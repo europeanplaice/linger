@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -290,5 +290,32 @@ describe('date utils', () => {
        const justAfterMidnight = formatRevisionTime('2026-05-15T00:00:01', 'ja-JP', { today: '今日', yesterday: '昨日' })
        expect(justAfterMidnight).toMatch(/^今日/)
      })
+  })
+
+  describe('sameMonthDayInPastYears', () => {
+    it('returns same month/day in earlier years, most recent first', () => {
+      const dates = ['2026-05-22', '2025-05-22', '2023-05-22', '2024-05-21', '2024-06-22']
+      expect(sameMonthDayInPastYears(dates, '2026-05-22')).toEqual(['2025-05-22', '2023-05-22'])
+    })
+
+    it('excludes the current year and future years', () => {
+      const dates = ['2026-05-22', '2027-05-22']
+      expect(sameMonthDayInPastYears(dates, '2026-05-22')).toEqual([])
+    })
+
+    it('matches across year boundary (Jan 1)', () => {
+      const dates = ['2025-01-01', '2024-01-01', '2024-12-31']
+      expect(sameMonthDayInPastYears(dates, '2026-01-01')).toEqual(['2025-01-01', '2024-01-01'])
+    })
+
+    it('only matches Feb 29 when today is Feb 29', () => {
+      const dates = ['2024-02-29', '2020-02-29']
+      expect(sameMonthDayInPastYears(dates, '2025-02-28')).toEqual([])
+      expect(sameMonthDayInPastYears(dates, '2028-02-29')).toEqual(['2024-02-29', '2020-02-29'])
+    })
+
+    it('returns empty when nothing matches', () => {
+      expect(sameMonthDayInPastYears(['2025-03-10'], '2026-05-22')).toEqual([])
+    })
   })
 })

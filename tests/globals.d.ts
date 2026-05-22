@@ -121,4 +121,9 @@ interface Window {
       tokenExpired?: boolean
     }) => void
   }
+  recollectionHarness: {
+    render: (opts: { dates: string[]; contents?: Record<string, string> }) => void
+    selectedDates: () => string[]
+    closeCount: () => number
+  }
 }

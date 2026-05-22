@@ -13,6 +13,7 @@ import { EntryEditor } from './components/EntryEditor'
 import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal } from './components/SettingsModal'
+import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, ymd, parseYmd, weekdayLabel, diaryDateLabel } from './utils/date'
 import { TokenExpiredError } from './api/driveEntries'
@@ -178,6 +179,7 @@ export default function App() {
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
   const [recentPreviews, setRecentPreviews] = useState<Map<string, RecentPreview>>(new Map())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [recollectionOpen, setRecollectionOpen] = useState(false)
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
   const searchBarRef = useRef<SearchBarHandle>(null)
   const selectedDateRef = useRef(selectedDate)
@@ -549,6 +551,12 @@ export default function App() {
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
         )}
+        {diary.dates.length > 0 && (
+          <button className="btn-recollection" onClick={() => setRecollectionOpen(true)}>
+            <svg className="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+            <span className="btn-text">{t.recollection.open}</span>
+          </button>
+        )}
         {(diary.loading || recentDates.length > 0) && <h2 className="entry-list-heading">{t.app.recent}</h2>}
         {diary.loading && <p className="sr-only" role="status">{t.app.loadingEntries}</p>}
         <ul className="entry-list">
@@ -613,6 +621,19 @@ export default function App() {
             onExport={diary.exportAll}
             onClose={() => setSettingsOpen(false)}
             email={email ?? undefined}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {recollectionOpen && (
+          <RecollectionJourney
+            dates={diary.dates}
+            getContent={diary.getContent}
+            onSelect={(d) => {
+              setRecollectionOpen(false)
+              selectDate(d)
+            }}
+            onClose={() => setRecollectionOpen(false)}
           />
         )}
       </AnimatePresence>

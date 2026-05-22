@@ -55,6 +55,20 @@ export function diaryDateLabel(date: string, includeYear = true, month: 'long' |
   })
 }
 
+/**
+ * From a list of YYYY-MM-DD dates, return those falling on the same month/day
+ * as `today` but in an earlier year, sorted most-recent year first.
+ */
+export function sameMonthDayInPastYears(dates: string[], today: string = todayYmd()): string[] {
+  const ref = parseYmd(today)
+  if (!ref) return []
+  return dates
+    .map(parseYmd)
+    .filter((p): p is { y: number; m: number; d: number } => p !== null && p.m === ref.m && p.d === ref.d && p.y < ref.y)
+    .sort((a, b) => b.y - a.y)
+    .map(p => ymd(p.y, p.m, p.d))
+}
+
 export function daysInMonth(year: number, month1to12: number): number {
   return new Date(year, month1to12, 0).getDate()
 }
