@@ -13,8 +13,8 @@
   --danger: #c0392b;
   --sidebar-w: 280px;
   --mobile-save-action-space: 0px;
-  --font-body: 'Noto Serif', 'Noto Serif JP', serif;
-  --font-editor: 'Noto Serif', 'Noto Serif JP', serif;
+  --font-body: 'Source Serif 4', 'Noto Serif JP', serif;
+  --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
   /* Additional themeable tokens */
   --card-bg: #fff;
   --input-bg: #fff;
@@ -129,8 +129,8 @@
 }
 
 [data-font="sans"] {
-  --font-body: 'Noto Sans', 'Noto Sans JP', sans-serif;
-  --font-editor: 'Noto Sans', 'Noto Sans JP', sans-serif;
+  --font-body: 'Inter', 'Noto Sans JP', sans-serif;
+  --font-editor: 'Inter', 'Noto Sans JP', sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1759,11 +1759,16 @@ body {
   font-family: var(--font-editor);
   font-size: var(--editor-font-size, 1.05rem);
   line-height: 1.8;
+  letter-spacing: 0.01em;
   color: var(--text);
   background: transparent;
   width: 100%;
   padding-top: 0.75rem;
   text-rendering: optimizeLegibility;
+}
+
+[data-font="sans"] .editor-textarea {
+  letter-spacing: 0.02em;
 }
 
 .entry-load-error {

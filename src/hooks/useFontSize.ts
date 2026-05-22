@@ -5,10 +5,10 @@ export type FontSize = 'sm' | 'md' | 'lg' | 'xl'
 const STORAGE_KEY = 'linger_fontsize'
 
 const FONT_SIZE_VALUES: Record<FontSize, string> = {
-  sm: '0.9rem',
-  md: '1.05rem',
-  lg: '1.2rem',
-  xl: '1.35rem',
+  sm: '1rem',
+  md: '1.1rem',
+  lg: '1.25rem',
+  xl: '1.4rem',
 }
 
 function readStoredFontSize(): FontSize {
