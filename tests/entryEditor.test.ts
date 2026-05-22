@@ -649,6 +649,26 @@ test.describe('EntryEditor — Open in Drive', () => {
   })
 })
 
+test.describe('EntryEditor — Share Entry', () => {
+  test('Share Entry is disabled when no saved entry exists', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: '', version: null })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await expect(page.locator('.more-menu')).toBeVisible()
+    await expect(page.getByText('Share Entry')).toHaveClass(/more-menu-item-disabled/)
+  })
+
+  test('Share Entry is enabled when a saved entry exists', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await expect(page.locator('.more-menu')).toBeVisible()
+    await expect(page.getByText('Share Entry')).not.toHaveClass(/more-menu-item-disabled/)
+  })
+})
+
 test.describe('EntryEditor — save progress', () => {
   test('shows inline saving state without overlay on explicit save button click', async ({ page }) => {
     await loadHarness(page)
