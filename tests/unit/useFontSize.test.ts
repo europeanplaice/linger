@@ -9,14 +9,14 @@ beforeEach(() => {
 test('defaults to md when no stored value', () => {
   const { result } = renderHook(() => useFontSize())
   expect(result.current.fontSize).toBe('md')
-  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.05rem')
+  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.1rem')
 })
 
 test('initializes from stored value in localStorage', () => {
   localStorage.setItem('linger_fontsize', 'lg')
   const { result } = renderHook(() => useFontSize())
   expect(result.current.fontSize).toBe('lg')
-  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.2rem')
+  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.25rem')
 })
 
 test('ignores invalid stored value and defaults to md', () => {
@@ -31,16 +31,16 @@ test('setFontSize updates state, localStorage, and CSS variable', () => {
   act(() => result.current.setFontSize('xl'))
   expect(result.current.fontSize).toBe('xl')
   expect(localStorage.getItem('linger_fontsize')).toBe('xl')
-  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.35rem')
+  expect(document.documentElement.style.getPropertyValue('--editor-font-size')).toBe('1.4rem')
 })
 
 test('all four sizes apply correct CSS values', () => {
   const { result } = renderHook(() => useFontSize())
   const expected: Record<string, string> = {
-    sm: '0.9rem',
-    md: '1.05rem',
-    lg: '1.2rem',
-    xl: '1.35rem',
+    sm: '1rem',
+    md: '1.1rem',
+    lg: '1.25rem',
+    xl: '1.4rem',
   }
   for (const [size, value] of Object.entries(expected)) {
     act(() => result.current.setFontSize(size as 'sm' | 'md' | 'lg' | 'xl'))
