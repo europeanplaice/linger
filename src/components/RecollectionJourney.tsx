@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { useI18n } from '../i18n'
-import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestEntryWithin, consecutiveWeekStreak, consecutiveMonthStreak } from '../utils/date'
+import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestEntryWithin } from '../utils/date'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -16,31 +16,14 @@ interface Preview {
   hasText: boolean
 }
 
-type Milestone =
-  | { date: string; kind: 'nth'; n: number }
-  | { date: string; kind: 'oneYear' }
-  | { date: string; kind: 'monthStreak'; n: number }
-  | { date: string; kind: 'weekStreak'; n: number }
-
 interface PeriodicEntry {
   date: string
   eyebrow: string
 }
 
-const MILESTONE_THRESHOLDS = [1000, 500, 365, 100]
-
 function excerpt(content: string, max = 140): string {
   const text = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('  ')
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-function isAtLeastOneYearBefore(date: string, today: string): boolean {
-  const p = parseYmd(date)
-  const ref = parseYmd(today)
-  if (!p || !ref) return false
-  if (ref.y - p.y > 1) return true
-  if (ref.y - p.y < 1) return false
-  return ref.m > p.m || (ref.m === p.m && ref.d >= p.d)
 }
 
 export function RecollectionJourney({ dates, getContent, onSelect, onClose }: RecollectionJourneyProps) {
@@ -81,33 +64,6 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     return out
   }, [dates, today, onThisDay, t])
 
-  const ascending = useMemo(() => [...dates].sort((a, b) => a.localeCompare(b)), [dates])
-
-  const milestones = useMemo<Milestone[]>(() => {
-    const result: Milestone[] = []
-    for (const n of MILESTONE_THRESHOLDS) {
-      if (ascending.length >= n) {
-        result.push({ date: ascending[n - 1], kind: 'nth', n })
-        break
-      }
-    }
-    const oldest = ascending[0]
-    if (oldest && isAtLeastOneYearBefore(oldest, today)) {
-      result.push({ date: oldest, kind: 'oneYear' })
-    }
-    const recent = ascending[ascending.length - 1]
-    if (recent) {
-      const months = consecutiveMonthStreak(dates)
-      const weeks = consecutiveWeekStreak(dates)
-      if (months >= 2) {
-        result.push({ date: recent, kind: 'monthStreak', n: months })
-      } else if (weeks >= 2) {
-        result.push({ date: recent, kind: 'weekStreak', n: weeks })
-      }
-    }
-    return result
-  }, [ascending, dates, today])
-
   const randomCandidates = useMemo(() => {
     const exclude = new Set<string>([today, ...onThisDay, ...periodic.map(p => p.date)])
     return dates.filter(d => !exclude.has(d))
@@ -142,7 +98,6 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     const targets = [
       ...onThisDay,
       ...periodic.map(p => p.date),
-      ...milestones.map(m => m.date),
       ...(randomDate ? [randomDate] : []),
     ]
     const toLoad = targets.filter(d => !previewsRef.current.has(d) && !loadingRef.current.has(d))
@@ -164,7 +119,7 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     })
 
     return () => { cancelled = true }
-  }, [onThisDay, periodic, milestones, randomDate, getContent])
+  }, [onThisDay, periodic, randomDate, getContent])
 
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose()
@@ -201,16 +156,7 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     )
   }
 
-  const milestoneEyebrow = (m: Milestone): string => {
-    switch (m.kind) {
-      case 'nth': return t.recollection.nthDay(m.n)
-      case 'oneYear': return t.recollection.oneYear
-      case 'monthStreak': return t.recollection.monthStreak(m.n)
-      case 'weekStreak': return t.recollection.weekStreak(m.n)
-    }
-  }
-
-  const hasAnything = onThisDay.length > 0 || periodic.length > 0 || milestones.length > 0 || randomDate !== null
+  const hasAnything = onThisDay.length > 0 || periodic.length > 0 || randomDate !== null
 
   return (
     <motion.div
@@ -263,18 +209,6 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
                 </h3>
                 <div className="recollection-cards">
                   {periodic.map(p => renderCard(p.date, p.eyebrow))}
-                </div>
-              </section>
-            )}
-
-            {milestones.length > 0 && (
-              <section className="recollection-section">
-                <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">⚑</span>
-                  {t.recollection.milestones}
-                </h3>
-                <div className="recollection-cards">
-                  {milestones.map(m => renderCard(m.date, milestoneEyebrow(m)))}
                 </div>
               </section>
             )}

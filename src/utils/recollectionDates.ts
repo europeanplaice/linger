@@ -6,26 +6,10 @@ import {
   daysInMonth,
   sameMonthDayInPastYears,
   nearestEntryWithin,
-  consecutiveMonthStreak,
-  consecutiveWeekStreak,
 } from './date'
 
-const MILESTONE_THRESHOLDS = [1000, 500, 365, 100]
-
-function isAtLeastOneYearBefore(date: string, today: string): boolean {
-  const p = parseYmd(date)
-  const ref = parseYmd(today)
-  if (!p || !ref) return false
-  if (ref.y - p.y > 1) return true
-  if (ref.y - p.y < 1) return false
-  return ref.m > p.m || (ref.m === p.m && ref.d >= p.d)
-}
-
-/**
- * Returns the deterministic dates that RecollectionJourney will display
- * (onThisDay + periodic + milestones). Used to prefetch content before
- * the modal opens.
- */
+/** Returns the deterministic dates that RecollectionJourney will display
+ * (onThisDay + periodic). Used to prefetch content before the modal opens. */
 export function recollectionDatesToPrefetch(dates: string[], today = todayYmd()): string[] {
   const ref = parseYmd(today)
   if (!ref || dates.length === 0) return []
@@ -60,23 +44,5 @@ export function recollectionDatesToPrefetch(dates: string[], today = todayYmd())
     }
   }
 
-  const ascending = [...dates].sort((a, b) => a.localeCompare(b))
-  const milestones: string[] = []
-
-  for (const n of MILESTONE_THRESHOLDS) {
-    if (ascending.length >= n) {
-      milestones.push(ascending[n - 1])
-      break
-    }
-  }
-
-  const oldest = ascending[0]
-  if (oldest && isAtLeastOneYearBefore(oldest, today)) milestones.push(oldest)
-
-  const recent = ascending[ascending.length - 1]
-  if (recent && (consecutiveMonthStreak(dates) >= 2 || consecutiveWeekStreak(dates) >= 2)) {
-    milestones.push(recent)
-  }
-
-  return [...new Set([...onThisDay, ...periodic, ...milestones])]
+  return [...new Set([...onThisDay, ...periodic])]
 }
