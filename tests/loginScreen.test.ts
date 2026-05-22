@@ -57,9 +57,9 @@ test.describe('LoginScreen — footer links', () => {
     await loadHarness(page)
     await render(page)
 
-    const aboutLink = page.locator('.login-footer a[href="/home.html"]')
-    const privacyLink = page.locator('.login-footer a[href="/privacy.html"]')
-    const tosLink = page.locator('.login-footer a[href="/terms-of-service.html"]')
+    const aboutLink = page.locator('.login-footer a[href="/home"]')
+    const privacyLink = page.locator('.login-footer a[href="/privacy"]')
+    const tosLink = page.locator('.login-footer a[href="/terms-of-service"]')
 
     await expect(aboutLink).toBeVisible()
     await expect(aboutLink).toHaveText('About')
@@ -75,9 +75,9 @@ test.describe('LoginScreen — footer links', () => {
     await loadHarness(page)
     await render(page)
 
-    const aboutLink = page.locator('.login-footer a[href="/home.html"]')
-    const privacyLink = page.locator('.login-footer a[href="/privacy.html"]')
-    const tosLink = page.locator('.login-footer a[href="/terms-of-service.html"]')
+    const aboutLink = page.locator('.login-footer a[href="/home"]')
+    const privacyLink = page.locator('.login-footer a[href="/privacy"]')
+    const tosLink = page.locator('.login-footer a[href="/terms-of-service"]')
 
     await expect(aboutLink).toHaveAttribute('target', '_blank')
     await expect(aboutLink).toHaveAttribute('rel', 'noopener noreferrer')

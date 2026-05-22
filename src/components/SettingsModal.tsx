@@ -200,9 +200,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
           <div className="settings-divider" />
           <div className="settings-legal">
-            <a href="/privacy.html" target="_blank" rel="noopener noreferrer">{t.settings.privacyPolicy}</a>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">{t.settings.privacyPolicy}</a>
             {' · '}
-            <a href="/terms-of-service.html" target="_blank" rel="noopener noreferrer">{t.settings.termsOfService}</a>
+            <a href="/terms-of-service" target="_blank" rel="noopener noreferrer">{t.settings.termsOfService}</a>
             {' · '}
             <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">{t.settings.github}</a>
           </div>
