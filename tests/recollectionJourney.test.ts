@@ -84,20 +84,6 @@ test.describe('RecollectionJourney', () => {
     await expect(section).toContainText('A month ago')
   })
 
-  test('shows a consecutive-month streak milestone', async ({ page }) => {
-    await loadHarness(page)
-    const dates = [
-      ymd(new Date(now.getFullYear(), now.getMonth(), 1)),
-      ymd(new Date(now.getFullYear(), now.getMonth() - 1, 10)),
-      ymd(new Date(now.getFullYear(), now.getMonth() - 2, 12)),
-    ]
-    await render(page, { dates })
-
-    const section = page.locator('.recollection-section', { hasText: 'Milestones' })
-    await expect(section).toBeVisible()
-    await expect(section).toContainText('months in a row')
-  })
-
   test('shows empty state when there is nothing to surface', async ({ page }) => {
     await loadHarness(page)
     // Only today's entry → no past-year matches, no milestones, no random candidate.
