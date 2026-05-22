@@ -152,6 +152,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
 }
 
 /* ── Login ── */
@@ -1757,7 +1758,8 @@ body {
   border: none;
   outline: none;
   font-family: var(--font-editor);
-  font-size: var(--editor-font-size, 1.05rem);
+  font-size: var(--editor-font-size, 1.1rem);
+  font-weight: 380;
   line-height: 1.8;
   letter-spacing: 0.01em;
   color: var(--text);
@@ -1768,6 +1770,7 @@ body {
 }
 
 [data-font="sans"] .editor-textarea {
+  font-weight: 400;
   letter-spacing: 0.02em;
 }
 
