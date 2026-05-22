@@ -113,18 +113,21 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     return dates.filter(d => !exclude.has(d))
   }, [dates, today, onThisDay, periodic])
   const [randomDate, setRandomDate] = useState<string | null>(null)
+  const randomCandidatesRef = useRef(randomCandidates)
+  randomCandidatesRef.current = randomCandidates
 
   const pickRandom = useCallback((avoid: string | null) => {
-    if (randomCandidates.length === 0) {
+    const candidates = randomCandidatesRef.current
+    if (candidates.length === 0) {
       setRandomDate(null)
       return
     }
-    let next = randomCandidates[Math.floor(Math.random() * randomCandidates.length)]
-    for (let i = 0; next === avoid && randomCandidates.length > 1 && i < 6; i++) {
-      next = randomCandidates[Math.floor(Math.random() * randomCandidates.length)]
+    let next = candidates[Math.floor(Math.random() * candidates.length)]
+    for (let i = 0; next === avoid && candidates.length > 1 && i < 6; i++) {
+      next = candidates[Math.floor(Math.random() * candidates.length)]
     }
     setRandomDate(next)
-  }, [randomCandidates])
+  }, [])
 
   useEffect(() => {
     pickRandom(null)
