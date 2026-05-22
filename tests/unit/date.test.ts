@@ -332,6 +332,11 @@ describe('date utils', () => {
     it('prefers an exact match', () => {
       expect(nearestEntryWithin(['2026-05-14', '2026-05-15'], '2026-05-15', 5)).toBe('2026-05-15')
     })
+
+    it('prefers the earlier (past) date on a tie, regardless of input order', () => {
+      expect(nearestEntryWithin(['2026-05-18', '2026-05-12'], '2026-05-15', 5)).toBe('2026-05-12')
+      expect(nearestEntryWithin(['2026-05-12', '2026-05-18'], '2026-05-15', 5)).toBe('2026-05-12')
+    })
   })
 
   describe('consecutiveMonthStreak', () => {

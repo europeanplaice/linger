@@ -82,7 +82,10 @@ export function nearestEntryWithin(dates: string[], target: string, maxDistanceD
     const dd = dateFromYmd(d)
     if (!dd) continue
     const dist = Math.abs(Math.round((dd.getTime() - t.getTime()) / 86_400_000))
-    if (dist <= maxDistanceDays && dist < bestDist) {
+    if (dist > maxDistanceDays) continue
+    // On a tie, prefer the earlier (past) date so a "while ago" look-back
+    // never jumps to a future entry.
+    if (dist < bestDist || (dist === bestDist && best !== null && d.localeCompare(best) < 0)) {
       bestDist = dist
       best = d
     }

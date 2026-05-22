@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { useI18n } from '../i18n'
-import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, sameMonthDayInPastYears, nearestEntryWithin, consecutiveWeekStreak, consecutiveMonthStreak } from '../utils/date'
+import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestEntryWithin, consecutiveWeekStreak, consecutiveMonthStreak } from '../utils/date'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -59,8 +59,9 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
       return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
     }
     const shiftMonths = (months: number) => {
-      const d = new Date(ref.y, ref.m - 1 - months, ref.d)
-      return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+      const { year, month } = addMonths(ref.y, ref.m, -months)
+      const day = Math.min(ref.d, daysInMonth(year, month))
+      return ymd(year, month, day)
     }
     const specs = [
       { target: shiftDays(7), tol: 3, eyebrow: t.recollection.weekAgo(1) },
@@ -107,7 +108,10 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     return result
   }, [ascending, dates, today])
 
-  const randomCandidates = useMemo(() => dates.filter(d => d !== today), [dates, today])
+  const randomCandidates = useMemo(() => {
+    const exclude = new Set<string>([today, ...onThisDay, ...periodic.map(p => p.date)])
+    return dates.filter(d => !exclude.has(d))
+  }, [dates, today, onThisDay, periodic])
   const [randomDate, setRandomDate] = useState<string | null>(null)
 
   const pickRandom = useCallback((avoid: string | null) => {
