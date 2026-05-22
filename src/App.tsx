@@ -16,6 +16,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, ymd, parseYmd, weekdayLabel, diaryDateLabel } from './utils/date'
+import { recollectionDatesToPrefetch } from './utils/recollectionDates'
 import { TokenExpiredError } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
@@ -228,6 +229,27 @@ export default function App() {
       setInitialLoadComplete(true)
     }
   }, [isSignedIn, diary.loading, initialLoadComplete])
+
+  const diaryDatesRef = useRef(diary.dates)
+  useEffect(() => { diaryDatesRef.current = diary.dates }, [diary.dates])
+  const diaryGetContentRef = useRef(diary.getContent)
+  useEffect(() => { diaryGetContentRef.current = diary.getContent }, [diary.getContent])
+
+  useEffect(() => {
+    if (!initialLoadComplete) return
+    const toFetch = recollectionDatesToPrefetch(diaryDatesRef.current)
+    if (toFetch.length === 0) return
+    let cancelled = false
+    const run = () => {
+      if (!cancelled) toFetch.forEach(d => diaryGetContentRef.current(d).catch(() => {}))
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      const id = requestIdleCallback(run, { timeout: 10_000 })
+      return () => { cancelled = true; cancelIdleCallback(id) }
+    }
+    const id = setTimeout(run, 1_500)
+    return () => { cancelled = true; clearTimeout(id) }
+  }, [initialLoadComplete])
 
   useEffect(() => {
     if (!isSignedIn) return
