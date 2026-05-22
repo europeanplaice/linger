@@ -149,21 +149,17 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     if (toLoad.length === 0) return
 
     let cancelled = false
-    toLoad.forEach(d => loadingRef.current.add(d))
-    Promise.all(
-      toLoad.map(async d => {
-        const loaded = await getContent(d).catch(() => null)
-        return [d, loaded?.entry.content ?? ''] as const
-      }),
-    ).then(entries => {
-      toLoad.forEach(d => loadingRef.current.delete(d))
-      if (cancelled) return
-      setPreviews(prev => {
-        const next = new Map(prev)
-        for (const [d, content] of entries) {
+    toLoad.forEach(d => {
+      loadingRef.current.add(d)
+      getContent(d).catch(() => null).then(loaded => {
+        loadingRef.current.delete(d)
+        if (cancelled) return
+        const content = loaded?.entry.content ?? ''
+        setPreviews(prev => {
+          const next = new Map(prev)
           next.set(d, { snippet: excerpt(content), hasText: Boolean(content.trim()) })
-        }
-        return next
+          return next
+        })
       })
     })
 
