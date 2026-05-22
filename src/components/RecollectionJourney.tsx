@@ -267,23 +267,6 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
               </section>
             )}
 
-            {randomDate && (
-              <section className="recollection-section">
-                <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">✦</span>
-                  {t.recollection.serendipity}
-                </h3>
-                <div className="recollection-cards">
-                  {renderCard(randomDate, '')}
-                </div>
-                {randomCandidates.length > 1 && (
-                  <button className="recollection-another" onClick={() => pickRandom(randomDate)}>
-                    {t.recollection.another}
-                  </button>
-                )}
-              </section>
-            )}
-
             {milestones.length > 0 && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
@@ -293,6 +276,29 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
                 <div className="recollection-cards">
                   {milestones.map(m => renderCard(m.date, milestoneEyebrow(m)))}
                 </div>
+              </section>
+            )}
+
+            {randomDate && (
+              <section className="recollection-section">
+                <h3 className="recollection-section-heading">
+                  <span className="recollection-section-glyph" aria-hidden="true">✦</span>
+                  {t.recollection.serendipity}
+                </h3>
+                <div className="recollection-cards">
+                  {renderCard(randomDate, (() => {
+                    const p = parseYmd(randomDate)
+                    const r = parseYmd(today)
+                    if (!p || !r) return ''
+                    const days = Math.round((new Date(r.y, r.m - 1, r.d).getTime() - new Date(p.y, p.m - 1, p.d).getTime()) / 86400000)
+                    return days > 0 ? t.recollection.daysAgo(days) : ''
+                  })())}
+                </div>
+                {randomCandidates.length > 1 && (
+                  <button className="recollection-another" onClick={() => pickRandom(randomDate)}>
+                    {t.recollection.another}
+                  </button>
+                )}
               </section>
             )}
           </div>
