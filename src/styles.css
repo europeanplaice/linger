@@ -2183,6 +2183,7 @@ body {
   .editor-actions button .btn-icon { width: 20px; height: 20px; }
   .more-menu .btn-text { display: inline; }
   .btn-settings .btn-text { display: inline; }
+  .btn-recollection .btn-text { display: inline; }
   .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; font-size: 1.6rem; background: none; }
 
   @media (max-width: 340px) {
