@@ -2272,9 +2272,6 @@ body {
   justify-content: space-between;
   padding: 1.1rem 1.4rem;
   border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--card-bg);
   border-radius: 12px 12px 0 0;
 }
 .recollection-title {
