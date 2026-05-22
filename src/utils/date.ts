@@ -69,6 +69,95 @@ export function sameMonthDayInPastYears(dates: string[], today: string = todayYm
     .map(p => ymd(p.y, p.m, p.d))
 }
 
+/**
+ * Find the entry date closest to `target` (YYYY-MM-DD), within `maxDistanceDays`.
+ * Returns null if no entry falls inside the window.
+ */
+export function nearestEntryWithin(dates: string[], target: string, maxDistanceDays: number): string | null {
+  const t = dateFromYmd(target)
+  if (!t) return null
+  let best: string | null = null
+  let bestDist = Infinity
+  for (const d of dates) {
+    const dd = dateFromYmd(d)
+    if (!dd) continue
+    const dist = Math.abs(Math.round((dd.getTime() - t.getTime()) / 86_400_000))
+    if (dist <= maxDistanceDays && dist < bestDist) {
+      bestDist = dist
+      best = d
+    }
+  }
+  return best
+}
+
+function mondayStart(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const offset = (d.getDay() + 6) % 7 // Monday = 0
+  d.setDate(d.getDate() - offset)
+  return d
+}
+
+function latestParsed(dates: string[]): string | null {
+  let latest: string | null = null
+  for (const d of dates) {
+    if (!parseYmd(d)) continue
+    if (latest === null || d.localeCompare(latest) > 0) latest = d
+  }
+  return latest
+}
+
+/**
+ * Number of consecutive ISO weeks (Monday-based) with at least one entry,
+ * counting back from the most recent entry's week.
+ */
+export function consecutiveWeekStreak(dates: string[]): number {
+  const latest = latestParsed(dates)
+  if (!latest) return 0
+
+  const weekKeys = new Set<string>()
+  for (const d of dates) {
+    const dd = dateFromYmd(d)
+    if (!dd) continue
+    const m = mondayStart(dd)
+    weekKeys.add(ymd(m.getFullYear(), m.getMonth() + 1, m.getDate()))
+  }
+
+  const cursor = mondayStart(dateFromYmd(latest)!)
+  let streak = 0
+  for (;;) {
+    const key = ymd(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate())
+    if (!weekKeys.has(key)) break
+    streak += 1
+    cursor.setDate(cursor.getDate() - 7)
+  }
+  return streak
+}
+
+/**
+ * Number of consecutive calendar months with at least one entry,
+ * counting back from the most recent entry's month.
+ */
+export function consecutiveMonthStreak(dates: string[]): number {
+  const latest = latestParsed(dates)
+  if (!latest) return 0
+
+  const monthKeys = new Set<string>()
+  for (const d of dates) {
+    const p = parseYmd(d)
+    if (p) monthKeys.add(`${p.y}-${String(p.m).padStart(2, '0')}`)
+  }
+
+  let { y, m } = parseYmd(latest)!
+  let streak = 0
+  for (;;) {
+    if (!monthKeys.has(`${y}-${String(m).padStart(2, '0')}`)) break
+    streak += 1
+    m -= 1
+    if (m === 0) { m = 12; y -= 1 }
+  }
+  return streak
+}
+
 export function daysInMonth(year: number, month1to12: number): number {
   return new Date(year, month1to12, 0).getDate()
 }

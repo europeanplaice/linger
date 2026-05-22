@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -316,6 +316,64 @@ describe('date utils', () => {
 
     it('returns empty when nothing matches', () => {
       expect(sameMonthDayInPastYears(['2025-03-10'], '2026-05-22')).toEqual([])
+    })
+  })
+
+  describe('nearestEntryWithin', () => {
+    it('returns the closest entry within the window', () => {
+      const dates = ['2026-05-10', '2026-05-14', '2026-05-20']
+      expect(nearestEntryWithin(dates, '2026-05-15', 3)).toBe('2026-05-14')
+    })
+
+    it('returns null when nothing is within the window', () => {
+      expect(nearestEntryWithin(['2026-05-01'], '2026-05-15', 3)).toBeNull()
+    })
+
+    it('prefers an exact match', () => {
+      expect(nearestEntryWithin(['2026-05-14', '2026-05-15'], '2026-05-15', 5)).toBe('2026-05-15')
+    })
+  })
+
+  describe('consecutiveMonthStreak', () => {
+    it('counts consecutive months back from the most recent entry', () => {
+      const dates = ['2026-03-04', '2026-04-19', '2026-05-01', '2026-05-22']
+      expect(consecutiveMonthStreak(dates)).toBe(3)
+    })
+
+    it('breaks the streak on a gap month', () => {
+      const dates = ['2026-01-10', '2026-03-10', '2026-04-10']
+      expect(consecutiveMonthStreak(dates)).toBe(2)
+    })
+
+    it('crosses the year boundary', () => {
+      const dates = ['2025-11-30', '2025-12-15', '2026-01-05']
+      expect(consecutiveMonthStreak(dates)).toBe(3)
+    })
+
+    it('returns 0 for no entries', () => {
+      expect(consecutiveMonthStreak([])).toBe(0)
+    })
+  })
+
+  describe('consecutiveWeekStreak', () => {
+    it('counts consecutive Monday-based weeks back from the most recent entry', () => {
+      // 2026-05-22 (Fri) week, 2026-05-15 week, 2026-05-08 week
+      const dates = ['2026-05-08', '2026-05-15', '2026-05-22']
+      expect(consecutiveWeekStreak(dates)).toBe(3)
+    })
+
+    it('treats same-week entries as one week', () => {
+      const dates = ['2026-05-18', '2026-05-20', '2026-05-22'] // all same ISO week
+      expect(consecutiveWeekStreak(dates)).toBe(1)
+    })
+
+    it('breaks on a skipped week', () => {
+      const dates = ['2026-05-01', '2026-05-15', '2026-05-22']
+      expect(consecutiveWeekStreak(dates)).toBe(2)
+    })
+
+    it('returns 0 for no entries', () => {
+      expect(consecutiveWeekStreak([])).toBe(0)
     })
   })
 })

@@ -11,6 +11,8 @@ const now = new Date()
 const oneYearAgo = ymd(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()))
 const threeYearsAgo = ymd(new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()))
 const unrelated = ymd(new Date(now.getFullYear() - 2, now.getMonth(), now.getDate() === 1 ? 2 : 1))
+const oneWeekAgo = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7))
+const oneMonthAgo = ymd(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()))
 
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/recollectionJourneyHarness.html`)
@@ -62,6 +64,38 @@ test.describe('RecollectionJourney', () => {
     await page.locator('.recollection-close').click()
     const count = await page.evaluate(() => window.recollectionHarness.closeCount())
     expect(count).toBe(1)
+  })
+
+  test('shows "a while ago" periodic look-back entries', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [oneWeekAgo, oneMonthAgo],
+      contents: {
+        [oneWeekAgo]: 'A week back, busy days.',
+        [oneMonthAgo]: 'A month ago, slower pace.',
+      },
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A while ago' })
+    await expect(section).toBeVisible()
+    const cards = section.locator('.recollection-card')
+    await expect(cards).toHaveCount(2)
+    await expect(section).toContainText('A week back')
+    await expect(section).toContainText('A month ago')
+  })
+
+  test('shows a consecutive-month streak milestone', async ({ page }) => {
+    await loadHarness(page)
+    const dates = [
+      ymd(new Date(now.getFullYear(), now.getMonth(), 1)),
+      ymd(new Date(now.getFullYear(), now.getMonth() - 1, 10)),
+      ymd(new Date(now.getFullYear(), now.getMonth() - 2, 12)),
+    ]
+    await render(page, { dates })
+
+    const section = page.locator('.recollection-section', { hasText: 'Milestones' })
+    await expect(section).toBeVisible()
+    await expect(section).toContainText('months in a row')
   })
 
   test('shows empty state when there is nothing to surface', async ({ page }) => {
