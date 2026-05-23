@@ -87,25 +87,26 @@ test.describe('SettingsModal — auto-save toggle', () => {
   })
 })
 
-test.describe('SettingsModal — theme select', () => {
-  test('shows a select with light, dark, and system options', async ({ page }) => {
+test.describe('SettingsModal — theme picker', () => {
+  test('shows three theme buttons with correct labels', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await expect(select).toBeVisible()
-    await expect(select.locator('option')).toHaveCount(3)
-    await expect(select.locator('option[value="light"]')).toHaveText('Light')
-    await expect(select.locator('option[value="dark"]')).toHaveText('Dark')
-    await expect(select.locator('option[value="system"]')).toHaveText('Follow system')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await expect(buttons).toHaveCount(3)
+    await expect(buttons.nth(0)).toHaveAttribute('aria-label', 'Light')
+    await expect(buttons.nth(1)).toHaveAttribute('aria-label', 'Dark')
+    await expect(buttons.nth(2)).toHaveAttribute('aria-label', 'Auto')
   })
 
-  test('defaults to light', async ({ page }) => {
+  test('defaults to light as active', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await expect(select).toHaveValue('light')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await expect(buttons.nth(0)).toHaveClass(/active/)
+    await expect(buttons.nth(1)).not.toHaveClass(/active/)
+    await expect(buttons.nth(2)).not.toHaveClass(/active/)
   })
 
   test('initializes with provided themeMode', async ({ page }) => {
@@ -113,36 +114,40 @@ test.describe('SettingsModal — theme select', () => {
     await page.evaluate(() => window.settingsHarness.render({ themeMode: 'system' }))
     await page.waitForSelector('.settings-modal')
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await expect(select).toHaveValue('system')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await expect(buttons.nth(2)).toHaveClass(/active/)
+    await expect(buttons.nth(0)).not.toHaveClass(/active/)
   })
 
-  test('selecting dark updates the select value', async ({ page }) => {
+  test('clicking dark activates dark button', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await select.selectOption('dark')
-    await expect(select).toHaveValue('dark')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await buttons.nth(1).click()
+    await expect(buttons.nth(1)).toHaveClass(/active/)
+    await expect(buttons.nth(0)).not.toHaveClass(/active/)
   })
 
-  test('selecting system updates the select value', async ({ page }) => {
+  test('clicking system activates system button', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await select.selectOption('system')
-    await expect(select).toHaveValue('system')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await buttons.nth(2).click()
+    await expect(buttons.nth(2)).toHaveClass(/active/)
+    await expect(buttons.nth(0)).not.toHaveClass(/active/)
   })
 
-  test('switching from dark back to light updates the select value', async ({ page }) => {
+  test('switching from dark back to light activates light button', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => window.settingsHarness.render({ themeMode: 'dark' }))
     await page.waitForSelector('.settings-modal')
 
-    const select = page.locator('.settings-item:has-text("Theme") select')
-    await select.selectOption('light')
-    await expect(select).toHaveValue('light')
+    const buttons = page.locator('.settings-theme-picker .settings-theme-option')
+    await buttons.nth(0).click()
+    await expect(buttons.nth(0)).toHaveClass(/active/)
+    await expect(buttons.nth(1)).not.toHaveClass(/active/)
   })
 })
 

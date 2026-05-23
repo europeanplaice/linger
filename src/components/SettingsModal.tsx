@@ -89,9 +89,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <span className="settings-item-label">{t.settings.theme}</span>
             <div className="settings-theme-picker">
               <button
+                type="button"
                 className={`settings-theme-option ${themeMode === 'light' ? 'active' : ''}`}
                 onClick={() => onThemeModeChange('light')}
                 aria-label={t.settings.themeLight}
+                aria-pressed={themeMode === 'light'}
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="4"/>
@@ -103,9 +105,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <span className="settings-theme-label">{t.settings.themeLight}</span>
               </button>
               <button
+                type="button"
                 className={`settings-theme-option ${themeMode === 'dark' ? 'active' : ''}`}
                 onClick={() => onThemeModeChange('dark')}
                 aria-label={t.settings.themeDark}
+                aria-pressed={themeMode === 'dark'}
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -113,9 +117,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <span className="settings-theme-label">{t.settings.themeDark}</span>
               </button>
               <button
+                type="button"
                 className={`settings-theme-option ${themeMode === 'system' ? 'active' : ''}`}
                 onClick={() => onThemeModeChange('system')}
-                aria-label={t.settings.themeSystem}
+                aria-label={t.settings.themeAuto}
+                aria-pressed={themeMode === 'system'}
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
@@ -129,17 +135,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <span className="settings-item-label">{t.settings.serifFont}</span>
             <div className="settings-font-picker">
               <button
+                type="button"
                 className={`settings-font-option ${fontMode === 'sans' ? 'active' : ''}`}
                 onClick={() => { if (fontMode !== 'sans') onFontToggle() }}
-                aria-label="Sans-serif"
+                aria-label={t.settings.fontSans}
+                aria-pressed={fontMode === 'sans'}
               >
                 <span className="settings-font-sample" style={{ fontFamily: "'Inter', 'Noto Sans JP', sans-serif" }}>Aあ</span>
                 <span className="settings-font-label">{t.settings.fontSans}</span>
               </button>
               <button
+                type="button"
                 className={`settings-font-option ${fontMode === 'serif' ? 'active' : ''}`}
                 onClick={() => { if (fontMode !== 'serif') onFontToggle() }}
-                aria-label="Serif"
+                aria-label={t.settings.fontSerif}
+                aria-pressed={fontMode === 'serif'}
               >
                 <span className="settings-font-sample" style={{ fontFamily: "'Source Serif 4', 'Noto Serif JP', serif" }}>Aあ</span>
                 <span className="settings-font-label">{t.settings.fontSerif}</span>
