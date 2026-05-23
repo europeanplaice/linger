@@ -71,6 +71,56 @@ test.describe('footer links — root (LoginScreen)', () => {
   })
 })
 
+function mockStaticPages(page: import('@playwright/test').Page) {
+  return Promise.all([
+    page.route('/home', route => route.fulfill({ body: homeHtml, contentType: 'text/html; charset=utf-8' })),
+    page.route('/privacy', route => route.fulfill({ body: privacyHtml, contentType: 'text/html; charset=utf-8' })),
+    page.route('/terms-of-service', route => route.fulfill({ body: termsHtml, contentType: 'text/html; charset=utf-8' })),
+  ])
+}
+
+test.describe('back navigation — /privacy', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockStaticPages(page)
+    await page.goto(`${baseUrl}/privacy`)
+  })
+
+  test('← About navigates to /home', async ({ page }) => {
+    await page.locator('a[href="/home"]').click()
+    await page.waitForLoadState()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(page.locator('h1')).toHaveText('Linger')
+  })
+
+  test('Open app navigates to /', async ({ page }) => {
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: false } }))
+    await page.locator('a[href="/"]').click()
+    await page.waitForLoadState()
+    await expect(page).toHaveURL(`${baseUrl}/`)
+  })
+})
+
+test.describe('back navigation — /terms-of-service', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockStaticPages(page)
+    await page.goto(`${baseUrl}/terms-of-service`)
+  })
+
+  test('← About navigates to /home', async ({ page }) => {
+    await page.locator('a[href="/home"]').click()
+    await page.waitForLoadState()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(page.locator('h1')).toHaveText('Linger')
+  })
+
+  test('Open app navigates to /', async ({ page }) => {
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: false } }))
+    await page.locator('a[href="/"]').click()
+    await page.waitForLoadState()
+    await expect(page).toHaveURL(`${baseUrl}/`)
+  })
+})
+
 test.describe('footer links — /home', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('/home', route =>
