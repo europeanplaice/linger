@@ -56,9 +56,9 @@ function CheckIcon() {
 
 
 const entryVariants = {
-  enter: (dir: number) => ({ x: dir * 20, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir * -20, opacity: 0 }),
+  enter: (dir: number) => ({ x: dir * 40, opacity: 0, scale: 0.97 }),
+  center: { x: 0, opacity: 1, scale: 1 },
+  exit: (dir: number) => ({ x: dir * -40, opacity: 0, scale: 0.97 }),
 }
 
 const SAVED_STATUS_VISIBLE_MS = 1600
@@ -697,7 +697,7 @@ useEffect(() => {
           initial="enter"
           animate="center"
           exit="exit"
-          transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+          transition={{ type: 'spring', stiffness: 480, damping: 38 }}
           style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}
         >
           {loading ? (
