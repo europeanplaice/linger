@@ -808,6 +808,37 @@ body {
   font-family: ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
+.settings-theme-picker {
+  display: flex;
+  gap: 0.4rem;
+}
+.settings-theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.65rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.settings-theme-option.active {
+  border-color: var(--accent);
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.settings-theme-option:hover:not(.active) {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.settings-theme-label {
+  font-size: 0.62rem;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
 .settings-language-select {
   background: var(--bg);
   border: 1px solid var(--border);

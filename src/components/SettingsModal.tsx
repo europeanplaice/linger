@@ -87,16 +87,42 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <div className="settings-divider" />
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.theme}</span>
-            <select
-              className="settings-language-select"
-              aria-label={t.settings.theme}
-              value={themeMode}
-              onChange={e => onThemeModeChange(e.target.value as ThemeMode)}
-            >
-              <option value="light">{t.settings.themeLight}</option>
-              <option value="dark">{t.settings.themeDark}</option>
-              <option value="system">{t.settings.themeSystem}</option>
-            </select>
+            <div className="settings-theme-picker">
+              <button
+                className={`settings-theme-option ${themeMode === 'light' ? 'active' : ''}`}
+                onClick={() => onThemeModeChange('light')}
+                aria-label={t.settings.themeLight}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="4"/>
+                  <line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                  <line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+                <span className="settings-theme-label">{t.settings.themeLight}</span>
+              </button>
+              <button
+                className={`settings-theme-option ${themeMode === 'dark' ? 'active' : ''}`}
+                onClick={() => onThemeModeChange('dark')}
+                aria-label={t.settings.themeDark}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                <span className="settings-theme-label">{t.settings.themeDark}</span>
+              </button>
+              <button
+                className={`settings-theme-option ${themeMode === 'system' ? 'active' : ''}`}
+                onClick={() => onThemeModeChange('system')}
+                aria-label={t.settings.themeSystem}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <span className="settings-theme-label">{t.settings.themeAuto}</span>
+              </button>
+            </div>
           </div>
           <div className="settings-divider" />
           <div className="settings-item">
