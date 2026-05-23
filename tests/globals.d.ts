@@ -98,6 +98,11 @@ interface Window {
     EntryConflictError: typeof import('../src/hooks/useDiary').EntryConflictError
     setToken: (token: string | null) => void
     expiredCalls: () => number
+    setDate: (date: string) => void
+    setRefreshSignal: (n: number) => void
+    setContentForDate: (date: string, content: string, version: string | null) => void
+    blockGetContent: (date: string) => void
+    unblockGetContent: () => void
   }
   historyHarness: {
     q: (...responses: { status: number; body: unknown; delayMs?: number }[]) => void

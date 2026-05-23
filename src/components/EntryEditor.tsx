@@ -154,6 +154,7 @@ useEffect(() => {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setRefreshing(false)
     setText('')
     setSavedTextValue('')
     setBaseVersionValue(null)
@@ -188,6 +189,8 @@ useEffect(() => {
     directionRef.current = date > prevDateRef.current ? 1 : -1
     prevDateRef.current = date
   }
+  const currentDateRef = useRef(date)
+  currentDateRef.current = date
 
   const isDirty = text !== savedText
 
@@ -314,19 +317,21 @@ useEffect(() => {
   }
 
   const loadFreshEntry = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    const capturedDate = date
     if (!silent) setRefreshing(true)
     setStatus('')
     try {
       const entry = await getContentRef.current(date, { forceNetwork: !silent })
+      if (currentDateRef.current !== capturedDate) return
       applyLoadedEntry(entry)
       onLoadCompleteRef.current?.(date, entry)
       setLoadFailed(false)
       setHasConflict(false)
       setConflictRemote(null)
     } catch {
-      if (!silent) setStatus(t.entry.failedToRefresh)
+      if (currentDateRef.current === capturedDate && !silent) setStatus(t.entry.failedToRefresh)
     } finally {
-      if (!silent) setRefreshing(false)
+      if (currentDateRef.current === capturedDate && !silent) setRefreshing(false)
     }
   }, [date, applyLoadedEntry])
 
@@ -340,17 +345,20 @@ useEffect(() => {
   useEffect(() => {
     if (isSignedIn && tokenExpiredForDateRef.current === date) {
       tokenExpiredForDateRef.current = null
+      let cancelled = false
       setLoading(true)
       setStatus('')
       setLoadFailed(false)
       getContentRef.current(date).then(entry => {
+        if (cancelled) return
         applyLoadedEntry(entry)
         onLoadCompleteRef.current?.(date, entry)
       }).catch(() => {
-        setStatus(t.entry.failedToRefresh)
+        if (!cancelled) setStatus(t.entry.failedToRefresh)
       }).finally(() => {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       })
+      return () => { cancelled = true }
     }
   }, [isSignedIn, date, applyLoadedEntry])
 

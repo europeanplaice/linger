@@ -804,6 +804,46 @@ test.describe('EntryEditor — token expiry', () => {
   })
 })
 
+test.describe('EntryEditor — date switch cancellation', () => {
+  test('does not overwrite new date content with stale in-flight refreshSignal fetch', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'date A content', version: '1' })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('date A content')
+
+    // Set up date B content and block any subsequent fetch for date A
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2026-05-02', 'date B content', '2')
+      window.editorHarness.blockGetContent('2026-05-01')
+    })
+
+    // Increment refreshSignal — loadFreshEntry fires for date A and hangs (blocked)
+    await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
+
+    // Wait until the blocked getContent call for date A is in-flight
+    await expect.poll(() =>
+      page.evaluate(() => window.editorHarness.getContentCalls().length)
+    ).toBeGreaterThanOrEqual(2)
+
+    // Switch to date B while date A's fetch is still in-flight.
+    // AnimatePresence keeps date A's exiting motion.div mounted during the
+    // transition, so two textareas briefly coexist — wait for the exit
+    // animation to settle back to a single textarea before asserting.
+    await page.evaluate(() => window.editorHarness.setDate('2026-05-02'))
+    await expect.poll(() => page.locator('textarea.editor-textarea').count()).toBe(1)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('date B content')
+
+    // Resolve the stale date A fetch and give React time to process its callback
+    await page.evaluate(() => {
+      window.editorHarness.unblockGetContent()
+      return new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    // Date B content must still be shown — not overwritten by the stale date A result
+    await expect.poll(() => page.locator('textarea.editor-textarea').count()).toBe(1)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('date B content')
+  })
+})
+
 test.describe('EntryEditor — editor meta info', () => {
   test('shows last modified timestamp for saved entries', async ({ page }) => {
     await loadHarness(page)

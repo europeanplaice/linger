@@ -45,6 +45,11 @@ let lastRenderAutoSave = true
 let lastRenderGetContentDelayMs = 0
 let lastRenderPendingNavDate: string | null = null
 
+let currentRefreshSignal = 0
+let contentByDate: Map<string, { content: string; version: string | null }> = new Map()
+let getContentBlockedForDate: string | null = null
+let getContentBlockResolvers: Array<() => void> = []
+
 function delaySave(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -55,12 +60,28 @@ window.open = (url?: string | URL, target?: string) => {
   return null
 }
 
-function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token }: {
+function doRender() {
+  root.render(
+    <I18nProvider>
+      <App
+        date={lastRenderDate}
+        autoSave={lastRenderAutoSave}
+        getContentDelayMs={lastRenderGetContentDelayMs}
+        pendingNavDate={lastRenderPendingNavDate}
+        token={currentToken}
+        refreshSignal={currentRefreshSignal}
+      />
+    </I18nProvider>
+  )
+}
+
+function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal }: {
   date: string
   autoSave: boolean
   getContentDelayMs: number
   pendingNavDate: string | null
   token: string | null
+  refreshSignal: number
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
 
@@ -72,9 +93,12 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
     <EntryEditor
       date={date}
       autoSave={autoSave}
+      refreshSignal={refreshSignal}
       getContent={async (d) => {
         getContentCalls.push({ date: d })
-        if (getContentDelayMs > 0) {
+        if (d === getContentBlockedForDate) {
+          await new Promise<void>(resolve => getContentBlockResolvers.push(resolve))
+        } else if (getContentDelayMs > 0) {
           await new Promise(resolve => setTimeout(resolve, getContentDelayMs))
         }
         if (currentGetContentReject === 'tokenExpired') {
@@ -83,6 +107,13 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         }
         if (currentGetContentReject === 'error') {
           throw new Error('Network error')
+        }
+        const perDate = contentByDate.get(d)
+        if (perDate) {
+          return {
+            entry: { date: d, content: perDate.content, updated_at: new Date().toISOString() },
+            meta: { id: 'file-1', name: `diary-${d}.json`, version: perDate.version ?? undefined },
+          }
         }
         if (!currentRemoteContent && currentRemoteVersion === null) return null
         return {
@@ -186,17 +217,11 @@ window.editorHarness = {
     lastRenderAutoSave = opts.autoSave ?? true
     lastRenderGetContentDelayMs = opts.getContentDelayMs ?? 0
     lastRenderPendingNavDate = opts.pendingNavDate ?? null
-    root.render(
-      <I18nProvider>
-        <App
-          date={lastRenderDate}
-          autoSave={lastRenderAutoSave}
-          getContentDelayMs={lastRenderGetContentDelayMs}
-          pendingNavDate={lastRenderPendingNavDate}
-          token={currentToken}
-        />
-      </I18nProvider>
-    )
+    currentRefreshSignal = 0
+    contentByDate.clear()
+    getContentBlockedForDate = null
+    getContentBlockResolvers = []
+    doRender()
   },
   saveCalls: () => [...saveCalls],
   saveCallsWithBaseContent: () => [...fullSaveCalls],
@@ -230,17 +255,27 @@ window.editorHarness = {
   setToken: (token: string | null) => {
     currentToken = token
     currentGetContentReject = undefined
-    root.render(
-      <I18nProvider>
-        <App
-          date={lastRenderDate}
-          autoSave={lastRenderAutoSave}
-          getContentDelayMs={lastRenderGetContentDelayMs}
-          pendingNavDate={lastRenderPendingNavDate}
-          token={currentToken}
-        />
-      </I18nProvider>
-    )
+    doRender()
+  },
+  setDate: (date: string) => {
+    lastRenderDate = date
+    doRender()
+  },
+  setRefreshSignal: (n: number) => {
+    currentRefreshSignal = n
+    doRender()
+  },
+  setContentForDate: (date: string, content: string, version: string | null) => {
+    contentByDate.set(date, { content, version })
+  },
+  blockGetContent: (date: string) => {
+    getContentBlockedForDate = date
+  },
+  unblockGetContent: () => {
+    getContentBlockedForDate = null
+    const resolvers = getContentBlockResolvers
+    getContentBlockResolvers = []
+    resolvers.forEach(r => r())
   },
   expiredCalls: () => expiredCount,
 }
