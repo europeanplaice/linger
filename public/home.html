@@ -67,8 +67,18 @@
   <h2>What is Linger?</h2>
   <p>
     Linger is a personal diary web app. Write daily entries and access them from any device.
-    Your entries are saved as individual files inside your own Google Drive account — you retain
-    full ownership and control of your data at all times.
+    Your entries are saved as individual Markdown files inside your own Google Drive account —
+    you retain full ownership and control of your data at all times.
+  </p>
+  <p>
+    To store and retrieve your diary files, Linger requests the
+    <strong>Google Drive <code>drive.file</code> OAuth scope</strong>, along with the
+    standard <code>openid</code> and <code>email</code> scopes used only to identify your
+    account at sign-in. The <code>drive.file</code> scope grants access
+    <strong>exclusively to files that Linger itself creates</strong> — it cannot read,
+    modify, or delete any other files in your Google Drive. Linger does not use these
+    permissions for any purpose other than signing you in and reading and writing your
+    diary entries on your behalf.
   </p>
 
   <h2>Features</h2>
@@ -83,8 +93,10 @@
 
   <h2>Data &amp; Privacy</h2>
   <p>
-    Linger signs in with your Google account and requests the
-    <code>drive.file</code> OAuth scope. This scope grants access
+    Linger signs in with your Google account and requests three OAuth scopes:
+    <code>drive.file</code> (to read and write diary entries in your Drive),
+    <code>openid</code>, and <code>email</code> (to identify your account at sign-in).
+    The <code>drive.file</code> scope grants access
     <strong>only to files this app created</strong> — it cannot read, modify, or delete
     any other files in your Google Drive.
   </p>
