@@ -61,6 +61,25 @@ export default defineConfig({
       },
     }),
     {
+      // Serve public/*.html at clean URLs to match Cloudflare Pages behavior.
+      // e.g. /home → public/home.html, /privacy → public/privacy.html
+      name: 'clean-url-html',
+      apply: 'serve',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          const pathname = req.url?.split('?')[0] ?? ''
+          if (!pathname.startsWith('/') || pathname.includes('.')) return next()
+          const candidate = resolve(__dirname, `public${pathname}.html`)
+          if (existsSync(candidate)) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8')
+            res.end(readFileSync(candidate, 'utf-8'))
+            return
+          }
+          next()
+        })
+      },
+    },
+    {
       name: 'sw-cache-version-dev',
       apply: 'serve',
       buildStart() {
