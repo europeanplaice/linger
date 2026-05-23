@@ -773,6 +773,41 @@ body {
 .settings-switch.active .settings-switch-thumb {
   transform: translateX(18px);
 }
+.settings-font-picker {
+  display: flex;
+  gap: 0.5rem;
+}
+.settings-font-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.6rem 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.settings-font-option.active {
+  border-color: var(--accent);
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.settings-font-option:hover:not(.active) {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.settings-font-sample {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.settings-font-label {
+  font-size: 0.62rem;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
 .settings-language-select {
   background: var(--bg);
   border: 1px solid var(--border);

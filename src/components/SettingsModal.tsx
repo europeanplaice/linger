@@ -101,14 +101,24 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <div className="settings-divider" />
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.serifFont}</span>
-            <button
-              className={`settings-switch ${fontMode === 'serif' ? 'active' : ''}`}
-              onClick={onFontToggle}
-              role="switch"
-              aria-checked={fontMode === 'serif'}
-            >
-              <span className="settings-switch-thumb" />
-            </button>
+            <div className="settings-font-picker">
+              <button
+                className={`settings-font-option ${fontMode === 'sans' ? 'active' : ''}`}
+                onClick={() => { if (fontMode !== 'sans') onFontToggle() }}
+                aria-label="Sans-serif"
+              >
+                <span className="settings-font-sample" style={{ fontFamily: "'Inter', 'Noto Sans JP', sans-serif" }}>Aあ</span>
+                <span className="settings-font-label">{t.settings.fontSans}</span>
+              </button>
+              <button
+                className={`settings-font-option ${fontMode === 'serif' ? 'active' : ''}`}
+                onClick={() => { if (fontMode !== 'serif') onFontToggle() }}
+                aria-label="Serif"
+              >
+                <span className="settings-font-sample" style={{ fontFamily: "'Source Serif 4', 'Noto Serif JP', serif" }}>Aあ</span>
+                <span className="settings-font-label">{t.settings.fontSerif}</span>
+              </button>
+            </div>
           </div>
           <div className="settings-divider" />
           <div className="settings-item">
