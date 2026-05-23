@@ -73,6 +73,9 @@ test.describe('footer links — root (LoginScreen)', () => {
 
 test.describe('footer links — /home', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route('/home', route =>
+      route.fulfill({ body: homeHtml, contentType: 'text/html; charset=utf-8' }),
+    )
     await page.route('/privacy', route =>
       route.fulfill({ body: privacyHtml, contentType: 'text/html; charset=utf-8' }),
     )
@@ -82,7 +85,7 @@ test.describe('footer links — /home', () => {
   })
 
   test('Privacy Policy link navigates to /privacy', async ({ page }) => {
-    await page.goto(`${baseUrl}/home.html`)
+    await page.goto(`${baseUrl}/home`)
 
     await page.locator('.footer a[href="/privacy"]').click()
     await page.waitForLoadState()
@@ -92,7 +95,7 @@ test.describe('footer links — /home', () => {
   })
 
   test('Terms of Service link navigates to /terms-of-service', async ({ page }) => {
-    await page.goto(`${baseUrl}/home.html`)
+    await page.goto(`${baseUrl}/home`)
 
     await page.locator('.footer a[href="/terms-of-service"]').click()
     await page.waitForLoadState()
