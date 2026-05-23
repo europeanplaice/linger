@@ -1831,6 +1831,9 @@ body {
   color: var(--text);
   background: transparent;
   width: 100%;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  line-break: strict;
   padding-top: 0.75rem;
   text-rendering: optimizeLegibility;
   scrollbar-width: thin;
