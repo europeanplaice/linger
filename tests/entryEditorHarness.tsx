@@ -46,7 +46,7 @@ let lastRenderGetContentDelayMs = 0
 let lastRenderPendingNavDate: string | null = null
 
 let currentRefreshSignal = 0
-let contentByDate: Map<string, { content: string; version: string | null }> = new Map()
+const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
 let getContentBlockedForDate: string | null = null
 let getContentBlockResolvers: Array<() => void> = []
 
