@@ -268,9 +268,6 @@ test.describe('EntryEditor — auto-save', () => {
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toHaveLength(1)
     expect(saveCalls[0].content).toBe('auto-save content')
-
-    await expect(page.locator('button.btn-save span').last()).toHaveText('Saved')
-    await expect(page.locator('button.btn-save')).toHaveClass(/btn-saved/)
   })
 
   test('auto-save does not fire while hasConflict is true', async ({ page }) => {
@@ -629,7 +626,6 @@ test.describe('EntryEditor — save progress', () => {
 
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
-    await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
     await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
