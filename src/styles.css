@@ -63,7 +63,7 @@
   --on-accent: #fff;
   --on-danger: #fff;
   --focus-ring: var(--accent);
-  --selection-bg: #b0ccb0;
+  --selection-bg: color-mix(in srgb, var(--accent) 45%, white);
   --selection-color: #2c2c2c;
   transition: background-color 0.25s ease, color 0.2s ease, border-color 0.2s ease;
 }
@@ -128,7 +128,7 @@
   --on-accent: #1c1f24;
   --on-danger: #1c1f24;
   --focus-ring: #e5c07b;
-  --selection-bg: #98c379;
+  --selection-bg: color-mix(in srgb, var(--accent) 70%, white);
   --selection-color: #1c1f24;
 }
 
@@ -623,9 +623,10 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 8px 28px var(--shadow-heavy);
-  padding: 0.7rem 0.55rem 0.55rem;
+  padding: 0.7rem 0.55rem 0.75rem;
   z-index: 200;
   transform-origin: top center;
+  overflow: hidden;
 }
 .mypicker-year-nav {
   display: flex;
@@ -653,6 +654,11 @@ body {
   opacity: 0.25;
   cursor: default;
 }
+.mypicker-year-nav button:focus-visible,
+.mypicker-month-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .mypicker-year-label {
   font-size: 0.85rem;
   font-weight: 700;
@@ -663,7 +669,6 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px 3px;
-  overflow: hidden;
 }
 .mypicker-month-btn {
   background: none;

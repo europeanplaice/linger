@@ -29,7 +29,7 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
     return s
   }, [dates])
   const ref = useRef<HTMLDivElement>(null)
-  const yearDirRef = useRef(0)
+  const [yearDir, setYearDir] = useState(0)
 
   useEffect(() => { setPickerYear(year) }, [year])
 
@@ -74,15 +74,15 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
             <div className="mypicker-year-nav">
               <button
                 type="button"
-                onClick={() => { yearDirRef.current = -1; setPickerYear(y => Math.max(y - 1, minYear)) }}
+                onClick={() => { setYearDir(-1); setPickerYear(y => Math.max(y - 1, minYear)) }}
                 disabled={pickerYear <= minYear}
                 aria-label="Previous year"
               >‹</button>
-              <AnimatePresence mode="wait" custom={yearDirRef.current} initial={false}>
+              <AnimatePresence mode="popLayout" custom={yearDir} initial={false}>
                 <motion.span
                   key={pickerYear}
                   className="mypicker-year-label"
-                  custom={yearDirRef.current}
+                  custom={yearDir}
                   variants={yearPickerVariants}
                   initial="enter"
                   animate="center"
@@ -94,16 +94,16 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
               </AnimatePresence>
               <button
                 type="button"
-                onClick={() => { yearDirRef.current = 1; setPickerYear(y => Math.min(y + 1, maxYear)) }}
+                onClick={() => { setYearDir(1); setPickerYear(y => Math.min(y + 1, maxYear)) }}
                 disabled={pickerYear >= maxYear}
                 aria-label="Next year"
               >›</button>
             </div>
-            <AnimatePresence mode="wait" custom={yearDirRef.current} initial={false}>
+            <AnimatePresence mode="popLayout" custom={yearDir} initial={false}>
             <motion.div
               key={pickerYear}
               className="mypicker-months"
-              custom={yearDirRef.current}
+              custom={yearDir}
               variants={yearPickerVariants}
               initial="enter"
               animate="center"
@@ -135,9 +135,9 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
 }
 
 const yearPickerVariants = {
-  enter: (dir: number) => ({ x: dir * 8, opacity: 0 }),
+  enter: (dir: number) => ({ x: dir * 16, opacity: 0 }),
   center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir * -8, opacity: 0 }),
+  exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
 const gridVariants = {
@@ -292,6 +292,34 @@ export function CalendarView({ dates, selectedDate, onSelect }: Props) {
           </motion.div>
         </AnimatePresence>
       </div>
+      <select
+        aria-label="Select month"
+        className="sr-only"
+        value={month}
+        onChange={e => {
+          const m = parseInt(e.target.value, 10)
+          setDirectionFor(year, m)
+          setMonth(m)
+        }}
+      >
+        {t.calendar.months.map((name, i) => (
+          <option key={i} value={i}>{name}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Select year"
+        className="sr-only"
+        value={year}
+        onChange={e => {
+          const y = parseInt(e.target.value, 10)
+          setDirectionFor(y, month)
+          setYear(y)
+        }}
+      >
+        {yearOptions.map(y => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
     </div>
   )
 }
