@@ -207,6 +207,7 @@ export default function App() {
   useEffect(() => { diaryGetContentRef.current = diary.getContent }, [diary.getContent])
 
   useEffect(() => {
+    if (recollectionOpen) return
     if (!initialLoadComplete) return
     const toFetch = recollectionDatesToPrefetch(diaryDatesRef.current)
     const candidates = recollectionRandomCandidates(diaryDatesRef.current)
@@ -225,7 +226,7 @@ export default function App() {
     }
     const id = setTimeout(run, 1_500)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [initialLoadComplete])
+  }, [initialLoadComplete, recollectionOpen])
 
   useEffect(() => {
     if (!isSignedIn) return
