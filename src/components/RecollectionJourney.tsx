@@ -7,6 +7,7 @@ import type { DiaryState } from '../hooks/useDiary'
 interface RecollectionJourneyProps {
   dates: string[]
   getContent: DiaryState['getContent']
+  serendipityPrefetch?: readonly string[]
   onSelect: (date: string) => void
   onClose: () => void
 }
@@ -35,7 +36,7 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-export function RecollectionJourney({ dates, getContent, onSelect, onClose }: RecollectionJourneyProps) {
+export function RecollectionJourney({ dates, getContent, serendipityPrefetch, onSelect, onClose }: RecollectionJourneyProps) {
   const { t, locale } = useI18n()
   const overlayRef = useRef<HTMLDivElement>(null)
   const today = todayYmd()
@@ -78,7 +79,15 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     return dates.filter(d => !exclude.has(d))
   }, [dates, today, onThisDay, periodic])
 
-  const [randomQueue] = useState<string[]>(() => shuffle(randomCandidates))
+  const [randomQueue] = useState<string[]>(() => {
+    const q = shuffle(randomCandidates)
+    const pinned = (serendipityPrefetch ?? []).filter(d => randomCandidates.includes(d))
+    for (let i = pinned.length - 1; i >= 0; i--) {
+      const idx = q.indexOf(pinned[i])
+      if (idx > 0) { q.splice(idx, 1); q.unshift(pinned[i]) }
+    }
+    return q
+  })
   const [randomIdx, setRandomIdx] = useState(0)
   const randomDate = randomQueue[randomIdx] ?? null
   const nextDate = randomQueue[randomIdx + 1] ?? null

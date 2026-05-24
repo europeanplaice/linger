@@ -46,3 +46,9 @@ export function recollectionDatesToPrefetch(dates: string[], today = todayYmd())
 
   return [...new Set([...onThisDay, ...periodic])]
 }
+
+/** Returns dates eligible for the serendipity (random) slot. */
+export function recollectionRandomCandidates(dates: string[], today = todayYmd()): string[] {
+  const deterministic = new Set([today, ...recollectionDatesToPrefetch(dates, today)])
+  return dates.filter(d => !deterministic.has(d))
+}

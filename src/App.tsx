@@ -16,7 +16,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, ymd, parseYmd, weekdayLabel, diaryDateLabel } from './utils/date'
-import { recollectionDatesToPrefetch } from './utils/recollectionDates'
+import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
 import { TokenExpiredError } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
@@ -151,6 +151,7 @@ export default function App() {
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recollectionOpen, setRecollectionOpen] = useState(false)
+  const [serendipityPrefetch, setSerendipityPrefetch] = useState<[string, string] | [string] | []>([])
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
   const searchBarRef = useRef<SearchBarHandle>(null)
   const selectedDateRef = useRef(selectedDate)
@@ -208,10 +209,15 @@ export default function App() {
   useEffect(() => {
     if (!initialLoadComplete) return
     const toFetch = recollectionDatesToPrefetch(diaryDatesRef.current)
-    if (toFetch.length === 0) return
+    const candidates = recollectionRandomCandidates(diaryDatesRef.current)
+    const shuffled = candidates.slice().sort(() => Math.random() - 0.5)
+    const prefetch = shuffled.slice(0, 2) as [string, string] | [string] | []
+    setSerendipityPrefetch(prefetch)
+    const allToFetch = [...toFetch, ...prefetch]
+    if (allToFetch.length === 0) return
     let cancelled = false
     const run = () => {
-      if (!cancelled) toFetch.forEach(d => diaryGetContentRef.current(d).catch(() => {}))
+      if (!cancelled) allToFetch.forEach(d => diaryGetContentRef.current(d).catch(() => {}))
     }
     if (typeof requestIdleCallback !== 'undefined') {
       const id = requestIdleCallback(run, { timeout: 10_000 })
@@ -507,6 +513,7 @@ export default function App() {
           <RecollectionJourney
             dates={diary.dates}
             getContent={diary.getContent}
+            serendipityPrefetch={serendipityPrefetch}
             onSelect={(d) => {
               setRecollectionOpen(false)
               selectDate(d)
