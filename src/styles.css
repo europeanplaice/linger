@@ -1451,6 +1451,7 @@ body {
   justify-content: center;
   gap: 0.45rem;
   min-width: 5.7rem;
+  transition: opacity 0.4s ease;
 }
 .editor-actions .btn-refresh-entry {
   background: transparent;
