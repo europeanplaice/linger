@@ -155,6 +155,11 @@ body {
   font-optical-sizing: auto;
 }
 
+::selection {
+  background: var(--selected-bg);
+  color: var(--text);
+}
+
 /* ── Login ── */
 .login-screen {
   display: flex;
