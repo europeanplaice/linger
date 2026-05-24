@@ -29,6 +29,7 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
     return s
   }, [dates])
   const ref = useRef<HTMLDivElement>(null)
+  const yearDirRef = useRef(0)
 
   useEffect(() => { setPickerYear(year) }, [year])
 
@@ -73,19 +74,42 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
             <div className="mypicker-year-nav">
               <button
                 type="button"
-                onClick={() => setPickerYear(y => Math.max(y - 1, minYear))}
+                onClick={() => { yearDirRef.current = -1; setPickerYear(y => Math.max(y - 1, minYear)) }}
                 disabled={pickerYear <= minYear}
                 aria-label="Previous year"
               >‹</button>
-              <span className="mypicker-year-label">{pickerYear}</span>
+              <AnimatePresence mode="wait" custom={yearDirRef.current} initial={false}>
+                <motion.span
+                  key={pickerYear}
+                  className="mypicker-year-label"
+                  custom={yearDirRef.current}
+                  variants={yearPickerVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={{ duration: 0.13, ease: 'easeOut' }}
+                >
+                  {pickerYear}
+                </motion.span>
+              </AnimatePresence>
               <button
                 type="button"
-                onClick={() => setPickerYear(y => Math.min(y + 1, maxYear))}
+                onClick={() => { yearDirRef.current = 1; setPickerYear(y => Math.min(y + 1, maxYear)) }}
                 disabled={pickerYear >= maxYear}
                 aria-label="Next year"
               >›</button>
             </div>
-            <div className="mypicker-months">
+            <AnimatePresence mode="wait" custom={yearDirRef.current} initial={false}>
+            <motion.div
+              key={pickerYear}
+              className="mypicker-months"
+              custom={yearDirRef.current}
+              variants={yearPickerVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.13, ease: 'easeOut' }}
+            >
               {months.map((name, i) => {
                 const mm = String(i + 1).padStart(2, '0')
                 const hasEntry = entryMonths.has(`${pickerYear}-${mm}`)
@@ -101,12 +125,19 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
                   </button>
                 )
               })}
-            </div>
+            </motion.div>
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   )
+}
+
+const yearPickerVariants = {
+  enter: (dir: number) => ({ x: dir * 8, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (dir: number) => ({ x: dir * -8, opacity: 0 }),
 }
 
 const gridVariants = {
