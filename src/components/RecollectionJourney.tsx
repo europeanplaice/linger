@@ -26,6 +26,15 @@ function excerpt(content: string, max = 140): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 export function RecollectionJourney({ dates, getContent, onSelect, onClose }: RecollectionJourneyProps) {
   const { t, locale } = useI18n()
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -68,26 +77,11 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     const exclude = new Set<string>([today, ...onThisDay, ...periodic.map(p => p.date)])
     return dates.filter(d => !exclude.has(d))
   }, [dates, today, onThisDay, periodic])
-  const [randomDate, setRandomDate] = useState<string | null>(null)
-  const randomCandidatesRef = useRef(randomCandidates)
-  randomCandidatesRef.current = randomCandidates
 
-  const pickRandom = useCallback((avoid: string | null) => {
-    const candidates = randomCandidatesRef.current
-    if (candidates.length === 0) {
-      setRandomDate(null)
-      return
-    }
-    let next = candidates[Math.floor(Math.random() * candidates.length)]
-    for (let i = 0; next === avoid && candidates.length > 1 && i < 6; i++) {
-      next = candidates[Math.floor(Math.random() * candidates.length)]
-    }
-    setRandomDate(next)
-  }, [])
-
-  useEffect(() => {
-    pickRandom(null)
-  }, [pickRandom])
+  const [randomQueue] = useState<string[]>(() => shuffle(randomCandidates))
+  const [randomIdx, setRandomIdx] = useState(0)
+  const randomDate = randomQueue[randomIdx] ?? null
+  const nextDate = randomQueue[randomIdx + 1] ?? null
 
   const [previews, setPreviews] = useState<Map<string, Preview>>(new Map())
   const previewsRef = useRef(previews)
@@ -99,6 +93,7 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
       ...onThisDay,
       ...periodic.map(p => p.date),
       ...(randomDate ? [randomDate] : []),
+      ...(nextDate ? [nextDate] : []),
     ]
     const toLoad = targets.filter(d => !previewsRef.current.has(d) && !loadingRef.current.has(d))
     if (toLoad.length === 0) return
@@ -119,7 +114,7 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
     })
 
     return () => { cancelled = true }
-  }, [onThisDay, periodic, randomDate, getContent])
+  }, [onThisDay, periodic, randomDate, nextDate, getContent])
 
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose()
@@ -228,8 +223,8 @@ export function RecollectionJourney({ dates, getContent, onSelect, onClose }: Re
                     return days > 0 ? t.recollection.daysAgo(days) : ''
                   })())}
                 </div>
-                {randomCandidates.length > 1 && (
-                  <button className="recollection-another" onClick={() => pickRandom(randomDate)}>
+                {randomIdx < randomQueue.length - 1 && (
+                  <button className="recollection-another" onClick={() => setRandomIdx(i => i + 1)}>
                     {t.recollection.another}
                   </button>
                 )}

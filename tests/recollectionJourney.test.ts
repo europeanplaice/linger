@@ -14,6 +14,17 @@ const unrelated = ymd(new Date(now.getFullYear() - 2, now.getMonth(), now.getDat
 const oneWeekAgo = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7))
 const oneMonthAgo = ymd(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()))
 
+// Serendipity candidates: offsets far from any periodic bucket (±10 days of 7d/1m/3m/6m)
+// and different month+day from today, so they won't appear in onThisDay or periodic sections.
+function dayOffset(days: number): string {
+  const d = new Date(now)
+  d.setDate(d.getDate() - days)
+  return ymd(d)
+}
+const rand1 = dayOffset(500)
+const rand2 = dayOffset(800)
+const rand3 = dayOffset(1100)
+
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/recollectionJourneyHarness.html`)
 }
@@ -91,5 +102,42 @@ test.describe('RecollectionJourney', () => {
 
     await expect(page.locator('.recollection-empty')).toBeVisible()
     await expect(page.locator('.recollection-section')).toHaveCount(0)
+  })
+
+  test('"Meet another day" advances through candidates without repeating', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [rand1, rand2, rand3],
+      contents: {
+        [rand1]: 'Entry alpha.',
+        [rand2]: 'Entry beta.',
+        [rand3]: 'Entry gamma.',
+      },
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    const shownDates: string[] = []
+
+    for (let i = 0; i < 3; i++) {
+      const dateText = await section.locator('.recollection-card-date').first().innerText()
+      shownDates.push(dateText.trim())
+      if (i < 2) await section.locator('.recollection-another').click()
+    }
+
+    expect(new Set(shownDates).size).toBe(3)
+  })
+
+  test('"Meet another day" button disappears after the last candidate', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [rand1, rand2],
+      contents: { [rand1]: 'First.', [rand2]: 'Second.' },
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    await expect(section.locator('.recollection-another')).toBeVisible()
+
+    await section.locator('.recollection-another').click()
+    await expect(section.locator('.recollection-another')).toHaveCount(0)
   })
 })
