@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { recollectionDatesToPrefetch } from '../../src/utils/recollectionDates'
+import { recollectionDatesToPrefetch, recollectionRandomCandidates } from '../../src/utils/recollectionDates'
 
 const TODAY = '2026-05-22'
 
@@ -71,5 +71,33 @@ describe('recollectionDatesToPrefetch', () => {
       const result = recollectionDatesToPrefetch(dates, TODAY)
       expect(result.filter(d => d === '2025-05-22')).toHaveLength(1)
     })
+  })
+})
+
+describe('recollectionRandomCandidates', () => {
+  it('returns empty array for empty dates', () => {
+    expect(recollectionRandomCandidates([], TODAY)).toEqual([])
+  })
+
+  it('excludes today', () => {
+    expect(recollectionRandomCandidates([TODAY], TODAY)).toEqual([])
+  })
+
+  it('excludes onThisDay and periodic dates', () => {
+    const onThisDay = '2025-05-22'
+    const periodic  = '2026-05-15' // 7 days ago, within tolerance
+    const candidate = '2024-01-01' // far from all periodic buckets and different month/day
+    const result = recollectionRandomCandidates([onThisDay, periodic, candidate], TODAY)
+    expect(result).not.toContain(onThisDay)
+    expect(result).not.toContain(periodic)
+    expect(result).toContain(candidate)
+  })
+
+  it('returns all dates that are not today/onThisDay/periodic', () => {
+    const a = '2023-06-15'
+    const b = '2022-08-20'
+    const result = recollectionRandomCandidates([a, b], TODAY)
+    expect(result).toContain(a)
+    expect(result).toContain(b)
   })
 })

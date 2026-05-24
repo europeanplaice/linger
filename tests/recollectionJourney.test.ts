@@ -31,7 +31,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { dates: string[]; contents?: Record<string, string> },
+  opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] },
 ) {
   await page.evaluate(o => window.recollectionHarness.render(o), opts)
   await page.waitForSelector('.recollection-view')
@@ -125,6 +125,28 @@ test.describe('RecollectionJourney', () => {
     }
 
     expect(new Set(shownDates).size).toBe(3)
+  })
+
+  test('serendipityPrefetch pins specified dates to the front of the queue', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [rand1, rand2, rand3],
+      contents: {
+        [rand1]: 'Entry alpha.',
+        [rand2]: 'Entry beta.',
+        [rand3]: 'Entry gamma.',
+      },
+      serendipityPrefetch: [rand2, rand3],
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+
+    const first = await section.locator('.recollection-card').first().innerText()
+    expect(first).toContain('Entry beta.')
+
+    await section.locator('.recollection-another').click()
+    const second = await section.locator('.recollection-card').first().innerText()
+    expect(second).toContain('Entry gamma.')
   })
 
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {
