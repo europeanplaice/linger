@@ -549,7 +549,7 @@ body {
   margin-bottom: 0.4rem;
   font-size: 0.85rem;
 }
-.calendar-nav button {
+.calendar-nav > button {
   background: none;
   border: none;
   font-size: 1.2rem;
@@ -558,12 +558,12 @@ body {
   padding: 0 0.3rem;
   line-height: 1;
 }
-.calendar-nav button:hover { color: var(--text); }
-.calendar-nav button:disabled {
+.calendar-nav > button:hover { color: var(--text); }
+.calendar-nav > button:disabled {
   cursor: default;
   opacity: 0.35;
 }
-.calendar-nav button:disabled:hover { color: var(--text-muted); }
+.calendar-nav > button:disabled:hover { color: var(--text-muted); }
 .calendar-title {
   display: inline-flex;
   align-items: center;
