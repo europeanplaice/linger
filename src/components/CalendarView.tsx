@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ChevronDown } from 'lucide-react'
 import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../utils/date'
@@ -15,12 +15,19 @@ interface MonthYearPickerProps {
   month: number
   yearOptions: number[]
   months: string[]
+  dates: Set<string>
   onSelect: (year: number, month: number) => void
 }
 
-function MonthYearPicker({ year, month, yearOptions, months, onSelect }: MonthYearPickerProps) {
+function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: MonthYearPickerProps) {
   const [open, setOpen] = useState(false)
   const [pickerYear, setPickerYear] = useState(year)
+
+  const entryMonths = useMemo(() => {
+    const s = new Set<string>()
+    for (const d of dates) s.add(d.slice(0, 7))
+    return s
+  }, [dates])
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setPickerYear(year) }, [year])
@@ -79,16 +86,21 @@ function MonthYearPicker({ year, month, yearOptions, months, onSelect }: MonthYe
               >›</button>
             </div>
             <div className="mypicker-months">
-              {months.map((name, i) => (
-                <button
-                  key={name}
-                  type="button"
-                  className={`mypicker-month-btn${i === month && pickerYear === year ? ' active' : ''}`}
-                  onClick={() => { onSelect(pickerYear, i); setOpen(false) }}
-                >
-                  {name.slice(0, 3)}
-                </button>
-              ))}
+              {months.map((name, i) => {
+                const mm = String(i + 1).padStart(2, '0')
+                const hasEntry = entryMonths.has(`${pickerYear}-${mm}`)
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`mypicker-month-btn${i === month && pickerYear === year ? ' active' : ''}`}
+                    onClick={() => { onSelect(pickerYear, i); setOpen(false) }}
+                  >
+                    {name.slice(0, 3)}
+                    <span className={`mypicker-dot${hasEntry ? ' visible' : ''}`} aria-hidden="true" />
+                  </button>
+                )
+              })}
             </div>
           </motion.div>
         )}
@@ -191,6 +203,7 @@ export function CalendarView({ dates, selectedDate, onSelect }: Props) {
             month={month}
             yearOptions={yearOptions}
             months={t.calendar.months}
+            dates={dates}
             onSelect={(newYear, newMonth) => {
               setDirectionFor(newYear, newMonth)
               setYear(newYear)
