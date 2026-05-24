@@ -63,6 +63,8 @@
   --on-accent: #fff;
   --on-danger: #fff;
   --focus-ring: var(--accent);
+  --selection-bg: #b0ccb0;
+  --selection-color: #2c2c2c;
   transition: background-color 0.25s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
@@ -126,6 +128,8 @@
   --on-accent: #1c1f24;
   --on-danger: #1c1f24;
   --focus-ring: #e5c07b;
+  --selection-bg: #98c379;
+  --selection-color: #1c1f24;
 }
 
 [data-font="sans"] {
@@ -156,8 +160,8 @@ body {
 }
 
 ::selection {
-  background: var(--selected-bg);
-  color: var(--text);
+  background: var(--selection-bg);
+  color: var(--selection-color);
 }
 
 /* ── Login ── */
