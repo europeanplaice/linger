@@ -342,21 +342,27 @@ test.describe('SettingsModal — font size select', () => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Font size") select')
-    await expect(select).toBeVisible()
-    await expect(select.locator('option')).toHaveCount(4)
-    await expect(select.locator('option[value="sm"]')).toHaveText('Small')
-    await expect(select.locator('option[value="md"]')).toHaveText('Medium')
-    await expect(select.locator('option[value="lg"]')).toHaveText('Large')
-    await expect(select.locator('option[value="xl"]')).toHaveText('Extra large')
+    const trigger = page.getByRole('button', { name: 'Font size' })
+    await expect(trigger).toBeVisible()
+    await trigger.click()
+
+    const dropdown = page.getByRole('listbox', { name: 'Font size' })
+    await expect(dropdown).toBeVisible()
+
+    const options = dropdown.getByRole('option')
+    await expect(options).toHaveCount(4)
+    await expect(options.nth(0)).toHaveText('Small')
+    await expect(options.nth(1)).toHaveText('Medium')
+    await expect(options.nth(2)).toHaveText('Large')
+    await expect(options.nth(3)).toHaveText('Extra large')
   })
 
   test('defaults to medium', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Font size") select')
-    await expect(select).toHaveValue('md')
+    const trigger = page.getByRole('button', { name: 'Font size' })
+    await expect(trigger.locator('span')).toHaveText('Medium')
   })
 
   test('initializes with provided fontSize', async ({ page }) => {
@@ -364,16 +370,20 @@ test.describe('SettingsModal — font size select', () => {
     await page.evaluate(() => window.settingsHarness.render({ fontSize: 'lg' }))
     await page.waitForSelector('.settings-modal')
 
-    const select = page.locator('.settings-item:has-text("Font size") select')
-    await expect(select).toHaveValue('lg')
+    const trigger = page.getByRole('button', { name: 'Font size' })
+    await expect(trigger.locator('span')).toHaveText('Large')
   })
 
   test('selecting xl updates the select value', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const select = page.locator('.settings-item:has-text("Font size") select')
-    await select.selectOption('xl')
-    await expect(select).toHaveValue('xl')
+    const trigger = page.getByRole('button', { name: 'Font size' })
+    await trigger.click()
+
+    const dropdown = page.getByRole('listbox', { name: 'Font size' })
+    await dropdown.getByRole('option', { name: 'Extra large' }).click()
+
+    await expect(trigger.locator('span')).toHaveText('Extra large')
   })
 })

@@ -74,7 +74,8 @@ test('switches between Japanese and English from settings and persists the choic
 
     await expect(page.getByRole('heading', { name: '設定' })).toBeVisible()
 
-    await page.getByLabel('言語').selectOption('en')
+    await page.getByLabel('言語').click()
+    await page.getByRole('option', { name: 'English' }).click()
 
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')

@@ -269,8 +269,7 @@ test.describe('EntryEditor — auto-save', () => {
     expect(saveCalls).toHaveLength(1)
     expect(saveCalls[0].content).toBe('auto-save content')
 
-    const saveButtonText = await page.locator('button.btn-save span').last().textContent()
-    expect(saveButtonText).toBe('Saved')
+    await expect(page.locator('button.btn-save span').last()).toHaveText('Saved')
     await expect(page.locator('button.btn-save')).toHaveClass(/btn-saved/)
   })
 
