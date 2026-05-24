@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
+import { ChevronDown } from 'lucide-react'
 import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../utils/date'
 import { useI18n } from '../i18n'
 
@@ -7,6 +8,93 @@ interface Props {
   dates: Set<string>
   selectedDate: string
   onSelect: (date: string) => void
+}
+
+interface MonthYearPickerProps {
+  year: number
+  month: number
+  yearOptions: number[]
+  months: string[]
+  onSelect: (year: number, month: number) => void
+}
+
+function MonthYearPicker({ year, month, yearOptions, months, onSelect }: MonthYearPickerProps) {
+  const [open, setOpen] = useState(false)
+  const [pickerYear, setPickerYear] = useState(year)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { setPickerYear(year) }, [year])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const minYear = yearOptions[0]
+  const maxYear = yearOptions[yearOptions.length - 1]
+
+  return (
+    <div className="mypicker" ref={ref}>
+      <button
+        type="button"
+        className="mypicker-trigger"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        {months[month]} {year}
+        <ChevronDown size={11} className={`mypicker-chevron${open ? ' open' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="mypicker-popup"
+            initial={{ opacity: 0, y: -6, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.95 }}
+            transition={{ duration: 0.14, ease: 'easeOut' }}
+          >
+            <div className="mypicker-year-nav">
+              <button
+                type="button"
+                onClick={() => setPickerYear(y => Math.max(y - 1, minYear))}
+                disabled={pickerYear <= minYear}
+                aria-label="Previous year"
+              >‹</button>
+              <span className="mypicker-year-label">{pickerYear}</span>
+              <button
+                type="button"
+                onClick={() => setPickerYear(y => Math.min(y + 1, maxYear))}
+                disabled={pickerYear >= maxYear}
+                aria-label="Next year"
+              >›</button>
+            </div>
+            <div className="mypicker-months">
+              {months.map((name, i) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={`mypicker-month-btn${i === month && pickerYear === year ? ' active' : ''}`}
+                  onClick={() => { onSelect(pickerYear, i); setOpen(false) }}
+                >
+                  {name.slice(0, 3)}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 const gridVariants = {
@@ -98,34 +186,17 @@ export function CalendarView({ dates, selectedDate, onSelect }: Props) {
       <div className="calendar-nav">
         <button type="button" onClick={prev} aria-label={t.calendar.previousMonth}>‹</button>
         <div className="calendar-title">
-          <select
-            className="calendar-month-select"
-            aria-label={t.calendar.selectMonth}
-            value={month}
-            onChange={event => {
-              const newMonth = Number(event.target.value)
-              setDirectionFor(year, newMonth)
+          <MonthYearPicker
+            year={year}
+            month={month}
+            yearOptions={yearOptions}
+            months={t.calendar.months}
+            onSelect={(newYear, newMonth) => {
+              setDirectionFor(newYear, newMonth)
+              setYear(newYear)
               setMonth(newMonth)
             }}
-          >
-            {t.calendar.months.map((monthName, index) => (
-              <option key={monthName} value={index}>{monthName}</option>
-            ))}
-          </select>
-          <select
-            className="calendar-year-select"
-            aria-label={t.calendar.selectYear}
-            value={year}
-            onChange={event => {
-              const newYear = Number(event.target.value)
-              setDirectionFor(newYear, month)
-              setYear(newYear)
-            }}
-          >
-            {yearOptions.map(optionYear => (
-              <option key={optionYear} value={optionYear}>{optionYear}</option>
-            ))}
-          </select>
+          />
         </div>
         <button type="button" onClick={next} aria-label={t.calendar.nextMonth}>›</button>
       </div>
