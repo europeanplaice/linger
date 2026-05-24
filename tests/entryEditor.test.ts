@@ -745,6 +745,39 @@ test.describe('EntryEditor — token expiry', () => {
   })
 })
 
+test.describe('EntryEditor — silent refresh race condition', () => {
+  test('does not overwrite user typing with in-flight silent refreshSignal fetch', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved content')
+
+    // Block subsequent getContent for this date before triggering a refresh
+    await page.evaluate(() => {
+      window.editorHarness.blockGetContent('2026-05-01')
+    })
+
+    // Increment refreshSignal — loadFreshEntry fires and hangs (blocked)
+    await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
+
+    // Wait until the blocked getContent call is in-flight
+    await expect.poll(() =>
+      page.evaluate(() => window.editorHarness.getContentCalls().length)
+    ).toBeGreaterThanOrEqual(2)
+
+    // User types new content while the fetch is still in-flight
+    await page.locator('textarea.editor-textarea').pressSequentially('\nuser typed here')
+
+    // Resolve the in-flight fetch and give React time to process
+    await page.evaluate(() => {
+      window.editorHarness.unblockGetContent()
+      return new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    // Typed content must NOT be overwritten by the silent refresh result
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved content\nuser typed here')
+  })
+})
+
 test.describe('EntryEditor — date switch cancellation', () => {
   test('does not overwrite new date content with stale in-flight refreshSignal fetch', async ({ page }) => {
     await loadHarness(page)

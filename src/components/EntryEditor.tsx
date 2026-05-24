@@ -313,6 +313,7 @@ useEffect(() => {
     try {
       const entry = await getContentRef.current(date, { forceNetwork: !silent })
       if (currentDateRef.current !== capturedDate) return
+      if (silent && textRef.current !== savedTextRef.current) return
       applyLoadedEntry(entry)
       setLoadFailed(false)
       setHasConflict(false)
@@ -723,6 +724,7 @@ useEffect(() => {
               value={text}
               onChange={e => {
                 if (loadFailed) return
+                textRef.current = e.target.value
                 setText(e.target.value)
                 if (status && status !== savedStatus) setStatus('')
               }}
