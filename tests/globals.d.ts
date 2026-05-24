@@ -93,8 +93,6 @@ interface Window {
     dirtyChanges: () => boolean[]
     clearCalls: () => void
     windowOpenCalls: () => { url: string; target: string }[]
-    loadCompleteCalls: () => { date: string; content: string | null; version: string | null }[]
-    saveCompleteCalls: () => { date: string; content: string }[]
     EntryConflictError: typeof import('../src/hooks/useDiary').EntryConflictError
     setToken: (token: string | null) => void
     expiredCalls: () => number

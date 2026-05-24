@@ -35,50 +35,6 @@ async function renderEditor(
 
 
 test.describe('EntryEditor — date header', () => {
-  test('notifies when the visible entry finishes loading', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'loaded content', version: '7' })
-
-    const calls = await page.evaluate(() => window.editorHarness.loadCompleteCalls())
-    expect(calls).toEqual([
-      { date: '2026-05-01', content: 'loaded content', version: '7' },
-    ])
-  })
-
-  test('notifies when an empty visible entry finishes loading', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-02', initialContent: '', version: null })
-
-    const calls = await page.evaluate(() => window.editorHarness.loadCompleteCalls())
-    expect(calls).toEqual([
-      { date: '2026-05-02', content: null, version: null },
-    ])
-  })
-
-  test('calls onSaveComplete with date and content after a successful save', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: '', version: null })
-
-    await page.locator('textarea.editor-textarea').fill('hello world')
-    await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
-
-    const calls = await page.evaluate(() => window.editorHarness.saveCompleteCalls())
-    expect(calls).toEqual([{ date: '2026-05-01', content: 'hello world' }])
-  })
-
-  test('does not call onSaveComplete when save fails', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'existing', version: '1', saveReject: 'error' })
-
-    await page.locator('textarea.editor-textarea').fill('edited text')
-    await page.locator('button.btn-save').click()
-    await expect(page.locator('.editor-status-line')).toContainText('Save failed')
-
-    const calls = await page.evaluate(() => window.editorHarness.saveCompleteCalls())
-    expect(calls).toHaveLength(0)
-  })
-
   test('shows an editor placeholder for empty entries', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-02', initialContent: '', version: null })
@@ -461,20 +417,6 @@ test.describe('EntryEditor — conflict resolution', () => {
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
-  test('calls onSaveComplete after overwriting a remote conflict', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict' })
-
-    await page.fill('textarea.editor-textarea', 'local edits')
-    await page.locator('button.btn-save').click()
-    await page.waitForSelector('.conflict-panel')
-
-    await page.getByRole('button', { name: 'Overwrite' }).click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
-
-    const calls = await page.evaluate(() => window.editorHarness.saveCompleteCalls())
-    expect(calls).toEqual([{ date: '2026-05-01', content: 'local edits' }])
-  })
 })
 
 test.describe('EntryEditor — delete confirmation', () => {

@@ -33,8 +33,6 @@ interface Props {
   reauthSaveResult: LoadedDiaryEntry | null
   isSignedIn: boolean
   onExpired: () => void
-  onLoadComplete?: (date: string, entry: LoadedDiaryEntry | null) => void
-  onSaveComplete?: (date: string, content: string) => void
   refreshSignal?: number
 }
 
@@ -72,7 +70,7 @@ function SpinnerIcon() {
 }
 
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, onExpired, onLoadComplete, onSaveComplete, refreshSignal = 0 }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, onExpired, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -107,11 +105,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   useEffect(() => { onSaveRef.current = onSave }, [onSave])
   const getContentRef = useRef(getContent)
   useEffect(() => { getContentRef.current = getContent }, [getContent])
-  const onLoadCompleteRef = useRef(onLoadComplete)
-  useEffect(() => { onLoadCompleteRef.current = onLoadComplete }, [onLoadComplete])
-  const onSaveCompleteRef = useRef(onSaveComplete)
-  useEffect(() => { onSaveCompleteRef.current = onSaveComplete }, [onSaveComplete])
-
 const textRef = useRef(text)
 const savedTextRef = useRef(savedText)
 const baseVersionRef = useRef(baseVersion)
@@ -167,7 +160,6 @@ useEffect(() => {
     getContentRef.current(date).then(entry => {
       if (cancelled) return
       applyLoadedEntry(entry)
-      onLoadCompleteRef.current?.(date, entry)
     }).catch((e) => {
       if (!cancelled) {
         if (e instanceof TokenExpiredError) {
@@ -244,7 +236,6 @@ useEffect(() => {
       fileIdRef.current = newId
       setStatus(savedStatus)
       success = true
-      onSaveCompleteRef.current?.(date, currentText)
       return true
     } catch (e) {
       if (!explicit) {
@@ -308,7 +299,6 @@ useEffect(() => {
       setHasConflict(false)
       setConflictRemote(null)
       setStatus(savedStatus)
-      onSaveCompleteRef.current?.(date, currentText)
     } catch {
       setStatus(t.entry.saveFailed)
     } finally {
@@ -324,7 +314,6 @@ useEffect(() => {
       const entry = await getContentRef.current(date, { forceNetwork: !silent })
       if (currentDateRef.current !== capturedDate) return
       applyLoadedEntry(entry)
-      onLoadCompleteRef.current?.(date, entry)
       setLoadFailed(false)
       setHasConflict(false)
       setConflictRemote(null)
@@ -352,7 +341,6 @@ useEffect(() => {
       getContentRef.current(date).then(entry => {
         if (cancelled) return
         applyLoadedEntry(entry)
-        onLoadCompleteRef.current?.(date, entry)
       }).catch(() => {
         if (!cancelled) setStatus(t.entry.failedToRefresh)
       }).finally(() => {

@@ -32,11 +32,8 @@ const dictionaries = {
     app: {
       closeMenu: 'Close menu',
       signOut: 'Sign out',
-      loadingEntries: 'Loading entries…',
       loadError: 'Failed to load entries. Check your connection and try again.',
       noEntriesHint: 'No entries yet. Start by writing today\'s diary.',
-      recent: 'Recent',
-      noTextYet: 'No text yet',
       loading: 'Loading…',
     },
     recollection: {
@@ -251,11 +248,8 @@ const dictionaries = {
     app: {
       closeMenu: 'メニューを閉じる',
       signOut: 'ログアウト',
-      loadingEntries: '日記を読み込み中...',
       loadError: '日記の読み込みに失敗しました。接続を確認して、もう一度お試しください。',
       noEntriesHint: 'まだ日記がありません。今日から書き始めましょう！',
-      recent: '最近',
-      noTextYet: 'まだ本文がありません',
       loading: '読み込み中...',
     },
     recollection: {

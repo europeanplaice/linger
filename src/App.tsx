@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
-import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import { AnimatePresence, MotionConfig } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
 import { useTheme } from './hooks/useTheme'
@@ -22,15 +22,8 @@ import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
 import { LogOut } from 'lucide-react'
 
-type RecentPreview = {
-  snippet: string
-  hasContent: boolean
-  loading: boolean
-}
-
 const DATE_HASH_RE = /^\d{4}-\d{2}-\d{2}$/
 const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
-const RECENT_PREVIEW_DELAY_MS = 75
 const FOCUS_REFRESH_MIN_MS = 1000
 
 interface SidebarHistoryState {
@@ -44,11 +37,6 @@ function dateFromHash(): string | null {
 
 function isMobileLayout(): boolean {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
-}
-
-function firstLinePreview(content: string): string {
-  const firstLine = content.split(/\r?\n/).find(line => line.trim())?.trim() ?? ''
-  return firstLine.length > 72 ? `${firstLine.slice(0, 69)}...` : firstLine
 }
 
 function dismissActiveTextCursor() {
@@ -74,19 +62,6 @@ function dismissActiveTextCursor() {
   window.getSelection()?.removeAllRanges()
 }
 
-function SkeletonEntryRows() {
-  return (
-    <>
-      {[0, 1, 2].map(i => (
-        <li key={i} className="restoring-entry-list-item" aria-hidden="true">
-          <span className="restoring-entry-date-skel" />
-          <span className="restoring-entry-preview-skel" />
-        </li>
-      ))}
-    </>
-  )
-}
-
 function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string; onTitleClick: () => void }) {
   const { t, locale } = useI18n()
   const weekday = weekdayLabel(selectedDate, locale)
@@ -100,10 +75,6 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
         </div>
         <div className="restoring-search" />
         <CalendarView dates={new Set()} selectedDate={selectedDate} onSelect={() => {}} />
-        <h2 className="entry-list-heading">{t.app.recent}</h2>
-        <ul className="entry-list">
-          <SkeletonEntryRows />
-        </ul>
       </aside>
       <main className="main">
         <div className="editor restoring-editor">
@@ -153,7 +124,7 @@ function shiftDate(date: string, days: number): string {
 }
 
 export default function App() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const {
     status,
     tokenExpired,
@@ -178,7 +149,6 @@ export default function App() {
   const [pendingDate, setPendingDate] = useState<string | null>(null)
   const [retrySaveAfterReauth, setRetrySaveAfterReauth] = useState(false)
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
-  const [recentPreviews, setRecentPreviews] = useState<Map<string, RecentPreview>>(new Map())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recollectionOpen, setRecollectionOpen] = useState(false)
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
@@ -320,23 +290,6 @@ export default function App() {
     selectDate(todayYmd())
   }, [selectDate])
 
-  const updateRecentPreview = useCallback((date: string, content: string) => {
-    setRecentPreviews(prev => {
-      const next = new Map(prev)
-      next.set(date, {
-        snippet: firstLinePreview(content),
-        hasContent: Boolean(content.trim()),
-        loading: false,
-      })
-      return next
-    })
-  }, [])
-
-  const handleEntryLoadComplete = useCallback((loadedDate: string, loaded: LoadedDiaryEntry | null) => {
-    if (loadedDate !== selectedDateRef.current) return
-    updateRecentPreview(loadedDate, loaded?.entry.content ?? '')
-  }, [updateRecentPreview])
-
   const handlePendingNavigate = useCallback(() => {
     if (pendingDate) doNavigateToDate(pendingDate)
   }, [pendingDate, doNavigateToDate])
@@ -409,61 +362,6 @@ export default function App() {
   }, [selectDate, toggleTheme, toggleFont])
 
   const datesSet = new Set(diary.dates)
-  const recentDates = diary.dates.slice(0, 5)
-  const todayDate = todayYmd()
-
-  useEffect(() => {
-    let cancelled = false
-    let timerId: number | null = null
-
-    if (!isSignedIn || recentDates.length === 0) {
-      setRecentPreviews(new Map())
-      return
-    }
-
-    const previewDates = recentDates.filter(date => date !== selectedDateRef.current)
-    if (previewDates.length === 0) return
-
-    setRecentPreviews(prev => {
-      const next = new Map(prev)
-      for (const date of previewDates) {
-        if (!next.has(date)) {
-          next.set(date, { snippet: '', hasContent: false, loading: true })
-        }
-      }
-      return next
-    })
-
-    timerId = window.setTimeout(() => {
-      Promise.all(
-        previewDates.map(async date => {
-          const loaded = await diary.getContent(date)
-          return [
-            date,
-            {
-              snippet: firstLinePreview(loaded?.entry.content ?? ''),
-              hasContent: Boolean(loaded?.entry.content.trim()),
-              loading: false,
-            },
-          ] as const
-        }),
-      ).then(previews => {
-        if (cancelled) return
-        setRecentPreviews(prev => {
-          const next = new Map(prev)
-          for (const [date, preview] of previews) next.set(date, preview)
-          return next
-        })
-      }).catch(() => {
-        if (!cancelled) setRecentPreviews(new Map())
-      })
-    }, RECENT_PREVIEW_DELAY_MS)
-
-    return () => {
-      cancelled = true
-      if (timerId !== null) window.clearTimeout(timerId)
-    }
-  }, [isSignedIn, diary.getContent, recentDates.join('|')])
 
   const handleReauth = useCallback(() => {
     retryAfterExpired()
@@ -478,7 +376,6 @@ export default function App() {
       .then(result => {
         if (!cancelled && result) {
           setReauthSaveResult(result)
-          updateRecentPreview(result.entry.date, result.entry.content)
         }
       })
       .catch(e => {
@@ -492,7 +389,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [isSignedIn, retrySaveAfterReauth, diary.retryPendingSave, updateRecentPreview])
+  }, [isSignedIn, retrySaveAfterReauth, diary.retryPendingSave])
 
   useEffect(() => {
     if (!isSignedIn || tokenExpired || !initialLoadComplete) return
@@ -579,47 +476,6 @@ export default function App() {
             <span className="btn-text">{t.recollection.open}</span>
           </button>
         )}
-        {(diary.loading || recentDates.length > 0) && <h2 className="entry-list-heading">{t.app.recent}</h2>}
-        {diary.loading && <p className="sr-only" role="status">{t.app.loadingEntries}</p>}
-        <ul className="entry-list">
-          {diary.loading && recentDates.length === 0 && <SkeletonEntryRows />}
-          <AnimatePresence initial={false}>
-          {recentDates.map(d => {
-            const preview = recentPreviews.get(d)
-            const isToday = d === todayDate
-            const weekday = weekdayLabel(d, locale)
-            return (
-            <motion.li
-              key={d}
-              layout
-              className={[d === selectedDate ? 'active' : '', isToday ? 'today' : ''].filter(Boolean).join(' ')}
-              onClick={() => selectDate(d)}
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-            >
-              <span
-                className="entry-list-date"
-                data-today={isToday || undefined}
-                aria-label={isToday ? `${diaryDateLabel(d, false, 'long', locale)}${weekday ? ` ${weekday}` : ''}, ${t.common.today}` : undefined}
-              >
-                <span>{diaryDateLabel(d, false, 'long', locale)}</span>
-                {weekday && <span className="entry-list-weekday">{weekday}</span>}
-              </span>
-              <span className="entry-list-preview">
-                {preview?.loading ? (
-                  <span className="entry-list-preview-skeleton" />
-                ) : preview?.hasContent ? (
-                  preview.snippet
-                ) : (
-                  t.app.noTextYet
-                )}
-              </span>
-            </motion.li>
-          )})}
-          </AnimatePresence>
-        </ul>
         <div className="sidebar-bottom">
           {email && <div className="user-email" title={email}>{email}</div>}
           <button className="btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
@@ -681,8 +537,6 @@ export default function App() {
           reauthSaveResult={reauthSaveResult}
           isSignedIn={!tokenExpired}
           onExpired={handleExpired}
-          onLoadComplete={handleEntryLoadComplete}
-          onSaveComplete={updateRecentPreview}
           refreshSignal={entryRefreshSignal}
         />
       </main>
