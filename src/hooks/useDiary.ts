@@ -83,7 +83,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     })
   }, [])
 
-  const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean) => {
+  const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean): Promise<Map<string, EntryCache>> => {
     const files = await listEntries()
 
     // Compute new state and IDB diff using the current cache snapshot
@@ -130,6 +130,8 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         ...toDelete.map(d => deleteCached(d).catch(() => {})),
       ]).catch(() => {})
     }
+
+    return next
   }, [updateCache])
 
   const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
@@ -211,13 +213,13 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
           setLoading(false)
         }
         // Always sync with Drive to pick up remote changes and evict stale content
-        await loadEntryList(true, canUsePersistentCache)
+        const freshCache = await loadEntryList(true, canUsePersistentCache)
 
         // Prefetch the 3 most recent entries that aren't already in memory
-        const recentDates = Array.from(cacheRef.current.keys())
+        const recentDates = Array.from(freshCache.keys())
           .sort((a, b) => b.localeCompare(a))
           .slice(0, 3)
-          .filter(d => !cacheRef.current.get(d)?.content)
+          .filter(d => !freshCache.get(d)?.content)
         for (const d of recentDates) {
           getContent(d).catch(() => {})
         }

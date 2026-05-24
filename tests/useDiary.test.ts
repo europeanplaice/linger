@@ -559,6 +559,65 @@ test.describe('useDiary IDB cache — 0-RTT startup', () => {
   })
 })
 
+test.describe('useDiary prefetch on initial load', () => {
+  test('prefetches the 3 most recent entries in the background after sign-in', async ({ page }) => {
+    const dates = ['2026-05-03', '2026-05-02', '2026-05-01']
+    await loadHarness(page)
+
+    // Queue list + all 3 entry responses so the prefetch can consume them
+    await page.evaluate(({ files, entries }) => {
+      window.diaryHarness.q(
+        { status: 200, body: { files } },
+        ...entries.map(entry => ({ status: 200, body: entry })),
+      )
+      window.diaryHarness.start()
+    }, {
+      files: dates.map(d => datedFileMeta(d)),
+      entries: dates.map(d => datedEntryResponse(d, `content ${d}`)),
+    })
+
+    await page.waitForSelector('#harness-ready')
+    // 1 list call + 3 prefetch content calls
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(4)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Content is now in cache — getContent must not make another network call
+    const result = await page.evaluate(() => window.diaryHarness.triggerGetContent('2026-05-03'))
+    expect(result?.entry.content).toBe('content 2026-05-03')
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
+  })
+
+  test('prefetches at most 3 entries even when more exist', async ({ page }) => {
+    const dates = ['2026-05-05', '2026-05-04', '2026-05-03', '2026-05-02', '2026-05-01']
+    await loadHarness(page)
+
+    // Queue list + responses for only the 3 most recent entries
+    // If a 4th or 5th were attempted, the queue would be exhausted and recorded in calls()
+    await page.evaluate(({ files, entries }) => {
+      window.diaryHarness.q(
+        { status: 200, body: { files } },
+        ...entries.map(entry => ({ status: 200, body: entry })),
+      )
+      window.diaryHarness.start()
+    }, {
+      files: dates.map(d => datedFileMeta(d)),
+      entries: ['2026-05-05', '2026-05-04', '2026-05-03'].map(d => datedEntryResponse(d, `content ${d}`)),
+    })
+
+    await page.waitForSelector('#harness-ready')
+    // 1 list + exactly 3 prefetch calls — 4th and 5th entries must not be attempted
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(4)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    const prefetchUrls = calls.slice(1).map((c: { url: string }) => c.url)
+    expect(prefetchUrls.some((u: string) => u.includes('2026-05-05'))).toBe(true)
+    expect(prefetchUrls.some((u: string) => u.includes('2026-05-04'))).toBe(true)
+    expect(prefetchUrls.some((u: string) => u.includes('2026-05-03'))).toBe(true)
+    expect(prefetchUrls.some((u: string) => u.includes('2026-05-02'))).toBe(false)
+    expect(prefetchUrls.some((u: string) => u.includes('2026-05-01'))).toBe(false)
+  })
+})
+
 test.describe('useDiary save — entry not found at save time', () => {
   test('save with no cache creates entry via POST with no fileId', async ({ page }) => {
     await loadHarness(page)
