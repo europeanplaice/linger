@@ -653,7 +653,7 @@ body {
 .mypicker-months {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 2px 3px;
+  gap: 6px 3px;
 }
 .mypicker-month-btn {
   background: none;
