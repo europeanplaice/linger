@@ -11,7 +11,6 @@ A minimalist personal diary app. Entries are stored as Markdown files in your ow
 - Calendar view to navigate by date, with dots marking days that have entries
 - Previous/next day controls, plus Alt+Left / Alt+Right and Alt+Up for today
 - Full-text search via Drive API, with on-demand snippet extraction from matched entries
-- Recent-entry list with first-line previews
 - Delete entries with an explicit confirmation step
 - Detect cross-device edit conflicts and choose whether to load latest, keep local edits, or overwrite
 - View and restore past revisions of an entry
