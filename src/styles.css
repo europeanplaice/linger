@@ -50,7 +50,6 @@
   --expired-bg: #fdf0ee;
   --expired-border: #f5c6c0;
   --danger-hover: #a93226;
-  --save-success-bg: #437a55;
   --save-success-flash: #5fad77;
   --save-progress: #c58f22;
   --save-glow: rgba(74,106,74,0.25);
@@ -116,7 +115,6 @@
   --expired-bg: #3a2020;
   --expired-border: #be5046;
   --danger-hover: #be5046;
-  --save-success-bg: #2d4a2a;
   --save-success-flash: #98c379;
   --save-progress: #d19a66;
   --save-glow: rgba(152,195,121,0.5);
@@ -1503,13 +1501,14 @@ body {
   to { transform: translateX(10px); }
 }
 .editor-actions .btn-save.btn-saved {
-  opacity: 1;
-  background: var(--save-success-bg);
-  animation: saved-button-flash 0.35s ease-out;
+  opacity: 0.55;
+  background: var(--accent);
+  cursor: default;
+  animation: saved-button-flash 0.5s ease-out;
 }
 @keyframes saved-button-flash {
-  0%   { background: var(--save-success-flash); }
-  100% { background: var(--save-success-bg); }
+  0%   { background: var(--save-success-flash); opacity: 1; }
+  100% { background: var(--accent); opacity: 0.55; }
 }
 .btn-delete { background: var(--danger) !important; color: var(--on-danger) !important; }
 .btn-delete:not(:disabled):hover { background: var(--danger-hover) !important; }
