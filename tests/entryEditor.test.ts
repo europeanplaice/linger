@@ -252,8 +252,8 @@ test.describe('EntryEditor — date header', () => {
 
 test.describe('EntryEditor — auto-save', () => {
   test('auto-save fires after a short idle period and briefly shows saved state', async ({ page }) => {
-    await loadHarness(page)
     await page.clock.install({ time: 0 })
+    await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: '' })
 
     await page.fill('textarea.editor-textarea', 'auto-save content')
@@ -274,8 +274,8 @@ test.describe('EntryEditor — auto-save', () => {
   })
 
   test('auto-save does not fire while hasConflict is true', async ({ page }) => {
-    await loadHarness(page)
     await page.clock.install()
+    await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', saveReject: 'conflict' })
 
     await page.fill('textarea.editor-textarea', 'edited text')
@@ -612,6 +612,7 @@ test.describe('EntryEditor — Share Entry', () => {
 
 test.describe('EntryEditor — save progress', () => {
   test('shows inline saving state without overlay on explicit save button click', async ({ page }) => {
+    await page.clock.install({ time: 0 })
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
@@ -626,16 +627,18 @@ test.describe('EntryEditor — save progress', () => {
     await page.fill('textarea.editor-textarea', 'new content')
     await page.locator('button.btn-save').click()
 
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true', { timeout: 2000 })
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
     await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
+    await page.clock.fastForward(500)
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
   test('shows inline saving state without overlay on Ctrl+S save', async ({ page }) => {
+    await page.clock.install({ time: 0 })
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
@@ -653,17 +656,18 @@ test.describe('EntryEditor — save progress', () => {
     await page.keyboard.press('Control+S')
 
     // Wait for the save button to enter saving state (aria-busy="true")
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true', { timeout: 2000 })
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved', { timeout: 5000 })
+    await page.clock.fastForward(3000)
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
   test('does not show saving overlay on auto-save', async ({ page }) => {
-    await loadHarness(page)
     await page.clock.install({ time: 0 })
+    await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
         date: '2026-05-01',
