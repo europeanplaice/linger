@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ExportButton } from './ExportButton'
+import { SettingsSelect } from './SettingsSelect'
 import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -74,15 +75,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <div className="settings-list">
           <div className="settings-item">
             <span className="settings-item-label">{t.common.language}</span>
-            <select
-              className="settings-language-select"
+            <SettingsSelect
               aria-label={t.common.language}
               value={language}
-              onChange={event => setLanguage(event.target.value === 'en' ? 'en' : 'ja')}
-            >
-              <option value="ja">{t.common.japanese}</option>
-              <option value="en">{t.common.english}</option>
-            </select>
+              onChange={val => setLanguage(val === 'en' ? 'en' : 'ja')}
+              options={[
+                { value: 'ja', label: t.common.japanese },
+                { value: 'en', label: t.common.english },
+              ]}
+            />
           </div>
           <div className="settings-divider" />
           <div className="settings-item">
@@ -159,17 +160,17 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <div className="settings-divider" />
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.fontSize}</span>
-            <select
-              className="settings-language-select"
+            <SettingsSelect
               aria-label={t.settings.fontSize}
               value={fontSize}
-              onChange={e => onFontSizeChange(e.target.value as FontSize)}
-            >
-              <option value="sm">{t.settings.fontSizeSm}</option>
-              <option value="md">{t.settings.fontSizeMd}</option>
-              <option value="lg">{t.settings.fontSizeLg}</option>
-              <option value="xl">{t.settings.fontSizeXl}</option>
-            </select>
+              onChange={val => onFontSizeChange(val as FontSize)}
+              options={[
+                { value: 'sm', label: t.settings.fontSizeSm },
+                { value: 'md', label: t.settings.fontSizeMd },
+                { value: 'lg', label: t.settings.fontSizeLg },
+                { value: 'xl', label: t.settings.fontSizeXl },
+              ]}
+            />
           </div>
           <div className="settings-divider" />
           <div className="settings-item">

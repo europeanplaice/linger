@@ -961,14 +961,71 @@ body {
   font-family: ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
-.settings-language-select {
+.settings-select {
+  position: relative;
+}
+.settings-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
   color: var(--text);
+  cursor: pointer;
   font-family: inherit;
   font-size: 0.82rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.35rem 0.65rem;
+  transition: border-color 0.15s;
+  white-space: nowrap;
+}
+.settings-select-trigger:hover {
+  border-color: var(--text-muted);
+}
+.settings-select-trigger:focus,
+.settings-select-trigger.open {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings-select-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.settings-select-trigger.open .settings-select-chevron {
+  transform: rotate(180deg);
+}
+.settings-select-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 100%;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  z-index: 100;
+}
+.settings-select-option {
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.82rem;
+  outline: none;
+  padding: 0.4rem 0.7rem;
+  transition: background 0.1s;
+}
+.settings-select-option:hover,
+.settings-select-option:focus {
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.settings-select-option.selected {
+  color: var(--accent);
+  font-weight: 500;
 }
 .settings-divider {
   height: 1px;
