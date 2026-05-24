@@ -83,7 +83,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     })
   }, [])
 
-  const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean) => {
+  const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean): Promise<Map<string, EntryCache>> => {
     const files = await listEntries()
 
     // Compute new state and IDB diff using the current cache snapshot
@@ -130,65 +130,9 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         ...toDelete.map(d => deleteCached(d).catch(() => {})),
       ]).catch(() => {})
     }
+
+    return next
   }, [updateCache])
-
-  // Load entry list when signed in
-  useEffect(() => {
-    if (!isSignedIn) {
-      const empty = new Map<string, EntryCache>()
-      cacheRef.current = empty
-      setCache(empty)
-      clearCache().catch(() => {})
-      return
-    }
-    setLoading(true)
-    setError(null)
-    ;(async () => {
-      try {
-        // If the signed-in account differs from the last known account, evict IDB
-        // before hydrating to prevent one user's diary from briefly appearing to another.
-        const canUsePersistentCache = email !== null
-        const storedUser = localStorage.getItem('linger_session_user')
-        if (!canUsePersistentCache) {
-          await clearCache().catch(() => {})
-          localStorage.removeItem('linger_session_user')
-        } else if (storedUser !== email) {
-          await clearCache().catch(() => {})
-          localStorage.setItem('linger_session_user', email)
-        }
-
-        // Preload from IDB immediately so the sidebar and previously-opened entries
-        // appear without waiting for the Drive network round trip.
-        const idbEntries = canUsePersistentCache ? await getAllCached().catch(() => [] as CachedEntry[]) : []
-        if (idbEntries.length > 0) {
-          updateCache(() => {
-            const m = new Map<string, EntryCache>()
-            for (const e of idbEntries) m.set(e.date, { meta: e.meta, content: e.content, snippet: e.snippet })
-            return m
-          })
-          setLoading(false)
-        }
-        // Always sync with Drive to pick up remote changes and evict stale content
-        await loadEntryList(true, canUsePersistentCache)
-      } catch (e) {
-        if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
-        console.error('Failed to load diary entries:', e)
-        setError(String(e))
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [isSignedIn, email, loadEntryList, updateCache])
-
-  const refreshEntries = useCallback(async (): Promise<void> => {
-    if (!isSignedIn) return
-    try {
-      await loadEntryList(true, email !== null)
-    } catch (e) {
-      if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
-      throw e
-    }
-  }, [isSignedIn, email, loadEntryList])
 
   const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
     if (!isSignedIn) return null
@@ -231,6 +175,73 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       throw e
     }
   }, [isSignedIn, email, updateCache])
+
+  // Load entry list when signed in
+  useEffect(() => {
+    if (!isSignedIn) {
+      const empty = new Map<string, EntryCache>()
+      cacheRef.current = empty
+      setCache(empty)
+      clearCache().catch(() => {})
+      return
+    }
+    setLoading(true)
+    setError(null)
+    ;(async () => {
+      try {
+        // If the signed-in account differs from the last known account, evict IDB
+        // before hydrating to prevent one user's diary from briefly appearing to another.
+        const canUsePersistentCache = email !== null
+        const storedUser = localStorage.getItem('linger_session_user')
+        if (!canUsePersistentCache) {
+          await clearCache().catch(() => {})
+          localStorage.removeItem('linger_session_user')
+        } else if (storedUser !== email) {
+          await clearCache().catch(() => {})
+          localStorage.setItem('linger_session_user', email)
+        }
+
+        // Preload from IDB immediately so the sidebar and previously-opened entries
+        // appear without waiting for the Drive network round trip.
+        const idbEntries = canUsePersistentCache ? await getAllCached().catch(() => [] as CachedEntry[]) : []
+        if (idbEntries.length > 0) {
+          updateCache(() => {
+            const m = new Map<string, EntryCache>()
+            for (const e of idbEntries) m.set(e.date, { meta: e.meta, content: e.content, snippet: e.snippet })
+            return m
+          })
+          setLoading(false)
+        }
+        // Always sync with Drive to pick up remote changes and evict stale content
+        const freshCache = await loadEntryList(true, canUsePersistentCache)
+
+        // Prefetch the 3 most recent entries that aren't already in memory
+        const recentDates = Array.from(freshCache.keys())
+          .sort((a, b) => b.localeCompare(a))
+          .slice(0, 3)
+          .filter(d => !freshCache.get(d)?.content)
+        for (const d of recentDates) {
+          getContent(d).catch(() => {})
+        }
+      } catch (e) {
+        if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
+        console.error('Failed to load diary entries:', e)
+        setError(String(e))
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [isSignedIn, email, loadEntryList, updateCache, getContent])
+
+  const refreshEntries = useCallback(async (): Promise<void> => {
+    if (!isSignedIn) return
+    try {
+      await loadEntryList(true, email !== null)
+    } catch (e) {
+      if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
+      throw e
+    }
+  }, [isSignedIn, email, loadEntryList])
 
   const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null): Promise<LoadedDiaryEntry> => {
     if (!isSignedIn) throw new Error('Not signed in')
