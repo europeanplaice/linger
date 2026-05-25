@@ -13,8 +13,8 @@
   --danger: #c0392b;
   --sidebar-w: 280px;
   --mobile-save-action-space: 0px;
-  --font-body: 'Source Serif 4', 'Noto Serif JP', serif;
-  --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
+  --font-body: 'Inter', 'Noto Sans JP', sans-serif;
+  --font-editor: 'Inter', 'Noto Sans JP', sans-serif;
   /* Additional themeable tokens */
   --card-bg: #fff;
   --input-bg: #fff;
@@ -130,9 +130,9 @@
   --selection-color: #1c1f24;
 }
 
-[data-font="sans"] {
-  --font-body: 'Inter', 'Noto Sans JP', sans-serif;
-  --font-editor: 'Inter', 'Noto Sans JP', sans-serif;
+[data-font="serif"] {
+  --font-body: 'Source Serif 4', 'Noto Serif JP', serif;
+  --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

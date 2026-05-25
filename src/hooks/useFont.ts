@@ -12,8 +12,8 @@ declare global {
 
 function readStoredFont(): FontMode {
   const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored === 'sans') return 'sans'
-  return 'serif'
+  if (stored === 'serif') return 'serif'
+  return 'sans'
 }
 
 function applyFont(mode: FontMode) {
