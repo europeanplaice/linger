@@ -15,7 +15,7 @@ import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal } from './components/SettingsModal'
 import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
-import { todayYmd, ymd, parseYmd, weekdayLabel, diaryDateLabel } from './utils/date'
+import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
 import { TokenExpiredError } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
@@ -116,13 +116,6 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
   )
 }
 
-function shiftDate(date: string, days: number): string {
-  const parts = parseYmd(date)
-  const d = parts ? new Date(parts.y, parts.m - 1, parts.d) : new Date()
-  d.setDate(d.getDate() + days)
-  return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
-}
-
 export default function App() {
   const { t } = useI18n()
   const {
@@ -179,7 +172,7 @@ export default function App() {
     if (selectedDateRef.current && dates.includes(selectedDateRef.current)) {
       setEntryRefreshSignal(v => v + 1)
     }
-  }, []))
+  }, []), selectedDate)
 
   useEffect(() => {
     if (!isSignedIn) {

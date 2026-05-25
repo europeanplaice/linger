@@ -59,6 +59,7 @@ interface Window {
     evictedCalls: () => string[][]
     clearEvictedCalls: () => void
     setEmail: (e: string | null) => void
+    setSelectedDate: (date: string | undefined) => void
     seedLocalStorageUser: (u: string | null) => void
     seedIdb: (entries: { date: string; meta: unknown; content?: unknown; snippet?: string }[]) => Promise<void>
   }

@@ -3,6 +3,7 @@ import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache } from '../lib/diaryCache'
 import type { CachedEntry } from '../lib/diaryCache'
+import { shiftDate } from '../utils/date'
 
 interface EntryCache {
   meta: DriveFileMeta
@@ -62,7 +63,7 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-export function useDiary(isSignedIn: boolean, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void): DiaryState {
+export function useDiary(isSignedIn: boolean, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string): DiaryState {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
@@ -379,6 +380,20 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
 
     return results
   }, [isSignedIn, cache, getContent])
+
+  const getContentRef = useRef(getContent)
+  useEffect(() => { getContentRef.current = getContent }, [getContent])
+
+  useEffect(() => {
+    if (!selectedDate) return
+    const datesSet = new Set(cache.keys())
+    const candidates = [shiftDate(selectedDate, -1), shiftDate(selectedDate, 1)].filter(d => datesSet.has(d))
+    if (candidates.length === 0) return
+    const id = setTimeout(() => {
+      candidates.forEach(d => getContentRef.current(d).catch(() => {}))
+    }, 300)
+    return () => clearTimeout(id)
+  }, [selectedDate, cache])
 
   const dates = Array.from(cache.keys()).sort((a, b) => b.localeCompare(a))
 

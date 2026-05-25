@@ -15,6 +15,13 @@ export function ymd(year: number, month1to12: number, day: number): string {
   return `${year}-${String(month1to12).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+export function shiftDate(date: string, days: number): string {
+  const parts = parseYmd(date)
+  const d = parts ? new Date(parts.y, parts.m - 1, parts.d) : new Date()
+  d.setDate(d.getDate() + days)
+  return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+}
+
 export function parseYmd(s: string): { y: number; m: number; d: number } | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
   if (!match) return null

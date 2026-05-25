@@ -618,6 +618,98 @@ test.describe('useDiary prefetch on initial load', () => {
   })
 })
 
+test.describe('useDiary adjacent-day prefetch', () => {
+  test('prefetches prev and next entries after navigating to a date', async ({ page }) => {
+    const dates = ['2026-05-03', '2026-05-02', '2026-05-01']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Queue responses for both adjacent entries
+    await page.evaluate(({ entries }) => {
+      window.diaryHarness.q(...entries.map(entry => ({ status: 200, body: entry })))
+    }, { entries: ['2026-05-01', '2026-05-03'].map(d => datedEntryResponse(d, `content ${d}`)) })
+
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-02'))
+
+    // Both adjacent entries must be fetched within 1s (300ms debounce + buffer)
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(2)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-01'))).toBe(true)
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-03'))).toBe(true)
+  })
+
+  test('skips dates that have no diary entry', async ({ page }) => {
+    await loadHarness(page)
+    // Only 2026-05-01 exists; adjacent dates (04-30 and 05-02) do not
+    await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-01'))
+
+    // No adjacent entries exist so no fetch should occur
+    await new Promise(r => setTimeout(r, 500))
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
+  })
+
+  test('debounces rapid navigation — only fetches for the final date', async ({ page }) => {
+    const dates = ['2026-05-05', '2026-05-04', '2026-05-03', '2026-05-02', '2026-05-01']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Queue responses only for the neighbours of the final date (2026-05-03)
+    await page.evaluate(({ entries }) => {
+      window.diaryHarness.q(...entries.map(entry => ({ status: 200, body: entry })))
+    }, { entries: ['2026-05-02', '2026-05-04'].map(d => datedEntryResponse(d, `content ${d}`)) })
+
+    // Rapid navigation: cycle through dates faster than the 300ms debounce
+    await page.evaluate(async () => {
+      window.diaryHarness.setSelectedDate('2026-05-01')
+      await new Promise(r => setTimeout(r, 50))
+      window.diaryHarness.setSelectedDate('2026-05-02')
+      await new Promise(r => setTimeout(r, 50))
+      window.diaryHarness.setSelectedDate('2026-05-03')
+    })
+
+    // Only the neighbours of the final settled date should be fetched
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(2)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-02'))).toBe(true)
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-04'))).toBe(true)
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-01'))).toBe(false)
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-05'))).toBe(false)
+  })
+
+  test('skips already-cached entries and avoids redundant network calls', async ({ page }) => {
+    const dates = ['2026-05-03', '2026-05-02', '2026-05-01']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+
+    // Pre-load 2026-05-01 into the content cache
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', 'cached') })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Queue a response only for the one uncached neighbour (2026-05-03)
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+    }, { entry: datedEntryResponse('2026-05-03', 'content 2026-05-03') })
+
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-02'))
+
+    // Only the uncached neighbour should be fetched
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(1)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls[0].url).toContain('2026-05-03')
+  })
+})
+
 test.describe('useDiary save — entry not found at save time', () => {
   test('save with no cache creates entry via POST with no fileId', async ({ page }) => {
     await loadHarness(page)

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useDiary, EntryConflictError } from '../src/hooks/useDiary'
 import type { LoadedDiaryEntry } from '../src/types'
@@ -10,6 +10,7 @@ const fetchCalls: FetchCall[] = []
 const queue: QueuedResponse[] = []
 const evictedCalls: string[][] = []
 let currentEmail: string | null = 'user@example.com'
+let _setSelectedDate: ((date: string | undefined) => void) | null = null
 
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   fetchCalls.push({ url: String(input), method: String(init?.method ?? 'GET'), body: typeof init?.body === 'string' ? init.body : undefined })
@@ -41,9 +42,13 @@ let expiredCount = 0
 let progressCalls: { done: number; total: number }[] = []
 
 function Harness() {
+  const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined)
+
+  useEffect(() => { _setSelectedDate = setSelectedDate }, [])
+
   const diary = useDiary(true, currentEmail, () => { expiredCount++ }, (dates) => {
     evictedCalls.push([...dates])
-  })
+  }, selectedDate)
 
   useEffect(() => {
     _save = diary.save
@@ -123,6 +128,7 @@ window.diaryHarness = {
   evictedCalls: () => evictedCalls.map(d => [...d]),
   clearEvictedCalls: () => { evictedCalls.splice(0) },
   setEmail: (e: string | null) => { currentEmail = e },
+  setSelectedDate: (date: string | undefined) => { _setSelectedDate?.(date) },
   seedLocalStorageUser: (u: string | null) => {
     if (u === null) localStorage.removeItem('linger_session_user')
     else localStorage.setItem('linger_session_user', u)
