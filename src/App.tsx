@@ -71,7 +71,7 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
     <div className="app restoring-app">
       <aside className="sidebar restoring-sidebar open">
         <div className="sidebar-top">
-          <h1 className="app-title" onClick={onTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
+          <h1 className="app-title"><button className="app-title-btn" onClick={onTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</button></h1>
         </div>
         <div className="restoring-search" />
         <CalendarView dates={new Set()} selectedDate={selectedDate} onSelect={() => {}} />
@@ -117,7 +117,7 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const {
     status,
     tokenExpired,
@@ -440,6 +440,9 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
+    <a href="#main-content" className="skip-link">
+      {language === 'ja' ? 'コンテンツへスキップ' : 'Skip to main content'}
+    </a>
     <div className={`app${updateAvailable && !editorDirty ? ' app--has-update-banner' : ''}`}>
       {updateAvailable && !editorDirty && (
         <div className="update-banner" role="status">
@@ -455,10 +458,14 @@ export default function App() {
       <div
         className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
         onClick={closeSidebar}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeSidebar() } }}
+        role="button"
+        tabIndex={sidebarOpen ? 0 : -1}
+        aria-label={t.app.closeMenu}
       />
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
-          <h1 className="app-title" onClick={handleTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
+          <h1 className="app-title"><button className="app-title-btn" onClick={handleTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</button></h1>
           <div className="sidebar-actions">
             <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
             <button className="btn-signout" onClick={handleSignOut} title={t.app.signOut}><LogOut size={14} /></button>
@@ -516,7 +523,7 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <EntryEditor
           date={selectedDate}
           getContent={diary.getContent}

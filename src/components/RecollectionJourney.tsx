@@ -38,7 +38,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 export function RecollectionJourney({ dates, getContent, serendipityPrefetch, onSelect, onClose }: RecollectionJourneyProps) {
   const { t, locale } = useI18n()
-  const overlayRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
   const today = todayYmd()
 
   const onThisDay = useMemo(() => sameMonthDayInPastYears(dates, today), [dates, today])
@@ -125,16 +125,19 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     return () => { cancelled = true }
   }, [onThisDay, periodic, randomDate, nextDate, getContent])
 
-  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) onClose()
+  useEffect(() => {
+    const dialog = dialogRef.current!
+    dialog.showModal()
+    return () => { if (dialog.open) dialog.close() }
+  }, [])
+
+  const handleCancel = useCallback((e: React.SyntheticEvent) => {
+    e.preventDefault()
+    onClose()
   }, [onClose])
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+  const handleBackdropClick = useCallback((e: React.MouseEvent<HTMLDialogElement>) => {
+    if (e.target === dialogRef.current) onClose()
   }, [onClose])
 
   const renderCard = (date: string, eyebrow: string) => {
@@ -163,24 +166,19 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   const hasAnything = onThisDay.length > 0 || periodic.length > 0 || randomDate !== null
 
   return (
-    <motion.div
-      className="recollection-overlay"
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.22 }}
+    <motion.dialog
+      ref={dialogRef}
+      className="recollection-dialog"
+      aria-labelledby="recollection-title"
+      onCancel={handleCancel}
+      onClick={handleBackdropClick}
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      transition={{ type: 'spring', stiffness: 360, damping: 34 }}
     >
-      <motion.div
-        className="recollection-view"
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 10 }}
-        transition={{ type: 'spring', stiffness: 360, damping: 34 }}
-      >
         <div className="recollection-header">
-          <h2 className="recollection-title">{t.recollection.title}</h2>
+          <h2 className="recollection-title" id="recollection-title">{t.recollection.title}</h2>
           <button className="recollection-close" onClick={onClose} aria-label={t.recollection.close}>×</button>
         </div>
 
@@ -241,7 +239,6 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             )}
           </div>
         )}
-      </motion.div>
-    </motion.div>
+    </motion.dialog>
   )
 }

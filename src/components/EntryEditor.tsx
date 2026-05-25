@@ -90,6 +90,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [lastModified, setLastModified] = useState<string | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
   const [hasConflict, setHasConflict] = useState(false)
   const [conflictRemote, setConflictRemote] = useState<LoadedDiaryEntry | null>(null)
@@ -492,42 +493,46 @@ useEffect(() => {
     </AnimatePresence>
     <AnimatePresence>
       {showDeleteModal && (
-        <motion.div className="delete-modal-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          onClick={() => setShowDeleteModal(false)}
+        <motion.dialog
+          ref={(node) => {
+            if (node) {
+              deleteDialogRef.current = node
+              if (!node.open) node.showModal()
+            } else {
+              if (deleteDialogRef.current?.open) deleteDialogRef.current.close()
+              deleteDialogRef.current = null
+            }
+          }}
+          className="delete-dialog"
+          aria-labelledby="delete-dialog-title"
+          onCancel={(e) => { e.preventDefault(); setShowDeleteModal(false) }}
+          onClick={(e) => { if (e.target === deleteDialogRef.current) setShowDeleteModal(false) }}
+          initial={{ opacity: 0, y: 14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
         >
-          <motion.div className="delete-modal"
-            initial={{ opacity: 0, y: 14, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.97 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>{t.entry.deleteTitle}</h3>
-            <p>{t.entry.deleteDescription(diaryDateLabel(date, true, 'long', locale))}</p>
-            <p className="delete-modal-hint">{t.entry.deleteHint}</p>
-            <input
-              className="delete-modal-input"
-              value={deleteInput}
-              onChange={e => setDeleteInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && deleteInput === t.entry.confirmKeyword) confirmDelete() }}
-              autoFocus
-              placeholder={t.entry.confirmKeyword}
-            />
-            <div className="delete-modal-actions">
-              <button onClick={() => setShowDeleteModal(false)} disabled={deleting}>{t.common.cancel}</button>
-              <button
-                className={`btn-delete${deleting ? ' btn-saving' : ''}`}
-                onClick={confirmDelete}
-                disabled={deleteInput !== t.entry.confirmKeyword || deleting}
-                aria-busy={deleting}
-              >{deleting ? <><SpinnerIcon />{t.common.deletingEllipsis}</> : t.common.delete}</button>
-            </div>
-          </motion.div>
-        </motion.div>
+          <h3 id="delete-dialog-title">{t.entry.deleteTitle}</h3>
+          <p>{t.entry.deleteDescription(diaryDateLabel(date, true, 'long', locale))}</p>
+          <p className="delete-modal-hint">{t.entry.deleteHint}</p>
+          <input
+            className="delete-modal-input"
+            value={deleteInput}
+            onChange={e => setDeleteInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && deleteInput === t.entry.confirmKeyword) confirmDelete() }}
+            autoFocus
+            placeholder={t.entry.confirmKeyword}
+          />
+          <div className="delete-modal-actions">
+            <button onClick={() => setShowDeleteModal(false)} disabled={deleting}>{t.common.cancel}</button>
+            <button
+              className={`btn-delete${deleting ? ' btn-saving' : ''}`}
+              onClick={confirmDelete}
+              disabled={deleteInput !== t.entry.confirmKeyword || deleting}
+              aria-busy={deleting}
+            >{deleting ? <><SpinnerIcon />{t.common.deletingEllipsis}</> : t.common.delete}</button>
+          </div>
+        </motion.dialog>
       )}
     </AnimatePresence>
     <div className="editor">

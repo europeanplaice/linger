@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #faf9f6;
   --sidebar-bg: #f0ede8;
   --border: #ddd8d0;
@@ -136,6 +137,21 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Reset browser <dialog> defaults so each dialog variant controls its own styles */
+dialog {
+  padding: 0;
+  border: none;
+  background: var(--card-bg);
+  color: var(--text);
+}
+dialog::backdrop {
+  background: transparent;
+  transition: background 0.18s ease;
+}
+@starting-style {
+  dialog::backdrop { background: transparent; }
+}
 
 /* Consistent keyboard focus ring across interactive controls.
    Mouse clicks don't trigger :focus-visible, so this only shows for keyboard
@@ -302,6 +318,23 @@ body {
   margin: 0 0.15rem;
 }
 
+/* ── Skip link ── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  z-index: 9999;
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0.5rem 1rem;
+  border-radius: 0 0 6px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.skip-link:focus { top: 0; }
+
 /* ── Accessibility utility ── */
 .sr-only {
   position: absolute;
@@ -354,16 +387,24 @@ body {
 .app-title {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
   font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+.app-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
   transition: opacity 0.15s ease;
 }
-.app-title:hover {
-  opacity: 0.75;
-}
+.app-title-btn:hover { opacity: 0.75; }
 .app-title-icon {
   width: 1.65rem;
   height: 1.65rem;
@@ -857,25 +898,19 @@ body {
 }
 
 /* ── Settings modal ── */
-.settings-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-heavy);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-.settings-modal {
-  background: var(--card-bg);
+dialog.settings-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   width: min(440px, 90vw);
+  max-height: min(90dvh, 90vh);
   box-shadow: 0 8px 32px var(--shadow-heavy);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: min(90dvh, 90vh);
+  margin: auto;
+}
+dialog.settings-dialog::backdrop {
+  background: var(--overlay-heavy);
 }
 .settings-modal-header {
   display: flex;
@@ -1267,18 +1302,8 @@ body {
   font-size: 0.78rem;
 }
 
-/* ── Export confirm modal ── */
-.export-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-heavy);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 210;
-}
-.export-confirm-modal {
-  background: var(--card-bg);
+/* ── Export confirm dialog ── */
+dialog.export-confirm-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1.5rem;
@@ -1287,6 +1312,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+  margin: auto;
+}
+dialog.export-confirm-dialog::backdrop {
+  background: var(--overlay-heavy);
 }
 .export-confirm-title {
   font-size: 1rem;
@@ -1851,18 +1880,8 @@ body {
 }
 .error-boundary-fallback button:hover { background: var(--border); }
 
-/* ── Delete confirmation modal ── */
-.delete-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-heavy);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-.delete-modal {
-  background: var(--card-bg);
+/* ── Delete confirmation dialog ── */
+dialog.delete-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 2rem;
@@ -1871,9 +1890,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  margin: auto;
 }
-.delete-modal h3 { font-size: 1.15rem; color: var(--danger); }
-.delete-modal p { font-size: 0.9rem; color: var(--text); line-height: 1.6; }
+dialog.delete-dialog::backdrop {
+  background: var(--overlay-heavy);
+}
+dialog.delete-dialog h3 { font-size: 1.15rem; color: var(--danger); }
+dialog.delete-dialog p { font-size: 0.9rem; color: var(--text); line-height: 1.6; }
 .delete-modal-hint { color: var(--text-muted) !important; }
 .delete-modal-input {
   border: 1px solid var(--border);
@@ -1919,17 +1942,7 @@ body {
   border-color: rgba(255, 255, 255, 0.45);
   border-top-color: #fff;
 }
-.session-expired-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-darkest);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 300;
-}
-.session-expired-modal {
-  background: var(--card-bg);
+dialog.session-expired-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 2rem;
@@ -1940,6 +1953,10 @@ body {
   gap: 1rem;
   align-items: center;
   text-align: center;
+  margin: auto;
+}
+dialog.session-expired-dialog::backdrop {
+  background: var(--overlay-darkest);
 }
 .session-expired-modal-msg {
   font-size: 0.95rem;
@@ -2067,18 +2084,8 @@ body {
   opacity: 0.7;
 }
 
-/* ── History modal ── */
-.history-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-heavy);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-.history-modal {
-  background: var(--card-bg);
+/* ── History dialog ── */
+dialog.history-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   width: min(760px, 95vw);
@@ -2087,6 +2094,10 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  margin: auto;
+}
+dialog.history-dialog::backdrop {
+  background: var(--overlay-heavy);
 }
 .history-modal-header {
   display: flex;
@@ -2460,7 +2471,7 @@ body {
     min-height: 2.75rem;
   }
 
-  .history-modal {
+  dialog.history-dialog {
     width: 100vw;
     height: 100dvh;
     border-radius: 0;
@@ -2511,25 +2522,20 @@ body {
   background: var(--card-bg);
 }
 
-.recollection-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-heavy);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  overflow-y: auto;
-  z-index: 220;
-  padding: 4vh 1rem;
-}
-.recollection-view {
-  background: var(--card-bg);
+dialog.recollection-dialog {
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: min(720px, 100%);
+  width: min(720px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 8vh);
   box-shadow: 0 12px 48px var(--shadow-heavy);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  margin-block-start: 4dvh;
+  margin-inline: auto;
+}
+dialog.recollection-dialog::backdrop {
+  background: var(--overlay-heavy);
 }
 .recollection-header {
   display: flex;

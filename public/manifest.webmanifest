@@ -13,7 +13,13 @@
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "linger_120x120.jpg",
+      "sizes": "120x120",
+      "type": "image/jpeg",
+      "purpose": "maskable"
     }
   ]
 }
