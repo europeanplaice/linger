@@ -30,7 +30,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 type SaveFn = (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
 type GetContentFn = (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
-type SearchFn = (query: string) => Promise<{ results: { date: string; snippet: string }[]; unindexedCount: number }>
+type SearchFn = (query: string) => Promise<{ results: { date: string; snippet: string }[]; unindexedCount: number; totalCount: number }>
 type ExportAllFn = (format: 'txt' | 'md', onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
 let _save: SaveFn | null = null
 let _getContent: GetContentFn | null = null

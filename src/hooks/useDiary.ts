@@ -27,6 +27,7 @@ export interface DiaryState {
 export interface SearchResult {
   results: { date: string; snippet: string }[]
   unindexedCount: number
+  totalCount: number
 }
 
 export class EntryConflictError extends Error {
@@ -310,7 +311,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   }, [isSignedIn, updateCache])
 
   const search = useCallback(async (query: string): Promise<SearchResult> => {
-    if (!isSignedIn || !query.trim()) return { results: [], unindexedCount: 0 }
+    if (!isSignedIn || !query.trim()) return { results: [], unindexedCount: 0, totalCount: 0 }
 
     const files = await searchEntries(query)
     const cached = cacheRef.current
@@ -319,13 +320,17 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md)$/, ''), fileId: f.id }))
       .filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date))
 
+    const totalCount = candidates.length
+    candidates.sort((a, b) => b.date.localeCompare(a.date))
+    const limited = candidates.slice(0, 30)
+
     let failedCount = 0
-    const mapped = await mapWithConcurrency(candidates, 5, async ({ date, fileId }) => {
+    const mapped = await mapWithConcurrency(limited, 5, async ({ date, fileId }) => {
       const cachedEntry = cached.get(date)
       if (cachedEntry?.content) {
         const text = cachedEntry.content.content
         const idx = text.toLowerCase().indexOf(normalizedQuery)
-        const snippet = text.slice(Math.max(0, idx - 30), idx + 60).replace(/\n/g, ' ')
+        const snippet = text.slice(Math.max(0, idx - 40), idx + 80).replace(/\n/g, ' ')
         return { date, snippet }
       }
 
@@ -334,7 +339,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         if (!loaded || loaded === 'not-modified') return null
         const text = loaded.entry.content
         const idx = text.toLowerCase().indexOf(normalizedQuery)
-        const snippet = text.slice(Math.max(0, idx - 30), idx + 60).replace(/\n/g, ' ')
+        const snippet = text.slice(Math.max(0, idx - 40), idx + 80).replace(/\n/g, ' ')
         updateCache(prev => {
           const next = new Map(prev)
           const ex = next.get(date)
@@ -350,7 +355,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
 
     const results = mapped.filter((r): r is { date: string; snippet: string } => r !== null)
     results.sort((a, b) => b.date.localeCompare(a.date))
-    return { results, unindexedCount: failedCount }
+    return { results, unindexedCount: failedCount, totalCount }
   }, [isSignedIn, updateCache])
 
   const retryPendingSave = useCallback(async (): Promise<LoadedDiaryEntry | null> => {

@@ -39,6 +39,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
   const [searched, setSearched] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [failedCount, setFailedCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
   const timerRef = useRef<number | undefined>(undefined)
   const abortRef = useRef<AbortController | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -59,6 +60,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
       setSearched(false)
       setIsSearching(false)
       setFailedCount(0)
+      setTotalCount(0)
       return
     }
 
@@ -75,17 +77,19 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
 
       setIsSearching(true)
       try {
-        const { results: r, unindexedCount } = await onSearch(query)
+        const { results: r, unindexedCount, totalCount: tc } = await onSearch(query)
         if (!controller.signal.aborted) {
           setResults(r)
           setSearched(true)
           setFailedCount(unindexedCount)
+          setTotalCount(tc)
         }
       } catch {
         if (!controller.signal.aborted) {
           setResults([])
           setSearched(true)
           setFailedCount(0)
+          setTotalCount(0)
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -143,19 +147,27 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
       )}
       <AnimatePresence>
         {results.length > 0 && (
-          <motion.ul className="search-results"
+          <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.14, ease: 'easeOut' }}
           >
-            {results.map(r => (
-              <li key={r.date} onClick={() => { onSelect(r.date); setQuery(''); setResults([]); setSearched(false); setFailedCount(0) }}>
-                <span className="search-date">{diaryDateLabel(r.date, true, 'long', locale)}</span>
-                <span className="search-snippet">…{highlightSnippet(r.snippet, query)}…</span>
-              </li>
-            ))}
-          </motion.ul>
+            <div className="search-result-header">
+              <span className="search-result-count">{t.search.resultCount(totalCount)}</span>
+              {totalCount > results.length && (
+                <span className="search-result-capped">{t.search.resultsCapped(results.length, totalCount)}</span>
+              )}
+            </div>
+            <ul className="search-results">
+              {results.map(r => (
+                <li key={r.date} onClick={() => { onSelect(r.date); setQuery(''); setResults([]); setSearched(false); setFailedCount(0); setTotalCount(0) }}>
+                  <span className="search-date">{diaryDateLabel(r.date, true, 'long', locale)}</span>
+                  <span className="search-snippet">…{highlightSnippet(r.snippet, query)}…</span>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
         )}
       </AnimatePresence>
       {searched && hasQuery && !entriesLoading && !isSearching && results.length === 0 && (

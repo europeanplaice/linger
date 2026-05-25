@@ -16,6 +16,7 @@ test.describe('SearchBar', () => {
       window.searchHarness.setSearchResult('alpha', {
         results: [{ date: '2026-04-01', snippet: 'alpha match' }],
         unindexedCount: 0,
+        totalCount: 1,
       })
     })
     await page.getByPlaceholder('Search entries...').fill('alpha')
@@ -28,6 +29,7 @@ test.describe('SearchBar', () => {
       window.searchHarness.setSearchResult('alpha', {
         results: [{ date: '2026-04-01', snippet: 'alpha match' }],
         unindexedCount: 0,
+        totalCount: 1,
       })
     })
     await page.getByPlaceholder('Search entries...').fill('alpha')
@@ -54,6 +56,7 @@ test.describe('SearchBar', () => {
       window.searchHarness.setSearchResult('alpha', {
         results: [{ date: '2026-04-01', snippet: 'alpha match' }],
         unindexedCount: 3,
+        totalCount: 4,
       })
     })
     await page.getByPlaceholder('Search entries...').fill('alpha')
@@ -65,11 +68,54 @@ test.describe('SearchBar', () => {
       window.searchHarness.setSearchResult('beta', {
         results: [],
         unindexedCount: 0,
+        totalCount: 0,
       })
     })
     await page.getByPlaceholder('Search entries...').fill('beta')
     await expect(page.getByText('No results')).toBeVisible()
     await expect(page.getByText(/could not be loaded/)).toHaveCount(0)
+  })
+
+  test('shows result count when results are returned', async ({ page }) => {
+    await page.evaluate(() => {
+      window.searchHarness.setSearchResult('alpha', {
+        results: [
+          { date: '2026-04-01', snippet: 'alpha one' },
+          { date: '2026-03-15', snippet: 'alpha two' },
+        ],
+        unindexedCount: 0,
+        totalCount: 2,
+      })
+    })
+    await page.getByPlaceholder('Search entries...').fill('alpha')
+    await expect(page.locator('.search-result-count')).toBeVisible()
+    await expect(page.locator('.search-result-count')).toHaveText('2 results')
+  })
+
+  test('shows capped hint when totalCount exceeds displayed results', async ({ page }) => {
+    await page.evaluate(() => {
+      window.searchHarness.setSearchResult('alpha', {
+        results: [{ date: '2026-04-01', snippet: 'alpha match' }],
+        unindexedCount: 0,
+        totalCount: 50,
+      })
+    })
+    await page.getByPlaceholder('Search entries...').fill('alpha')
+    await expect(page.locator('.search-result-capped')).toBeVisible()
+    await expect(page.locator('.search-result-capped')).toContainText('50')
+  })
+
+  test('does not show capped hint when all results are displayed', async ({ page }) => {
+    await page.evaluate(() => {
+      window.searchHarness.setSearchResult('alpha', {
+        results: [{ date: '2026-04-01', snippet: 'alpha match' }],
+        unindexedCount: 0,
+        totalCount: 1,
+      })
+    })
+    await page.getByPlaceholder('Search entries...').fill('alpha')
+    await expect(page.locator('.search-result-count')).toBeVisible()
+    await expect(page.locator('.search-result-capped')).toHaveCount(0)
   })
 
   test('shows character count warning when query exceeds 400 chars', async ({ page }) => {

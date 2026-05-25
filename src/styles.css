@@ -534,13 +534,30 @@ body {
   flex: 0 0 auto;
   animation: save-spinner 0.75s linear infinite;
 }
+.search-result-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0 0.1rem;
+}
+.search-result-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.search-result-capped {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
 .search-results {
   list-style: none;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-top: 0.3rem;
-  max-height: 200px;
+  max-height: 320px;
   overflow-y: auto;
 }
 .search-results li {

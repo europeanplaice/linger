@@ -87,6 +87,8 @@ const dictionaries = {
       remaining: (count: number) => `Indexing ${count} remaining entries…`,
       partialResults: (count: number) => `${count} ${count === 1 ? 'entry' : 'entries'} could not be loaded.`,
       queryLimit: (max: number) => `${max} character limit`,
+      resultCount: (n: number) => `${n} ${n === 1 ? 'result' : 'results'}`,
+      resultsCapped: (shown: number, total: number) => `Showing ${shown} of ${total} — add keywords to narrow down`,
     },
     login: {
       continueWithGoogle: 'Continue with Google',
@@ -290,6 +292,8 @@ const dictionaries = {
       remaining: (count: number) => `残り${count}件をインデックス作成中...`,
       partialResults: (count: number) => `${count}件の日記を読み込めませんでした。`,
       queryLimit: (max: number) => `${max}文字まで`,
+      resultCount: (n: number) => `${n}件`,
+      resultsCapped: (shown: number, total: number) => `${total}件中新しい順に${shown}件を表示 — キーワードを追加して絞り込んでください`,
     },
     login: {
       continueWithGoogle: 'Google で続行',

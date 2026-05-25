@@ -19,7 +19,7 @@ function render() {
         onSearch={query => {
           callLog.push(query)
           const registered = resultMap.get(query)
-          return Promise.resolve(registered ?? { results: [], unindexedCount: 0 })
+          return Promise.resolve(registered ?? { results: [], unindexedCount: 0, totalCount: 0 })
         }}
         onSelect={date => {
           selectedDates.push(date)
