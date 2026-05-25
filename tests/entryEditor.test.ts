@@ -851,7 +851,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Today\'s entry - Last modified:')
+    await expect(meta).toContainText('Today\'s entry · Last modified:')
   })
 
   test('shows only last modified for past dates with content', async ({ page }) => {
@@ -896,7 +896,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Yesterday\'s entry - Last modified:')
+    await expect(meta).toContainText('Yesterday\'s entry · Last modified:')
   })
 
   test('past dates (not today or yesterday) do not show Yesterday\'s entry label', async ({ page }) => {
