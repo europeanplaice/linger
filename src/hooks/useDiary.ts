@@ -386,14 +386,13 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
 
   useEffect(() => {
     if (!selectedDate) return
-    const datesSet = new Set(cache.keys())
-    const candidates = [shiftDate(selectedDate, -1), shiftDate(selectedDate, 1)].filter(d => datesSet.has(d))
-    if (candidates.length === 0) return
     const id = setTimeout(() => {
-      candidates.forEach(d => getContentRef.current(d).catch(() => {}))
+      ;[shiftDate(selectedDate, -1), shiftDate(selectedDate, 1)]
+        .filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
+        .forEach(d => getContentRef.current(d).catch(() => {}))
     }, 300)
     return () => clearTimeout(id)
-  }, [selectedDate, cache])
+  }, [selectedDate])
 
   const dates = Array.from(cache.keys()).sort((a, b) => b.localeCompare(a))
 

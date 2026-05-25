@@ -648,8 +648,8 @@ test.describe('useDiary adjacent-day prefetch', () => {
 
     await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-01'))
 
-    // No adjacent entries exist so no fetch should occur
-    await new Promise(r => setTimeout(r, 500))
+    // No adjacent entries exist so no fetch should occur (debounce 300ms + buffer)
+    await page.waitForTimeout(400)
     expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
   })
 
