@@ -4,7 +4,7 @@
   --border: #ddd8d0;
   --accent: #4a6a4a;
   --accent-hover: #3b5a3b;
-  --text: #2c2c2c;
+  --text: #33312e;
   --text-muted: #666;
   --dot: #4a6a4a;
   --today-ring: #a07a30;
@@ -1364,8 +1364,9 @@ body {
 /* ── SW update banner ── */
 .update-banner {
   align-items: center;
-  background: var(--accent);
-  color: #fff;
+  background: var(--sidebar-bg);
+  color: var(--accent-hover);
+  border-bottom: 1px solid var(--border);
   display: flex;
   font-size: 0.875rem;
   gap: 1rem;
@@ -1379,16 +1380,16 @@ body {
   z-index: 50;
 }
 .update-banner-reload {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: transparent;
+  border: 1px solid var(--accent);
   border-radius: 4px;
-  color: #fff;
+  color: var(--accent-hover);
   cursor: pointer;
   font-family: inherit;
   font-size: 0.82rem;
   padding: 0.2rem 0.65rem;
 }
-.update-banner-reload:hover { background: rgba(255, 255, 255, 0.32); }
+.update-banner-reload:hover { background: rgba(74, 106, 74, 0.1); }
 [data-theme="dark"] .update-banner {
   background: #21252b;
   color: var(--accent);
