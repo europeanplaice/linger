@@ -302,7 +302,7 @@ const dictionaries = {
       signInLoadFailed: 'Google ログインを読み込めませんでした。ネットワークやブラウザ拡張機能を確認してください。',
       loadingSignIn: 'Google ログインを読み込み中...',
       useAnotherAccount: '別のアカウントを使う',
-      driveFileScope: 'このアプリが作成した日記ファイルのみにアクセスします。',
+      driveFileScope: 'このアプリが作成した日記ファイル以外にはアクセスしません。',
       privacyPolicy: 'プライバシーポリシー',
       termsOfService: '利用規約',
       aboutLinger: 'Lingerについて',
