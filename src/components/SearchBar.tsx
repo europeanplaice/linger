@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { SearchResult } from '../hooks/useDiary'
 import { diaryDateLabel } from '../utils/date'
@@ -13,6 +13,15 @@ interface Props {
   onSearch: (query: string) => Promise<SearchResult>
   onSelect: (date: string) => void
   entriesLoading: boolean
+}
+
+function highlightSnippet(snippet: string, query: string): ReactNode {
+  const trimmed = query.trim()
+  if (!trimmed) return snippet
+  const escaped = trimmed.split(/\s+/).filter(Boolean)
+    .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const parts = snippet.split(new RegExp(`(${escaped})`, 'gi'))
+  return parts.map((part, i) => i % 2 === 1 ? <mark key={i}>{part}</mark> : part)
 }
 
 const SEARCH_DEBOUNCE_MS = 250
@@ -143,7 +152,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
             {results.map(r => (
               <li key={r.date} onClick={() => { onSelect(r.date); setQuery(''); setResults([]); setSearched(false); setFailedCount(0) }}>
                 <span className="search-date">{diaryDateLabel(r.date, true, 'long', locale)}</span>
-                <span className="search-snippet">…{r.snippet}…</span>
+                <span className="search-snippet">…{highlightSnippet(r.snippet, query)}…</span>
               </li>
             ))}
           </motion.ul>

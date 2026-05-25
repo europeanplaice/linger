@@ -506,7 +506,8 @@ body {
   outline: none;
   transition: border-color 120ms ease-out;
 }
-.search-bar input:focus { border-color: var(--accent); }
+.search-bar input:focus { border-color: var(--accent); outline: none; }
+.search-bar input:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); }
 .search-status {
   display: flex;
   align-items: center;
@@ -558,6 +559,12 @@ body {
   line-height: 1.25;
 }
 .search-snippet { color: var(--text-muted); font-size: 0.78rem; }
+.search-snippet mark {
+  background: var(--selected-bg);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 1px;
+}
 
 /* ── Calendar ── */
 .calendar { padding: 0.5rem 1rem 0; }
@@ -806,7 +813,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.7;
 }
 .btn-settings {
   display: flex;
