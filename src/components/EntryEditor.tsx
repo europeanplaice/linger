@@ -52,6 +52,14 @@ function CheckIcon() {
   )
 }
 
+function DiscardIcon() {
+  return (
+    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
+    </svg>
+  )
+}
+
 
 const entryVariants = {
   enter: (dir: number) => ({ x: dir * 64, opacity: 0 }),
@@ -85,6 +93,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteInput, setDeleteInput] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [showDiscardModal, setShowDiscardModal] = useState(false)
+  const discardDialogRef = useRef<HTMLDialogElement>(null)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [lastModified, setLastModified] = useState<string | null>(null)
@@ -352,6 +362,16 @@ useEffect(() => {
     }
   }, [isSignedIn, date, applyLoadedEntry])
 
+  const handleDiscardClick = () => {
+    setShowDiscardModal(true)
+  }
+
+  const confirmDiscard = () => {
+    setText(savedTextRef.current)
+    setShowDiscardModal(false)
+    setStatus('')
+  }
+
   const del = async () => {
     setDeleteInput('')
     setShowDeleteModal(true)
@@ -535,6 +555,36 @@ useEffect(() => {
         </motion.dialog>
       )}
     </AnimatePresence>
+    <AnimatePresence>
+      {showDiscardModal && (
+        <motion.dialog
+          ref={(node) => {
+            if (node) {
+              discardDialogRef.current = node
+              if (!node.open) node.showModal()
+            } else {
+              if (discardDialogRef.current?.open) discardDialogRef.current.close()
+              discardDialogRef.current = null
+            }
+          }}
+          className="delete-dialog"
+          aria-labelledby="discard-dialog-title"
+          onCancel={(e) => { e.preventDefault(); setShowDiscardModal(false) }}
+          onClick={(e) => { if (e.target === discardDialogRef.current) setShowDiscardModal(false) }}
+          initial={{ opacity: 0, y: 14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+        >
+          <h3 id="discard-dialog-title">{t.entry.discardTitle}</h3>
+          <p>{t.entry.discardDescription}</p>
+          <div className="delete-modal-actions">
+            <button onClick={() => setShowDiscardModal(false)}>{t.common.cancel}</button>
+            <button className="btn-delete" onClick={confirmDiscard}>{t.common.discard}</button>
+          </div>
+        </motion.dialog>
+      )}
+    </AnimatePresence>
     <div className="editor">
       {saveProgress !== null && (
         <div className="save-progress-bar" aria-hidden="true">
@@ -581,6 +631,24 @@ useEffect(() => {
           >›</motion.button>
         </div>
         <div className="editor-actions">
+          <AnimatePresence>
+            {isDirty && !loading && !saving && (
+              <motion.button
+                className="btn-discard"
+                onClick={handleDiscardClick}
+                aria-label={t.common.discard}
+                initial={{ opacity: 0, width: 0, marginRight: '-0.7rem' }}
+                animate={{ opacity: 1, width: 'auto', marginRight: 0 }}
+                exit={{ opacity: 0, width: 0, marginRight: '-0.7rem' }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+                style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <DiscardIcon />
+                <span className="btn-text">{t.common.discard}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
           <motion.button
             className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
             onClick={handleExplicitSave}

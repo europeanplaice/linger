@@ -1698,6 +1698,16 @@ dialog.export-confirm-dialog::backdrop {
 }
 .btn-delete { background: var(--danger) !important; color: var(--on-danger) !important; }
 .btn-delete:not(:disabled):hover { background: var(--danger-hover) !important; }
+.editor-actions .btn-discard {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+}
+.editor-actions .btn-discard:hover { background: var(--border); color: var(--text); }
 .more-menu-container { position: relative; }
 .editor-actions .btn-more {
   display: inline-flex;
@@ -2461,6 +2471,13 @@ dialog.history-dialog::backdrop {
     height: 2.75rem;
     min-width: 2.75rem;
     padding: 0;
+  }
+  .editor-actions .btn-discard {
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    padding: 0;
+    justify-content: center;
   }
   .editor-actions button .btn-icon { width: 20px; height: 20px; }
   .more-menu .btn-text { display: inline; }

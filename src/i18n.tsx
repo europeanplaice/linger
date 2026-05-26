@@ -149,6 +149,8 @@ const dictionaries = {
       loadingEntry: 'Loading entry',
       placeholder: 'Write your thoughts here...',
       charCount: (n: number) => `${n} ${n === 1 ? 'char' : 'chars'}`,
+      discardTitle: 'Discard changes?',
+      discardDescription: 'Your unsaved changes will be lost.',
     },
     settings: {
       title: 'Settings',
@@ -354,6 +356,8 @@ const dictionaries = {
       loadingEntry: '日記を読み込み中',
       placeholder: 'ここに記入してください...',
       charCount: (n: number) => `${n}文字`,
+      discardTitle: '変更を破棄しますか？',
+      discardDescription: '未保存の変更は失われます。',
     },
     settings: {
       title: '設定',
