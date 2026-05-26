@@ -11,7 +11,7 @@ let closeCount = 0
 
 function makeLoaded(date: string, content: string): LoadedDiaryEntry {
   return {
-    entry: { date, content, updated_at: '2026-01-01T00:00:00.000Z' },
+    entry: { date, content },
     meta: { id: `id-${date}`, name: `diary-${date}.md`, version: '1' },
   }
 }

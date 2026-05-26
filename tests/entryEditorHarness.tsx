@@ -107,13 +107,13 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         const perDate = contentByDate.get(d)
         if (perDate) {
           return {
-            entry: { date: d, content: perDate.content, updated_at: new Date().toISOString() },
+            entry: { date: d, content: perDate.content },
             meta: { id: 'file-1', name: `diary-${d}.json`, version: perDate.version ?? undefined },
           }
         }
         if (!currentRemoteContent && currentRemoteVersion === null) return null
         return {
-          entry: { date, content: currentRemoteContent, updated_at: new Date().toISOString() },
+          entry: { date, content: currentRemoteContent },
           meta: { id: 'file-1', name: `diary-${date}.json`, version: currentRemoteVersion ?? undefined },
         }
       }}
@@ -125,7 +125,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         fullSaveCalls.push({ date: d, content, baseVersion: baseVer, force, baseContent })
         if (currentSaveReject === 'conflict' && !force) {
           const remote: LoadedDiaryEntry = {
-            entry: { date: d, content: 'remote content', updated_at: new Date().toISOString() },
+            entry: { date: d, content: 'remote content' },
             meta: { id: 'file-1', name: `diary-${d}.json`, version: '99' },
           }
           throw new EntryConflictError(remote)
@@ -136,7 +136,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         currentRemoteContent = content
         currentRemoteVersion = '2'
         return {
-          entry: { date: d, content, updated_at: new Date().toISOString() },
+          entry: { date: d, content },
           meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion },
         }
       }}

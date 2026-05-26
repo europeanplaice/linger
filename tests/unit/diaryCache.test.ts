@@ -12,7 +12,7 @@ const meta = (v: string, id = 'f1') => ({
 const entry: CachedEntry = {
   date: '2026-05-01',
   meta: meta('1'),
-  content: { date: '2026-05-01', content: 'hello', updated_at: '2026-05-01T00:00:00Z' },
+  content: { date: '2026-05-01', content: 'hello' },
   snippet: 'hello',
 }
 

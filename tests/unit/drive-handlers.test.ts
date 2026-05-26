@@ -162,7 +162,7 @@ describe('post entry handler', () => {
 
   it('returns a conflict without saving when current Drive content differs from baseContent', async () => {
     vi.mocked(drive.getDiaryFileMeta).mockResolvedValueOnce({ id: 'entry-1', name: 'diary-2026-05-01.json', version: '9' })
-    vi.mocked(drive.getEntryContent).mockResolvedValueOnce({ date: '2026-05-01', content: 'remote edit', updated_at: '' })
+    vi.mocked(drive.getEntryContent).mockResolvedValueOnce({ date: '2026-05-01', content: 'remote edit' })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entry/2026-05-01', {
         method: 'POST',
@@ -207,7 +207,7 @@ describe('post entry handler', () => {
 
   it('saves when current Drive version changed but remote content still matches baseContent', async () => {
     vi.mocked(drive.getDiaryFileMeta).mockResolvedValueOnce({ id: 'entry-1', name: 'diary-2026-05-01.json', version: '9' })
-    vi.mocked(drive.getEntryContent).mockResolvedValueOnce({ date: '2026-05-01', content: 'local base', updated_at: '' })
+    vi.mocked(drive.getEntryContent).mockResolvedValueOnce({ date: '2026-05-01', content: 'local base' })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entry/2026-05-01', {
         method: 'POST',

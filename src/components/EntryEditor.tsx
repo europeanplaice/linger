@@ -151,7 +151,7 @@ useEffect(() => {
     setText(driveText)
     setSavedTextValue(driveText)
     setBaseVersionValue(entry?.meta.version ?? null)
-    setLastModified(entry?.entry.updated_at ?? null)
+    setLastModified(entry?.meta.modifiedTime ?? null)
     fileIdRef.current = entry?.meta.id ?? null
   }, [setBaseVersionValue, setSavedTextValue])
 
@@ -212,7 +212,7 @@ useEffect(() => {
 
     setSavedTextValue(content)
     setBaseVersionValue(reauthSaveResult.meta.version ?? null)
-    setLastModified(reauthSaveResult.entry.updated_at ?? null)
+    setLastModified(reauthSaveResult.meta.modifiedTime ?? null)
     fileIdRef.current = reauthSaveResult.meta.id
 
     if (currentText === previousSavedText || currentText === content) {
@@ -241,7 +241,7 @@ useEffect(() => {
       const currentText = textRef.current
       const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
       const newVersion = saved.meta.version ?? null
-      const newModified = saved.entry.updated_at ?? null
+      const newModified = saved.meta.modifiedTime ?? null
       const newId = saved.meta.id
       setSavedTextValue(currentText)
       setBaseVersionValue(newVersion)
@@ -515,7 +515,7 @@ useEffect(() => {
           setText(content)
           setSavedTextValue(content)
           setBaseVersionValue(result.meta.version ?? null)
-          setLastModified(result.entry.updated_at ?? null)
+          setLastModified(result.meta.modifiedTime ?? null)
           fileIdRef.current = result.meta.id
           setShowHistoryModal(false)
         }}

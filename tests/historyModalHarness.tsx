@@ -65,14 +65,14 @@ function App({ date, fileId, baseVersion, text, savedText, isDirty, autoSave }: 
         fullSaveCalls.push({ date: d, content, baseVersion: bv, force, baseContent })
         if (saveReject === 'conflict') {
           const remote: LoadedDiaryEntry = {
-            entry: { date: d, content: 'remote', updated_at: new Date().toISOString() },
+            entry: { date: d, content: 'remote' },
             meta: { id: fileId, name: `diary-${d}.json`, version: '99' },
           }
           throw new EntryConflictError(remote)
         }
         if (saveReject === 'error') throw new Error('Network error')
         return {
-          entry: { date: d, content, updated_at: new Date().toISOString() },
+          entry: { date: d, content },
           meta: { id: fileId, name: `diary-${d}.json`, version: '10' },
         }
       }}

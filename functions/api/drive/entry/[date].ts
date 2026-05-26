@@ -93,7 +93,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const entry: DiaryEntry = { date, content: body.content, updated_at: new Date().toISOString() }
+    const entry: DiaryEntry = { date, content: body.content }
 
     // Known fileId path: avoid filename search, but still validate current Drive
     // metadata before writing because Drive v3 does not document version as an

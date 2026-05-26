@@ -97,7 +97,7 @@ test.describe('listRevisions', () => {
 
 test.describe('getRevisionContent', () => {
   test('fetches revision content from /api/drive/revisions/:fileId/:revisionId', async () => {
-    const entry: DiaryEntry = { date: '2026-05-01', content: 'old text', updated_at: '2026-05-01T10:00:00Z' }
+    const entry: DiaryEntry = { date: '2026-05-01', content: 'old text' }
     mockFetch(jsonResponse(entry))
 
     const result = await getRevisionContent('file-1', 'rev-2')
@@ -107,7 +107,7 @@ test.describe('getRevisionContent', () => {
   })
 
   test('calls the correct URL with credentials', async () => {
-    mockFetch(jsonResponse({ date: '2026-05-01', content: '', updated_at: '' }))
+    mockFetch(jsonResponse({ date: '2026-05-01', content: '' }))
 
     await getRevisionContent('file-abc', 'rev-xyz')
 

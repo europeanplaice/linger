@@ -312,7 +312,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
 
     const prev = saveQueueRef.current.get(date) ?? Promise.resolve()
     const run = prev.catch(() => {}).then(async (): Promise<LoadedDiaryEntry> => {
-      const entry: DiaryEntry = { date, content, updated_at: new Date().toISOString() }
+      const entry: DiaryEntry = { date, content }
       try {
         const cachedMeta = cacheRef.current.get(date)?.meta ?? null
         const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force })
@@ -440,7 +440,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       const entry = loaded?.entry
       if (!entry) return { date, content: '' }
       const content = format === 'md'
-        ? `---\ndate: ${entry.date}\nupdated_at: ${entry.updated_at}\n---\n\n${entry.content}`
+        ? `---\ndate: ${entry.date}\n---\n\n${entry.content}`
         : entry.content
       return { date, content }
     })

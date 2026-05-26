@@ -18,7 +18,6 @@ export interface DriveFileMeta {
 export interface DiaryEntry {
   date: string
   content: string
-  updated_at: string
 }
 
 export interface DriveRevisionMeta {
@@ -271,7 +270,7 @@ export async function getDiaryFileMeta(
 }
 
 function serializeEntry(entry: DiaryEntry): string {
-  return `---\ndate: ${entry.date}\nupdated_at: ${entry.updated_at}\n---\n\n${entry.content}`
+  return `---\ndate: ${entry.date}\n---\n\n${entry.content}`
 }
 
 function parseEntry(text: string): DiaryEntry {
@@ -280,8 +279,7 @@ function parseEntry(text: string): DiaryEntry {
   const frontmatter = match[1]
   const content = match[2].replace(/^\n/, '')
   const date = frontmatter.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
-  const updated_at = frontmatter.match(/^updated_at:\s*(.+)$/m)?.[1]?.trim() ?? ''
-  return { date, content, updated_at }
+  return { date, content }
 }
 
 export async function getEntryContent(token: string, fileId: string): Promise<DiaryEntry> {
