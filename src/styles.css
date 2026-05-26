@@ -1755,6 +1755,7 @@ dialog.export-confirm-dialog::backdrop {
 }
 .more-menu-item:hover { background: var(--border); }
 .more-menu-item-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+.more-menu-discard { display: none; }
 .more-menu-delete { color: var(--danger); }
 .editor-share-toast {
   font-size: 0.75rem;
@@ -2473,13 +2474,10 @@ dialog.history-dialog::backdrop {
     padding: 0;
   }
   .editor-actions .btn-discard {
-    width: 2.75rem;
-    height: 2.75rem;
-    min-width: 2.75rem;
-    padding: 0;
-    justify-content: center;
+    display: none;
   }
   .editor-actions button .btn-icon { width: 20px; height: 20px; }
+  .more-menu-discard { display: flex; }
   .more-menu .btn-text { display: inline; }
   .btn-settings .btn-text { display: inline; }
   .btn-recollection .btn-text { display: inline; }

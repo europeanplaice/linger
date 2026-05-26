@@ -685,6 +685,12 @@ useEffect(() => {
                   exit={{ opacity: 0, scale: 0.91, y: -6 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 >
+                  {isDirty && !loading && !saving && (
+                    <div className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
+                      <DiscardIcon />
+                      {t.common.discard}
+                    </div>
+                  )}
                   {isSignedIn && fileIdRef.current && (
                     <div className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
                       <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>

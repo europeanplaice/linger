@@ -142,6 +142,40 @@ test.describe('EntryEditor — date header', () => {
     expect(metrics.saveHeight).toBeGreaterThanOrEqual(56)
   })
 
+  test('moves mobile discard into the more menu so the date keeps room', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1' })
+
+    await page.locator('textarea.editor-textarea').fill('saved content with edits')
+
+    const metrics = await page.evaluate(() => {
+      const header = document.querySelector('.editor-header')?.getBoundingClientRect()
+      const actions = document.querySelector('.editor-actions')?.getBoundingClientRect()
+      const more = document.querySelector('button.btn-more')?.getBoundingClientRect()
+      const save = document.querySelector('button.btn-save')
+      const discard = document.querySelector('button.btn-discard')
+      if (!header || !actions || !more || !save || !discard) throw new Error('missing editor actions')
+
+      return {
+        headerBottom: header.bottom,
+        actionsWidth: actions.width,
+        moreWidth: more.width,
+        savePosition: getComputedStyle(save).position,
+        discardDisplay: getComputedStyle(discard).display,
+      }
+    })
+
+    expect(metrics.savePosition).toBe('fixed')
+    expect(metrics.discardDisplay).toBe('none')
+    expect(metrics.actionsWidth).toBeLessThanOrEqual(metrics.moreWidth)
+
+    await page.locator('button.btn-more').click()
+    await expect(page.locator('.more-menu-discard')).toBeVisible()
+    await page.locator('.more-menu-discard').click()
+    await expect(page.locator('#discard-dialog-title')).toBeVisible()
+  })
+
   test('moves the mobile save action above the visual viewport keyboard inset', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
