@@ -12,7 +12,7 @@ async function render(
   await page.evaluate(({ autoSave, modalOpen }) => {
     window.settingsHarness.render({ autoSave, modalOpen })
   }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen })
-  await page.waitForSelector('.settings-modal')
+  await page.waitForSelector('.settings-dialog')
 }
 
 test.describe('SettingsModal — auto-save toggle', () => {
@@ -75,15 +75,15 @@ test.describe('SettingsModal — auto-save toggle', () => {
     await render(page)
 
     await page.keyboard.press('Escape')
-    await expect(page.locator('.settings-modal')).toHaveCount(0)
+    await expect(page.locator('.settings-dialog')).toHaveCount(0)
   })
 
   test('overlay click closes the modal', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    await page.locator('.settings-overlay').click({ position: { x: 5, y: 5 } })
-    await expect(page.locator('.settings-modal')).toHaveCount(0)
+    await page.mouse.click(5, 5)
+    await expect(page.locator('.settings-dialog')).toHaveCount(0)
   })
 })
 
@@ -112,7 +112,7 @@ test.describe('SettingsModal — theme picker', () => {
   test('initializes with provided themeMode', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => window.settingsHarness.render({ themeMode: 'system' }))
-    await page.waitForSelector('.settings-modal')
+    await page.waitForSelector('.settings-dialog')
 
     const buttons = page.locator('.settings-theme-picker .settings-theme-option')
     await expect(buttons.nth(2)).toHaveClass(/active/)
@@ -142,7 +142,7 @@ test.describe('SettingsModal — theme picker', () => {
   test('switching from dark back to light activates light button', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => window.settingsHarness.render({ themeMode: 'dark' }))
-    await page.waitForSelector('.settings-modal')
+    await page.waitForSelector('.settings-dialog')
 
     const buttons = page.locator('.settings-theme-picker .settings-theme-option')
     await buttons.nth(0).click()
@@ -199,7 +199,7 @@ test.describe('SettingsModal — export confirm modal', () => {
     await render(page, { modalOpen: true })
 
     await page.locator('.btn-export-modern').click()
-    await expect(page.locator('.export-confirm-modal')).toBeVisible()
+    await expect(page.locator('.export-confirm-dialog')).toBeVisible()
   })
 
   test('confirm modal shows entry count', async ({ page }) => {
@@ -216,7 +216,7 @@ test.describe('SettingsModal — export confirm modal', () => {
 
     await page.locator('.btn-export-modern').click()
     await page.locator('.export-confirm-cancel').click()
-    await expect(page.locator('.export-confirm-modal')).toHaveCount(0)
+    await expect(page.locator('.export-confirm-dialog')).not.toBeVisible()
   })
 
   test('Escape key closes confirm modal', async ({ page }) => {
@@ -225,7 +225,7 @@ test.describe('SettingsModal — export confirm modal', () => {
 
     await page.locator('.btn-export-modern').click()
     await page.keyboard.press('Escape')
-    await expect(page.locator('.export-confirm-modal')).toHaveCount(0)
+    await expect(page.locator('.export-confirm-dialog')).not.toBeVisible()
   })
 
   test('overlay click closes confirm modal', async ({ page }) => {
@@ -233,8 +233,8 @@ test.describe('SettingsModal — export confirm modal', () => {
     await render(page, { modalOpen: true })
 
     await page.locator('.btn-export-modern').click()
-    await page.locator('.export-confirm-overlay').click({ position: { x: 5, y: 5 } })
-    await expect(page.locator('.export-confirm-modal')).toHaveCount(0)
+    await page.mouse.click(5, 5)
+    await expect(page.locator('.export-confirm-dialog')).not.toBeVisible()
   })
 
   test('format selector is visible with txt active by default', async ({ page }) => {
@@ -286,7 +286,7 @@ test.describe('SettingsModal — export confirm modal', () => {
     await page.evaluate(() => {
       window.settingsHarness.render({ modalOpen: true })
       // Override dates to empty
-      const settingsModal = document.querySelector('.settings-modal')
+      const settingsModal = document.querySelector('.settings-dialog')
       if (settingsModal) {
         // Can't dynamically change dates prop easily, but button should be disabled
       }
@@ -320,7 +320,7 @@ test.describe('SettingsModal — Drive folder link', () => {
   test('link includes authuser param when email is provided', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => window.settingsHarness.render({ modalOpen: true, email: 'test@example.com' }))
-    await page.waitForSelector('.settings-modal')
+    await page.waitForSelector('.settings-dialog')
 
     const link = page.locator('.settings-drive-link')
     const href = await link.getAttribute('href')
@@ -368,7 +368,7 @@ test.describe('SettingsModal — font size select', () => {
   test('initializes with provided fontSize', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => window.settingsHarness.render({ fontSize: 'lg' }))
-    await page.waitForSelector('.settings-modal')
+    await page.waitForSelector('.settings-dialog')
 
     const trigger = page.getByRole('button', { name: 'Font size' })
     await expect(trigger.locator('span')).toHaveText('Large')

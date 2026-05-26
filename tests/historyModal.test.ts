@@ -273,7 +273,7 @@ test.describe('HistoryModal — restore button', () => {
     await page.locator('.btn-restore').click()
 
     await expect(page.locator('.history-restore-error')).toBeVisible()
-    await expect(page.locator('.history-modal')).toBeVisible()
+    await expect(page.locator('.history-dialog')).toBeVisible()
   })
 
   test('restore shows error message on save failure', async ({ page }) => {
@@ -325,7 +325,7 @@ test.describe('HistoryModal — close behaviour', () => {
     await loadHarness(page)
     await renderModal(page)
 
-    await page.locator('.history-overlay').click({ position: { x: 10, y: 10 } })
+    await page.mouse.click(10, 10)
     await page.waitForSelector('#modal-closed')
 
     const closeCalls = await page.evaluate(() => window.historyHarness.closeCalls())
@@ -337,7 +337,7 @@ test.describe('HistoryModal — close behaviour', () => {
     await renderModal(page)
 
     await page.locator('.history-modal-header').click()
-    await expect(page.locator('.history-modal')).toBeVisible()
+    await expect(page.locator('.history-dialog')).toBeVisible()
   })
 })
 

@@ -433,7 +433,7 @@ test.describe('EntryEditor — delete confirmation', () => {
     await page.locator('.delete-modal-input').fill('confirm')
     await page.locator('.delete-modal-actions .btn-delete').click()
 
-    await expect(page.locator('.delete-modal')).toHaveCount(0)
+    await expect(page.locator('.delete-dialog')).toHaveCount(0)
     expect(await page.evaluate(() => window.editorHarness.deleteCalls())).toEqual([
       { date: '2026-05-01' },
     ])
@@ -450,7 +450,7 @@ test.describe('EntryEditor — delete confirmation', () => {
     await page.locator('.delete-modal-input').fill('confirm')
     await page.locator('.delete-modal-actions .btn-delete').click()
 
-    await expect(page.locator('.delete-modal')).toHaveCount(0)
+    await expect(page.locator('.delete-dialog')).toHaveCount(0)
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('')
   })
 
@@ -463,7 +463,7 @@ test.describe('EntryEditor — delete confirmation', () => {
     await page.locator('.delete-modal-input').fill('confirm')
     await page.locator('.delete-modal-actions .btn-delete').click()
 
-    await expect(page.locator('.delete-modal')).toHaveCount(0)
+    await expect(page.locator('.delete-dialog')).toHaveCount(0)
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved content')
     await expect(page.locator('.editor-status-line')).toHaveText('Delete failed.')
   })
