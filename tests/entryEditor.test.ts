@@ -938,3 +938,34 @@ test.describe('EntryEditor — editor meta info', () => {
     await expect(meta).not.toContainText('Last modified:')
   })
 })
+
+test.describe('EntryEditor — dirty dot indicator', () => {
+  test('dot is invisible when content is clean', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '0')
+  })
+
+  test('dot becomes visible when user types unsaved changes', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+
+    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '1')
+  })
+
+  test('dot disappears after saving', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '1')
+
+    await page.locator('button.btn-save').click()
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+
+    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '0')
+  })
+})
