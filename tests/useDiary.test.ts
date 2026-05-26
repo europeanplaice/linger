@@ -13,14 +13,14 @@ function datedFileMeta(date: string, version = '1', id = `file-${date}`) {
 
 function entryResponse(version: string, content = 'hello', id = 'file-1') {
   return {
-    entry: { date: '2026-05-01', content, updated_at: '2026-05-01T00:00:00.000Z' },
+    entry: { date: '2026-05-01', content },
     meta: fileMeta(version, id),
   }
 }
 
 function datedEntryResponse(date: string, content: string, version = '1') {
   return {
-    entry: { date, content, updated_at: '2026-05-01T00:00:00.000Z' },
+    entry: { date, content },
     meta: datedFileMeta(date, version),
   }
 }
@@ -367,7 +367,7 @@ test.describe('useDiary Drive read batching', () => {
 
     await expect.poll(() => page.evaluate(() => (window as any).__exportResult?.length ?? 0)).toBe(1)
     const content = await page.evaluate(() => (window as any).__exportResult[0].content)
-    expect(content).toContain('---\ndate: 2026-05-01\nupdated_at: 2026-05-01T00:00:00.000Z\n---')
+    expect(content).toContain('---\ndate: 2026-05-01\n---')
     expect(content).toContain('hello world')
   })
 })
@@ -438,7 +438,7 @@ test.describe('useDiary refreshEntries', () => {
 
     // Load content into memory cache
     await page.evaluate(() => {
-      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello', updated_at: '' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '1' } } })
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '1' } } })
       return window.diaryHarness.triggerGetContent('2026-05-01')
     })
     await page.evaluate(() => window.diaryHarness.clearEvictedCalls())
@@ -454,7 +454,7 @@ test.describe('useDiary refreshEntries', () => {
     // Next getContent should hit the network (content was evicted)
     await page.evaluate(() => window.diaryHarness.clearCalls())
     const refreshed = await page.evaluate(() => {
-      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'updated', updated_at: '' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '2' } } })
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'updated' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '2' } } })
       return window.diaryHarness.triggerGetContent('2026-05-01')
     })
     expect(refreshed?.entry.content).toBe('updated')
@@ -472,7 +472,7 @@ test.describe('useDiary IDB cache — eviction callback', () => {
 
     // Load content into memory cache
     await page.evaluate(() => {
-      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello', updated_at: '' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
       return window.diaryHarness.triggerGetContent('2026-05-01')
     })
 
@@ -492,7 +492,7 @@ test.describe('useDiary IDB cache — eviction callback', () => {
     await startHarness(page, { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] })
 
     await page.evaluate(() => {
-      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello', updated_at: '' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
       return window.diaryHarness.triggerGetContent('2026-05-01')
     })
 
@@ -511,7 +511,7 @@ test.describe('useDiary IDB cache — eviction callback', () => {
     await startHarness(page, { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] })
 
     await page.evaluate(() => {
-      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello', updated_at: '' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello' }, meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } } })
       return window.diaryHarness.triggerGetContent('2026-05-01')
     })
 
@@ -565,7 +565,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
       await window.diaryHarness.seedIdb([{
         date: '2026-05-01',
         meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' },
-        content: { date: '2026-05-01', content: 'cached secret', updated_at: '' },
+        content: { date: '2026-05-01', content: 'cached secret' },
         snippet: 'cached secret',
       }])
       window.diaryHarness.setEmail(null)

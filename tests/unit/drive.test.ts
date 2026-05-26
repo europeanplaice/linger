@@ -16,8 +16,8 @@ function driveJsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function driveMarkdownResponse(entry: { date: string; content: string; updated_at: string }, status = 200): Response {
-  const body = `---\ndate: ${entry.date}\nupdated_at: ${entry.updated_at}\n---\n\n${entry.content}`
+function driveMarkdownResponse(entry: { date: string; content: string }, status = 200): Response {
+  const body = `---\ndate: ${entry.date}\n---\n\n${entry.content}`
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
 }
 
@@ -70,7 +70,7 @@ describe('ensureFolder', () => {
 
 describe('getEntryContent', () => {
   it('fetches entry content from Drive', async () => {
-    const entry = { date: '2026-05-01', content: 'hello', updated_at: '2026-05-01T00:00:00.000Z' }
+    const entry = { date: '2026-05-01', content: 'hello' }
     mockFetch(driveMarkdownResponse(entry))
 
     const result = await getEntryContent('token', 'file-123')
@@ -81,7 +81,7 @@ describe('getEntryContent', () => {
   })
 
   it('retries on 429 then succeeds', async () => {
-    const entry = { date: '2026-05-01', content: 'hello', updated_at: '' }
+    const entry = { date: '2026-05-01', content: 'hello' }
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(new Response('Too Many Requests', { status: 429 }))
       .mockResolvedValueOnce(driveMarkdownResponse(entry)))
@@ -325,7 +325,7 @@ describe('listRevisions', () => {
 
 describe('getRevisionContent', () => {
   it('fetches revision content with alt=media', async () => {
-    const entry = { date: '2026-05-01', content: 'rev', updated_at: '2026-05-01T00:00:00.000Z' }
+    const entry = { date: '2026-05-01', content: 'rev' }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveMarkdownResponse(entry)))
 
     const result = await getRevisionContent('token', 'file-1', 'rev-1')
