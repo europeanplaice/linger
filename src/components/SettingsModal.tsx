@@ -182,11 +182,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <span className="settings-switch-thumb" />
           </button>
         </div>
-        <div className="settings-divider" />
-        <div className="settings-item">
-          <span className="settings-item-label">{t.settings.exportAllEntries}</span>
-          <ExportButton dates={dates} onExport={onExport} />
-        </div>
+        {dates.length > 0 && (
+          <>
+            <div className="settings-divider" />
+            <div className="settings-item">
+              <span className="settings-item-label">{t.settings.exportAllEntries}</span>
+              <ExportButton dates={dates} onExport={onExport} />
+            </div>
+          </>
+        )}
         <div className="settings-divider" />
         <div className="settings-item">
           <span className="settings-item-label">{t.settings.shareThisApp}</span>
