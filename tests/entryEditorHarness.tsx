@@ -108,13 +108,13 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         if (perDate) {
           return {
             entry: { date: d, content: perDate.content },
-            meta: { id: 'file-1', name: `diary-${d}.json`, version: perDate.version ?? undefined },
+            meta: { id: 'file-1', name: `diary-${d}.json`, version: perDate.version ?? undefined, modifiedTime: '2026-05-01T10:00:00.000Z' },
           }
         }
         if (!currentRemoteContent && currentRemoteVersion === null) return null
         return {
           entry: { date, content: currentRemoteContent },
-          meta: { id: 'file-1', name: `diary-${date}.json`, version: currentRemoteVersion ?? undefined },
+          meta: { id: 'file-1', name: `diary-${date}.json`, version: currentRemoteVersion ?? undefined, modifiedTime: '2026-05-01T10:00:00.000Z' },
         }
       }}
       onSave={async (d, content, baseVer, force, baseContent) => {
@@ -137,7 +137,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         currentRemoteVersion = '2'
         return {
           entry: { date: d, content },
-          meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion },
+          meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion, modifiedTime: new Date().toISOString() },
         }
       }}
       onDelete={async (d) => {
