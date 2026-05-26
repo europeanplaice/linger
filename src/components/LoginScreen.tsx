@@ -1,3 +1,4 @@
+import { motion } from 'motion/react'
 import { AppIcon } from './AppIcon'
 import { useI18n } from '../i18n'
 
@@ -12,7 +13,12 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
 
   return (
     <main className="login-screen">
-      <div className="login-card">
+      <motion.div
+        className="login-card"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+      >
         <AppIcon className="login-logo" fetchPriority="high" />
         <h1>{t.documentTitle}</h1>
         <p>{t.login.privateDiary}</p>
@@ -69,7 +75,7 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
             日本語
           </button>
         </div>
-      </div>
+      </motion.div>
     </main>
   )
 }

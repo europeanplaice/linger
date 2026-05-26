@@ -36,6 +36,16 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
+const cardContainerVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.05, delayChildren: 0.12 } },
+}
+
+const cardItemVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.22, 0.61, 0.36, 1] as [number, number, number, number] } },
+}
+
 export function RecollectionJourney({ dates, getContent, serendipityPrefetch, onSelect, onClose }: RecollectionJourneyProps) {
   const { t, locale } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -144,7 +154,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     const preview = previews.get(date)
     const weekday = weekdayLabel(date, locale)
     return (
-      <button key={date} className="recollection-card" onClick={() => onSelect(date)}>
+      <motion.button key={date} className="recollection-card" onClick={() => onSelect(date)} variants={cardItemVariants}>
         <span className="recollection-card-eyebrow">{eyebrow}</span>
         <span className="recollection-card-date">
           {diaryDateLabel(date, true, 'long', locale)}
@@ -159,7 +169,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             <span className="recollection-card-empty">{t.recollection.noText}</span>
           )}
         </span>
-      </button>
+      </motion.button>
     )
   }
 
@@ -192,14 +202,14 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                   <span className="recollection-section-glyph" aria-hidden="true">⚬</span>
                   {t.recollection.onThisDay}
                 </h3>
-                <div className="recollection-cards">
+                <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
                   {onThisDay.map(date => {
                     const p = parseYmd(date)
                     const ref = parseYmd(today)
                     const years = p && ref ? ref.y - p.y : 0
                     return renderCard(date, t.recollection.yearsAgo(years))
                   })}
-                </div>
+                </motion.div>
               </section>
             )}
 
@@ -209,9 +219,9 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                   <span className="recollection-section-glyph" aria-hidden="true">◷</span>
                   {t.recollection.aWhileAgo}
                 </h3>
-                <div className="recollection-cards">
+                <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
                   {periodic.map(p => renderCard(p.date, p.eyebrow))}
-                </div>
+                </motion.div>
               </section>
             )}
 
@@ -221,7 +231,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                   <span className="recollection-section-glyph" aria-hidden="true">✦</span>
                   {t.recollection.serendipity}
                 </h3>
-                <div className="recollection-cards">
+                <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
                   {renderCard(randomDate, (() => {
                     const p = parseYmd(randomDate)
                     const r = parseYmd(today)
@@ -229,7 +239,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                     const days = Math.round((new Date(r.y, r.m - 1, r.d).getTime() - new Date(p.y, p.m - 1, p.d).getTime()) / 86400000)
                     return days > 0 ? t.recollection.daysAgo(days) : ''
                   })())}
-                </div>
+                </motion.div>
                 {randomIdx < randomQueue.length - 1 && (
                   <button className="recollection-another" onClick={() => setRandomIdx(i => i + 1)}>
                     {t.recollection.another}

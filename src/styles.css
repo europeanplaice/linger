@@ -147,10 +147,11 @@ dialog {
 }
 dialog::backdrop {
   background: transparent;
-  transition: background 0.18s ease;
+  transition: background 0.22s ease, opacity 0.22s ease;
+  transition-behavior: allow-discrete;
 }
 @starting-style {
-  dialog::backdrop { background: transparent; }
+  dialog::backdrop { background: transparent; opacity: 0; }
 }
 
 /* Consistent keyboard focus ring across interactive controls.
@@ -912,6 +913,9 @@ dialog.settings-dialog {
 dialog.settings-dialog::backdrop {
   background: var(--overlay-heavy);
 }
+@starting-style {
+  dialog.settings-dialog::backdrop { background: transparent; }
+}
 .settings-modal-header {
   display: flex;
   align-items: center;
@@ -1316,6 +1320,9 @@ dialog.export-confirm-dialog {
 }
 dialog.export-confirm-dialog::backdrop {
   background: var(--overlay-heavy);
+}
+@starting-style {
+  dialog.export-confirm-dialog::backdrop { background: transparent; }
 }
 .export-confirm-title {
   font-size: 1rem;
@@ -1895,6 +1902,9 @@ dialog.delete-dialog {
 dialog.delete-dialog::backdrop {
   background: var(--overlay-heavy);
 }
+@starting-style {
+  dialog.delete-dialog::backdrop { background: transparent; }
+}
 dialog.delete-dialog h3 { font-size: 1.15rem; color: var(--danger); }
 dialog.delete-dialog p { font-size: 0.9rem; color: var(--text); line-height: 1.6; }
 .delete-modal-hint { color: var(--text-muted) !important; }
@@ -1957,6 +1967,9 @@ dialog.session-expired-dialog {
 }
 dialog.session-expired-dialog::backdrop {
   background: var(--overlay-darkest);
+}
+@starting-style {
+  dialog.session-expired-dialog::backdrop { background: transparent; }
 }
 .session-expired-modal-msg {
   font-size: 0.95rem;
@@ -2098,6 +2111,9 @@ dialog.history-dialog {
 }
 dialog.history-dialog::backdrop {
   background: var(--overlay-heavy);
+}
+@starting-style {
+  dialog.history-dialog::backdrop { background: transparent; }
 }
 .history-modal-header {
   display: flex;
@@ -2536,6 +2552,9 @@ dialog.recollection-dialog {
 }
 dialog.recollection-dialog::backdrop {
   background: var(--overlay-heavy);
+}
+@starting-style {
+  dialog.recollection-dialog::backdrop { background: transparent; }
 }
 .recollection-header {
   display: flex;

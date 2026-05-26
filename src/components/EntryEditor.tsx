@@ -667,9 +667,20 @@ useEffect(() => {
       {shareMsgVisible && (
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>
       )}
-      {status && status !== savedStatus && !loadFailed && (
-        <div className="editor-status-line" role="status">{status}</div>
-      )}
+      <AnimatePresence>
+        {status && status !== savedStatus && !loadFailed && (
+          <motion.div
+            className="editor-status-line"
+            role="status"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+          >
+            {status}
+          </motion.div>
+        )}
+      </AnimatePresence>
       {pendingNavDate && (
         <div className="unsaved-nav-banner">
           <span>{t.entry.unsavedLeave}</span>

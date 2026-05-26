@@ -69,7 +69,8 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
             initial={{ opacity: 0, y: -6, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.95 }}
-            transition={{ duration: 0.14, ease: 'easeOut' }}
+            transition={{ type: 'spring', stiffness: 460, damping: 34 }}
+            style={{ transformOrigin: 'top center' }}
           >
             <div className="mypicker-year-nav">
               <button
