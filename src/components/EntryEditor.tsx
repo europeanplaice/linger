@@ -93,8 +93,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteInput, setDeleteInput] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const [showDiscardModal, setShowDiscardModal] = useState(false)
-  const discardDialogRef = useRef<HTMLDialogElement>(null)
+  const [discardedText, setDiscardedText] = useState<string | null>(null)
+  const discardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [lastModified, setLastModified] = useState<string | null>(null)
@@ -167,6 +167,8 @@ useEffect(() => {
     setLoadFailed(false)
     setHasConflict(false)
     setConflictRemote(null)
+    setDiscardedText(null)
+    if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
     getContentRef.current(date).then(entry => {
       if (cancelled) return
@@ -363,13 +365,20 @@ useEffect(() => {
   }, [isSignedIn, date, applyLoadedEntry])
 
   const handleDiscardClick = () => {
-    setShowDiscardModal(true)
+    const previous = text
+    setText(savedTextRef.current)
+    setStatus('')
+    setDiscardedText(previous)
+    if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
+    discardToastTimerRef.current = setTimeout(() => setDiscardedText(null), 5000)
   }
 
-  const confirmDiscard = () => {
-    setText(savedTextRef.current)
-    setShowDiscardModal(false)
-    setStatus('')
+  const handleUndoDiscard = () => {
+    if (discardedText !== null) {
+      setText(discardedText)
+      setDiscardedText(null)
+      if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
+    }
   }
 
   const del = async () => {
@@ -427,6 +436,10 @@ useEffect(() => {
       window.clearTimeout(clearTimeout)
     }
   }, [status, savedStatus])
+
+  useEffect(() => () => {
+    if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
+  }, [])
 
   useEffect(() => {
     const viewport = window.visualViewport
@@ -555,36 +568,6 @@ useEffect(() => {
         </motion.dialog>
       )}
     </AnimatePresence>
-    <AnimatePresence>
-      {showDiscardModal && (
-        <motion.dialog
-          ref={(node) => {
-            if (node) {
-              discardDialogRef.current = node
-              if (!node.open) node.showModal()
-            } else {
-              if (discardDialogRef.current?.open) discardDialogRef.current.close()
-              discardDialogRef.current = null
-            }
-          }}
-          className="delete-dialog"
-          aria-labelledby="discard-dialog-title"
-          onCancel={(e) => { e.preventDefault(); setShowDiscardModal(false) }}
-          onClick={(e) => { if (e.target === discardDialogRef.current) setShowDiscardModal(false) }}
-          initial={{ opacity: 0, y: 14, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.97 }}
-          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-        >
-          <h3 id="discard-dialog-title">{t.entry.discardTitle}</h3>
-          <p>{t.entry.discardDescription}</p>
-          <div className="delete-modal-actions">
-            <button onClick={() => setShowDiscardModal(false)}>{t.common.cancel}</button>
-            <button className="btn-delete" onClick={confirmDiscard}>{t.common.discard}</button>
-          </div>
-        </motion.dialog>
-      )}
-    </AnimatePresence>
     <div className="editor">
       {saveProgress !== null && (
         <div className="save-progress-bar" aria-hidden="true">
@@ -632,7 +615,7 @@ useEffect(() => {
         </div>
         <div className="editor-actions">
           <AnimatePresence>
-            {isDirty && !loading && !saving && (
+            {isDirty && !loading && !saving && !autoSave && (
               <motion.button
                 className="btn-discard"
                 onClick={handleDiscardClick}
@@ -685,7 +668,7 @@ useEffect(() => {
                   exit={{ opacity: 0, scale: 0.91, y: -6 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 >
-                  {isDirty && !loading && !saving && (
+                  {isDirty && !loading && !saving && !autoSave && (
                     <div className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
                       <DiscardIcon />
                       {t.common.discard}
@@ -760,6 +743,21 @@ useEffect(() => {
             transition={{ duration: 0.18, ease: 'easeOut' }}
           >
             {status}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {discardedText !== null && (
+          <motion.div
+            className="discard-undo-toast"
+            role="status"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+          >
+            <span>{t.entry.discardedUndo}</span>
+            <button onClick={handleUndoDiscard}>{t.common.undo}</button>
           </motion.div>
         )}
       </AnimatePresence>

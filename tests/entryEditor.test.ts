@@ -16,6 +16,7 @@ async function renderEditor(
     deleteReject?: 'error'
     pendingNavDate?: string | null
     token?: string | null
+    autoSave?: boolean
   } = {},
 ) {
   const date = opts.date ?? '2026-05-01'
@@ -24,10 +25,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -145,9 +146,11 @@ test.describe('EntryEditor — date header', () => {
   test('moves mobile discard into the more menu so the date keeps room', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.locator('textarea.editor-textarea').fill('saved content with edits')
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.waitForSelector('button.btn-discard', { state: 'attached' })
 
     const metrics = await page.evaluate(() => {
       const header = document.querySelector('.editor-header')?.getBoundingClientRect()
@@ -173,7 +176,7 @@ test.describe('EntryEditor — date header', () => {
     await page.locator('button.btn-more').click()
     await expect(page.locator('.more-menu-discard')).toBeVisible()
     await page.locator('.more-menu-discard').click()
-    await expect(page.locator('#discard-dialog-title')).toBeVisible()
+    await expect(page.locator('.discard-undo-toast')).toBeVisible()
   })
 
   test('moves the mobile save action above the visual viewport keyboard inset', async ({ page }) => {

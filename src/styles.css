@@ -1808,6 +1808,33 @@ dialog.export-confirm-dialog::backdrop {
 .conflict-actions button:not(:disabled):hover { background: var(--sidebar-bg); }
 .conflict-actions button:disabled { opacity: 0.5; cursor: default; }
 
+/* ── Discard undo toast ── */
+.discard-undo-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.discard-undo-toast button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.25rem 0.65rem;
+  flex-shrink: 0;
+}
+.discard-undo-toast button:hover { background: var(--border); }
+
 /* ── Unsaved-changes navigation banner ── */
 .unsaved-nav-banner {
   align-items: center;
