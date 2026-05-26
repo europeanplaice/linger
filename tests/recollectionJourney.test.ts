@@ -34,7 +34,7 @@ async function render(
   opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] },
 ) {
   await page.evaluate(o => window.recollectionHarness.render(o), opts)
-  await page.waitForSelector('.recollection-view')
+  await page.waitForSelector('.recollection-dialog')
 }
 
 test.describe('RecollectionJourney', () => {
