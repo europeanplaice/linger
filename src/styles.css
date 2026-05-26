@@ -2695,6 +2695,13 @@ dialog.recollection-dialog::backdrop {
   border-color: var(--accent);
 }
 
+/* dialog:not([open]) must come after all specific dialog rules (equal specificity,
+   last-rule-wins) to ensure dialogs are hidden when closed even if display:flex
+   is set elsewhere in their rule. */
+dialog:not([open]) {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .recollection-overlay {
     padding: 0;
