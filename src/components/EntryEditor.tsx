@@ -560,9 +560,17 @@ useEffect(() => {
             <span
               className="entry-date-text"
               data-today={isToday || undefined}
-              data-dirty={isDirty || undefined}
               aria-label={isToday ? `${diaryDateLabel(date, true, 'long', locale, true)}${weekday ? ` ${weekday}` : ''}, ${t.common.today}` : undefined}
             >
+              <motion.span
+                className="dirty-dot"
+                initial={false}
+                animate={isDirty
+                  ? { opacity: 1, width: '0.42rem', marginRight: 0 }
+                  : { opacity: 0, width: 0, marginRight: '-0.4rem' }
+                }
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+              />
               <span className="entry-date-label-full">{diaryDateLabel(date, true, 'long', locale, true)}</span>
               <span className="entry-date-label-short">{diaryDateLabel(date, true, 'short', locale, true)}</span>
               {weekday && <span className="entry-date-weekday">{weekday}</span>}
