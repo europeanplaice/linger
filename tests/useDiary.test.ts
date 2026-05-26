@@ -372,25 +372,93 @@ test.describe('useDiary Drive read batching', () => {
   })
 })
 
+function change(date: string, version = '1', removed = false, id = `file-${date}`) {
+  return {
+    fileId: id,
+    removed,
+    file: removed ? undefined : { id, name: `diary-${date}.md`, version },
+  }
+}
+
 test.describe('useDiary refreshEntries', () => {
-  test('refreshes the entry list from Drive without requiring a remount', async ({ page }) => {
+  test('applies new entries from the Changes API without requiring a remount', async ({ page }) => {
     await loadHarness(page)
     await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
     await page.evaluate(() => window.diaryHarness.clearCalls())
 
-    await page.evaluate((files) => {
+    await page.evaluate((changes) => {
       window.diaryHarness.q({
         status: 200,
-        body: { files },
+        body: { changes, newStartPageToken: 'tok-2' },
       })
       return window.diaryHarness.refreshEntries()
-    }, [datedFileMeta('2026-05-03'), datedFileMeta('2026-05-02')])
+    }, [change('2026-05-03'), change('2026-05-02')])
 
-    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-03,2026-05-02')
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-03,2026-05-02,2026-05-01')
     const calls = await page.evaluate(() => window.diaryHarness.calls())
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('/api/drive/entries')
+    expect(calls[0].url).toBe('/api/drive/changes')
+  })
+
+  test('does nothing when the Changes API returns no changes (token init)', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 200, body: { changes: [], newStartPageToken: 'tok-1' } })
+      return window.diaryHarness.refreshEntries()
+    })
+
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('/api/drive/changes')
+  })
+
+  test('removes a deleted entry reported by the Changes API', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-02'), datedFileMeta('2026-05-01')] })
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-02,2026-05-01')
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate((changes) => {
+      window.diaryHarness.q({ status: 200, body: { changes, newStartPageToken: 'tok-2' } })
+      return window.diaryHarness.refreshEntries()
+    }, [change('2026-05-01', '1', true)])
+
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-02')
+  })
+
+  test('evicts content for an entry whose version changed', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [{ id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '1' }] })
+
+    // Load content into memory cache
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'hello', updated_at: '' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '1' } } })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    })
+    await page.evaluate(() => window.diaryHarness.clearEvictedCalls())
+
+    // Changes API reports the file at a newer version → content must be evicted
+    await page.evaluate((changes) => {
+      window.diaryHarness.q({ status: 200, body: { changes, newStartPageToken: 'tok-2' } })
+      return window.diaryHarness.refreshEntries()
+    }, [change('2026-05-01', '2')])
+
+    expect(await page.evaluate(() => window.diaryHarness.evictedCalls())).toEqual([['2026-05-01']])
+
+    // Next getContent should hit the network (content was evicted)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+    const refreshed = await page.evaluate(() => {
+      window.diaryHarness.q({ status: 200, body: { entry: { date: '2026-05-01', content: 'updated', updated_at: '' }, meta: { id: 'file-2026-05-01', name: 'diary-2026-05-01.md', version: '2' } } })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    })
+    expect(refreshed?.entry.content).toBe('updated')
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(1)
   })
 })
 
@@ -410,9 +478,9 @@ test.describe('useDiary IDB cache — eviction callback', () => {
 
     await page.evaluate(() => window.diaryHarness.clearEvictedCalls())
 
-    // Refresh: Drive now returns a newer version → content must be evicted
+    // Refresh: Changes API reports a newer version → content must be evicted
     await page.evaluate(async () => {
-      window.diaryHarness.q({ status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '2' }] } })
+      window.diaryHarness.q({ status: 200, body: { changes: [{ fileId: 'file-1', removed: false, file: { id: 'file-1', name: 'diary-2026-05-01.md', version: '2' } }], newStartPageToken: 'tok-2' } })
       await window.diaryHarness.refreshEntries()
     })
 
@@ -431,7 +499,7 @@ test.describe('useDiary IDB cache — eviction callback', () => {
     await page.evaluate(() => window.diaryHarness.clearEvictedCalls())
 
     await page.evaluate(async () => {
-      window.diaryHarness.q({ status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] } })
+      window.diaryHarness.q({ status: 200, body: { changes: [{ fileId: 'file-1', removed: false, file: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } }], newStartPageToken: 'tok-2' } })
       await window.diaryHarness.refreshEntries()
     })
 
@@ -449,9 +517,9 @@ test.describe('useDiary IDB cache — eviction callback', () => {
 
     await page.evaluate(() => window.diaryHarness.clearEvictedCalls())
 
-    // Refresh: Drive returns empty list — entry was deleted on another device
+    // Refresh: Changes API reports the file removed — deleted on another device
     await page.evaluate(async () => {
-      window.diaryHarness.q({ status: 200, body: { files: [] } })
+      window.diaryHarness.q({ status: 200, body: { changes: [{ fileId: 'file-1', removed: true }], newStartPageToken: 'tok-2' } })
       await window.diaryHarness.refreshEntries()
     })
 

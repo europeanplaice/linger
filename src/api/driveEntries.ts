@@ -1,4 +1,4 @@
-import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
+import type { ChangesResult, DiaryEntry, DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../types'
 
 const BASE = '/api/drive'
 
@@ -106,6 +106,13 @@ export async function searchEntries(query: string): Promise<DriveFileMeta[]> {
   const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/search?q=${encodeURIComponent(query)}`)
   return data?.files ?? []
 }
+
+export async function getChanges(): Promise<ChangesResult> {
+  const { data } = await apiFetch<ChangesResult>(`${BASE}/changes`)
+  return { changes: data?.changes ?? [], newStartPageToken: data?.newStartPageToken ?? '' }
+}
+
+export type { DriveChange }
 
 export async function getEntryByDate(date: string, cachedVersion?: string, fileId?: string): Promise<LoadedDiaryEntry | null | 'not-modified'> {
   const headers: Record<string, string> = cachedVersion ? { 'If-None-Match': cachedVersion } : {}

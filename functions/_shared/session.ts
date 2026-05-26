@@ -16,6 +16,7 @@ export interface SessionData {
   folder_id?: string
   renewed_at?: number // ms since epoch — tracks last KV write to throttle sliding TTL renewal
   email?: string
+  changes_start_page_token?: string // Drive Changes API page token for incremental sync
 }
 
 export interface Data extends Record<string, unknown> {

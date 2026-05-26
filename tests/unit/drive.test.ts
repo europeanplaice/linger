@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
   ensureFolder, getEntryContent, saveEntry, deleteEntry,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
+  listEntries, getStartPageToken, getChanges,
 } from '../../functions/_shared/drive'
 
 function mockFetch(response: unknown): void {
@@ -329,5 +330,106 @@ describe('getRevisionContent', () => {
 
     const result = await getRevisionContent('token', 'file-1', 'rev-1')
     expect(result).toEqual(entry)
+  })
+})
+
+const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, folder_id: 'folder-1' })
+const envStub = { SESSIONS: { put: vi.fn() } } as any
+
+describe('listEntries pagination', () => {
+  it('uses pageSize=100 and orderBy=name', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+      urls.push(String(input))
+      return driveJsonResponse({ files: [{ id: 'f1', name: 'diary-2026-05-01.md', version: '1' }] })
+    }))
+
+    await listEntries('tok', 'sid', sessionWithFolder(), envStub)
+
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toContain('pageSize=100')
+    expect(urls[0]).toContain('orderBy=name')
+  })
+
+  it('follows nextPageToken until exhausted and concatenates all files', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+      urls.push(String(input))
+      if (urls.length === 1) {
+        return driveJsonResponse({ files: [{ id: 'f1', name: 'diary-2026-05-01.md', version: '1' }], nextPageToken: 'page-2' })
+      }
+      if (urls.length === 2) {
+        return driveJsonResponse({ files: [{ id: 'f2', name: 'diary-2026-05-02.md', version: '1' }], nextPageToken: 'page-3' })
+      }
+      return driveJsonResponse({ files: [{ id: 'f3', name: 'diary-2026-05-03.md', version: '1' }] })
+    }))
+
+    const files = await listEntries('tok', 'sid', sessionWithFolder(), envStub)
+
+    expect(files.map(f => f.id)).toEqual(['f1', 'f2', 'f3'])
+    expect(urls).toHaveLength(3)
+    expect(urls[1]).toContain('pageToken=page-2')
+    expect(urls[2]).toContain('pageToken=page-3')
+  })
+})
+
+describe('getStartPageToken', () => {
+  it('returns the start page token from the changes endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+      expect(String(input)).toContain('/changes/startPageToken')
+      return driveJsonResponse({ startPageToken: 'tok-123' })
+    }))
+
+    const token = await getStartPageToken('tok')
+    expect(token).toBe('tok-123')
+  })
+})
+
+describe('getChanges', () => {
+  it('returns changes and newStartPageToken on the happy path', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+      urls.push(String(input))
+      return driveJsonResponse({
+        changes: [
+          { fileId: 'f1', removed: false, file: { id: 'f1', name: 'diary-2026-05-01.md', version: '2' } },
+          { fileId: 'f2', removed: true },
+        ],
+        newStartPageToken: 'tok-next',
+      })
+    }))
+
+    const result = await getChanges('tok', 'tok-start')
+
+    expect(result.newStartPageToken).toBe('tok-next')
+    expect(result.changes).toHaveLength(2)
+    expect(result.changes[0]).toMatchObject({ fileId: 'f1', removed: false })
+    expect(result.changes[1]).toMatchObject({ fileId: 'f2', removed: true })
+    expect(urls[0]).toContain('pageToken=tok-start')
+    expect(urls[0]).toContain('restrictToMyDrive=true')
+    expect(urls[0]).toContain('includeItemsFromAllDrives=false')
+  })
+
+  it('paginates through nextPageToken and returns the final newStartPageToken', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+      urls.push(String(input))
+      if (urls.length === 1) {
+        return driveJsonResponse({
+          changes: [{ fileId: 'f1', removed: false, file: { id: 'f1', name: 'diary-2026-05-01.md', version: '1' } }],
+          nextPageToken: 'page-2',
+        })
+      }
+      return driveJsonResponse({
+        changes: [{ fileId: 'f2', removed: false, file: { id: 'f2', name: 'diary-2026-05-02.md', version: '1' } }],
+        newStartPageToken: 'tok-final',
+      })
+    }))
+
+    const result = await getChanges('tok', 'tok-start')
+
+    expect(result.changes.map(c => c.fileId)).toEqual(['f1', 'f2'])
+    expect(result.newStartPageToken).toBe('tok-final')
+    expect(urls[1]).toContain('pageToken=page-2')
   })
 })

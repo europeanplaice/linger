@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
-import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
+import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache } from '../lib/diaryCache'
 import type { CachedEntry } from '../lib/diaryCache'
 import { shiftDate } from '../utils/date'
@@ -238,12 +238,74 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   const refreshEntries = useCallback(async (): Promise<void> => {
     if (!isSignedIn) return
     try {
-      await loadEntryList(true, email !== null)
+      const { changes } = await getChanges()
+      if (changes.length === 0) {
+        // First-time token initialisation — the full list already ran on sign-in.
+        return
+      }
+
+      const syncPersistentCache = email !== null
+      const toUpsert: CachedEntry[] = []
+      const toDelete: string[] = []
+      const evicted: string[] = []
+
+      // Compute the next cache from the current snapshot (side-effect-free updater).
+      const next = new Map(cacheRef.current)
+      for (const change of changes) {
+        if (change.removed || change.file?.trashed) {
+          // Removed changes typically omit the file object — match by fileId.
+          for (const [date, entry] of next) {
+            if (entry.meta.id === change.fileId) {
+              if (entry.content) evicted.push(date)
+              next.delete(date)
+              toDelete.push(date)
+              break
+            }
+          }
+          continue
+        }
+
+        const name = change.file?.name ?? ''
+        const date = name.replace('diary-', '').replace(/\.(json|md)$/, '')
+        // Only act on diary files matching the expected pattern.
+        if (!/^diary-\d{4}-\d{2}-\d{2}\.md$/.test(name) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+
+        const meta: DriveFileMeta = {
+          id: change.file!.id,
+          name: change.file!.name,
+          modifiedTime: change.file!.modifiedTime,
+          version: change.file!.version,
+        }
+        const existing = next.get(date)
+        if (existing) {
+          // Version changed → evict content so it is re-fetched on next access.
+          if (existing.meta.version !== meta.version) {
+            if (existing.content) evicted.push(date)
+            next.set(date, { meta })
+            toUpsert.push({ date, meta })
+          } else {
+            next.set(date, { ...existing, meta })
+          }
+        } else {
+          // New file added on another device.
+          next.set(date, { meta })
+          toUpsert.push({ date, meta })
+        }
+      }
+
+      updateCache(() => next)
+      if (evicted.length) onEvictedRef.current?.(evicted)
+      if (syncPersistentCache) {
+        Promise.all([
+          ...toUpsert.map(e => putCached(e).catch(() => {})),
+          ...toDelete.map(d => deleteCached(d).catch(() => {})),
+        ]).catch(() => {})
+      }
     } catch (e) {
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
       throw e
     }
-  }, [isSignedIn, email, loadEntryList])
+  }, [isSignedIn, email, updateCache])
 
   const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null): Promise<LoadedDiaryEntry> => {
     if (!isSignedIn) throw new Error('Not signed in')

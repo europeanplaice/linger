@@ -125,15 +125,30 @@ async function withFolderFallback<T>(
   }
 }
 
+// Drive API v3 files.list caps pageSize at 100; values above are silently capped.
+// We page through nextPageToken to collect every matching file.
+const FILES_PAGE_SIZE = 100
+
+async function listAllFiles(token: string, baseUrl: string): Promise<DriveFileMeta[]> {
+  const files: DriveFileMeta[] = []
+  let pageToken: string | undefined
+  do {
+    const url = pageToken ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}` : baseUrl
+    const res = await driveWithRetry(
+      () => fetch(url, { headers: driveHeaders(token) }),
+      r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
+    )
+    if (res.files) files.push(...res.files)
+    pageToken = res.nextPageToken
+  } while (pageToken)
+  return files
+}
+
 export async function listEntries(token: string, sessionId: string, session: SessionData, env: Env): Promise<DriveFileMeta[]> {
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain'`)
-    const fields = encodeURIComponent('files(id,name,modifiedTime,version)')
-    const res = await driveWithRetry(
-      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1000`, { headers: driveHeaders(token) }),
-      r => r.json() as Promise<{ files: DriveFileMeta[] }>,
-    )
-    return res.files
+    const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version)')
+    return listAllFiles(token, `${BASE}/files?q=${q}&fields=${fields}&orderBy=name&pageSize=${FILES_PAGE_SIZE}`)
   })
 }
 
@@ -141,13 +156,60 @@ export async function searchEntries(token: string, sessionId: string, session: S
   const escapedQuery = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain' and fullText contains '${escapedQuery}'`)
-    const fields = encodeURIComponent('files(id,name,modifiedTime,version)')
-    const res = await driveWithRetry(
-      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1000`, { headers: driveHeaders(token) }),
-      r => r.json() as Promise<{ files: DriveFileMeta[] }>,
-    )
-    return res.files
+    const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version)')
+    return listAllFiles(token, `${BASE}/files?q=${q}&fields=${fields}&pageSize=${FILES_PAGE_SIZE}`)
   })
+}
+
+export interface DriveChange {
+  fileId: string
+  removed: boolean
+  file?: DriveFileMeta
+}
+
+export interface ChangesResult {
+  changes: DriveChange[]
+  newStartPageToken: string
+}
+
+// Gets the initial start page token (used after a full listEntries call).
+export async function getStartPageToken(token: string): Promise<string> {
+  const res = await driveWithRetry(
+    () => fetch(`${BASE}/changes/startPageToken?supportsAllDrives=false`, { headers: driveHeaders(token) }),
+    r => r.json() as Promise<{ startPageToken: string }>,
+  )
+  return res.startPageToken
+}
+
+interface RawChange {
+  fileId: string
+  removed?: boolean
+  file?: DriveFileMeta
+}
+
+// Gets changes since the stored page token; handles nextPageToken pagination.
+export async function getChanges(token: string, pageToken: string): Promise<ChangesResult> {
+  const fields = encodeURIComponent('newStartPageToken,nextPageToken,changes(fileId,removed,file(id,name,modifiedTime,version,mimeType,parents,trashed))')
+  const changes: DriveChange[] = []
+  let cursor = pageToken
+  let newStartPageToken = pageToken
+  for (;;) {
+    const url = `${BASE}/changes?pageToken=${encodeURIComponent(cursor)}&spaces=drive&restrictToMyDrive=true&includeRemoved=true&includeItemsFromAllDrives=false&fields=${fields}`
+    const res = await driveWithRetry(
+      () => fetch(url, { headers: driveHeaders(token) }),
+      r => r.json() as Promise<{ changes?: RawChange[]; nextPageToken?: string; newStartPageToken?: string }>,
+    )
+    for (const c of res.changes ?? []) {
+      changes.push({ fileId: c.fileId, removed: c.removed === true, file: c.file })
+    }
+    if (res.nextPageToken) {
+      cursor = res.nextPageToken
+      continue
+    }
+    if (res.newStartPageToken) newStartPageToken = res.newStartPageToken
+    break
+  }
+  return { changes, newStartPageToken }
 }
 
 export async function findEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<DriveFileMeta | null> {

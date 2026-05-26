@@ -3,6 +3,7 @@ import { onRequestGet as onSearch } from '../../functions/api/drive/search'
 import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../functions/api/drive/entry/[date]'
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
 import { onRequestGet as onGetRevision } from '../../functions/api/drive/revisions/[fileId]/[revisionId]'
+import { onRequestGet as onChanges } from '../../functions/api/drive/changes'
 import * as drive from '../../functions/_shared/drive'
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
@@ -16,6 +17,8 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   saveEntry: vi.fn().mockResolvedValue({ id: 'entry-1', name: 'diary-2026-05-01.json', version: '9' }),
   listRevisions: vi.fn().mockResolvedValue([]),
   getRevisionContent: vi.fn().mockResolvedValue({ date: '2026-05-01', content: 'hi', updated_at: '' }),
+  getStartPageToken: vi.fn().mockResolvedValue('tok-init'),
+  getChanges: vi.fn().mockResolvedValue({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' }),
 }))
 
 function makeContext(overrides: Record<string, unknown> = {}) {
@@ -250,6 +253,55 @@ describe('list revisions handler', () => {
     const ctx = makeContext({ params: { fileId: 'validFileId1234567890' } })
     const res = await onListRevisions(ctx as any)
     expect(res.status).toBe(200)
+  })
+})
+
+describe('changes handler', () => {
+  function changesContext(session: Record<string, unknown>) {
+    const put = vi.fn()
+    const ctx = {
+      request: new Request('http://localhost/api/drive/changes'),
+      data: { accessToken: 'tok', sessionId: 'sid', session },
+      env: { SESSIONS: { put } },
+    }
+    return { ctx, put }
+  }
+
+  it('initialises the start page token and returns empty changes when none is stored', async () => {
+    const session: Record<string, unknown> = {}
+    const { ctx, put } = changesContext(session)
+
+    const res = await onChanges(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changes: [], newStartPageToken: 'tok-init' })
+    expect(drive.getStartPageToken).toHaveBeenCalledOnce()
+    expect(drive.getChanges).not.toHaveBeenCalled()
+    expect(put).toHaveBeenCalledOnce()
+  })
+
+  it('returns changes and persists newStartPageToken when a token is stored', async () => {
+    const session: Record<string, unknown> = { changes_start_page_token: 'tok-old' }
+    const { ctx, put } = changesContext(session)
+
+    const res = await onChanges(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' })
+    expect(drive.getChanges).toHaveBeenCalledWith('tok', 'tok-old')
+    expect(put).toHaveBeenCalledOnce()
+  })
+
+  it('resets the token and returns empty changes when the stored token is stale (400)', async () => {
+    vi.mocked(drive.getChanges).mockRejectedValueOnce(new drive.DriveError(400, 'Invalid pageToken'))
+    const session: Record<string, unknown> = { changes_start_page_token: 'tok-stale' }
+    const { ctx } = changesContext(session)
+
+    const res = await onChanges(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changes: [], newStartPageToken: 'tok-init' })
+    expect(drive.getStartPageToken).toHaveBeenCalledOnce()
   })
 })
 

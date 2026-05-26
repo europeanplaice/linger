@@ -9,6 +9,18 @@ export interface DriveFileMeta {
   name: string
   modifiedTime?: string
   version?: string
+  trashed?: boolean
+}
+
+export interface DriveChange {
+  fileId: string
+  removed: boolean
+  file?: DriveFileMeta
+}
+
+export interface ChangesResult {
+  changes: DriveChange[]
+  newStartPageToken: string
 }
 
 export interface LoadedDiaryEntry {

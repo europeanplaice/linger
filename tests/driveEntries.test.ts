@@ -9,6 +9,7 @@ import {
   getEntryByDate,
   saveEntry,
   deleteEntry,
+  getChanges,
 } from '../src/api/driveEntries'
 
 type FetchCall = {
@@ -186,6 +187,35 @@ test.describe('driveEntries proxy API', () => {
 
     expect(err).toBeInstanceOf(SaveConflictError)
     expect((err as SaveConflictError).remote).toBeNull()
+  })
+
+  test('getChanges calls /api/drive/changes and returns changes + token', async () => {
+    const changes = [
+      { fileId: 'file-1', removed: false, file: { id: 'file-1', name: 'diary-2026-05-01.md', version: '2' } },
+      { fileId: 'file-2', removed: true },
+    ]
+    mockFetch(jsonResponse({ changes, newStartPageToken: 'tok-next' }))
+
+    const result = await getChanges()
+
+    expect(result).toEqual({ changes, newStartPageToken: 'tok-next' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('/api/drive/changes')
+    expect(calls[0].init?.credentials).toBe('include')
+  })
+
+  test('getChanges defaults to empty changes when fields are missing', async () => {
+    mockFetch(jsonResponse({}))
+
+    const result = await getChanges()
+
+    expect(result).toEqual({ changes: [], newStartPageToken: '' })
+  })
+
+  test('getChanges throws TokenExpiredError on 401', async () => {
+    mockFetch(textResponse('expired', 401))
+
+    await expect(getChanges()).rejects.toBeInstanceOf(TokenExpiredError)
   })
 
   test('deleteEntry sends DELETE to /api/drive/entry/:date', async () => {
