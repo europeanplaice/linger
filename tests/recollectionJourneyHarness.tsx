@@ -8,6 +8,7 @@ const root = createRoot(document.getElementById('root') as HTMLElement)
 
 const selectedDates: string[] = []
 let closeCount = 0
+let renderCount = 0
 
 function makeLoaded(date: string, content: string): LoadedDiaryEntry {
   return {
@@ -32,7 +33,7 @@ window.recollectionHarness = {
           serendipityPrefetch={serendipityPrefetch}
           onSelect={(d: string) => { selectedDates.push(d) }}
           onClose={() => { closeCount += 1 }}
-          key={Date.now()}
+          key={++renderCount}
         />
       </I18nProvider>,
     )

@@ -41,13 +41,15 @@ test.describe('SearchBar', () => {
   })
 
   test('does not search while entriesLoading is true', async ({ page }) => {
+    await page.clock.install()
     await page.evaluate(() => window.searchHarness.render({ entriesLoading: true }))
     await page.getByPlaceholder('Search entries...').fill('alpha')
     await expect(page.getByText('Loading entries…')).toBeVisible()
-    await page.waitForTimeout(400)
+    await page.clock.fastForward(400)
     expect(await page.evaluate(() => window.searchHarness.calls())).toEqual([])
 
     await page.evaluate(() => window.searchHarness.render({ entriesLoading: false }))
+    await page.clock.fastForward(300)
     await expect.poll(() => page.evaluate(() => window.searchHarness.calls())).toEqual(['alpha'])
   })
 

@@ -13,6 +13,7 @@ type FullSaveCall = SaveCall & { baseContent?: string | null }
 
 const fetchCalls: FetchCall[] = []
 const queue: QueuedResponse[] = []
+let renderCount = 0
 const saveCalls: SaveCall[] = []
 const fullSaveCalls: FullSaveCall[] = []
 const restoredCalls: LoadedDiaryEntry[] = []
@@ -110,7 +111,7 @@ window.historyHarness = {
           savedText={opts.savedText ?? ''}
           isDirty={opts.isDirty ?? false}
           autoSave={opts.autoSave ?? true}
-          key={Date.now()}
+          key={++renderCount}
         />
       </I18nProvider>
     )

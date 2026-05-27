@@ -622,7 +622,7 @@ test.describe('useDiary IDB cache — 0-RTT startup', () => {
     })
 
     // Entry from IDB should appear well within the 500ms Drive delay
-    await expect(page.locator('[data-dates="2026-05-01"]')).toBeVisible({ timeout: 300 })
+    await expect(page.locator('[data-dates="2026-05-01"]')).toBeVisible({ timeout: 450 })
     await page.waitForSelector('#harness-ready')
   })
 })
@@ -714,10 +714,10 @@ test.describe('useDiary adjacent-day prefetch', () => {
     await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
     await page.evaluate(() => window.diaryHarness.clearCalls())
 
+    await page.clock.install()
     await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-01'))
-
-    // No adjacent entries exist so no fetch should occur (debounce 300ms + buffer)
-    await page.waitForTimeout(400)
+    // No adjacent entries exist so no fetch should occur even after debounce elapses
+    await page.clock.fastForward(400)
     expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
   })
 

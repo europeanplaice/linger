@@ -11,6 +11,7 @@ const root = createRoot(document.getElementById('root') as HTMLElement)
 
 const exportCalls: ExportCall = []
 let exportReject = false
+let renderCount = 0
 
 interface AppProps {
   autoSave: boolean
@@ -76,7 +77,7 @@ window.settingsHarness = {
           themeMode={initialTheme ?? 'light'}
           fontSize={initialFontSize ?? 'md'}
           email={email}
-          key={Date.now()}
+          key={++renderCount}
         />
       </I18nProvider>
     )

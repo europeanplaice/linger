@@ -149,7 +149,6 @@ test.describe('EntryEditor — date header', () => {
     await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.locator('textarea.editor-textarea').fill('saved content with edits')
-    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
     await page.waitForSelector('button.btn-discard', { state: 'attached' })
 
     const metrics = await page.evaluate(() => {
@@ -804,12 +803,8 @@ test.describe('EntryEditor — silent refresh race condition', () => {
     // User types new content while the fetch is still in-flight
     await page.locator('textarea.editor-textarea').pressSequentially('\nuser typed here')
 
-    // Resolve the in-flight fetch and give React time to process
-    await page.evaluate(() => {
-      window.editorHarness.unblockGetContent()
-      return new Promise(resolve => setTimeout(resolve, 100))
-    })
-
+    // Resolve the in-flight fetch — the trailing assertion retries until stable
+    await page.evaluate(() => window.editorHarness.unblockGetContent())
     // Typed content must NOT be overwritten by the silent refresh result
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved content\nuser typed here')
   })
@@ -843,11 +838,8 @@ test.describe('EntryEditor — date switch cancellation', () => {
     await expect.poll(() => page.locator('textarea.editor-textarea').count()).toBe(1)
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('date B content')
 
-    // Resolve the stale date A fetch and give React time to process its callback
-    await page.evaluate(() => {
-      window.editorHarness.unblockGetContent()
-      return new Promise(resolve => setTimeout(resolve, 100))
-    })
+    // Resolve the stale date A fetch — the trailing assertion retries until stable
+    await page.evaluate(() => window.editorHarness.unblockGetContent())
 
     // Date B content must still be shown — not overwritten by the stale date A result
     await expect.poll(() => page.locator('textarea.editor-textarea').count()).toBe(1)

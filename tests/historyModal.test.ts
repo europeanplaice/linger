@@ -3,14 +3,14 @@ import { baseUrl } from './baseUrl'
 
 const REV_LIST = {
   revisions: [
-    { id: 'rev-3', modifiedTime: new Date(Date.now() - 60_000).toISOString() },
-    { id: 'rev-2', modifiedTime: new Date(Date.now() - 3_600_000).toISOString() },
-    { id: 'rev-1', modifiedTime: new Date(Date.now() - 86_400_000).toISOString() },
+    { id: 'rev-3', modifiedTime: '2026-05-01T12:59:00.000Z' },
+    { id: 'rev-2', modifiedTime: '2026-05-01T11:00:00.000Z' },
+    { id: 'rev-1', modifiedTime: '2026-05-01T10:00:00.000Z' },
   ],
 }
 
-const CONTENT_V3 = { date: '2026-05-01', content: 'latest version text', updated_at: new Date().toISOString() }
-const CONTENT_V2 = { date: '2026-05-01', content: 'older version text', updated_at: new Date().toISOString() }
+const CONTENT_V3 = { date: '2026-05-01', content: 'latest version text', updated_at: '2026-05-01T13:00:00.000Z' }
+const CONTENT_V2 = { date: '2026-05-01', content: 'older version text', updated_at: '2026-05-01T12:00:00.000Z' }
 
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/historyModalHarness.html`)

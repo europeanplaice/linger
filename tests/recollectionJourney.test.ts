@@ -38,6 +38,12 @@ async function render(
 }
 
 test.describe('RecollectionJourney', () => {
+  // Pin the browser clock to match the module-level `now` so the component's
+  // internal "today" never diverges from the fixture dates at midnight.
+  test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: now })
+  })
+
   test('shows "on this day" entries from past years, most recent first', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
