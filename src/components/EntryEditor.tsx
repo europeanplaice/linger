@@ -481,6 +481,29 @@ useEffect(() => {
   }, [showMoreMenu])
 
   const [shareMsgVisible, setShareMsgVisible] = useState(false)
+  const [scrollAtTop, setScrollAtTop] = useState(true)
+  const [scrollAtBottom, setScrollAtBottom] = useState(true)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el || loading) {
+      setScrollAtTop(true)
+      setScrollAtBottom(true)
+      return
+    }
+    const update = () => {
+      setScrollAtTop(el.scrollTop < 2)
+      setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', update)
+      ro.disconnect()
+    }
+  }, [loading, text])
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -784,7 +807,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}`}>
       <AnimatePresence initial={false} custom={directionRef.current}>
         <motion.div
           key={date}
@@ -833,6 +856,8 @@ useEffect(() => {
           )}
         </motion.div>
       </AnimatePresence>
+      <div className="editor-fade-top" aria-hidden="true" />
+      <div className="editor-fade-bottom" aria-hidden="true" />
       </div>
       {!loading && !loadFailed && (
         <div className="editor-charcount" aria-hidden="true">
