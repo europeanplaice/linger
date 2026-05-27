@@ -261,12 +261,14 @@ test.describe('EntryEditor — date header', () => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
 
+    // Block content fetch so the skeleton stays until we explicitly unblock,
+    // avoiding the race where React commits loading=true after the 100ms timer fires.
     await page.evaluate(() => {
+      window.editorHarness.blockGetContent('2026-12-31')
       window.editorHarness.render({
         date: '2026-12-31',
         initialContent: 'saved content',
         version: '1',
-        getContentDelayMs: 100,
       })
     })
     await page.waitForSelector('.entry-skeleton')
@@ -275,6 +277,7 @@ test.describe('EntryEditor — date header', () => {
       el.getBoundingClientRect().bottom
     )
 
+    await page.evaluate(() => window.editorHarness.unblockGetContent())
     await page.waitForSelector('textarea.editor-textarea')
     await expect(page.locator('button.btn-more')).toBeVisible()
 
