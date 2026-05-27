@@ -856,8 +856,6 @@ useEffect(() => {
           )}
         </motion.div>
       </AnimatePresence>
-      <div className="editor-fade-top" aria-hidden="true" />
-      <div className="editor-fade-bottom" aria-hidden="true" />
       </div>
       {!loading && !loadFailed && (
         <div className="editor-charcount" aria-hidden="true">
