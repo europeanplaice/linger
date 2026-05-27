@@ -261,15 +261,16 @@ test.describe('EntryEditor — date header', () => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
 
-    // Block content fetch so the skeleton stays until we explicitly unblock,
-    // avoiding the race where React commits loading=true after the 100ms timer fires.
+    // render() resets getContentBlockedForDate, so block must be set after render.
+    // React effects run after the current JS task, so the block is in place before
+    // getContent is ever called.
     await page.evaluate(() => {
-      window.editorHarness.blockGetContent('2026-12-31')
       window.editorHarness.render({
         date: '2026-12-31',
         initialContent: 'saved content',
         version: '1',
       })
+      window.editorHarness.blockGetContent('2026-12-31')
     })
     await page.waitForSelector('.entry-skeleton')
 
