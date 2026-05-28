@@ -104,8 +104,10 @@ interface Window {
     unblockGetContent: () => void
   }
   historyHarness: {
-    q: (...responses: { status: number; body: unknown; delayMs?: number }[]) => void
-    render: (opts?: { date?: string; fileId?: string; baseVersion?: string | null }) => void
+    list: (resp: { status: number; body: unknown; delayMs?: number }) => void
+    content: (responses: Record<string, { status: number; body: unknown; delayMs?: number }>) => void
+    reset: () => void
+    render: (opts?: { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean }) => void
     calls: () => { url: string; method: string }[]
     saveCalls: () => { date: string; content: string; baseVersion: string | null; force?: boolean }[]
     saveCallsWithBaseContent: () => {

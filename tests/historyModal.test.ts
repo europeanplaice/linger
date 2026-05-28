@@ -11,6 +11,7 @@ const REV_LIST = {
 
 const CONTENT_V3 = { date: '2026-05-01', content: 'latest version text', updated_at: '2026-05-01T13:00:00.000Z' }
 const CONTENT_V2 = { date: '2026-05-01', content: 'older version text', updated_at: '2026-05-01T12:00:00.000Z' }
+const CONTENT_V1 = { date: '2026-05-01', content: 'oldest version text', updated_at: '2026-05-01T11:00:00.000Z' }
 
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/historyModalHarness.html`)
@@ -20,15 +21,17 @@ async function renderModal(
   page: import('@playwright/test').Page,
   opts: { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean } = {},
 ) {
-  // Queue: list revisions, then rev-3 content, then rev-2 content (for diff)
-  await page.evaluate(({ revList, contentV3, contentV2, opts }) => {
-    window.historyHarness.q(
-      { status: 200, body: revList },
-      { status: 200, body: contentV3 },
-      { status: 200, body: contentV2 },
-    )
+  // Content for every revision is provided up front; the modal prefetches all of
+  // them on open, so switching versions later is served from cache.
+  await page.evaluate(({ revList, c3, c2, c1, opts }) => {
+    window.historyHarness.list({ status: 200, body: revList })
+    window.historyHarness.content({
+      'rev-3': { status: 200, body: c3 },
+      'rev-2': { status: 200, body: c2 },
+      'rev-1': { status: 200, body: c1 },
+    })
     window.historyHarness.render(opts)
-  }, { revList: REV_LIST, contentV3: CONTENT_V3, contentV2: CONTENT_V2, opts })
+  }, { revList: REV_LIST, c3: CONTENT_V3, c2: CONTENT_V2, c1: CONTENT_V1, opts })
   await page.waitForSelector('.history-preview-diff')
 }
 
@@ -64,14 +67,14 @@ test.describe('HistoryModal — revision list', () => {
     await page.evaluate(({ content }) => {
       const now = new Date()
       const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).getTime()
-      window.historyHarness.q(
-        { status: 200, body: { revisions: [
-          { id: 'rev-2', modifiedTime: new Date(todayNoon - 60_000).toISOString() },
-          { id: 'rev-1', modifiedTime: new Date(todayNoon - 3_600_000).toISOString() },
-        ] } },
-        { status: 200, body: content },
-        { status: 200, body: content },
-      )
+      window.historyHarness.list({ status: 200, body: { revisions: [
+        { id: 'rev-2', modifiedTime: new Date(todayNoon - 60_000).toISOString() },
+        { id: 'rev-1', modifiedTime: new Date(todayNoon - 3_600_000).toISOString() },
+      ] } })
+      window.historyHarness.content({
+        'rev-2': { status: 200, body: content },
+        'rev-1': { status: 200, body: content },
+      })
       window.historyHarness.render()
     }, { content: CONTENT_V3 })
     await page.waitForSelector('.history-preview-diff')
@@ -83,14 +86,15 @@ test.describe('HistoryModal — revision list', () => {
   test('shows skeleton while list is loading', async ({ page }) => {
     await loadHarness(page)
 
-    await page.evaluate(({ revList, content }) => {
-      window.historyHarness.q(
-        { status: 200, body: revList, delayMs: 300 },
-        { status: 200, body: content },
-        { status: 200, body: content },
-      )
+    await page.evaluate(({ revList, c3, c2, c1 }) => {
+      window.historyHarness.list({ status: 200, body: revList, delayMs: 300 })
+      window.historyHarness.content({
+        'rev-3': { status: 200, body: c3 },
+        'rev-2': { status: 200, body: c2 },
+        'rev-1': { status: 200, body: c1 },
+      })
       window.historyHarness.render()
-    }, { revList: REV_LIST, content: CONTENT_V3 })
+    }, { revList: REV_LIST, c3: CONTENT_V3, c2: CONTENT_V2, c1: CONTENT_V1 })
 
     await expect(page.locator('.history-skeleton-row').first()).toBeVisible()
     await page.waitForSelector('.history-revision-item')
@@ -107,17 +111,9 @@ test.describe('HistoryModal — preview', () => {
     await expect(page.locator('.history-preview-diff')).toContainText(CONTENT_V3.content)
   })
 
-  test('clicking a different revision loads its content', async ({ page }) => {
+  test('clicking a different revision shows its content from cache', async ({ page }) => {
     await loadHarness(page)
     await renderModal(page)
-
-    // When clicking rev-2, need rev-2 content and rev-1 (previous) content
-    await page.evaluate(({ contentV2, contentV1 }) => {
-      window.historyHarness.q(
-        { status: 200, body: contentV2 },
-        { status: 200, body: contentV1 },
-      )
-    }, { contentV2: CONTENT_V2, contentV1: CONTENT_V3 })
 
     await page.locator('.history-revision-item').nth(1).click()
 
@@ -128,15 +124,16 @@ test.describe('HistoryModal — preview', () => {
   test('shows preview skeleton while content is loading', async ({ page }) => {
     await loadHarness(page)
 
-    // List response is fast, preview response is delayed
-    await page.evaluate(({ revList, contentV3, contentV2 }) => {
-      window.historyHarness.q(
-        { status: 200, body: revList },
-        { status: 200, body: contentV3, delayMs: 300 },
-        { status: 200, body: contentV2 },
-      )
+    // List is fast, but the selected revision's content is delayed.
+    await page.evaluate(({ revList, c3, c2, c1 }) => {
+      window.historyHarness.list({ status: 200, body: revList })
+      window.historyHarness.content({
+        'rev-3': { status: 200, body: c3, delayMs: 300 },
+        'rev-2': { status: 200, body: c2 },
+        'rev-1': { status: 200, body: c1 },
+      })
       window.historyHarness.render()
-    }, { revList: REV_LIST, contentV3: CONTENT_V3, contentV2: CONTENT_V2 })
+    }, { revList: REV_LIST, c3: CONTENT_V3, c2: CONTENT_V2, c1: CONTENT_V1 })
 
     await page.waitForSelector('.history-revision-item')
     await expect(page.locator('.history-preview-skeleton')).toBeVisible()
@@ -144,30 +141,22 @@ test.describe('HistoryModal — preview', () => {
     await expect(page.locator('.history-preview-skeleton')).toHaveCount(0)
   })
 
-  test('starts current and previous revision fetches together for diff preview', async ({ page }) => {
+  test('prefetches content for all revisions on open', async ({ page }) => {
     await loadHarness(page)
+    await renderModal(page, { fileId: 'my-file-id' })
 
-    await page.evaluate(({ revList, contentV3, contentV2 }) => {
-      window.historyHarness.q(
-        { status: 200, body: revList },
-        { status: 200, body: contentV3, delayMs: 200 },
-        { status: 200, body: contentV2, delayMs: 200 },
-      )
-      window.historyHarness.render()
-    }, { revList: REV_LIST, contentV3: CONTENT_V3, contentV2: CONTENT_V2 })
-
-    await expect.poll(async () => (await page.evaluate(() => window.historyHarness.calls())).length).toBe(3)
-    await page.waitForSelector('.history-preview-diff')
+    await expect.poll(async () => {
+      const urls = (await page.evaluate(() => window.historyHarness.calls())).map(c => c.url)
+      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`/api/drive/revisions/my-file-id/${id}`))
+    }).toBe(true)
   })
 
   test('shows error when preview fetch fails', async ({ page }) => {
     await loadHarness(page)
 
     await page.evaluate(({ revList }) => {
-      window.historyHarness.q(
-        { status: 200, body: revList },
-        { status: 500, body: { error: 'Server error' } },
-      )
+      window.historyHarness.list({ status: 200, body: revList })
+      window.historyHarness.content({ 'rev-3': { status: 500, body: { error: 'Server error' } } })
       window.historyHarness.render()
     }, { revList: REV_LIST })
 
@@ -181,10 +170,8 @@ test.describe('HistoryModal — preview', () => {
     const maliciousContent = '<img src=x onerror="window.__historyXss = true">plain text'
     await page.evaluate(({ content }) => {
       window.__historyXss = false
-      window.historyHarness.q(
-        { status: 200, body: { revisions: [{ id: 'rev-1', modifiedTime: new Date().toISOString() }] } },
-        { status: 200, body: { date: '2026-05-01', content, updated_at: new Date().toISOString() } },
-      )
+      window.historyHarness.list({ status: 200, body: { revisions: [{ id: 'rev-1', modifiedTime: new Date().toISOString() }] } })
+      window.historyHarness.content({ 'rev-1': { status: 200, body: { date: '2026-05-01', content, updated_at: new Date().toISOString() } } })
       window.historyHarness.render()
     }, { content: maliciousContent })
 
@@ -207,14 +194,6 @@ test.describe('HistoryModal — restore button', () => {
     await loadHarness(page)
     await renderModal(page)
 
-    // When clicking rev-2, need rev-2 content and rev-1 (previous) content
-    await page.evaluate(({ contentV2, contentV1 }) => {
-      window.historyHarness.q(
-        { status: 200, body: contentV2 },
-        { status: 200, body: contentV1 },
-      )
-    }, { contentV2: CONTENT_V2, contentV1: CONTENT_V3 })
-
     await page.locator('.history-revision-item').nth(1).click()
     await page.waitForSelector('.history-preview-diff')
 
@@ -224,14 +203,6 @@ test.describe('HistoryModal — restore button', () => {
   test('restore calls onSave with the selected content and closes modal', async ({ page }) => {
     await loadHarness(page)
     await renderModal(page, { baseVersion: '7', savedText: 'current saved content' })
-
-    // Clicking rev-2: need rev-2 content and rev-1 (previous) content
-    await page.evaluate(({ contentV2, contentV1 }) => {
-      window.historyHarness.q(
-        { status: 200, body: contentV2 },
-        { status: 200, body: contentV1 },
-      )
-    }, { contentV2: CONTENT_V2, contentV1: CONTENT_V3 })
 
     await page.locator('.history-revision-item').nth(1).click()
     await page.waitForSelector('.history-preview-diff')
@@ -258,14 +229,6 @@ test.describe('HistoryModal — restore button', () => {
     await loadHarness(page)
     await renderModal(page)
 
-    // Clicking rev-2: need rev-2 content and rev-1 (previous) content
-    await page.evaluate(({ contentV2, contentV1 }) => {
-      window.historyHarness.q(
-        { status: 200, body: contentV2 },
-        { status: 200, body: contentV1 },
-      )
-    }, { contentV2: CONTENT_V2, contentV1: CONTENT_V3 })
-
     await page.locator('.history-revision-item').nth(1).click()
     await page.waitForSelector('.history-preview-diff')
 
@@ -279,14 +242,6 @@ test.describe('HistoryModal — restore button', () => {
   test('restore shows error message on save failure', async ({ page }) => {
     await loadHarness(page)
     await renderModal(page)
-
-    // Clicking rev-2: need rev-2 content and rev-1 (previous) content
-    await page.evaluate(({ contentV2, contentV1 }) => {
-      window.historyHarness.q(
-        { status: 200, body: contentV2 },
-        { status: 200, body: contentV1 },
-      )
-    }, { contentV2: CONTENT_V2, contentV1: CONTENT_V3 })
 
     await page.locator('.history-revision-item').nth(1).click()
     await page.waitForSelector('.history-preview-diff')
@@ -346,7 +301,7 @@ test.describe('HistoryModal — error states', () => {
     await loadHarness(page)
 
     await page.evaluate(() => {
-      window.historyHarness.q({ status: 500, body: { error: 'Server error' } })
+      window.historyHarness.list({ status: 500, body: { error: 'Server error' } })
       window.historyHarness.render()
     })
 
@@ -358,7 +313,7 @@ test.describe('HistoryModal — error states', () => {
     await loadHarness(page)
 
     await page.evaluate(() => {
-      window.historyHarness.q({ status: 401, body: { error: 'Unauthorized' } })
+      window.historyHarness.list({ status: 401, body: { error: 'Unauthorized' } })
       window.historyHarness.render()
     })
 
@@ -373,11 +328,11 @@ test.describe('HistoryModal — API calls', () => {
   test('makes correct requests to Drive Revisions API', async ({ page }) => {
     await loadHarness(page)
     await renderModal(page, { fileId: 'my-file-id' })
-    await page.waitForFunction(() => window.historyHarness.calls().length >= 2)
 
     const calls = await page.evaluate(() => window.historyHarness.calls())
     expect(calls[0].url).toBe('/api/drive/revisions/my-file-id')
-    expect(calls[1].url).toBe('/api/drive/revisions/my-file-id/rev-3')
+    const urls = calls.map(c => c.url)
+    expect(urls).toContain('/api/drive/revisions/my-file-id/rev-3')
   })
 })
 

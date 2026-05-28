@@ -7,12 +7,14 @@ import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
 type FetchCall = { url: string; method: string }
-type QueuedResponse = { status: number; body: unknown; delayMs?: number }
+type Response_ = { status: number; body: unknown; delayMs?: number }
 type SaveCall = { date: string; content: string; baseVersion: string | null; force?: boolean }
 type FullSaveCall = SaveCall & { baseContent?: string | null }
 
 const fetchCalls: FetchCall[] = []
-const queue: QueuedResponse[] = []
+// Responses are matched by URL so concurrent prefetch requests resolve deterministically.
+let listResponse: Response_ | null = null
+const contentResponses = new Map<string, Response_>()
 let renderCount = 0
 const saveCalls: SaveCall[] = []
 const fullSaveCalls: FullSaveCall[] = []
@@ -21,19 +23,29 @@ let closeCalls = 0
 let expiredCalls = 0
 let saveReject: 'conflict' | 'error' | null = null
 
+// content URL: /api/drive/revisions/<fileId>/<revisionId>
+const CONTENT_RE = /\/api\/drive\/revisions\/[^/]+\/([^/]+)$/
+
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-  fetchCalls.push({ url: String(input), method: String(init?.method ?? 'GET') })
-  const resp = queue.shift()
-  if (!resp) throw new Error(`Unexpected fetch: ${String(input)}`)
-  if (resp.delayMs) {
-    await new Promise(r => setTimeout(r, resp.delayMs))
+  const url = String(input)
+  fetchCalls.push({ url, method: String(init?.method ?? 'GET') })
+
+  const match = url.match(CONTENT_RE)
+  const resp = match ? contentResponses.get(match[1]) : listResponse
+
+  // Unconfigured content (e.g. a revision the test didn't supply) resolves as 404
+  // so background prefetch fails quietly without throwing.
+  const effective: Response_ = resp ?? { status: 404, body: { error: 'Not found' } }
+
+  if (effective.delayMs) {
+    await new Promise(r => setTimeout(r, effective.delayMs))
   }
   return {
-    status: resp.status,
-    ok: resp.status >= 200 && resp.status < 300,
+    status: effective.status,
+    ok: effective.status >= 200 && effective.status < 300,
     headers: new Headers(),
-    json: async () => resp.body,
-    text: async () => JSON.stringify(resp.body),
+    json: async () => effective.body,
+    text: async () => JSON.stringify(effective.body),
   } as Response
 }
 
@@ -92,7 +104,12 @@ const root = createRoot(document.getElementById('root') as HTMLElement)
 type RenderOpts = { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean }
 
 window.historyHarness = {
-  q: (...responses: { status: number; body: unknown; delayMs?: number }[]) => queue.push(...responses),
+  // Configure the revision list response.
+  list: (resp: Response_) => { listResponse = resp },
+  // Configure per-revision content responses, keyed by revision id.
+  content: (responses: Record<string, Response_>) => {
+    for (const [id, resp] of Object.entries(responses)) contentResponses.set(id, resp)
+  },
   render: (opts: RenderOpts = {}) => {
     fetchCalls.splice(0)
     saveCalls.splice(0)
@@ -115,6 +132,10 @@ window.historyHarness = {
         />
       </I18nProvider>
     )
+  },
+  reset: () => {
+    listResponse = null
+    contentResponses.clear()
   },
   calls: () => [...fetchCalls],
   saveCalls: () => [...saveCalls],

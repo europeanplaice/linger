@@ -1,10 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { DriveRevisionMeta, LoadedDiaryEntry } from '../types'
+import type { DriveRevisionMeta, LoadedDiaryEntry, DiaryEntry } from '../types'
 import { listRevisions, getRevisionContent } from '../api/driveRevisions'
 import { TokenExpiredError } from '../api/driveEntries'
 import { EntryConflictError } from './useDiary'
 
 const UNSAVED_ID = '__unsaved__'
+
+// On open, eagerly fetch content for the most recent revisions so switching
+// versions and rendering diffs is instant. Capped to avoid hammering Drive.
+const PREFETCH_LIMIT = 50
+const PREFETCH_CONCURRENCY = 6
+
+async function prefetchContents(
+  fileId: string,
+  ids: string[],
+  cache: Map<string, DiaryEntry>,
+  isCancelled: () => boolean,
+): Promise<void> {
+  let cursor = 0
+  async function worker() {
+    while (cursor < ids.length && !isCancelled()) {
+      const id = ids[cursor++]
+      if (cache.has(id)) continue
+      try {
+        const content = await getRevisionContent(fileId, id)
+        if (isCancelled()) return
+        cache.set(id, content)
+      } catch {
+        // Ignore prefetch failures; selecting the revision will retry and surface errors.
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PREFETCH_CONCURRENCY, ids.length) }, worker),
+  )
+}
 
 export interface RevisionsState {
   revisions: DriveRevisionMeta[]
@@ -81,11 +111,13 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
   const [restoreError, setRestoreError] = useState<string | null>(null)
 
   const previewAbortRef = useRef<AbortController | null>(null)
+  const contentCacheRef = useRef<Map<string, DiaryEntry>>(new Map())
   const onExpiredRef = useRef(onExpired)
   useEffect(() => { onExpiredRef.current = onExpired }, [onExpired])
 
   useEffect(() => {
     let cancelled = false
+    contentCacheRef.current = new Map()
     setListLoading(true)
     setListError(null)
     listRevisions(fileId).then(list => {
@@ -96,6 +128,12 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
       } else if (list.length > 0) {
         setSelectedId(list[0].id)
       }
+      void prefetchContents(
+        fileId,
+        list.slice(0, PREFETCH_LIMIT).map(r => r.id),
+        contentCacheRef.current,
+        () => cancelled,
+      )
     }).catch(e => {
       if (cancelled) return
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
@@ -131,13 +169,21 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
     const controller = new AbortController()
     previewAbortRef.current = controller
 
-    setPreviewLoading(true)
+    const cache = contentCacheRef.current
+    const loadContent = (id: string): Promise<DiaryEntry> => {
+      const cached = cache.get(id)
+      if (cached) return Promise.resolve(cached)
+      return getRevisionContent(fileId, id).then(c => { cache.set(id, c); return c })
+    }
+
+    // Skip the loading state when content was prefetched — switching is instant.
+    setPreviewLoading(!cache.has(selectedId))
     setPreviewError(null)
     setDiffHtml(null)
 
-    const currentPromise = getRevisionContent(fileId, selectedId)
+    const currentPromise = loadContent(selectedId)
     const prevId = idx < revisions.length - 1 ? revisions[idx + 1].id : null
-    const prevPromise = prevId ? getRevisionContent(fileId, prevId).catch(() => null) : null
+    const prevPromise = prevId ? loadContent(prevId).catch(() => null) : null
 
     currentPromise.then(async (current) => {
       if (controller.signal.aborted) return
