@@ -43,7 +43,7 @@ interface JwkKey {
   e: string
 }
 
-function base64UrlToUint8Array(input: string): Uint8Array {
+function base64UrlToUint8Array(input: string): Uint8Array<ArrayBuffer> {
   const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4))
   const base64 = (input + pad).replace(/-/g, '+').replace(/_/g, '/')
   const binary = atob(base64)
