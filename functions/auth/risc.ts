@@ -64,7 +64,7 @@ const JWKS_CACHE_TTL_SEC = 3600
 
 async function fetchJwks(forceRefresh = false): Promise<JwkKey[]> {
   const cacheKey = new Request(GOOGLE_RISC_JWKS_URL)
-  const cache = caches.default
+  const cache = await caches.open('risc-jwks')
 
   if (!forceRefresh) {
     const cached = await cache.match(cacheKey)

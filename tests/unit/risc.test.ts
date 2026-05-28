@@ -42,7 +42,7 @@ function makeMockCache(cachedResponse: Response | null = null) {
 }
 
 function mockJwks(cache = makeMockCache()) {
-  vi.stubGlobal('caches', { default: cache })
+  vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue(cache) })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
     new Response(JSON.stringify(FAKE_JWKS), { status: 200, headers: { 'Content-Type': 'application/json' } }),
   ))
@@ -77,7 +77,7 @@ function postRisc(body: string, env: ReturnType<typeof makeEnv>) {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
-  vi.stubGlobal('caches', { default: makeMockCache() })
+  vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue(makeMockCache()) })
 })
 
 afterEach(() => {
