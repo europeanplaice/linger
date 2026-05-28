@@ -13,7 +13,7 @@ function makeJwt(header: object, payload: object): string {
   return `${h}.${p}.fakesig`
 }
 
-const VALID_HEADER = { alg: 'RS256', kid: 'key-1' }
+const VALID_HEADER = { alg: 'RS256', kid: 'key-1', typ: 'secevent+jwt' }
 
 function validPayload(overrides?: object) {
   return {
@@ -86,24 +86,35 @@ describe('onRequestPost (RISC webhook)', () => {
   it('returns 400 for a JWT with wrong number of parts', async () => {
     const response = await postRisc('only.two', makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Malformed JWT')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
+  })
+
+  it('returns 400 when typ is missing', async () => {
+    const jwt = makeJwt({ alg: 'RS256', kid: 'key-1' }, validPayload())
+    const response = await postRisc(jwt, makeEnv())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
+  })
+
+  it('returns 400 when typ is not secevent+jwt', async () => {
+    const jwt = makeJwt({ alg: 'RS256', kid: 'key-1', typ: 'JWT' }, validPayload())
+    const response = await postRisc(jwt, makeEnv())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when alg is not RS256', async () => {
-    const jwt = makeJwt({ alg: 'HS256', kid: 'key-1' }, validPayload())
+    const jwt = makeJwt({ alg: 'HS256', kid: 'key-1', typ: 'secevent+jwt' }, validPayload())
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Unsupported alg')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when kid is missing from header', async () => {
-    const jwt = makeJwt({ alg: 'RS256' }, validPayload())
+    const jwt = makeJwt({ alg: 'RS256', typ: 'secevent+jwt' }, validPayload())
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Missing kid')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when JWKS fetch fails', async () => {
@@ -112,8 +123,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload())
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('JWKS fetch failed')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when kid does not match any JWKS key', async () => {
@@ -126,8 +136,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload())
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('No matching JWK')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when signature verification fails', async () => {
@@ -136,8 +145,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload())
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Signature verification failed')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when iss does not match Google', async () => {
@@ -146,8 +154,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload({ iss: 'https://evil.com' }))
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Invalid iss')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when aud does not match client ID', async () => {
@@ -156,8 +163,35 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload({ aud: 'wrong-client' }))
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Invalid aud')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
+  })
+
+  it('returns 400 when iat is missing', async () => {
+    mockCrypto(true)
+    mockJwks()
+    const { iat: _iat, ...rest } = validPayload()
+    const jwt = makeJwt(VALID_HEADER, rest)
+    const response = await postRisc(jwt, makeEnv())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
+  })
+
+  it('returns 400 when iat is more than 1 hour old', async () => {
+    mockCrypto(true)
+    mockJwks()
+    const jwt = makeJwt(VALID_HEADER, validPayload({ iat: Math.floor(Date.now() / 1000) - 3601 }))
+    const response = await postRisc(jwt, makeEnv())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
+  })
+
+  it('returns 400 when iat is more than 60s in the future', async () => {
+    mockCrypto(true)
+    mockJwks()
+    const jwt = makeJwt(VALID_HEADER, validPayload({ iat: Math.floor(Date.now() / 1000) + 61 }))
+    const response = await postRisc(jwt, makeEnv())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 400 when token is expired', async () => {
@@ -166,8 +200,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const jwt = makeJwt(VALID_HEADER, validPayload({ exp: Math.floor(Date.now() / 1000) - 1 }))
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toContain('Token expired')
+    expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
   it('returns 202 and revokes all sessions for the user', async () => {

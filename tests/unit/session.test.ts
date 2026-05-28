@@ -223,12 +223,34 @@ describe('removeEmailSessionIndex', () => {
 describe('deleteAllSessionsForEmail', () => {
   it('deletes all sessions and removes the index key', async () => {
     const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
-    const del = vi.fn()
+    const del = vi.fn().mockResolvedValue(undefined)
     const env = { SESSIONS: { get, delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
     expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+  })
+
+  it('normalizes email (uppercase) before looking up index', async () => {
+    const get = vi.fn().mockResolvedValue(null)
+    const env = { SESSIONS: { get, delete: vi.fn() } }
+    await deleteAllSessionsForEmail('User@Example.COM', env as any)
+    expect(get).toHaveBeenCalledWith('email_sessions:user@example.com')
+  })
+
+  it('keeps failed session IDs in the index when a delete fails', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
+    const del = vi.fn().mockImplementation((key: string) =>
+      key === 'session:sid1' ? Promise.reject(new Error('KV error')) : Promise.resolve(undefined)
+    )
+    const put = vi.fn()
+    const env = { SESSIONS: { get, delete: del, put } }
+    await deleteAllSessionsForEmail('user@example.com', env as any)
+    expect(put).toHaveBeenCalledWith(
+      'email_sessions:user@example.com',
+      JSON.stringify(['sid1']),
+      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+    )
   })
 
   it('does nothing when no index exists', async () => {

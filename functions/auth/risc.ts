@@ -11,9 +11,12 @@ const HANDLED_EVENT_TYPES = new Set<string>([
   'https://schemas.openid.net/secevent/risc/event-type/account-credential-change-required',
 ])
 
+const MAX_SET_AGE_SEC = 3600
+
 interface JwtHeader {
   alg: string
   kid?: string
+  typ?: string
 }
 
 interface SetEventPayload {
@@ -78,7 +81,8 @@ async function verifyJwt(token: string, clientId: string): Promise<SetClaims> {
     throw new Error('Invalid JWT encoding')
   }
 
-  if (header.alg !== 'RS256') throw new Error(`Unsupported alg: ${header.alg}`)
+  if (header.typ?.toLowerCase() !== 'secevent+jwt') throw new Error('Invalid typ')
+  if (header.alg !== 'RS256') throw new Error('Unsupported alg')
   if (!header.kid) throw new Error('Missing kid')
 
   const keys = await fetchJwks()
@@ -101,14 +105,20 @@ async function verifyJwt(token: string, clientId: string): Promise<SetClaims> {
   )
   if (!valid) throw new Error('Signature verification failed')
 
-  if (claims.iss !== GOOGLE_ISSUER) throw new Error(`Invalid iss: ${claims.iss}`)
+  if (claims.iss !== GOOGLE_ISSUER) throw new Error('Invalid iss')
 
   const audValid = Array.isArray(claims.aud)
     ? claims.aud.includes(clientId)
     : claims.aud === clientId
   if (!audValid) throw new Error('Invalid aud')
 
-  if (typeof claims.exp === 'number' && claims.exp < Math.floor(Date.now() / 1000)) {
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  if (typeof claims.iat !== 'number') throw new Error('Missing iat')
+  if (claims.iat > nowSec + 60) throw new Error('iat is in the future')
+  if (nowSec - claims.iat > MAX_SET_AGE_SEC) throw new Error('SET is too old')
+
+  if (typeof claims.exp === 'number' && claims.exp <= nowSec) {
     throw new Error('Token expired')
   }
 
@@ -118,9 +128,8 @@ async function verifyJwt(token: string, clientId: string): Promise<SetClaims> {
 }
 
 function extractEmail(payload: SetEventPayload): string | null {
-  if (payload.hint_identifier) return payload.hint_identifier
-  if (payload.subject?.email) return payload.subject.email
-  return null
+  const raw = payload.subject?.email || payload.hint_identifier
+  return raw ? raw.trim().toLowerCase() : null
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
@@ -131,7 +140,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
     claims = await verifyJwt(body, env.GOOGLE_CLIENT_ID)
   } catch (err) {
-    return jsonResponse({ error: err instanceof Error ? err.message : 'Verification failed' }, 400)
+    console.error('RISC SET verification failed:', err instanceof Error ? err.message : err)
+    return jsonResponse({ error: 'invalid SET' }, 400)
   }
 
   let handled = 0
@@ -143,16 +153,16 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
     const email = extractEmail(payload)
     if (!email) {
-      console.log(`RISC ${eventType}: no email available (sub=${payload?.subject?.sub ?? 'n/a'}); skipping`)
+      console.log(`RISC ${eventType}: no email available; skipping`)
       continue
     }
 
     try {
       await deleteAllSessionsForEmail(email, env)
       revoked++
-      console.log(`RISC ${eventType}: revoked sessions for ${email}`)
+      console.log(`RISC ${eventType}: revoked sessions`)
     } catch (err) {
-      console.error(`RISC ${eventType}: failed to revoke sessions for ${email}: ${err instanceof Error ? err.message : err}`)
+      console.error(`RISC ${eventType}: failed to revoke sessions: ${err instanceof Error ? err.message : err}`)
     }
   }
 

@@ -96,8 +96,12 @@ export function clearSessionCookie(secure = true): string {
   return `${COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Strict; Path=/; Max-Age=0`
 }
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
 export async function addEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
-  const key = `email_sessions:${email}`
+  const key = `email_sessions:${normalizeEmail(email)}`
   const raw = await env.SESSIONS.get(key)
   const ids: string[] = raw ? (JSON.parse(raw) as string[]) : []
   if (!ids.includes(sessionId)) {
@@ -107,7 +111,7 @@ export async function addEmailSessionIndex(email: string, sessionId: string, env
 }
 
 export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
-  const key = `email_sessions:${email}`
+  const key = `email_sessions:${normalizeEmail(email)}`
   const raw = await env.SESSIONS.get(key)
   if (!raw) return
   const ids = (JSON.parse(raw) as string[]).filter(id => id !== sessionId)
@@ -119,12 +123,17 @@ export async function removeEmailSessionIndex(email: string, sessionId: string, 
 }
 
 export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {
-  const key = `email_sessions:${email}`
+  const key = `email_sessions:${normalizeEmail(email)}`
   const raw = await env.SESSIONS.get(key)
   if (!raw) return
   const ids = JSON.parse(raw) as string[]
-  await Promise.all(ids.map(id => env.SESSIONS.delete(`session:${id}`)))
-  await env.SESSIONS.delete(key)
+  const results = await Promise.allSettled(ids.map(id => env.SESSIONS.delete(`session:${id}`)))
+  const failedIds = ids.filter((_, i) => results[i].status === 'rejected')
+  if (failedIds.length === 0) {
+    await env.SESSIONS.delete(key)
+  } else {
+    await env.SESSIONS.put(key, JSON.stringify(failedIds), { expirationTtl: SESSION_TTL })
+  }
 }
 
 export function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
