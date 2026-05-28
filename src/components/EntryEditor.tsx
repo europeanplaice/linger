@@ -726,7 +726,7 @@ useEffect(() => {
         </div>
       </div>
       <div className={`editor-meta${loading && !isToday ? ' editor-meta--loading' : ''}${isFuture ? ' editor-meta--future' : ''}`}>
-        {isToday && t.common.today}
+        {isToday && <span className="editor-meta-today">{t.common.today}</span>}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
         <AnimatePresence initial={false}>

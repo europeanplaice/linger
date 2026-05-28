@@ -847,9 +847,15 @@ body {
   border-radius: 50%;
   background: var(--dot);
   margin-top: 1px;
-  visibility: hidden;
+  /* opacity/scale (not visibility) so the dot can animate in. The layout box is
+     always reserved, keeping the grid aligned. A day cell mounts already in its
+     final state, so this only animates when .has-entry is added to a live cell
+     (i.e. the moment you save a day's first entry) — not on month navigation. */
+  opacity: 0;
+  transform: scale(0);
+  transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.cal-day.has-entry .dot { visibility: visible; }
+.cal-day.has-entry .dot { opacity: 1; transform: scale(1); }
 .cal-day-empty { visibility: hidden; pointer-events: none; cursor: default; }
 
 /* ── Sidebar bottom bar (account + settings) ── */
@@ -1516,7 +1522,7 @@ dialog.export-confirm-dialog::backdrop {
   min-height: 0;
   padding: 0.9rem 2rem 1.5rem;
   position: relative;
-  max-width: 800px;
+  max-width: 680px;
   margin: 0 auto;
   width: 100%;
 }
@@ -1601,6 +1607,23 @@ dialog.export-confirm-dialog::backdrop {
 .editor-meta-unsaved {
   color: var(--text-muted);
 }
+.editor-meta-today {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  line-height: 1.4;
+}
+/* On today, tint the weekday accent to echo the eyebrow pill. */
+.entry-date-text[data-today] .entry-date-weekday {
+  color: var(--accent);
+}
 .entry-date-label-short {
   display: none;
 }
@@ -1654,7 +1677,18 @@ dialog.export-confirm-dialog::backdrop {
   justify-content: center;
   gap: 0.45rem;
   min-width: 5.7rem;
-  transition: opacity 0.4s ease;
+  /* Transparent border keeps width identical to the ghost (idle) state below,
+     so the button doesn't shift when changes appear. */
+  border: 1px solid transparent;
+  transition: opacity 0.4s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+/* Idle state (nothing to save): quiet ghost button instead of a loud solid
+   accent, so the resting editor stays calm. Saving/saved keep the solid look. */
+.editor-actions .btn-save:disabled:not(.btn-saving):not(.btn-saved) {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+  opacity: 1;
 }
 .editor-actions .btn-refresh-entry {
   background: transparent;
@@ -2299,22 +2333,25 @@ dialog.history-dialog::backdrop {
   padding: 0;
   margin: 0;
 }
+/* Diff highlights derive from the accent (green) and danger (red) tokens via
+   color-mix, so they sit in the same warm/sage family as the rest of the UI
+   instead of clashing bootstrap green/red. */
 .diff-add {
-  background: #d4edda;
-  color: #155724;
+  background: color-mix(in srgb, var(--accent) 22%, var(--card-bg));
+  color: var(--accent-hover);
 }
 .diff-remove {
-  background: #f8d7da;
-  color: #721c24;
+  background: color-mix(in srgb, var(--danger) 18%, var(--card-bg));
+  color: var(--danger-hover);
   text-decoration: line-through;
 }
 .diff-add-word {
-  background: #d4edda;
-  color: #155724;
+  background: color-mix(in srgb, var(--accent) 34%, var(--card-bg));
+  color: var(--accent-hover);
 }
 .diff-remove-word {
-  background: #f8d7da;
-  color: #721c24;
+  background: color-mix(in srgb, var(--danger) 28%, var(--card-bg));
+  color: var(--danger-hover);
   text-decoration: line-through;
 }
 [data-theme="dark"] .diff-add { background: #2d4a2a; color: #98c379; }
