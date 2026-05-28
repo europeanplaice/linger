@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import type { LoadedDiaryEntry } from '../types'
-import { todayYmd, yesterdayYmd, weekdayLabel, diaryDateLabel } from '../utils/date'
+import { todayYmd, weekdayLabel, diaryDateLabel } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
@@ -97,7 +97,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const discardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
-  const [lastModified, setLastModified] = useState<string | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
@@ -108,8 +107,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const tokenExpiredForDateRef = useRef<string | null>(null)
   const weekday = weekdayLabel(date, locale)
   const isToday = date === todayYmd()
-  const isYesterday = date === yesterdayYmd()
   const isFuture = date > todayYmd()
+  const daysDiff = (() => {
+    const today = todayYmd()
+    const [ty, tm, td] = today.split('-').map(Number)
+    const [ey, em, ed] = date.split('-').map(Number)
+    const ms = new Date(ey, em - 1, ed).getTime() - new Date(ty, tm - 1, td).getTime()
+    return Math.round(ms / 86400000)
+  })()
 
   // Use a ref to track the latest onSave without restarting debounce timers
   const onSaveRef = useRef(onSave)
@@ -151,7 +156,7 @@ useEffect(() => {
     setText(driveText)
     setSavedTextValue(driveText)
     setBaseVersionValue(entry?.meta.version ?? null)
-    setLastModified(entry?.meta.modifiedTime ?? null)
+
     fileIdRef.current = entry?.meta.id ?? null
   }, [setBaseVersionValue, setSavedTextValue])
 
@@ -162,7 +167,7 @@ useEffect(() => {
     setText('')
     setSavedTextValue('')
     setBaseVersionValue(null)
-    setLastModified(null)
+
     setStatus('')
     setLoadFailed(false)
     setHasConflict(false)
@@ -212,7 +217,7 @@ useEffect(() => {
 
     setSavedTextValue(content)
     setBaseVersionValue(reauthSaveResult.meta.version ?? null)
-    setLastModified(reauthSaveResult.meta.modifiedTime ?? null)
+
     fileIdRef.current = reauthSaveResult.meta.id
 
     if (currentText === previousSavedText || currentText === content) {
@@ -241,11 +246,9 @@ useEffect(() => {
       const currentText = textRef.current
       const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
       const newVersion = saved.meta.version ?? null
-      const newModified = saved.meta.modifiedTime ?? null
       const newId = saved.meta.id
       setSavedTextValue(currentText)
       setBaseVersionValue(newVersion)
-      setLastModified(newModified)
       fileIdRef.current = newId
       setStatus(savedStatus)
       success = true
@@ -538,7 +541,6 @@ useEffect(() => {
           setText(content)
           setSavedTextValue(content)
           setBaseVersionValue(result.meta.version ?? null)
-          setLastModified(result.meta.modifiedTime ?? null)
           fileIdRef.current = result.meta.id
           setShowHistoryModal(false)
         }}
@@ -732,25 +734,9 @@ useEffect(() => {
           </div>
         </div>
       </div>
-      <div className={`editor-meta${loading && !isToday && !isYesterday ? ' editor-meta--loading' : ''}${isFuture ? ' editor-meta--future' : ''}`}>
-        {isToday && !lastModified && (
-          <>{t.entry.todaysEntry}</>
-        )}
-        {isToday && lastModified && (
-          <>{t.entry.entryLastModified(t.entry.todaysEntry)} <relative-time datetime={lastModified} /></>
-        )}
-        {isYesterday && !lastModified && (
-          <>{t.entry.yesterdaysEntry}</>
-        )}
-        {isYesterday && lastModified && (
-          <>{t.entry.entryLastModified(t.entry.yesterdaysEntry)} <relative-time datetime={lastModified} /></>
-        )}
-        {isFuture && (
-          <>{t.entry.futureEntry}</>
-        )}
-        {!isToday && !isYesterday && !isFuture && lastModified && (
-          <>{t.entry.lastModified} <relative-time datetime={lastModified} /></>
-        )}
+      <div className={`editor-meta${loading && !isToday ? ' editor-meta--loading' : ''}${isFuture ? ' editor-meta--future' : ''}`}>
+        {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
+        {isFuture && t.entry.daysAhead(daysDiff)}
       </div>
       {shareMsgVisible && (
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>
