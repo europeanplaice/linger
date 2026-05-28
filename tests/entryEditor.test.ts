@@ -887,6 +887,22 @@ test.describe('EntryEditor — editor meta info', () => {
     await expect(meta).toHaveText('Today')
   })
 
+  test('renders the Today label as an accent pill', async ({ page }) => {
+    await loadHarness(page)
+    const today = await page.evaluate(() => {
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })
+    await renderEditor(page, { date: today, initialContent: '', version: null })
+
+    const pill = page.locator('.editor-meta-today')
+    await expect(pill).toBeVisible()
+    await expect(pill).toHaveText('Today')
+    // Past/future labels stay plain text, so the pill must not appear for them
+    await renderEditor(page, { date: '2026-04-15', initialContent: '', version: null })
+    await expect(page.locator('.editor-meta-today')).toHaveCount(0)
+  })
+
   test('shows days ago for past dates with content', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-04-15', initialContent: 'past content', version: '1' })
@@ -1001,5 +1017,36 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
 
     await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+  })
+})
+
+const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+
+test.describe('EntryEditor — save button appearance', () => {
+  test('save button is a quiet ghost when idle, solid accent when dirty (desktop)', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    const save = page.locator('button.btn-save')
+    // Idle: nothing to save → transparent fill (ghost)
+    await expect(save).toBeDisabled()
+    expect(await save.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(TRANSPARENT)
+
+    // Dirty: solid accent fill (poll past the background-color transition)
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await expect(save).toBeEnabled()
+    await expect.poll(() => save.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(TRANSPARENT)
+  })
+
+  test('mobile save FAB stays solid even when idle', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    const save = page.locator('button.btn-save')
+    await expect(save).toBeDisabled()
+    const bg = await save.evaluate(el => getComputedStyle(el).backgroundColor)
+    expect(bg).not.toBe(TRANSPARENT)
   })
 })
