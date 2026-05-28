@@ -2587,6 +2587,13 @@ dialog.history-dialog::backdrop {
     box-shadow: 0 6px 18px var(--save-btn-shadow);
     outline: none;
   }
+  /* The mobile save FAB stays solid even when idle — a floating action button
+     reads as broken if it goes transparent. (Overrides the desktop ghost rule.) */
+  .editor-actions .btn-save:disabled:not(.btn-saving):not(.btn-saved) {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--on-accent);
+  }
   .editor-actions .btn-delete {
     width: 2.75rem;
     height: 2.75rem;
