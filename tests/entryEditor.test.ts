@@ -852,16 +852,16 @@ test.describe('EntryEditor — date switch cancellation', () => {
 })
 
 test.describe('EntryEditor — editor meta info', () => {
-  test('shows last modified timestamp for saved entries', async ({ page }) => {
+  test('shows days ago for saved past entries', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Last modified:')
+    await expect(meta).toContainText('days ago')
   })
 
-  test('shows Today\'s entry label for today with no content', async ({ page }) => {
+  test('shows Today label for today with no content', async ({ page }) => {
     await loadHarness(page)
     const today = await page.evaluate(() => {
       const d = new Date()
@@ -871,10 +871,10 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('Today\'s entry')
+    await expect(meta).toHaveText('Today')
   })
 
-  test('shows Today\'s entry with last modified for today with content', async ({ page }) => {
+  test('shows Today label for today with content', async ({ page }) => {
     await loadHarness(page)
     const today = await page.evaluate(() => {
       const d = new Date()
@@ -884,27 +884,29 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Today\'s entry · Last modified:')
+    await expect(meta).toHaveText('Today')
   })
 
-  test('shows only last modified for past dates with content', async ({ page }) => {
+  test('shows days ago for past dates with content', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-04-15', initialContent: 'past content', version: '1' })
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Last modified:')
-    await expect(meta).not.toContainText('Today\'s entry')
+    await expect(meta).toContainText('days ago')
+    await expect(meta).not.toContainText('Today')
   })
 
-  test('hides editor meta when no entry exists for past dates', async ({ page }) => {
+  test('shows days ago for past dates with no content', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-04-15', initialContent: '', version: null })
 
-    await expect(page.locator('.editor-meta')).toBeHidden()
+    const meta = page.locator('.editor-meta')
+    await expect(meta).toBeVisible()
+    await expect(meta).toContainText('days ago')
   })
 
-  test('shows Yesterday\'s entry label for yesterday with no content', async ({ page }) => {
+  test('shows 1 day ago for yesterday with no content', async ({ page }) => {
     await loadHarness(page)
     const yesterday = await page.evaluate(() => {
       const d = new Date()
@@ -915,10 +917,10 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('Yesterday\'s entry')
+    await expect(meta).toHaveText('1 day ago')
   })
 
-  test('shows Yesterday\'s entry with last modified for yesterday with content', async ({ page }) => {
+  test('shows 1 day ago for yesterday with content', async ({ page }) => {
     await loadHarness(page)
     const yesterday = await page.evaluate(() => {
       const d = new Date()
@@ -929,20 +931,20 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toContainText('Yesterday\'s entry · Last modified:')
+    await expect(meta).toHaveText('1 day ago')
   })
 
-  test('past dates (not today or yesterday) do not show Yesterday\'s entry label', async ({ page }) => {
+  test('past dates beyond yesterday show days ago, not 1 day ago', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-04-14', initialContent: 'old content', version: '1' })
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).not.toContainText('Yesterday\'s entry')
-    await expect(meta).toContainText('Last modified:')
+    await expect(meta).not.toHaveText('1 day ago')
+    await expect(meta).toContainText('days ago')
   })
 
-  test('shows future date warning for future dates with no content', async ({ page }) => {
+  test('shows days from now for future dates with no content', async ({ page }) => {
     await loadHarness(page)
     const tomorrow = await page.evaluate(() => {
       const d = new Date()
@@ -953,10 +955,10 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('This is a future date')
+    await expect(meta).toHaveText('1 day from now')
   })
 
-  test('shows future date warning for future dates with content, not last modified', async ({ page }) => {
+  test('shows days from now for future dates with content', async ({ page }) => {
     await loadHarness(page)
     const tomorrow = await page.evaluate(() => {
       const d = new Date()
@@ -967,38 +969,37 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('This is a future date')
-    await expect(meta).not.toContainText('Last modified:')
+    await expect(meta).toHaveText('1 day from now')
   })
 })
 
-test.describe('EntryEditor — dirty dot indicator', () => {
-  test('dot is invisible when content is clean', async ({ page }) => {
+test.describe('EntryEditor — unsaved indicator', () => {
+  test('unsaved label is absent when content is clean', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '0')
+    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
   })
 
-  test('dot becomes visible when user types unsaved changes', async ({ page }) => {
+  test('unsaved label appears when user types unsaved changes', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
     await page.fill('textarea.editor-textarea', 'edited content')
 
-    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '1')
+    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
   })
 
-  test('dot disappears after saving', async ({ page }) => {
+  test('unsaved label disappears after saving', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
     await page.fill('textarea.editor-textarea', 'edited content')
-    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '1')
+    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
 
     await page.locator('button.btn-save').click()
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
 
-    await expect(page.locator('.dirty-dot')).toHaveCSS('opacity', '0')
+    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
   })
 })
