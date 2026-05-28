@@ -111,13 +111,21 @@ test.describe('HistoryModal — preview', () => {
     await expect(page.locator('.history-preview-diff')).toContainText(CONTENT_V3.content)
   })
 
-  test('clicking a different revision shows its content from cache', async ({ page }) => {
+  test('clicking a prefetched revision shows its content instantly without a skeleton', async ({ page }) => {
     await loadHarness(page)
     await renderModal(page)
+
+    // Wait for all revisions to be prefetched so the next selection is a cache hit.
+    await expect.poll(async () => {
+      const urls = (await page.evaluate(() => window.historyHarness.calls())).map(c => c.url)
+      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`/api/drive/revisions/file-123/${id}`))
+    }).toBe(true)
 
     await page.locator('.history-revision-item').nth(1).click()
 
     await expect(page.locator('.history-revision-item').nth(1)).toHaveClass(/selected/)
+    // Prefetched content renders synchronously — the loading skeleton must never appear.
+    await expect(page.locator('.history-preview-skeleton')).toHaveCount(0)
     await expect(page.locator('.history-preview-diff')).toContainText(CONTENT_V2.content)
   })
 
