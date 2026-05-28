@@ -6,10 +6,9 @@ const GOOGLE_RISC_JWKS_URL = 'https://accounts.google.com/o/oauth2/risc/jwks'
 
 const HANDLED_EVENT_TYPES = new Set<string>([
   'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked',
-  'https://schemas.openid.net/secevent/risc/event-type/tokens-revoked',
+  'https://schemas.openid.net/secevent/oauth/event-type/tokens-revoked',  // oauth namespace, not risc
   'https://schemas.openid.net/secevent/risc/event-type/account-disabled',
-  'https://schemas.openid.net/secevent/risc/event-type/account-purged',
-  'https://schemas.openid.net/secevent/risc/event-type/credential-compromise',
+  'https://schemas.openid.net/secevent/risc/event-type/account-credential-change-required',
 ])
 
 interface JwtHeader {

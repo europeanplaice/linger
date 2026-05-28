@@ -229,12 +229,11 @@ describe('onRequestPost (RISC webhook)', () => {
   })
 
   it.each([
-    'sessions-revoked',
-    'tokens-revoked',
-    'account-disabled',
-    'account-purged',
-    'credential-compromise',
-  ])('revokes sessions for RISC event type: %s', async (eventSlug) => {
+    ['risc', 'sessions-revoked'],
+    ['oauth', 'tokens-revoked'],
+    ['risc', 'account-disabled'],
+    ['risc', 'account-credential-change-required'],
+  ])('revokes sessions for event %s/%s', async (ns, eventSlug) => {
     mockCrypto(true)
     mockJwks()
     const del = vi.fn()
@@ -244,7 +243,7 @@ describe('onRequestPost (RISC webhook)', () => {
     })
     const payload = validPayload({
       events: {
-        [`https://schemas.openid.net/secevent/risc/event-type/${eventSlug}`]: {
+        [`https://schemas.openid.net/secevent/${ns}/event-type/${eventSlug}`]: {
           hint_identifier: 'user@example.com',
         },
       },
