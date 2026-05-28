@@ -620,15 +620,6 @@ useEffect(() => {
               data-today={isToday || undefined}
               aria-label={isToday ? `${diaryDateLabel(date, true, 'long', locale, true)}${weekday ? ` ${weekday}` : ''}, ${t.common.today}` : undefined}
             >
-              <motion.span
-                className="dirty-dot"
-                initial={false}
-                animate={isDirty
-                  ? { opacity: 1, width: '0.42rem', marginRight: 0 }
-                  : { opacity: 0, width: 0, marginRight: '-0.4rem' }
-                }
-                transition={{ duration: 0.2, ease: 'easeInOut' }}
-              />
               <span className="entry-date-label-full">{diaryDateLabel(date, true, 'long', locale, true)}</span>
               <span className="entry-date-label-short">{diaryDateLabel(date, true, 'short', locale, true)}</span>
               {weekday && <span className="entry-date-weekday">{weekday}</span>}
@@ -735,8 +726,21 @@ useEffect(() => {
         </div>
       </div>
       <div className={`editor-meta${loading && !isToday ? ' editor-meta--loading' : ''}${isFuture ? ' editor-meta--future' : ''}`}>
+        {isToday && t.common.today}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
+        <AnimatePresence initial={false}>
+          {isDirty && !autoSave && !loading && (
+            <motion.span
+              key="unsaved"
+              className="editor-meta-unsaved"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >{` · ${t.common.unsaved}`}</motion.span>
+          )}
+        </AnimatePresence>
       </div>
       {shareMsgVisible && (
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>

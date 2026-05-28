@@ -1598,12 +1598,8 @@ dialog.export-confirm-dialog::backdrop {
   line-height: 1.15;
   min-width: 0;
 }
-.dirty-dot {
-  flex: 0 0 auto;
-  height: 0.42rem;
-  border-radius: 50%;
-  background: var(--today-ring);
-  align-self: center;
+.editor-meta-unsaved {
+  color: var(--text-muted);
 }
 .entry-date-label-short {
   display: none;
