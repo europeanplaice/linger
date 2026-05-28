@@ -169,8 +169,9 @@ describe('onRequestPost (RISC webhook)', () => {
   it('returns 400 when iat is missing', async () => {
     mockCrypto(true)
     mockJwks()
-    const { iat: _, ...rest } = validPayload()
-    const jwt = makeJwt(VALID_HEADER, rest)
+    const payload = validPayload()
+    delete (payload as Record<string, unknown>).iat
+    const jwt = makeJwt(VALID_HEADER, payload)
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'invalid SET' })
