@@ -60,10 +60,31 @@ function base64UrlDecodeToString(input: string): string {
   return new TextDecoder().decode(base64UrlToUint8Array(input))
 }
 
-async function fetchJwks(): Promise<JwkKey[]> {
+const JWKS_CACHE_TTL_SEC = 3600
+
+async function fetchJwks(forceRefresh = false): Promise<JwkKey[]> {
+  const cacheKey = new Request(GOOGLE_RISC_JWKS_URL)
+  const cache = caches.default
+
+  if (!forceRefresh) {
+    const cached = await cache.match(cacheKey)
+    if (cached) {
+      const json = await cached.json() as { keys: JwkKey[] }
+      return json.keys
+    }
+  }
+
   const resp = await fetch(GOOGLE_RISC_JWKS_URL)
   if (!resp.ok) throw new Error(`JWKS fetch failed: ${resp.status}`)
   const json = await resp.json() as { keys: JwkKey[] }
+
+  await cache.put(cacheKey, new Response(JSON.stringify(json), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': `public, max-age=${JWKS_CACHE_TTL_SEC}`,
+    },
+  }))
+
   return json.keys
 }
 
@@ -85,9 +106,14 @@ async function verifyJwt(token: string, clientId: string): Promise<SetClaims> {
   if (header.alg !== 'RS256') throw new Error('Unsupported alg')
   if (!header.kid) throw new Error('Missing kid')
 
-  const keys = await fetchJwks()
-  const jwk = keys.find(k => k.kid === header.kid)
-  if (!jwk) throw new Error(`No matching JWK for kid ${header.kid}`)
+  let keys = await fetchJwks()
+  let jwk = keys.find(k => k.kid === header.kid)
+  if (!jwk) {
+    // kid not in cache — Google may have rotated keys, force refresh once
+    keys = await fetchJwks(true)
+    jwk = keys.find(k => k.kid === header.kid)
+  }
+  if (!jwk) throw new Error('No matching JWK for kid')
 
   const key = await crypto.subtle.importKey(
     'jwk',

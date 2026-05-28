@@ -34,10 +34,19 @@ function validPayload(overrides?: object) {
 
 const FAKE_JWKS = { keys: [{ kty: 'RSA', kid: 'key-1', n: 'fake-n', e: 'AQAB' }] }
 
-function mockJwks() {
+function makeMockCache(cachedResponse: Response | null = null) {
+  return {
+    match: vi.fn().mockResolvedValue(cachedResponse),
+    put: vi.fn().mockResolvedValue(undefined),
+  }
+}
+
+function mockJwks(cache = makeMockCache()) {
+  vi.stubGlobal('caches', { default: cache })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
     new Response(JSON.stringify(FAKE_JWKS), { status: 200, headers: { 'Content-Type': 'application/json' } }),
   ))
+  return cache
 }
 
 function mockCrypto(verifyResult: boolean) {
@@ -68,6 +77,7 @@ function postRisc(body: string, env: ReturnType<typeof makeEnv>) {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  vi.stubGlobal('caches', { default: makeMockCache() })
 })
 
 afterEach(() => {
@@ -222,6 +232,44 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
     expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+  })
+
+  it('uses cached JWKS and skips fetch on cache hit', async () => {
+    mockCrypto(true)
+    const cachedResp = new Response(JSON.stringify(FAKE_JWKS), { headers: { 'Content-Type': 'application/json' } })
+    const cache = mockJwks(makeMockCache(cachedResp))
+    const jwt = makeJwt(VALID_HEADER, validPayload())
+
+    await postRisc(jwt, makeEnv())
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    expect(cache.put).not.toHaveBeenCalled()
+  })
+
+  it('fetches and caches JWKS on cache miss', async () => {
+    mockCrypto(true)
+    const cache = mockJwks()
+    const jwt = makeJwt(VALID_HEADER, validPayload())
+
+    await postRisc(jwt, makeEnv())
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce()
+    expect(cache.put).toHaveBeenCalledOnce()
+  })
+
+  it('force-refreshes JWKS when kid is not found in cache', async () => {
+    mockCrypto(true)
+    const staleJwks = { keys: [{ kty: 'RSA', kid: 'old-key', n: 'n', e: 'e' }] }
+    const cachedResp = new Response(JSON.stringify(staleJwks), { headers: { 'Content-Type': 'application/json' } })
+    const cache = mockJwks(makeMockCache(cachedResp))
+    const jwt = makeJwt(VALID_HEADER, validPayload()) // kid: 'key-1', not in stale cache
+
+    const response = await postRisc(jwt, makeEnv())
+
+    // Should have fetched fresh JWKS (kid found after refresh → 202)
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce()
+    expect(response.status).toBe(202)
+    expect(cache.put).toHaveBeenCalledOnce()
   })
 
   it('accepts aud as an array containing the client ID', async () => {
