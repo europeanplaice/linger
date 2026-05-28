@@ -130,7 +130,10 @@ describe('onRequestGet (OAuth callback)', () => {
       }),
     ))
     const put = vi.fn()
-    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put } })
+    const get = vi.fn().mockImplementation((key: string) =>
+      Promise.resolve(key.startsWith('email_sessions:') ? null : 'verifier')
+    )
+    const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put } })
     const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
 
     await onRequestGet({ request, env } as any)

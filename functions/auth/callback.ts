@@ -1,5 +1,5 @@
 import type { Env, SessionData } from '../_shared/session'
-import { saveSession, makeSessionCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { saveSession, addEmailSessionIndex, makeSessionCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
@@ -66,6 +66,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     ...(email ? { email } : {}),
   }
   await saveSession(sessionId, session, env)
+  if (email) {
+    await addEmailSessionIndex(email, sessionId, env)
+  }
 
   const safeReturnPath = (returnPath.startsWith('/') && !returnPath.startsWith('//')) ? returnPath : '/'
 

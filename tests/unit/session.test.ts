@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   parseSessionId, getSession, saveSession, getValidAccessToken,
   makeSessionCookie, clearSessionCookie, jsonResponse,
+  addEmailSessionIndex, removeEmailSessionIndex, deleteAllSessionsForEmail,
+  SESSION_TTL,
 } from '../../functions/_shared/session'
 
 describe('jsonResponse', () => {
@@ -159,5 +161,81 @@ describe('getValidAccessToken', () => {
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toThrow('Token refresh failed: 401')
+  })
+})
+
+describe('addEmailSessionIndex', () => {
+  it('creates a new index entry with the session ID', async () => {
+    const get = vi.fn().mockResolvedValue(null)
+    const put = vi.fn()
+    const env = { SESSIONS: { get, put } }
+    await addEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid1']), { expirationTtl: SESSION_TTL })
+  })
+
+  it('appends to an existing index', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+    const put = vi.fn()
+    const env = { SESSIONS: { get, put } }
+    await addEmailSessionIndex('user@example.com', 'sid2', env as any)
+    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid1', 'sid2']), { expirationTtl: SESSION_TTL })
+  })
+
+  it('does not duplicate an already-indexed session ID', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+    const put = vi.fn()
+    const env = { SESSIONS: { get, put } }
+    await addEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(put).not.toHaveBeenCalled()
+  })
+})
+
+describe('removeEmailSessionIndex', () => {
+  it('removes a session ID from the index', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
+    const put = vi.fn()
+    const del = vi.fn()
+    const env = { SESSIONS: { get, put, delete: del } }
+    await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid2']), { expirationTtl: SESSION_TTL })
+    expect(del).not.toHaveBeenCalled()
+  })
+
+  it('deletes the index key when the last session is removed', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+    const del = vi.fn()
+    const env = { SESSIONS: { get, delete: del } }
+    await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+  })
+
+  it('does nothing when no index exists', async () => {
+    const get = vi.fn().mockResolvedValue(null)
+    const put = vi.fn()
+    const del = vi.fn()
+    const env = { SESSIONS: { get, put, delete: del } }
+    await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(put).not.toHaveBeenCalled()
+    expect(del).not.toHaveBeenCalled()
+  })
+})
+
+describe('deleteAllSessionsForEmail', () => {
+  it('deletes all sessions and removes the index key', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
+    const del = vi.fn()
+    const env = { SESSIONS: { get, delete: del } }
+    await deleteAllSessionsForEmail('user@example.com', env as any)
+    expect(del).toHaveBeenCalledWith('session:sid1')
+    expect(del).toHaveBeenCalledWith('session:sid2')
+    expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+  })
+
+  it('does nothing when no index exists', async () => {
+    const get = vi.fn().mockResolvedValue(null)
+    const del = vi.fn()
+    const env = { SESSIONS: { get, delete: del } }
+    await deleteAllSessionsForEmail('user@example.com', env as any)
+    expect(del).not.toHaveBeenCalled()
   })
 })

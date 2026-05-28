@@ -9,10 +9,11 @@ afterEach(() => {
 describe('logout handler', () => {
   it('deletes session and clears cookie', async () => {
     const del = vi.fn()
+    const get = vi.fn().mockResolvedValue(null)
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid123' },
     })
-    const env = { SESSIONS: { delete: del }, SESSION_DOMAIN: 'https://example.com' }
+    const env = { SESSIONS: { get, delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
     const response = await onLogout({ request, env } as any)
 
@@ -20,6 +21,30 @@ describe('logout handler', () => {
     expect(del).toHaveBeenCalledWith('session:sid123')
     const cookie = response.headers.get('Set-Cookie')
     expect(cookie).toContain('Max-Age=0')
+  })
+
+  it('removes email index entry on logout', async () => {
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 9999999999999, email: 'user@example.com' }
+    const get = vi.fn().mockImplementation((key: string) => {
+      if (key === 'session:sid123') return Promise.resolve(JSON.stringify(session))
+      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid123', 'sid456']))
+      return Promise.resolve(null)
+    })
+    const del = vi.fn()
+    const put = vi.fn()
+    const request = new Request('http://localhost/auth/logout', {
+      headers: { Cookie: 'linger_session=sid123' },
+    })
+    const env = { SESSIONS: { get, delete: del, put }, SESSION_DOMAIN: 'https://example.com' }
+
+    await onLogout({ request, env } as any)
+
+    expect(put).toHaveBeenCalledWith(
+      'email_sessions:user@example.com',
+      JSON.stringify(['sid456']),
+      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+    )
+    expect(del).toHaveBeenCalledWith('session:sid123')
   })
 
   it('works without a session cookie', async () => {
@@ -52,10 +77,11 @@ describe('logout handler', () => {
   })
 
   it('omits Secure flag on HTTP domains', async () => {
+    const get = vi.fn().mockResolvedValue(null)
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid' },
     })
-    const env = { SESSIONS: { delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
+    const env = { SESSIONS: { get, delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
 
     const response = await onLogout({ request, env } as any)
 
