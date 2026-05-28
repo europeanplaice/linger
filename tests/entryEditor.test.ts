@@ -976,14 +976,14 @@ test.describe('EntryEditor — editor meta info', () => {
 test.describe('EntryEditor — unsaved indicator', () => {
   test('unsaved label is absent when content is clean', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
   })
 
   test('unsaved label appears when user types unsaved changes', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'edited content')
 
@@ -992,7 +992,7 @@ test.describe('EntryEditor — unsaved indicator', () => {
 
   test('unsaved label disappears after saving', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'edited content')
     await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
