@@ -341,7 +341,9 @@ export default function App() {
   // quickly through months only fetches the one the user settles on; concurrency
   // is bounded inside diary.prefetch.
   const monthPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const displayedMonthRef = useRef<{ year: number; month: number } | null>(null)
   const prefetchMonth = useCallback((year: number, month: number) => {
+    displayedMonthRef.current = { year, month }
     if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
     const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`
     monthPrefetchTimerRef.current = setTimeout(() => {
@@ -349,6 +351,24 @@ export default function App() {
       if (monthDates.length > 0) diaryPrefetchRef.current(monthDates, 3).catch(() => {})
     }, 250)
   }, [])
+
+  const prefetchDisplayedMonth = useCallback(() => {
+    const m = displayedMonthRef.current
+    if (m) prefetchMonth(m.year, m.month)
+  }, [prefetchMonth])
+
+  // Opening the sidebar on mobile reveals the calendar — a strong signal the
+  // user is about to tap a date in the month on screen, so warm it.
+  useEffect(() => {
+    if (sidebarOpen) prefetchDisplayedMonth()
+  }, [sidebarOpen, prefetchDisplayedMonth])
+
+  // On a cold first load the entry list can resolve after the calendar's
+  // mount-time prefetch already ran against an empty list; re-warm the month in
+  // view once entries are available.
+  useEffect(() => {
+    if (initialLoadComplete) prefetchDisplayedMonth()
+  }, [initialLoadComplete, prefetchDisplayedMonth])
 
   useEffect(() => () => {
     if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
