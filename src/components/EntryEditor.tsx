@@ -32,6 +32,7 @@ interface Props {
   onCancelNavigation: () => void
   reauthSaveResult: LoadedDiaryEntry | null
   isSignedIn: boolean
+  isOnline: boolean
   onExpired: () => void
   refreshSignal?: number
 }
@@ -78,7 +79,7 @@ function SpinnerIcon() {
 }
 
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, onExpired, refreshSignal = 0 }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -104,6 +105,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [hasConflict, setHasConflict] = useState(false)
   const [conflictRemote, setConflictRemote] = useState<LoadedDiaryEntry | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  // Set when a save couldn't reach Drive because the device is offline; the
+  // edits stay dirty and are retried automatically once connectivity returns.
+  const [pendingOfflineSave, setPendingOfflineSave] = useState(false)
+  const pendingOfflineSaveRef = useRef(pendingOfflineSave)
+  useEffect(() => { pendingOfflineSaveRef.current = pendingOfflineSave }, [pendingOfflineSave])
   const tokenExpiredForDateRef = useRef<string | null>(null)
   const weekday = weekdayLabel(date, locale)
   const isToday = date === todayYmd()
@@ -172,6 +178,7 @@ useEffect(() => {
     setLoadFailed(false)
     setHasConflict(false)
     setConflictRemote(null)
+    setPendingOfflineSave(false)
     setDiscardedText(null)
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
@@ -250,10 +257,18 @@ useEffect(() => {
       setSavedTextValue(currentText)
       setBaseVersionValue(newVersion)
       fileIdRef.current = newId
+      setPendingOfflineSave(false)
       setStatus(savedStatus)
       success = true
       return true
     } catch (e) {
+      // Offline: the fetch never reached Drive. Keep the edits dirty and let the
+      // reconnect effect retry rather than reporting a hard failure.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setPendingOfflineSave(true)
+        if (explicit) setStatus(t.entry.offlineSavePending)
+        return false
+      }
       if (!explicit) {
         console.error('Auto-save failed:', e)
         return false
@@ -415,6 +430,14 @@ useEffect(() => {
     }, AUTO_SAVE_MS)
     return () => window.clearTimeout(id)
   }, [text, isDirty, save, autoSave])
+
+  // When connectivity returns, retry a save that failed while offline.
+  useEffect(() => {
+    if (!isOnline || !pendingOfflineSaveRef.current) return
+    if (textRef.current === savedTextRef.current) { setPendingOfflineSave(false); return }
+    if (savingRef.current || hasConflictRef.current || loadingRef.current || loadFailedRef.current) return
+    void save(true)
+  }, [isOnline, save])
 
   // Ctrl+S / Cmd+S explicit save
   useEffect(() => {
@@ -729,6 +752,21 @@ useEffect(() => {
         {isToday && <span className="editor-meta-today">{t.common.today}</span>}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
+        <AnimatePresence initial={false}>
+          {!isOnline && (
+            <motion.span
+              key="offline"
+              className="editor-meta-offline"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <span className="editor-meta-offline-dot" aria-hidden="true" />
+              {t.entry.offlineBadge}
+            </motion.span>
+          )}
+        </AnimatePresence>
         <AnimatePresence initial={false}>
           {isDirty && !autoSave && !loading && (
             <motion.span

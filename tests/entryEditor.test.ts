@@ -335,6 +335,59 @@ test.describe('EntryEditor — auto-save', () => {
   })
 })
 
+test.describe('EntryEditor — offline', () => {
+  test('shows the offline badge while disconnected', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1' })
+
+    await expect(page.locator('.editor-meta-offline')).toHaveCount(0)
+    await page.evaluate(() => window.editorHarness.setOnline(false))
+    await expect(page.locator('.editor-meta-offline')).toBeVisible()
+    await page.evaluate(() => window.editorHarness.setOnline(true))
+    await expect(page.locator('.editor-meta-offline')).toHaveCount(0)
+  })
+
+  test('queues a save made while offline and retries it on reconnect', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+
+    await page.evaluate(() => window.editorHarness.setOnline(false))
+    await page.fill('textarea.editor-textarea', 'written while offline')
+    await page.locator('button.btn-save').click()
+
+    // No hard failure — a pending message, edits stay unsaved, no save reached the backend
+    await expect(page.getByText('Offline — your changes will be saved when you reconnect.')).toBeVisible()
+    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+
+    // Reconnect → the queued edits are saved automatically
+    await page.evaluate(() => window.editorHarness.setOnline(true))
+
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'written while offline', baseVersion: '1' },
+    ])
+    await expect(page.locator('.editor-meta-offline')).toHaveCount(0)
+    await expect(page.locator('button.btn-save')).toBeDisabled()
+  })
+
+  test('auto-save while offline is retried once on reconnect', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
+
+    await page.evaluate(() => window.editorHarness.setOnline(false))
+    await page.fill('textarea.editor-textarea', 'auto written offline')
+
+    // Auto-save fires while offline and fails silently (no save recorded)
+    await page.waitForTimeout(1700)
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+
+    await page.evaluate(() => window.editorHarness.setOnline(true))
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'auto written offline', baseVersion: '1' },
+    ])
+  })
+})
+
 test.describe('EntryEditor — keyboard save', () => {
   test('Ctrl+S saves dirty content without clicking the save button', async ({ page }) => {
     await loadHarness(page)

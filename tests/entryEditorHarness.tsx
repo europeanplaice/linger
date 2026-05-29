@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EntryEditor } from '../src/components/EntryEditor'
+import { useOnline } from '../src/hooks/useOnline'
 import { EntryConflictError } from '../src/hooks/useDiary'
 import { TokenExpiredError } from '../src/api/driveEntries'
 import type { LoadedDiaryEntry } from '../src/types'
@@ -80,6 +81,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
   refreshSignal: number
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
+  const isOnline = useOnline()
 
   function onExpired() {
     expiredCount++
@@ -118,6 +120,10 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         }
       }}
       onSave={async (d, content, baseVer, force, baseContent) => {
+        // Simulate a network failure while offline, mirroring fetch in production.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          throw new Error('Network error')
+        }
         if (currentSaveDelayMs > 0) {
           await delaySave(currentSaveDelayMs)
         }
@@ -160,6 +166,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       }}
       reauthSaveResult={null}
       isSignedIn={token !== null}
+      isOnline={isOnline}
       onExpired={onExpired}
     />
   )
@@ -256,6 +263,10 @@ window.editorHarness = {
     const resolvers = getContentBlockResolvers
     getContentBlockResolvers = []
     resolvers.forEach(r => r())
+  },
+  setOnline: (online: boolean) => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => online })
+    window.dispatchEvent(new Event(online ? 'online' : 'offline'))
   },
   expiredCalls: () => expiredCount,
 }

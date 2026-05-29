@@ -6,6 +6,7 @@ import { useTheme } from './hooks/useTheme'
 import { useFont } from './hooks/useFont'
 import { useFontSize } from './hooks/useFontSize'
 import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
+import { useOnline } from './hooks/useOnline'
 import { LoginScreen } from './components/LoginScreen'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -132,6 +133,7 @@ export default function App() {
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
   const { updateAvailable: swUpdateAvailable, applyUpdate } = useServiceWorkerUpdate()
+  const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const updateAvailable = swUpdateAvailable || previewParams.includes('update-banner')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -465,6 +467,7 @@ export default function App() {
     let cancelled = false
     const refreshFromDrive = () => {
       if (document.visibilityState === 'hidden') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
 
       const now = Date.now()
       if (now - lastFocusRefreshRef.current < FOCUS_REFRESH_MIN_MS) return
@@ -482,10 +485,12 @@ export default function App() {
     }
 
     window.addEventListener('focus', refreshFromDrive)
+    window.addEventListener('online', refreshFromDrive)
     document.addEventListener('visibilitychange', refreshFromDrive)
     return () => {
       cancelled = true
       window.removeEventListener('focus', refreshFromDrive)
+      window.removeEventListener('online', refreshFromDrive)
       document.removeEventListener('visibilitychange', refreshFromDrive)
     }
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
@@ -612,6 +617,7 @@ export default function App() {
           onCancelNavigation={handleCancelNavigation}
           reauthSaveResult={reauthSaveResult}
           isSignedIn={!tokenExpired}
+          isOnline={isOnline}
           onExpired={handleExpired}
           refreshSignal={entryRefreshSignal}
         />

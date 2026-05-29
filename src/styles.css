@@ -1660,6 +1660,20 @@ dialog.export-confirm-dialog::backdrop {
 .editor-meta-unsaved {
   color: var(--text-muted);
 }
+.editor-meta-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.5rem;
+  color: var(--warning, #b45309);
+}
+.editor-meta-offline-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.85;
+}
 .editor-meta-today {
   display: inline-flex;
   align-items: center;

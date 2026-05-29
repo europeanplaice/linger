@@ -102,6 +102,7 @@ interface Window {
     setContentForDate: (date: string, content: string, version: string | null) => void
     blockGetContent: (date: string) => void
     unblockGetContent: () => void
+    setOnline: (online: boolean) => void
   }
   historyHarness: {
     list: (resp: { status: number; body: unknown; delayMs?: number }) => void
