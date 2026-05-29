@@ -708,6 +708,29 @@ test.describe('useDiary adjacent-day prefetch', () => {
     expect(calls.some((c: { url: string }) => c.url.includes('2026-05-03'))).toBe(true)
   })
 
+  test('prefetches entries two days out in both directions', async ({ page }) => {
+    const dates = ['2026-05-01', '2026-05-02', '2026-05-04', '2026-05-05', '2026-05-06']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // 2026-05-03 has no entry; its ±1/±2 neighbours (05-01, 05-02, 05-04, 05-05) do
+    await page.evaluate(({ entries }) => {
+      window.diaryHarness.q(...entries.map(entry => ({ status: 200, body: entry })))
+    }, { entries: ['2026-05-01', '2026-05-02', '2026-05-04', '2026-05-05'].map(d => datedEntryResponse(d, `content ${d}`)) })
+
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-03'))
+
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(4)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    for (const d of ['2026-05-01', '2026-05-02', '2026-05-04', '2026-05-05']) {
+      expect(calls.some((c: { url: string }) => c.url.includes(d))).toBe(true)
+    }
+    // 05-06 is three days out — outside the ±2 window
+    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-06'))).toBe(false)
+  })
+
   test('skips dates that have no diary entry', async ({ page }) => {
     await loadHarness(page)
     // Only 2026-05-01 exists; adjacent dates (04-30 and 05-02) do not
@@ -722,33 +745,40 @@ test.describe('useDiary adjacent-day prefetch', () => {
   })
 
   test('debounces rapid navigation — only fetches for the final date', async ({ page }) => {
-    const dates = ['2026-05-05', '2026-05-04', '2026-05-03', '2026-05-02', '2026-05-01']
+    // Spread the navigation targets far apart so the ±2 prefetch windows of the
+    // intermediate dates never overlap the final settled date's window.
+    const finalNeighbours = ['2026-05-18', '2026-05-19', '2026-05-21', '2026-05-22']
+    const intermediateNeighbours = ['2026-05-01', '2026-05-03', '2026-05-09', '2026-05-11']
+    const navDates = ['2026-05-02', '2026-05-10', '2026-05-20']
+    const dates = [...finalNeighbours, ...intermediateNeighbours, ...navDates]
     await loadHarness(page)
     await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
     await page.evaluate(() => window.diaryHarness.clearCalls())
 
-    // Queue responses only for the neighbours of the final date (2026-05-03)
+    // Queue responses only for the neighbours of the final date (2026-05-20)
     await page.evaluate(({ entries }) => {
       window.diaryHarness.q(...entries.map(entry => ({ status: 200, body: entry })))
-    }, { entries: ['2026-05-02', '2026-05-04'].map(d => datedEntryResponse(d, `content ${d}`)) })
+    }, { entries: finalNeighbours.map(d => datedEntryResponse(d, `content ${d}`)) })
 
     // Rapid navigation: cycle through dates faster than the 300ms debounce
     await page.evaluate(async () => {
-      window.diaryHarness.setSelectedDate('2026-05-01')
-      await new Promise(r => setTimeout(r, 50))
       window.diaryHarness.setSelectedDate('2026-05-02')
       await new Promise(r => setTimeout(r, 50))
-      window.diaryHarness.setSelectedDate('2026-05-03')
+      window.diaryHarness.setSelectedDate('2026-05-10')
+      await new Promise(r => setTimeout(r, 50))
+      window.diaryHarness.setSelectedDate('2026-05-20')
     })
 
-    // Only the neighbours of the final settled date should be fetched
-    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(2)
+    // Only the ±1/±2 neighbours of the final settled date should be fetched
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 1000 }).toBe(4)
 
     const calls = await page.evaluate(() => window.diaryHarness.calls())
-    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-02'))).toBe(true)
-    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-04'))).toBe(true)
-    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-01'))).toBe(false)
-    expect(calls.some((c: { url: string }) => c.url.includes('2026-05-05'))).toBe(false)
+    for (const d of finalNeighbours) {
+      expect(calls.some((c: { url: string }) => c.url.includes(d))).toBe(true)
+    }
+    for (const d of intermediateNeighbours) {
+      expect(calls.some((c: { url: string }) => c.url.includes(d))).toBe(false)
+    }
   })
 
   test('skips already-cached entries and avoids redundant network calls', async ({ page }) => {

@@ -330,6 +330,30 @@ export default function App() {
     })
   }, [])
 
+  const diaryPrefetchRef = useRef(diary.prefetch)
+  useEffect(() => { diaryPrefetchRef.current = diary.prefetch }, [diary.prefetch])
+
+  const prefetchEntry = useCallback((d: string) => {
+    diaryGetContentRef.current(d).catch(() => {})
+  }, [])
+
+  // Warm every entry in the month the calendar is showing. Debounced so paging
+  // quickly through months only fetches the one the user settles on; concurrency
+  // is bounded inside diary.prefetch.
+  const monthPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prefetchMonth = useCallback((year: number, month: number) => {
+    if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`
+    monthPrefetchTimerRef.current = setTimeout(() => {
+      const monthDates = diaryDatesRef.current.filter(d => d.startsWith(prefix))
+      if (monthDates.length > 0) diaryPrefetchRef.current(monthDates, 3).catch(() => {})
+    }, 250)
+  }, [])
+
+  useEffect(() => () => {
+    if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
+  }, [])
+
   const onPrevDay = useCallback(() => {
     selectDate(shiftDate(selectedDateRef.current, -1))
   }, [selectDate])
@@ -496,7 +520,7 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} />
+        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>

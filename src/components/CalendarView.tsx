@@ -8,6 +8,8 @@ interface Props {
   dates: Set<string>
   selectedDate: string
   onSelect: (date: string) => void
+  onPrefetch?: (date: string) => void
+  onMonthChange?: (year: number, month: number) => void
 }
 
 interface MonthYearPickerProps {
@@ -209,7 +211,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect }: Props) {
+export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange }: Props) {
   const { t } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -249,6 +251,14 @@ export function CalendarView({ dates, selectedDate, onSelect }: Props) {
     setYear(selectedParsed.y)
     setMonth(selectedParsed.m - 1)
   }, [selectedParsed?.y, selectedParsed?.m])
+
+  // Notify the parent whenever the displayed month changes so it can warm the
+  // entries in view before the user taps one.
+  const onMonthChangeRef = useRef(onMonthChange)
+  onMonthChangeRef.current = onMonthChange
+  useEffect(() => {
+    onMonthChangeRef.current?.(year, month)
+  }, [year, month])
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = daysInMonthUtil(year, month + 1)
@@ -344,6 +354,8 @@ export function CalendarView({ dates, selectedDate, onSelect }: Props) {
                   aria-label={dateStr}
                   className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
+                  onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
+                  onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   whileTap={{ scale: 0.92 }}
                   transition={{ type: 'spring', stiffness: 600, damping: 25 }}
                 >

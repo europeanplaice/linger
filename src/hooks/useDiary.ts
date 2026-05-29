@@ -21,6 +21,7 @@ export interface DiaryState {
   remove: (date: string) => Promise<void>
   search: (query: string) => Promise<SearchResult>
   refreshEntries: () => Promise<void>
+  prefetch: (dates: string[], concurrency?: number) => Promise<void>
   retryPendingSave: () => Promise<LoadedDiaryEntry | null>
   exportAll: (format: 'txt' | 'md', onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
 }
@@ -71,6 +72,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
   const cacheRef = useRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
+  const inflightRef = useRef<Map<string, Promise<LoadedDiaryEntry | null>>>(new Map())
   const pendingSaveRef = useRef<PendingSave | null>(null)
   const onExpiredRef = useRef(onExpired)
   const onEvictedRef = useRef(onEntriesEvicted)
@@ -139,44 +141,64 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
 
   const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
     if (!isSignedIn) return null
-    try {
-      const cached = cacheRef.current.get(date)
 
-      // Content is already in memory (verified by listEntries version check or saved this session)
-      if (cached?.content && !options.forceNetwork) return { entry: cached.content, meta: cached.meta }
+    const cached = cacheRef.current.get(date)
+    // Content is already in memory (verified by listEntries version check or saved this session)
+    if (cached?.content && !options.forceNetwork) return { entry: cached.content, meta: cached.meta }
 
-      const loaded = await getEntryByDate(date, undefined, cached?.meta.id)
-      if (!loaded || loaded === 'not-modified') {
-        if (options.forceNetwork && cached) {
-          updateCache(prev => {
-            const next = new Map(prev)
-            next.delete(date)
-            return next
-          })
-          if (email !== null) deleteCached(date).catch(() => {})
-        }
-        return null
-      }
-      const { entry: content, meta } = loaded
-      updateCache(prev => {
-        const next = new Map(prev)
-        const existing = next.get(date)
-        if (existing) {
-          const existingV = Number(existing.meta.version ?? 0)
-          const fetchedV = Number(meta.version ?? 0)
-          const safeMeta = fetchedV >= existingV ? meta : existing.meta
-          next.set(date, { ...existing, meta: safeMeta, content, snippet: existing.snippet ?? content.content.slice(0, 500) })
-        } else {
-          next.set(date, { meta, content, snippet: content.content.slice(0, 500) })
-        }
-        return next
-      })
-      if (email !== null) putCached({ date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})
-      return { entry: content, meta }
-    } catch (e) {
-      if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
-      throw e
+    // Dedupe concurrent fetches of the same entry — hover-intent, adjacent-day,
+    // and month prefetch can all race for one date.
+    if (!options.forceNetwork) {
+      const inflight = inflightRef.current.get(date)
+      if (inflight) return inflight
     }
+
+    const fetchPromise = (async (): Promise<LoadedDiaryEntry | null> => {
+      try {
+        const current = cacheRef.current.get(date)
+        const loaded = await getEntryByDate(date, undefined, current?.meta.id)
+        if (!loaded || loaded === 'not-modified') {
+          if (options.forceNetwork && current) {
+            updateCache(prev => {
+              const next = new Map(prev)
+              next.delete(date)
+              return next
+            })
+            if (email !== null) deleteCached(date).catch(() => {})
+          }
+          return null
+        }
+        const { entry: content, meta } = loaded
+        updateCache(prev => {
+          const next = new Map(prev)
+          const existing = next.get(date)
+          if (existing) {
+            const existingV = Number(existing.meta.version ?? 0)
+            const fetchedV = Number(meta.version ?? 0)
+            const safeMeta = fetchedV >= existingV ? meta : existing.meta
+            next.set(date, { ...existing, meta: safeMeta, content, snippet: existing.snippet ?? content.content.slice(0, 500) })
+          } else {
+            next.set(date, { meta, content, snippet: content.content.slice(0, 500) })
+          }
+          return next
+        })
+        if (email !== null) putCached({ date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})
+        return { entry: content, meta }
+      } catch (e) {
+        if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
+        throw e
+      }
+    })()
+
+    if (!options.forceNetwork) {
+      inflightRef.current.set(date, fetchPromise)
+      fetchPromise
+        .catch(() => {})
+        .finally(() => {
+          if (inflightRef.current.get(date) === fetchPromise) inflightRef.current.delete(date)
+        })
+    }
+    return fetchPromise
   }, [isSignedIn, email, updateCache])
 
   // Load entry list when signed in
@@ -449,13 +471,28 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     return results
   }, [isSignedIn, cache, getContent])
 
+  // Prefetch a set of dates with bounded concurrency. Skips dates that have no
+  // entry or whose content is already loaded; in-flight dedup in getContent
+  // prevents racing with other prefetch paths.
+  const prefetch = useCallback(async (dates: string[], concurrency = 3): Promise<void> => {
+    if (!isSignedIn) return
+    const targets = dates.filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
+    if (targets.length === 0) return
+    await mapWithConcurrency(targets, Math.max(1, concurrency), async (d) => {
+      await getContent(d).catch(() => {})
+    })
+  }, [isSignedIn, getContent])
+
   const getContentRef = useRef(getContent)
   useEffect(() => { getContentRef.current = getContent }, [getContent])
 
+  // Warm the neighbours of the selected day so day-nav (±1) is instant and a
+  // continued scrub in either direction (±2) stays a step ahead. Only dates
+  // that actually have an entry are fetched.
   useEffect(() => {
     if (!selectedDate) return
     const id = setTimeout(() => {
-      ;[shiftDate(selectedDate, -1), shiftDate(selectedDate, 1)]
+      ;[shiftDate(selectedDate, -1), shiftDate(selectedDate, 1), shiftDate(selectedDate, -2), shiftDate(selectedDate, 2)]
         .filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
         .forEach(d => getContentRef.current(d).catch(() => {}))
     }, 300)
@@ -465,5 +502,5 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   const dates = Array.from(cache.keys()).sort((a, b) => b.localeCompare(a))
   const hasLegacyMdFiles = Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name))
 
-  return { loading, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, retryPendingSave, exportAll }
+  return { loading, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }
 }
