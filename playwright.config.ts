@@ -12,7 +12,10 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium',      use: { ...devices['Desktop Chrome'] } },
-    { name: 'webkit',        use: { ...devices['Desktop Safari'] } },
+    // WebKit is slow to run locally; exercise it in CI only.
+    ...(process.env.CI
+      ? [{ name: 'webkit', use: { ...devices['Desktop Safari'] } }]
+      : []),
     {
       name: 'mobile-chrome',
       use: { ...devices['Pixel 7'] },
