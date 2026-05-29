@@ -419,7 +419,7 @@ describe('migrateMdToTxt', () => {
 
   it('returns 0 and issues no renames when nothing is legacy', async () => {
     const methods: (string | undefined)[] = []
-    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: any, init: any) => {
       methods.push(init?.method)
       return driveJsonResponse({ files: [{ id: 'f1', name: 'diary-2026-05-01.txt', version: '1' }] })
     }))
