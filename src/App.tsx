@@ -17,7 +17,7 @@ import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
-import { TokenExpiredError } from './api/driveEntries'
+import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
 import { LogOut } from 'lucide-react'
@@ -194,10 +194,34 @@ export default function App() {
     }
   }, [isSignedIn, diary.loading, initialLoadComplete])
 
+  const migrationAttemptedRef = useRef(false)
+
   const diaryDatesRef = useRef(diary.dates)
   useEffect(() => { diaryDatesRef.current = diary.dates }, [diary.dates])
   const diaryGetContentRef = useRef(diary.getContent)
   useEffect(() => { diaryGetContentRef.current = diary.getContent }, [diary.getContent])
+
+  // One-time migration of legacy `.md` diary files to `.txt`. Runs once per
+  // device when any `.md` entry is detected; renamed files are picked up by the
+  // next incremental Drive sync.
+  useEffect(() => {
+    if (!isSignedIn || !initialLoadComplete) return
+    if (migrationAttemptedRef.current) return
+    if (localStorage.getItem('linger_ext_migrated') === 'true') return
+    if (!diary.hasLegacyMdFiles) return
+
+    migrationAttemptedRef.current = true
+    migrateExtensions()
+      .then(migrated => {
+        localStorage.setItem('linger_ext_migrated', 'true')
+        if (migrated > 0) {
+          diary.refreshEntries()
+            .then(() => setEntryRefreshSignal(v => v + 1))
+            .catch(() => {})
+        }
+      })
+      .catch(() => { migrationAttemptedRef.current = false })
+  }, [isSignedIn, initialLoadComplete, diary.hasLegacyMdFiles, diary.refreshEntries])
 
   useEffect(() => {
     if (recollectionOpen) return

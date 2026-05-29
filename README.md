@@ -39,12 +39,14 @@ Scope: `drive.file` — non-sensitive, only accesses files this app created.
 
 ### Drive storage
 All Drive API v3 calls are made server-side by Cloudflare Pages Functions at `/api/drive/…`.
-The browser never holds an OAuth token. Diary entries are stored as individual Markdown files:
+The browser never holds an OAuth token. Diary entries are stored as individual plain-text files (MIME `text/plain`):
 
 ```
 /linger_diary/
-  diary-YYYY-MM-DD.md   ← YAML frontmatter (date, updated_at) + plain-text body
+  diary-YYYY-MM-DD.txt   ← YAML frontmatter (date) + plain-text body
 ```
+
+New entries are written as `.txt`. Legacy `.md` files remain readable and are renamed to `.txt` by a one-time migration on first sign-in.
 
 Each file looks like:
 

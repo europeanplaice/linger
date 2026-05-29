@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
   ensureFolder, getEntryContent, saveEntry, deleteEntry,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
-  listEntries, getStartPageToken, getChanges,
+  listEntries, getStartPageToken, getChanges, migrateMdToTxt,
 } from '../../functions/_shared/drive'
 
 function mockFetch(response: unknown): void {
@@ -167,6 +167,23 @@ describe('getDiaryFileMeta', () => {
 
     await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
+  })
+
+  it('accepts a .txt diary file', async () => {
+    const meta = {
+      id: 'file-1',
+      name: 'diary-2026-05-01.txt',
+      mimeType: 'text/plain',
+      parents: ['folder-1'],
+      trashed: false,
+      version: '2',
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+
+    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01')
+
+    expect(result).toEqual(meta)
   })
 
   it('rejects diary files for a different date', async () => {
@@ -370,6 +387,47 @@ describe('listEntries pagination', () => {
     expect(urls).toHaveLength(3)
     expect(urls[1]).toContain('pageToken=page-2')
     expect(urls[2]).toContain('pageToken=page-3')
+  })
+})
+
+describe('migrateMdToTxt', () => {
+  it('renames only legacy .md diary files to .txt and returns the count', async () => {
+    const calls: { url: string; method?: string; body?: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => {
+      const url = String(input)
+      calls.push({ url, method: init?.method, body: init?.body })
+      if (url.includes('q=')) {
+        return driveJsonResponse({ files: [
+          { id: 'f1', name: 'diary-2026-05-01.md', version: '1' },
+          { id: 'f2', name: 'diary-2026-05-02.txt', version: '1' },
+          { id: 'f3', name: 'diary-2026-05-03.md', version: '1' },
+        ] })
+      }
+      return driveJsonResponse({ id: 'patched' })
+    }))
+
+    const migrated = await migrateMdToTxt('tok', 'sid', sessionWithFolder(), envStub)
+
+    expect(migrated).toBe(2)
+    const patches = calls.filter(c => c.method === 'PATCH')
+    expect(patches).toHaveLength(2)
+    expect(patches[0].url).toContain('/files/f1')
+    expect(JSON.parse(patches[0].body!)).toEqual({ name: 'diary-2026-05-01.txt' })
+    expect(patches[1].url).toContain('/files/f3')
+    expect(JSON.parse(patches[1].body!)).toEqual({ name: 'diary-2026-05-03.txt' })
+  })
+
+  it('returns 0 and issues no renames when nothing is legacy', async () => {
+    const methods: (string | undefined)[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => {
+      methods.push(init?.method)
+      return driveJsonResponse({ files: [{ id: 'f1', name: 'diary-2026-05-01.txt', version: '1' }] })
+    }))
+
+    const migrated = await migrateMdToTxt('tok', 'sid', sessionWithFolder(), envStub)
+
+    expect(migrated).toBe(0)
+    expect(methods.some(m => m === 'PATCH')).toBe(false)
   })
 })
 

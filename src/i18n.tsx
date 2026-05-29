@@ -182,7 +182,7 @@ const dictionaries = {
       storageIntro: 'Your diary entries are stored in your Google Drive:',
       storageItems: [
         <>A folder named <b>linger_diary</b> is created automatically</>,
-        'One Markdown file per day: diary-YYYY-MM-DD.md',
+        'One text file per day: diary-YYYY-MM-DD.txt',
         'Format: YAML frontmatter (date) + plain text body',
         'This app only accesses files it created (scope: drive.file)',
       ] as ReactNode[],
@@ -386,7 +386,7 @@ const dictionaries = {
       storageIntro: '日記は Google Drive に保存されます:',
       storageItems: [
         <><b>linger_diary</b> というフォルダが自動作成されます</>,
-        '1日につき1つの Markdown ファイル: diary-YYYY-MM-DD.md',
+        '1日につき1つのテキストファイル: diary-YYYY-MM-DD.txt',
         '形式: YAMLフロントマター (date) + 本文',
         'このアプリは自分で作成したファイルだけにアクセスします（scope: drive.file）',
       ] as ReactNode[],

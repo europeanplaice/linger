@@ -146,3 +146,8 @@ export async function saveEntry(date: string, entry: DiaryEntry, optionsOrFileId
 export async function deleteEntry(date: string): Promise<void> {
   await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, { method: 'DELETE' })
 }
+
+export async function migrateExtensions(): Promise<number> {
+  const { data } = await apiFetch<{ migrated: number }>(`${BASE}/migrate`, { method: 'POST' })
+  return data?.migrated ?? 0
+}

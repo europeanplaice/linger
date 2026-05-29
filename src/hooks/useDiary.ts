@@ -15,6 +15,7 @@ export interface DiaryState {
   loading: boolean
   error: string | null
   dates: string[]                                      // sorted desc
+  hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
   save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
   remove: (date: string) => Promise<void>
@@ -97,7 +98,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     const evicted: string[] = []
 
     for (const f of files) {
-      const date = f.name.replace('diary-', '').replace(/\.(json|md)$/, '')
+      const date = f.name.replace('diary-', '').replace(/\.(json|md|txt)$/, '')
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
       prevDates.delete(date)
 
@@ -266,9 +267,9 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         }
 
         const name = change.file?.name ?? ''
-        const date = name.replace('diary-', '').replace(/\.(json|md)$/, '')
+        const date = name.replace('diary-', '').replace(/\.(json|md|txt)$/, '')
         // Only act on diary files matching the expected pattern.
-        if (!/^diary-\d{4}-\d{2}-\d{2}\.md$/.test(name) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+        if (!/^diary-\d{4}-\d{2}-\d{2}\.(md|txt)$/.test(name) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
 
         const meta: DriveFileMeta = {
           id: change.file!.id,
@@ -379,7 +380,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     const cached = cacheRef.current
     const normalizedQuery = query.toLowerCase()
     const candidates = files
-      .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md)$/, ''), fileId: f.id }))
+      .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md|txt)$/, ''), fileId: f.id }))
       .filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date))
 
     const totalCount = candidates.length
@@ -462,6 +463,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   }, [selectedDate])
 
   const dates = Array.from(cache.keys()).sort((a, b) => b.localeCompare(a))
+  const hasLegacyMdFiles = Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name))
 
-  return { loading, error, dates, getContent, save, remove, search, refreshEntries, retryPendingSave, exportAll }
+  return { loading, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, retryPendingSave, exportAll }
 }

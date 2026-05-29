@@ -212,9 +212,10 @@ export async function getChanges(token: string, pageToken: string): Promise<Chan
 }
 
 export async function findEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<DriveFileMeta | null> {
-  const filename = `diary-${date}.md`.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  // `date` is validated as YYYY-MM-DD by the calling endpoint, so it is safe to
+  // interpolate directly. Accept both the legacy `.md` and current `.txt` names.
   return withFolderFallback(token, sessionId, session, env, async folderId => {
-    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name='${filename}'`)
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and (name='diary-${date}.md' or name='diary-${date}.txt')`)
     const fields = encodeURIComponent('files(id,name,modifiedTime,version)')
     const res = await driveWithRetry(
       () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token) }),
@@ -232,15 +233,16 @@ export async function getEntryMeta(token: string, fileId: string): Promise<Drive
   )
 }
 
-function expectedDiaryName(date?: string): RegExp | string {
-  return date ? `diary-${date}.md` : /^diary-\d{4}-\d{2}-\d{2}\.md$/
+// Both the legacy `.md` and current `.txt` extensions are accepted on read.
+// `date` is always a validated YYYY-MM-DD string when provided.
+function expectedDiaryName(date?: string): RegExp {
+  return date
+    ? new RegExp(`^diary-${date}\\.(md|txt)$`)
+    : /^diary-\d{4}-\d{2}-\d{2}\.(md|txt)$/
 }
 
 function isExpectedDiaryFile(meta: DriveFileMeta, folderId: string, date?: string): boolean {
-  const expectedName = expectedDiaryName(date)
-  const nameMatches = typeof expectedName === 'string'
-    ? meta.name === expectedName
-    : expectedName.test(meta.name)
+  const nameMatches = expectedDiaryName(date).test(meta.name)
 
   return nameMatches
     && meta.mimeType === 'text/plain'
@@ -328,7 +330,7 @@ export async function saveEntry(
     )
   }
 
-  const filename = `diary-${entry.date}.md`
+  const filename = `diary-${entry.date}.txt`
   if (!folderId) throw new Error('folderId is required when creating a new entry')
   const { contentType, data } = buildMultipart({ name: filename, mimeType: 'text/plain', parents: [folderId] }, body)
   return driveWithRetry(
@@ -339,6 +341,27 @@ export async function saveEntry(
     }),
     r => r.json() as Promise<DriveFileMeta>,
   )
+}
+
+// One-time migration: rename legacy `diary-YYYY-MM-DD.md` files to `.txt`.
+// Idempotent — returns 0 once no `.md` files remain. fileId/version change but
+// content (and revision history) are preserved by the metadata-only PATCH.
+export async function migrateMdToTxt(token: string, sessionId: string, session: SessionData, env: Env): Promise<number> {
+  const files = await listEntries(token, sessionId, session, env)
+  const legacy = files.filter(f => /^diary-\d{4}-\d{2}-\d{2}\.md$/.test(f.name))
+  const fields = encodeURIComponent('id')
+  for (const f of legacy) {
+    const name = f.name.replace(/\.md$/, '.txt')
+    await driveWithRetry(
+      () => fetch(`${BASE}/files/${f.id}?fields=${fields}`, {
+        method: 'PATCH',
+        headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ name }),
+      }),
+      r => r.json() as Promise<{ id: string }>,
+    )
+  }
+  return legacy.length
 }
 
 export async function deleteEntry(token: string, fileId: string): Promise<void> {
