@@ -19,22 +19,35 @@ interface MonthYearPickerProps {
   onSelect: (year: number, month: number) => void
 }
 
+const YEARS_PER_PAGE = 12
+
 function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: MonthYearPickerProps) {
   const [open, setOpen] = useState(false)
   const [pickerYear, setPickerYear] = useState(year)
+  const [view, setView] = useState<'months' | 'years'>('months')
 
   const entryMonths = useMemo(() => {
     const s = new Set<string>()
     for (const d of dates) s.add(d.slice(0, 7))
     return s
   }, [dates])
+  const entryYears = useMemo(() => {
+    const s = new Set<string>()
+    for (const d of dates) s.add(d.slice(0, 4))
+    return s
+  }, [dates])
   const ref = useRef<HTMLDivElement>(null)
   const [yearDir, setYearDir] = useState(0)
+
+  const minYear = yearOptions[0]
+  const maxYear = yearOptions[yearOptions.length - 1]
+  const [pageStart, setPageStart] = useState(minYear)
+  const lastPageStart = minYear + Math.floor((maxYear - minYear) / YEARS_PER_PAGE) * YEARS_PER_PAGE
 
   useEffect(() => { setPickerYear(year) }, [year])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) { setView('months'); return }
     const onPointer = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
@@ -47,8 +60,24 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
     }
   }, [open])
 
-  const minYear = yearOptions[0]
-  const maxYear = yearOptions[yearOptions.length - 1]
+  const openYears = () => {
+    setPageStart(pickerYear - ((pickerYear - minYear) % YEARS_PER_PAGE))
+    setView('years')
+  }
+  const pageYears = Array.from({ length: YEARS_PER_PAGE }, (_, i) => pageStart + i)
+    .filter(y => y >= minYear && y <= maxYear)
+  const navPrev = () => {
+    setYearDir(-1)
+    if (view === 'years') setPageStart(s => Math.max(s - YEARS_PER_PAGE, minYear))
+    else setPickerYear(y => Math.max(y - 1, minYear))
+  }
+  const navNext = () => {
+    setYearDir(1)
+    if (view === 'years') setPageStart(s => Math.min(s + YEARS_PER_PAGE, lastPageStart))
+    else setPickerYear(y => Math.min(y + 1, maxYear))
+  }
+  const prevDisabled = view === 'years' ? pageStart <= minYear : pickerYear <= minYear
+  const nextDisabled = view === 'years' ? pageStart >= lastPageStart : pickerYear >= maxYear
 
   return (
     <div className="mypicker" ref={ref}>
@@ -75,14 +104,17 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
             <div className="mypicker-year-nav">
               <button
                 type="button"
-                onClick={() => { setYearDir(-1); setPickerYear(y => Math.max(y - 1, minYear)) }}
-                disabled={pickerYear <= minYear}
-                aria-label="Previous year"
+                onClick={navPrev}
+                disabled={prevDisabled}
+                aria-label={view === 'years' ? 'Previous years' : 'Previous year'}
               >‹</button>
               <AnimatePresence mode="popLayout" custom={yearDir} initial={false}>
-                <motion.span
-                  key={pickerYear}
+                <motion.button
+                  key={view === 'years' ? `page-${pageStart}` : pickerYear}
+                  type="button"
                   className="mypicker-year-label"
+                  onClick={() => (view === 'years' ? setView('months') : openYears())}
+                  aria-label={view === 'years' ? 'Back to month selection' : 'Select year'}
                   custom={yearDir}
                   variants={yearPickerVariants}
                   initial="enter"
@@ -90,43 +122,73 @@ function MonthYearPicker({ year, month, yearOptions, months, dates, onSelect }: 
                   exit="exit"
                   transition={{ duration: 0.13, ease: 'easeOut' }}
                 >
-                  {pickerYear}
-                </motion.span>
+                  {view === 'years'
+                    ? `${pageYears[0]}–${pageYears[pageYears.length - 1]}`
+                    : pickerYear}
+                </motion.button>
               </AnimatePresence>
               <button
                 type="button"
-                onClick={() => { setYearDir(1); setPickerYear(y => Math.min(y + 1, maxYear)) }}
-                disabled={pickerYear >= maxYear}
-                aria-label="Next year"
+                onClick={navNext}
+                disabled={nextDisabled}
+                aria-label={view === 'years' ? 'Next years' : 'Next year'}
               >›</button>
             </div>
             <AnimatePresence mode="popLayout" custom={yearDir} initial={false}>
-            <motion.div
-              key={pickerYear}
-              className="mypicker-months"
-              custom={yearDir}
-              variants={yearPickerVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.13, ease: 'easeOut' }}
-            >
-              {months.map((name, i) => {
-                const mm = String(i + 1).padStart(2, '0')
-                const hasEntry = entryMonths.has(`${pickerYear}-${mm}`)
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    className={`mypicker-month-btn${i === month && pickerYear === year ? ' active' : ''}`}
-                    onClick={() => { onSelect(pickerYear, i); setOpen(false) }}
-                  >
-                    {name.slice(0, 3)}
-                    <span className={`mypicker-dot${hasEntry ? ' visible' : ''}`} aria-hidden="true" />
-                  </button>
-                )
-              })}
-            </motion.div>
+            {view === 'years' ? (
+              <motion.div
+                key={`years-${pageStart}`}
+                className="mypicker-years"
+                custom={yearDir}
+                variants={yearPickerVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.13, ease: 'easeOut' }}
+              >
+                {pageYears.map(y => {
+                  const hasEntry = entryYears.has(String(y))
+                  return (
+                    <button
+                      key={y}
+                      type="button"
+                      className={`mypicker-year-btn${y === pickerYear ? ' active' : ''}`}
+                      onClick={() => { setYearDir(0); setPickerYear(y); setView('months') }}
+                    >
+                      {y}
+                      <span className={`mypicker-dot${hasEntry ? ' visible' : ''}`} aria-hidden="true" />
+                    </button>
+                  )
+                })}
+              </motion.div>
+            ) : (
+              <motion.div
+                key={pickerYear}
+                className="mypicker-months"
+                custom={yearDir}
+                variants={yearPickerVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.13, ease: 'easeOut' }}
+              >
+                {months.map((name, i) => {
+                  const mm = String(i + 1).padStart(2, '0')
+                  const hasEntry = entryMonths.has(`${pickerYear}-${mm}`)
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      className={`mypicker-month-btn${i === month && pickerYear === year ? ' active' : ''}`}
+                      onClick={() => { onSelect(pickerYear, i); setOpen(false) }}
+                    >
+                      {name.slice(0, 3)}
+                      <span className={`mypicker-dot${hasEntry ? ' visible' : ''}`} aria-hidden="true" />
+                    </button>
+                  )
+                })}
+              </motion.div>
+            )}
             </AnimatePresence>
           </motion.div>
         )}

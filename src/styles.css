@@ -738,15 +738,68 @@ body {
   outline-offset: 2px;
 }
 .mypicker-year-label {
+  font: inherit;
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.02em;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0.15rem 0.5rem;
+  transition: background 0.12s;
 }
-.mypicker-months {
+.mypicker-year-label:hover {
+  background: var(--sidebar-bg);
+}
+.mypicker-year-label:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.mypicker-months,
+.mypicker-years {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
+}
+.mypicker-year-btn {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.2rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+.mypicker-year-btn:hover:not(.active) {
+  color: var(--text);
+  background: var(--sidebar-bg);
+}
+.mypicker-year-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+[data-theme="dark"] .mypicker-year-btn.active {
+  color: #1a2a1a;
+}
+.mypicker-year-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.mypicker-year-btn.active .mypicker-dot.visible {
+  background: rgba(255, 255, 255, 0.65);
+}
+[data-theme="dark"] .mypicker-year-btn.active .mypicker-dot.visible {
+  background: rgba(26, 42, 26, 0.6);
 }
 .mypicker-month-btn {
   background: none;
