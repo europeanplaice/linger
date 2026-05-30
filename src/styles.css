@@ -2777,6 +2777,20 @@ dialog.recollection-dialog::backdrop {
   padding: 1.1rem 1.4rem;
   border-bottom: 1px solid var(--border);
   border-radius: 12px 12px 0 0;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+  animation: recollection-header-shadow linear both;
+  animation-timeline: scroll(nearest);
+  animation-range: 0px 24px;
+}
+@keyframes recollection-header-shadow {
+  from { box-shadow: 0 2px 8px -2px transparent; }
+  to   { box-shadow: 0 2px 8px -2px var(--shadow-heavy); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recollection-header { animation: none; }
 }
 .recollection-title {
   font-size: 1.1rem;
