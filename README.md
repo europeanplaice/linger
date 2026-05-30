@@ -153,6 +153,7 @@ npm run workers:dev       # Wrangler Pages dev server at http://localhost:8788
 
 Other commands:
 ```bash
+npm run ci:local # run the local merge-check suite (build + lint + unit + e2e)
 npm run build     # type-check + production build → dist/
 npm run preview   # serve the production build with Wrangler locally
 npm test          # run the Playwright e2e test suite
