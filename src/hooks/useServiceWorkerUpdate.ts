@@ -10,7 +10,7 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
     const waiting = regRef.current?.waiting
     if (!waiting) return
     reloadingRef.current = true
-    let fallbackTimer: ReturnType<typeof setTimeout> | undefined
+    const fallbackTimer = setTimeout(() => window.location.reload(), 4000)
     navigator.serviceWorker.addEventListener(
       'controllerchange',
       () => {
@@ -19,8 +19,6 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
       },
       { once: true },
     )
-    // Fallback: if controllerchange never fires, reload after 4s.
-    fallbackTimer = setTimeout(() => window.location.reload(), 4000)
     waiting.postMessage('SKIP_WAITING')
   }
 
