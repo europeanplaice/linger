@@ -170,7 +170,8 @@ dialog::backdrop {
 .settings-list,
 .editor-textarea,
 .history-revision-list,
-.history-preview-diff {
+.history-preview-diff,
+dialog.recollection-dialog {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
@@ -178,7 +179,8 @@ dialog::backdrop {
 .settings-list::-webkit-scrollbar,
 .editor-textarea::-webkit-scrollbar,
 .history-revision-list::-webkit-scrollbar,
-.history-preview-diff::-webkit-scrollbar {
+.history-preview-diff::-webkit-scrollbar,
+dialog.recollection-dialog::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
@@ -186,14 +188,16 @@ dialog::backdrop {
 .settings-list::-webkit-scrollbar-track,
 .editor-textarea::-webkit-scrollbar-track,
 .history-revision-list::-webkit-scrollbar-track,
-.history-preview-diff::-webkit-scrollbar-track {
+.history-preview-diff::-webkit-scrollbar-track,
+dialog.recollection-dialog::-webkit-scrollbar-track {
   background: transparent;
 }
 .sidebar::-webkit-scrollbar-thumb,
 .settings-list::-webkit-scrollbar-thumb,
 .editor-textarea::-webkit-scrollbar-thumb,
 .history-revision-list::-webkit-scrollbar-thumb,
-.history-preview-diff::-webkit-scrollbar-thumb {
+.history-preview-diff::-webkit-scrollbar-thumb,
+dialog.recollection-dialog::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 3px;
 }
@@ -201,7 +205,8 @@ dialog::backdrop {
 .settings-list::-webkit-scrollbar-thumb:hover,
 .editor-textarea::-webkit-scrollbar-thumb:hover,
 .history-revision-list::-webkit-scrollbar-thumb:hover,
-.history-preview-diff::-webkit-scrollbar-thumb:hover {
+.history-preview-diff::-webkit-scrollbar-thumb:hover,
+dialog.recollection-dialog::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
 
@@ -2579,7 +2584,8 @@ dialog.history-dialog::backdrop {
   .sidebar::-webkit-scrollbar,
   .settings-list::-webkit-scrollbar,
   .history-revision-list::-webkit-scrollbar,
-  .history-preview-diff::-webkit-scrollbar {
+  .history-preview-diff::-webkit-scrollbar,
+  dialog.recollection-dialog::-webkit-scrollbar {
     display: none;
   }
 
