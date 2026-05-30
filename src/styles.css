@@ -165,6 +165,46 @@ dialog::backdrop {
   border-radius: 4px;
 }
 
+/* ── Scrollbars (desktop) ── */
+.sidebar,
+.settings-list,
+.editor-textarea,
+.history-revision-list,
+.history-preview-diff {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.sidebar::-webkit-scrollbar,
+.settings-list::-webkit-scrollbar,
+.editor-textarea::-webkit-scrollbar,
+.history-revision-list::-webkit-scrollbar,
+.history-preview-diff::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.sidebar::-webkit-scrollbar-track,
+.settings-list::-webkit-scrollbar-track,
+.editor-textarea::-webkit-scrollbar-track,
+.history-revision-list::-webkit-scrollbar-track,
+.history-preview-diff::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb,
+.settings-list::-webkit-scrollbar-thumb,
+.editor-textarea::-webkit-scrollbar-thumb,
+.history-revision-list::-webkit-scrollbar-thumb,
+.history-preview-diff::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.sidebar::-webkit-scrollbar-thumb:hover,
+.settings-list::-webkit-scrollbar-thumb:hover,
+.editor-textarea::-webkit-scrollbar-thumb:hover,
+.history-revision-list::-webkit-scrollbar-thumb:hover,
+.history-preview-diff::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
 html,
 body,
 #root {
@@ -368,18 +408,6 @@ body {
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.sidebar::-webkit-scrollbar {
-  width: 4px;
-}
-.sidebar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sidebar::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 2px;
 }
 .sidebar-top {
   display: flex;
@@ -1026,8 +1054,6 @@ dialog.settings-dialog::backdrop {
   flex: 1;
   min-height: 0;
   padding: 0.4rem 0 0.5rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 .settings-item {
   display: flex;
@@ -2248,8 +2274,6 @@ dialog.session-expired-dialog::backdrop {
   line-break: strict;
   padding-top: 0.75rem;
   text-rendering: optimizeLegibility;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
   -webkit-mask-image: linear-gradient(
     to bottom,
     var(--editor-scroll-mask-top) 0,
@@ -2370,6 +2394,8 @@ dialog.history-dialog::backdrop {
   display: flex;
   flex-direction: column;
   padding: 0.4rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 .history-revision-list ul {
   list-style: none;
@@ -2437,6 +2463,8 @@ dialog.history-dialog::backdrop {
   cursor: default;
   white-space: pre-wrap;
   word-break: break-word;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 .history-preview-diff > div {
   padding: 0;
@@ -2547,7 +2575,11 @@ dialog.history-dialog::backdrop {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  *::-webkit-scrollbar {
+  *::-webkit-scrollbar,
+  .sidebar::-webkit-scrollbar,
+  .settings-list::-webkit-scrollbar,
+  .history-revision-list::-webkit-scrollbar,
+  .history-preview-diff::-webkit-scrollbar {
     display: none;
   }
 
