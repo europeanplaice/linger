@@ -2288,7 +2288,7 @@ dialog.session-expired-dialog::backdrop {
   word-break: normal;
   overflow-wrap: anywhere;
   line-break: strict;
-  padding-top: 0.75rem;
+  padding-top: 0.2rem;
   text-rendering: optimizeLegibility;
   -webkit-mask-image: linear-gradient(
     to bottom,
