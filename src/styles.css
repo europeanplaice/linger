@@ -59,6 +59,7 @@
   --sidebar-box-shadow: rgba(0,0,0,0.12);
   --restoring-search-bg: rgba(255,255,255,0.75);
   --unsaved-status: #8a5f00;
+  --warning: #92400e;
   --theme-icon: var(--text-muted);
   --on-accent: #fff;
   --on-danger: #fff;
@@ -76,7 +77,7 @@
   --accent: #98c379;
   --accent-hover: #7dbd5f;
   --text: #abb2bf;
-  --text-muted: #7f848e;
+  --text-muted: #969ba5;
   --dot: #98c379;
   --today-ring: #e5c07b;
   --today-text: #d19a66;
@@ -124,6 +125,7 @@
   --sidebar-box-shadow: rgba(0,0,0,0.4);
   --restoring-search-bg: rgba(255,255,255,0.06);
   --unsaved-status: #e5c07b;
+  --warning: #e0a048;
   --on-accent: #1c1f24;
   --on-danger: #1c1f24;
   --focus-ring: #e5c07b;
@@ -1633,7 +1635,7 @@ dialog.export-confirm-dialog::backdrop {
   display: none;
 }
 .editor-meta--future {
-  color: var(--warning, #b45309);
+  color: var(--warning);
 }
 .editor-meta--loading:empty {
   display: block;
@@ -1672,7 +1674,7 @@ dialog.export-confirm-dialog::backdrop {
   align-items: center;
   gap: 0.3rem;
   margin-left: 0.5rem;
-  color: var(--warning, #b45309);
+  color: var(--warning);
 }
 .editor-meta-offline-dot {
   width: 0.4rem;
@@ -1688,15 +1690,16 @@ dialog.export-confirm-dialog::backdrop {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--today-text);
+  background: color-mix(in srgb, var(--today-text) 14%, transparent);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   line-height: 1.4;
 }
-/* On today, tint the weekday accent to echo the eyebrow pill. */
+/* On today, tint the weekday to match the today pill — warmer and more distinct from the muted gray. */
 .entry-date-text[data-today] .entry-date-weekday {
-  color: var(--accent);
+  color: var(--today-text);
+  font-weight: 700;
 }
 .entry-date-label-short {
   display: none;
