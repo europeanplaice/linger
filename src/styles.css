@@ -1167,27 +1167,67 @@ dialog.settings-dialog::backdrop {
   transform: rotate(180deg);
 }
 .settings-select-dropdown {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  min-width: 100%;
+  /* Popover UA style resets */
+  inset: unset;
+  margin: 0;
+  border: none;
+  padding: 0.25rem;
+  overflow: visible;
+  /* Anchor positioning — position-anchor set via JS per instance */
+  top: calc(anchor(bottom) + 4px);
+  right: anchor(right);
+  min-width: anchor-size(width);
+  position-try-fallbacks: --ss-flip-up;
+  /* Appearance */
   background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 12px var(--shadow-heavy);
+  color: var(--text);
   list-style: none;
-  margin: 0;
-  padding: 0.25rem;
-  z-index: 100;
+  white-space: nowrap;
+  /* Entry/exit animation */
+  opacity: 0;
+  translate: 0 -4px;
+  transition: opacity 0.12s ease, translate 0.12s ease,
+              display 0.12s allow-discrete,
+              overlay 0.12s allow-discrete;
+}
+.settings-select-dropdown:popover-open {
+  opacity: 1;
+  translate: 0 0;
+}
+@starting-style {
+  .settings-select-dropdown:popover-open {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+@position-try --ss-flip-up {
+  top: unset;
+  bottom: calc(anchor(top) + 4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-select-dropdown {
+    transition: none;
+  }
 }
 .settings-select-option {
   border-radius: 5px;
   color: var(--text);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.82rem;
   outline: none;
-  padding: 0.4rem 0.7rem;
+  padding: 0.5rem 0.7rem;
   transition: background 0.1s;
+}
+.settings-select-check {
+  color: var(--accent);
+  flex-shrink: 0;
+  visibility: hidden;
 }
 .settings-select-option:hover,
 .settings-select-option:focus {
@@ -1197,6 +1237,9 @@ dialog.settings-dialog::backdrop {
 .settings-select-option.selected {
   color: var(--accent);
   font-weight: 500;
+}
+.settings-select-option.selected .settings-select-check {
+  visibility: visible;
 }
 .settings-divider {
   height: 1px;
