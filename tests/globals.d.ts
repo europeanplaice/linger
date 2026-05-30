@@ -96,6 +96,7 @@ interface Window {
     pendingNavigateCalls: () => { date: string | null }[]
     cancelNavigationCalls: () => { date: string | null }[]
     menuClickCount: () => number
+    goToTodayCount: () => number
     dirtyChanges: () => boolean[]
     clearCalls: () => void
     windowOpenCalls: () => { url: string; target: string }[]

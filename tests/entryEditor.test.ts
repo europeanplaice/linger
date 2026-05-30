@@ -1103,3 +1103,44 @@ test.describe('EntryEditor — save button appearance', () => {
     expect(bg).not.toBe(TRANSPARENT)
   })
 })
+
+test.describe('EntryEditor — Today FAB', () => {
+  test('btn-today-fab is not in the DOM when viewing today', async ({ page }) => {
+    await loadHarness(page)
+    const today = await page.evaluate(() => {
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })
+    await renderEditor(page, { date: today, initialContent: '' })
+
+    await expect(page.locator('button.btn-today-fab')).toHaveCount(0)
+  })
+
+  test('btn-today-fab is hidden on desktop viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'content', version: '1' })
+
+    const fab = page.locator('button.btn-today-fab')
+    await expect(fab).toHaveCount(1)
+    expect(await fab.evaluate(el => getComputedStyle(el).display)).toBe('none')
+  })
+
+  test('btn-today-fab is visible on mobile viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'content', version: '1' })
+
+    await expect(page.locator('button.btn-today-fab')).toBeVisible()
+  })
+
+  test('btn-today-fab click triggers onGoToToday', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'content', version: '1' })
+
+    await page.locator('button.btn-today-fab').click()
+    const count = await page.evaluate(() => window.editorHarness.goToTodayCount())
+    expect(count).toBe(1)
+  })
+})

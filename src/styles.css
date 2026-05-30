@@ -1757,7 +1757,7 @@ dialog.export-confirm-dialog::backdrop {
 }
 .editor-actions button:disabled { opacity: 0.5; cursor: default; }
 .editor-actions .btn-save:disabled { cursor: not-allowed; }
-.btn-today-fab { display: none; }
+.editor-actions .btn-today-fab { display: none; }
 .editor-actions .btn-save {
   display: inline-flex;
   align-items: center;

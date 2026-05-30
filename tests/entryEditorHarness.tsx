@@ -25,6 +25,7 @@ let cancelNavigationCalls: NavCall[] = []
 let windowOpenCalls: WindowOpenCall[] = []
 let getContentCalls: GetContentCall[] = []
 let menuClickCount = 0
+let goToTodayCount = 0
 let dirtyChanges: boolean[] = []
 
 let currentSaveReject: 'conflict' | 'error' | undefined
@@ -152,6 +153,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         if (currentDeleteReject === 'error') throw new Error('Network error')
       }}
       onMenuClick={() => { menuClickCount++ }}
+      onGoToToday={() => { goToTodayCount++ }}
       onDirtyChange={(isDirty) => { dirtyChanges.push(isDirty) }}
       onPrevDay={() => {}}
       onNextDay={() => {}}
@@ -195,6 +197,7 @@ window.editorHarness = {
     windowOpenCalls = []
     getContentCalls = []
     menuClickCount = 0
+    goToTodayCount = 0
     dirtyChanges = []
     currentSaveReject = opts.saveReject
     currentGetContentReject = opts.getContentReject
@@ -225,6 +228,7 @@ window.editorHarness = {
   pendingNavigateCalls: () => [...pendingNavigateCalls],
   cancelNavigationCalls: () => [...cancelNavigationCalls],
   menuClickCount: () => menuClickCount,
+  goToTodayCount: () => goToTodayCount,
   dirtyChanges: () => [...dirtyChanges],
   clearCalls: () => {
     saveCalls = []
