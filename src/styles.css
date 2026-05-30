@@ -1895,19 +1895,20 @@ dialog.export-confirm-dialog::backdrop {
   line-height: 1;
   cursor: pointer;
   color: var(--text-muted);
-  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  transition: background-color 0.16s ease, color 0.16s ease;
 }
 .editor-actions .btn-more:hover {
   background: var(--sidebar-bg);
-  border-color: var(--border);
   color: var(--text);
 }
-.editor-actions .btn-more:focus-visible,
 .editor-actions .btn-more[aria-expanded="true"] {
-  background: var(--bg);
-  border-color: var(--accent);
+  background: var(--sidebar-bg);
   color: var(--text);
-  box-shadow: 0 0 0 3px var(--save-glow);
+}
+.editor-actions .btn-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--text);
 }
 .editor-actions .btn-more:active { background: var(--selected-bg); }
 .restoring-header-placeholder {

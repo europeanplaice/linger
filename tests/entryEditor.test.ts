@@ -758,6 +758,35 @@ test.describe('EntryEditor — Share Entry', () => {
     expect(metrics.itemCount).toBe(4)
   })
 
+  test('more button stays visually quiet while menu is open', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      initialContent: 'saved content',
+      version: '1',
+      token: 'mock-token',
+    })
+
+    const moreButton = page.locator('button.btn-more')
+    await moreButton.click()
+    await expect(page.locator('.more-menu')).toBeVisible()
+
+    const styles = await moreButton.evaluate(el => {
+      const buttonStyles = getComputedStyle(el)
+      const icon = el.querySelector('.btn-icon')
+      return {
+        borderColor: buttonStyles.borderTopColor,
+        boxShadow: buttonStyles.boxShadow,
+        color: buttonStyles.color,
+        iconColor: icon ? getComputedStyle(icon).color : '',
+      }
+    })
+
+    expect(styles.borderColor).toBe('rgba(0, 0, 0, 0)')
+    expect(styles.boxShadow).toBe('none')
+    expect(styles.iconColor).toBe(styles.color)
+  })
+
   test('delete menu icon keeps the danger color while hovered and pressed', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
