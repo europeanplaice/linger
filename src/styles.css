@@ -2708,6 +2708,13 @@ dialog.history-dialog::backdrop {
     cursor: pointer;
     white-space: nowrap;
   }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .editor-actions .btn-today-fab {
+      background: color-mix(in srgb, var(--surface) 80%, transparent);
+      -webkit-backdrop-filter: blur(8px) saturate(1.1);
+      backdrop-filter: blur(8px) saturate(1.1);
+    }
+  }
   .editor-actions .btn-today-fab::after {
     content: '';
     position: absolute;
