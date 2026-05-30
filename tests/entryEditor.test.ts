@@ -803,7 +803,7 @@ test.describe('EntryEditor — Share Entry', () => {
     const hovered = await deleteItem.evaluate(el => {
       const probe = document.createElement('span')
       probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--danger')
-      document.body.append(probe)
+      document.body.appendChild(probe)
       const danger = getComputedStyle(probe).color
       probe.remove()
       const icon = el.querySelector('.btn-icon')
