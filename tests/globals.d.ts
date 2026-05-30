@@ -138,5 +138,6 @@ interface Window {
     render: (opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] }) => void
     selectedDates: () => string[]
     closeCount: () => number
+    getContentCalls: () => string[]
   }
 }

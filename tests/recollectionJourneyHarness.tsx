@@ -7,6 +7,7 @@ import '../src/styles.css'
 const root = createRoot(document.getElementById('root') as HTMLElement)
 
 const selectedDates: string[] = []
+const getContentLog: string[] = []
 let closeCount = 0
 let renderCount = 0
 
@@ -20,6 +21,7 @@ function makeLoaded(date: string, content: string): LoadedDiaryEntry {
 window.recollectionHarness = {
   render: ({ dates, contents, serendipityPrefetch }: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] }) => {
     selectedDates.splice(0)
+    getContentLog.splice(0)
     closeCount = 0
     const map = contents ?? {}
     root.render(
@@ -27,6 +29,7 @@ window.recollectionHarness = {
         <RecollectionJourney
           dates={dates}
           getContent={async (date: string) => {
+            getContentLog.push(date)
             const content = map[date]
             return content === undefined ? null : makeLoaded(date, content)
           }}
@@ -40,4 +43,5 @@ window.recollectionHarness = {
   },
   selectedDates: () => [...selectedDates],
   closeCount: () => closeCount,
+  getContentCalls: () => [...getContentLog],
 }

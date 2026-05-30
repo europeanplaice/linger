@@ -24,6 +24,8 @@ function dayOffset(days: number): string {
 const rand1 = dayOffset(500)
 const rand2 = dayOffset(800)
 const rand3 = dayOffset(1100)
+const rand4 = dayOffset(1400)
+const rand5 = dayOffset(1700)
 
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/recollectionJourneyHarness.html`)
@@ -179,6 +181,33 @@ test.describe('RecollectionJourney', () => {
     expect(firstBox).not.toBeNull()
     expect(secondBox).not.toBeNull()
     expect(Math.abs(firstBox!.height - secondBox!.height)).toBeLessThan(1)
+  })
+
+  test('prefetches the next 3 random entries on render, then the 4th after advancing', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [rand1, rand2, rand3, rand4, rand5],
+      contents: {
+        [rand1]: 'Entry one.',
+        [rand2]: 'Entry two.',
+        [rand3]: 'Entry three.',
+        [rand4]: 'Entry four.',
+        [rand5]: 'Entry five.',
+      },
+      serendipityPrefetch: [rand1, rand2, rand3, rand4, rand5],
+    })
+
+    // current (rand1) + next 3 (rand2–rand4) should be fetched; rand5 not yet
+    await expect.poll(() => page.evaluate(() => window.recollectionHarness.getContentCalls()))
+      .toEqual(expect.arrayContaining([rand1, rand2, rand3, rand4]))
+    expect(await page.evaluate(() => window.recollectionHarness.getContentCalls())).not.toContain(rand5)
+
+    // after advancing to rand2, rand5 (idx+3 from the new position) should be prefetched
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    await section.locator('.recollection-another').click()
+
+    await expect.poll(() => page.evaluate(() => window.recollectionHarness.getContentCalls()))
+      .toContain(rand5)
   })
 
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {
