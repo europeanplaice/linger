@@ -1884,7 +1884,6 @@ dialog.export-confirm-dialog::backdrop {
   box-shadow: 0 4px 12px var(--shadow-heavy);
   z-index: 120;
   overflow: hidden;
-  transform-origin: top right;
 }
 .editor-actions .more-menu .more-menu-item {
   display: flex;

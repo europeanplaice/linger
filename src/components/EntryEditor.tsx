@@ -738,10 +738,10 @@ useEffect(() => {
             <AnimatePresence>
               {showMoreMenu && (
                 <motion.div id="entry-more-menu" className="more-menu"
-                  initial={{ opacity: 0, scale: 0.91, y: -6 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.91, y: -6 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                 >
                   {isDirty && !loading && !saving && !autoSave && (
                     <button type="button" className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
