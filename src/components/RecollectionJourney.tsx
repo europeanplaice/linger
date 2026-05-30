@@ -100,7 +100,9 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   })
   const [randomIdx, setRandomIdx] = useState(0)
   const randomDate = randomQueue[randomIdx] ?? null
-  const nextDate = randomQueue[randomIdx + 1] ?? null
+  const nextDate1 = randomQueue[randomIdx + 1] ?? null
+  const nextDate2 = randomQueue[randomIdx + 2] ?? null
+  const nextDate3 = randomQueue[randomIdx + 3] ?? null
 
   const [previews, setPreviews] = useState<Map<string, Preview>>(new Map())
   const previewsRef = useRef(previews)
@@ -112,7 +114,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
       ...onThisDay,
       ...periodic.map(p => p.date),
       ...(randomDate ? [randomDate] : []),
-      ...(nextDate ? [nextDate] : []),
+      ...[nextDate1, nextDate2, nextDate3].filter(Boolean) as string[],
     ]
     const toLoad = targets.filter(d => !previewsRef.current.has(d) && !loadingRef.current.has(d))
     if (toLoad.length === 0) return
@@ -133,7 +135,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     })
 
     return () => { cancelled = true }
-  }, [onThisDay, periodic, randomDate, nextDate, getContent])
+  }, [onThisDay, periodic, randomDate, nextDate1, nextDate2, nextDate3, getContent])
 
   useEffect(() => {
     const dialog = dialogRef.current!
