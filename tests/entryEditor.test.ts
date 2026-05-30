@@ -105,8 +105,11 @@ test.describe('EntryEditor — date header', () => {
 
     const saveButton = page.locator('button.btn-save')
     const moreButton = page.locator('button.btn-more')
+    // Make the entry dirty so the save FAB becomes visible; wait for scale-in to finish
+    await page.locator('textarea').fill('modified content')
     await expect(saveButton).toBeVisible()
     await expect(moreButton).toBeVisible()
+    await expect.poll(() => saveButton.evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(56)
 
     const metrics = await page.evaluate(() => {
       const header = document.querySelector('.editor-header')?.getBoundingClientRect()
@@ -195,6 +198,7 @@ test.describe('EntryEditor — date header', () => {
     })
 
     await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1' })
+    await page.locator('textarea.editor-textarea').fill('modified content')
 
     await page.evaluate(() => {
       Object.defineProperty(window.visualViewport, 'height', {
@@ -1242,15 +1246,18 @@ test.describe('EntryEditor — save button appearance', () => {
     await expect.poll(() => save.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(TRANSPARENT)
   })
 
-  test('mobile save FAB stays solid even when idle', async ({ page }) => {
+  test('mobile save FAB is hidden when not dirty and visible when dirty', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     const save = page.locator('button.btn-save')
     await expect(save).toBeDisabled()
-    const bg = await save.evaluate(el => getComputedStyle(el).backgroundColor)
-    expect(bg).not.toBe(TRANSPARENT)
+    await expect(save).toHaveCSS('opacity', '0')
+
+    await page.locator('textarea').fill('modified content')
+    await expect(save).toBeEnabled()
+    await expect(save).toHaveCSS('opacity', '1')
   })
 })
 
