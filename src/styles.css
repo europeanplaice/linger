@@ -2684,17 +2684,19 @@ dialog.history-dialog::backdrop {
   .editor-actions button .btn-icon { width: 20px; height: 20px; }
 
   /* Today FAB — pill chip above the save FAB. Not affected by keyboard-inset so it
-     naturally disappears behind the keyboard when the user is typing. */
+     naturally disappears behind the keyboard when the user is typing.
+     Visual size is ~2.1rem; ::after expands the tap target to ≥44px. */
   .editor-actions .btn-today-fab {
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 0.35rem;
     position: fixed;
     right: max(1rem, env(safe-area-inset-right));
-    bottom: calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.65rem);
+    bottom: calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.85rem);
     z-index: 89;
     height: 2.1rem;
-    padding: 0 0.85rem;
+    padding: 0 0.8rem;
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 500;
@@ -2705,6 +2707,11 @@ dialog.history-dialog::backdrop {
     box-shadow: 0 2px 8px var(--save-btn-shadow);
     cursor: pointer;
     white-space: nowrap;
+  }
+  .editor-actions .btn-today-fab::after {
+    content: '';
+    position: absolute;
+    inset: -6px -8px;
   }
 
   .more-menu-discard { display: flex; }
