@@ -512,13 +512,20 @@ useEffect(() => {
 
   useEffect(() => {
     if (!showMoreMenu) return
-    const handler = (e: MouseEvent) => {
+    const handleMouse = (e: MouseEvent) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
         setShowMoreMenu(false)
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowMoreMenu(false)
+    }
+    document.addEventListener('mousedown', handleMouse)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleMouse)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [showMoreMenu])
 
   const [shareMsgVisible, setShareMsgVisible] = useState(false)
@@ -618,6 +625,7 @@ useEffect(() => {
             onKeyDown={e => { if (e.key === 'Enter' && deleteInput === t.entry.confirmKeyword) confirmDelete() }}
             autoFocus
             placeholder={t.entry.confirmKeyword}
+            aria-label={t.entry.confirmKeyword}
           />
           <div className="delete-modal-actions">
             <button onClick={() => setShowDeleteModal(false)} disabled={deleting}>{t.common.cancel}</button>
@@ -648,7 +656,7 @@ useEffect(() => {
       )}
       <div className="editor-header">
         <div className="editor-date-group">
-          <button className="btn-menu" onClick={onMenuClick} title={t.entry.openMenu}>☰</button>
+          <button className="btn-menu" onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
           <motion.button className="btn-day-nav" onClick={onPrevDay} aria-label={t.entry.previousDay}
             whileTap={dayNavWhileTap} transition={dayNavTransition}
           >‹</motion.button>
@@ -724,6 +732,7 @@ useEffect(() => {
           )}
           <div className="more-menu-container" ref={moreMenuRef}>
             <motion.button className="btn-more" onClick={() => setShowMoreMenu(v => !v)} aria-label={t.entry.moreOptions}
+              aria-haspopup="true" aria-expanded={showMoreMenu}
               whileTap={{ scale: 0.88 }}
               transition={{ type: 'spring', stiffness: 600, damping: 25 }}
             >···</motion.button>
@@ -736,40 +745,44 @@ useEffect(() => {
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 >
                   {isDirty && !loading && !saving && !autoSave && (
-                    <div className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
+                    <button type="button" className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
                       <DiscardIcon />
                       {t.common.discard}
-                    </div>
+                    </button>
                   )}
                   {isSignedIn && fileIdRef.current && (
-                    <div className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
+                    <button type="button" className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
                       <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                       {t.entry.history}
-                    </div>
+                    </button>
                   )}
                   {isSignedIn && fileIdRef.current && (
-                    <div className="more-menu-item" onClick={() => {
+                    <button type="button" className="more-menu-item" onClick={() => {
                       setShowMoreMenu(false)
                       window.open(`https://drive.google.com/file/d/${fileIdRef.current}/view`, '_blank')
                     }}>
                       <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                       {t.entry.openInDrive}
-                    </div>
+                    </button>
                   )}
-                  <div
-                    className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                  <button
+                    type="button"
+                                       className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
                     onClick={fileIdRef.current ? handleShareEntry : undefined}
+                    disabled={!fileIdRef.current}
                   >
                     <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                     {t.entry.shareEntry}
-                  </div>
-                  <div
-                    className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                  </button>
+                  <button
+                    type="button"
+                                       className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
                     onClick={fileIdRef.current ? del : undefined}
+                    disabled={!fileIdRef.current}
                   >
                     <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                     {t.common.delete}
-                  </div>
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>

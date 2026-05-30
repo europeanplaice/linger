@@ -118,6 +118,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
           ref={inputRef}
           type="search"
           placeholder={t.search.placeholder}
+          aria-label={t.search.placeholder}
           value={query}
           onChange={e => setQuery(e.target.value)}
           maxLength={QUERY_MAX_LENGTH}
@@ -161,9 +162,11 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
             </div>
             <ul className="search-results">
               {results.map(r => (
-                <li key={r.date} onClick={() => { onSelect(r.date); setQuery(''); setResults([]); setSearched(false); setFailedCount(0); setTotalCount(0) }}>
-                  <span className="search-date">{diaryDateLabel(r.date, true, 'long', locale)}</span>
-                  <span className="search-snippet">…{highlightSnippet(r.snippet, query)}…</span>
+                <li key={r.date}>
+                  <button type="button" onClick={() => { onSelect(r.date); setQuery(''); setResults([]); setSearched(false); setFailedCount(0); setTotalCount(0) }}>
+                    <span className="search-date">{diaryDateLabel(r.date, true, 'long', locale)}</span>
+                    <span className="search-snippet">…{highlightSnippet(r.snippet, query)}…</span>
+                  </button>
                 </li>
               ))}
             </ul>

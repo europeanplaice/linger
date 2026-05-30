@@ -88,25 +88,36 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
           {!listLoading && listError && (
             <div className="history-list-error">{listError}</div>
           )}
-          {showUnsavedEntry && (
-            <div
-              className={`history-revision-item${selectedId === '__unsaved__' ? ' selected' : ''}`}
-              onClick={() => selectRevision('__unsaved__')}
-            >
-              <span className="history-revision-time">{t.history.unsaved}</span>
-              <span className="history-revision-badge unsaved-badge">{t.history.unsaved}</span>
-            </div>
+          {!listLoading && !listError && (
+            <ul>
+              {showUnsavedEntry && (
+                <li>
+                  <button
+                    type="button"
+                    className={`history-revision-item${selectedId === '__unsaved__' ? ' selected' : ''}`}
+                    onClick={() => selectRevision('__unsaved__')}
+                    aria-current={selectedId === '__unsaved__' ? 'true' : undefined}
+                  >
+                    <span className="history-revision-time">{t.history.unsaved}</span>
+                    <span className="history-revision-badge unsaved-badge">{t.history.unsaved}</span>
+                  </button>
+                </li>
+              )}
+              {revisions.map((rev, i) => (
+                <li key={rev.id}>
+                  <button
+                    type="button"
+                    className={`history-revision-item${selectedId === rev.id ? ' selected' : ''}`}
+                    onClick={() => selectRevision(rev.id)}
+                    aria-current={selectedId === rev.id ? 'true' : undefined}
+                  >
+                    <span className="history-revision-time">{formatRevisionTime(rev.modifiedTime, locale, t.dates)}</span>
+                    {i === 0 && !showUnsavedEntry && <span className="history-revision-badge">{t.history.current}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
-          {!listLoading && !listError && revisions.map((rev, i) => (
-            <div
-              key={rev.id}
-              className={`history-revision-item${selectedId === rev.id ? ' selected' : ''}`}
-              onClick={() => selectRevision(rev.id)}
-            >
-              <span className="history-revision-time">{formatRevisionTime(rev.modifiedTime, locale, t.dates)}</span>
-              {i === 0 && !showUnsavedEntry && <span className="history-revision-badge">{t.history.current}</span>}
-            </div>
-          ))}
         </div>
         <div className="history-preview-pane">
           {previewLoading && (

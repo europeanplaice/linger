@@ -605,14 +605,23 @@ body {
   overflow-y: auto;
 }
 .search-results li {
-  padding: 0.5rem 0.7rem;
-  cursor: pointer;
-  font-size: 0.82rem;
   border-bottom: 1px solid var(--border);
   transition: background-color 100ms ease-out;
 }
 .search-results li:last-child { border-bottom: none; }
 .search-results li:hover { background: var(--selected-bg); }
+.search-results li button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.82rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .search-date {
   color: var(--accent);
   display: block;
@@ -1878,10 +1887,15 @@ dialog.export-confirm-dialog::backdrop {
   align-items: center;
   gap: 0.35rem;
   padding: 0.55rem 0.75rem;
-  font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
 }
 .more-menu-item:hover { background: var(--border); }
 .more-menu-item-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
@@ -2357,6 +2371,16 @@ dialog.history-dialog::backdrop {
   flex-direction: column;
   padding: 0.4rem 0;
 }
+.history-revision-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.history-revision-list li {
+  list-style: none;
+}
 .history-revision-item {
   padding: 0.6rem 1rem;
   cursor: pointer;
@@ -2364,6 +2388,13 @@ dialog.history-dialog::backdrop {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  width: 100%;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  text-align: left;
+  font: inherit;
 }
 .history-revision-item:hover { background: var(--sidebar-bg); }
 .history-revision-item.selected {
