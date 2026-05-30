@@ -10,21 +10,24 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
     const waiting = regRef.current?.waiting
     if (!waiting) return
     reloadingRef.current = true
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined
     navigator.serviceWorker.addEventListener(
       'controllerchange',
-      () => window.location.reload(),
+      () => {
+        clearTimeout(fallbackTimer)
+        window.location.reload()
+      },
       { once: true },
     )
-    // Fallback: if controllerchange never fires, reload after 4s so the app doesn't
-    // get stuck with reloadingRef=true and stale assets served forever.
-    setTimeout(() => window.location.reload(), 4000)
+    // Fallback: if controllerchange never fires, reload after 4s.
+    fallbackTimer = setTimeout(() => window.location.reload(), 4000)
     waiting.postMessage('SKIP_WAITING')
   }
 
   useEffect(() => {
     dirtyRef.current = editorDirty
-    if (!editorDirty) maybeApply()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally no maybeApply() here — updates apply only when the tab
+    // is hidden so the user is never interrupted mid-session.
   }, [editorDirty])
 
   useEffect(() => {
@@ -49,6 +52,7 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         regRef.current?.update()
+      } else {
         maybeApply()
       }
     }
