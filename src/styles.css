@@ -2898,8 +2898,8 @@ dialog.history-dialog::backdrop {
   gap: 0.45rem;
   width: calc(100% - 2rem);
   margin: 0.25rem 1rem 0.35rem;
-  background: transparent;
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, var(--sidebar-bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
   border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
@@ -2910,8 +2910,8 @@ dialog.history-dialog::backdrop {
 }
 .btn-recollection:hover {
   color: var(--accent);
-  border-color: var(--accent);
-  background: var(--card-bg);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--sidebar-bg));
 }
 
 dialog.recollection-dialog {
