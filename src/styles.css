@@ -1513,51 +1513,6 @@ dialog.export-confirm-dialog::backdrop {
 .export-confirm-start:hover {
   opacity: 0.9;
 }
-/* ── SW update banner ── */
-.update-banner {
-  align-items: center;
-  background: var(--sidebar-bg);
-  color: var(--accent-hover);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  font-size: 0.875rem;
-  gap: 1rem;
-  justify-content: center;
-  left: 0;
-  padding: 0.45rem 1rem;
-  position: fixed;
-  right: 0;
-  top: 0;
-  /* Keep below modal overlays (z-index 200) so the banner doesn't cover dialogs */
-  z-index: 50;
-}
-.update-banner-reload {
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  color: var(--accent-hover);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.82rem;
-  padding: 0.2rem 0.65rem;
-}
-.update-banner-reload:hover { background: rgba(74, 106, 74, 0.1); }
-[data-theme="dark"] .update-banner {
-  background: #21252b;
-  color: var(--accent);
-  border-bottom: 1px solid var(--border);
-}
-[data-theme="dark"] .update-banner-reload {
-  background: transparent;
-  border-color: var(--accent);
-  color: var(--accent);
-}
-[data-theme="dark"] .update-banner-reload:hover { background: rgba(152,195,121,0.12); }
-/* Push app content below the fixed banner (box-sizing: border-box means
-   the 100dvh height absorbs the padding, so content starts below the banner) */
-.app--has-update-banner {
-  padding-top: 2.2rem;
-}
 
 /* ── Entry list ── */
 .sidebar-status { padding: 0.4rem 1rem; font-size: 0.82rem; color: var(--text-muted); }

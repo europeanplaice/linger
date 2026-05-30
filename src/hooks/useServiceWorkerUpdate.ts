@@ -1,60 +1,59 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 
-interface SwUpdateState {
-  updateAvailable: boolean
-  applyUpdate: () => void
-}
-
-export function useServiceWorkerUpdate(): SwUpdateState {
-  const [updateAvailable, setUpdateAvailable] = useState(false)
+export function useServiceWorkerUpdate(editorDirty: boolean): void {
   const regRef = useRef<ServiceWorkerRegistration | null>(null)
+  const dirtyRef = useRef(editorDirty)
+  const reloadingRef = useRef(false)
 
-  const applyUpdate = useCallback(() => {
+  function maybeApply() {
+    if (reloadingRef.current || dirtyRef.current) return
     const waiting = regRef.current?.waiting
-    if (waiting) {
-      waiting.postMessage('SKIP_WAITING')
-      let reloading = false
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloading) return
-        reloading = true
-        window.location.reload()
-      }, { once: true })
-    } else {
-      window.location.reload()
-    }
-  }, [])
+    if (!waiting) return
+    reloadingRef.current = true
+    navigator.serviceWorker.addEventListener(
+      'controllerchange',
+      () => window.location.reload(),
+      { once: true },
+    )
+    // Fallback: if controllerchange never fires, reload after 4s so the app doesn't
+    // get stuck with reloadingRef=true and stale assets served forever.
+    setTimeout(() => window.location.reload(), 4000)
+    waiting.postMessage('SKIP_WAITING')
+  }
+
+  useEffect(() => {
+    dirtyRef.current = editorDirty
+    if (!editorDirty) maybeApply()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDirty])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator) || import.meta.env.DEV) return
-
     const sw = navigator.serviceWorker
     if (!sw) return
 
-    function onWaiting() {
-      setUpdateAvailable(true)
-    }
-
     function watchRegistration(reg: ServiceWorkerRegistration) {
       regRef.current = reg
-      if (reg.waiting) onWaiting()
+      if (reg.waiting) maybeApply()
       reg.addEventListener('updatefound', () => {
         const installing = reg.installing
         if (!installing) return
         installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && sw.controller) onWaiting()
+          if (installing.state === 'installed' && sw.controller) maybeApply()
         })
       })
     }
 
     sw.ready.then(watchRegistration)
 
-    // Re-check for updates whenever the tab becomes visible
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') regRef.current?.update()
+      if (document.visibilityState === 'visible') {
+        regRef.current?.update()
+        maybeApply()
+      }
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  return { updateAvailable, applyUpdate }
 }

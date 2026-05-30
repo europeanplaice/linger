@@ -26,6 +26,7 @@ let originalDEV: boolean
 beforeEach(() => {
   originalDEV = import.meta.env.DEV
   ;(import.meta.env as Record<string, unknown>).DEV = false
+  vi.stubGlobal('location', { reload: vi.fn() })
 })
 
 afterEach(() => {
@@ -35,30 +36,52 @@ afterEach(() => {
 })
 
 describe('useServiceWorkerUpdate', () => {
-  describe('updateAvailable', () => {
-    it('is false before sw.ready resolves', () => {
+  describe('auto-apply when not dirty', () => {
+    it('posts SKIP_WAITING and reloads when a waiting SW is present and not dirty', async () => {
       const reg = new MockRegistration()
+      const waiting = new MockServiceWorker()
+      reg.waiting = waiting
+      const container = makeMockContainer(reg)
       Object.defineProperty(navigator, 'serviceWorker', {
         configurable: true,
-        value: makeMockContainer(reg),
+        value: container,
       })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
-      expect(result.current.updateAvailable).toBe(false)
-    })
-
-    it('becomes true when reg.waiting is already set on startup', async () => {
-      const reg = new MockRegistration()
-      reg.waiting = new MockServiceWorker()
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: makeMockContainer(reg),
-      })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
-      expect(result.current.updateAvailable).toBe(true)
+
+      expect(waiting.postMessage).toHaveBeenCalledWith('SKIP_WAITING')
+
+      act(() => { container.dispatchEvent(new Event('controllerchange')) })
+      expect(window.location.reload).toHaveBeenCalledTimes(1)
     })
 
-    it('becomes true when a new SW reaches installed state and a controller exists', async () => {
+    it('does not apply while dirty, then applies once dirty becomes false', async () => {
+      const reg = new MockRegistration()
+      const waiting = new MockServiceWorker()
+      reg.waiting = waiting
+      const container = makeMockContainer(reg)
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: container,
+      })
+
+      const { rerender } = renderHook(
+        ({ dirty }: { dirty: boolean }) => useServiceWorkerUpdate(dirty),
+        { initialProps: { dirty: true } },
+      )
+      await act(async () => {})
+
+      expect(waiting.postMessage).not.toHaveBeenCalled()
+
+      await act(async () => { rerender({ dirty: false }) })
+
+      expect(waiting.postMessage).toHaveBeenCalledWith('SKIP_WAITING')
+
+      act(() => { container.dispatchEvent(new Event('controllerchange')) })
+      expect(window.location.reload).toHaveBeenCalledTimes(1)
+    })
+
+    it('applies when a new SW reaches installed state and not dirty', async () => {
       const reg = new MockRegistration()
       const installing = new MockServiceWorker()
       const container = makeMockContainer(reg, true)
@@ -66,7 +89,7 @@ describe('useServiceWorkerUpdate', () => {
         configurable: true,
         value: container,
       })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
 
       act(() => {
@@ -75,13 +98,15 @@ describe('useServiceWorkerUpdate', () => {
       })
       act(() => {
         installing.state = 'installed'
+        // Browser moves the SW from installing → waiting on this transition
+        reg.waiting = installing
         installing.dispatchEvent(new Event('statechange'))
       })
 
-      expect(result.current.updateAvailable).toBe(true)
+      expect(installing.postMessage).toHaveBeenCalledWith('SKIP_WAITING')
     })
 
-    it('stays false on first install when no existing controller', async () => {
+    it('does not apply on first install when no existing controller', async () => {
       const reg = new MockRegistration()
       const installing = new MockServiceWorker()
       const container = makeMockContainer(reg, false)
@@ -89,7 +114,7 @@ describe('useServiceWorkerUpdate', () => {
         configurable: true,
         value: container,
       })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
 
       act(() => {
@@ -98,56 +123,48 @@ describe('useServiceWorkerUpdate', () => {
       })
       act(() => {
         installing.state = 'installed'
+        reg.waiting = installing
         installing.dispatchEvent(new Event('statechange'))
       })
 
-      expect(result.current.updateAvailable).toBe(false)
+      expect(installing.postMessage).not.toHaveBeenCalled()
+      expect(window.location.reload).not.toHaveBeenCalled()
     })
 
-    it('detects a subsequent update even when reg.waiting was already set on startup', async () => {
+    it('reloads only once even if controllerchange fires multiple times', async () => {
       const reg = new MockRegistration()
       reg.waiting = new MockServiceWorker()
-      const container = makeMockContainer(reg, true)
+      const container = makeMockContainer(reg)
       Object.defineProperty(navigator, 'serviceWorker', {
         configurable: true,
         value: container,
       })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
-      expect(result.current.updateAvailable).toBe(true)
 
-      // A second update arrives via updatefound — should still be caught
-      const installing2 = new MockServiceWorker()
       act(() => {
-        reg.installing = installing2
-        reg.dispatchEvent(new Event('updatefound'))
+        container.dispatchEvent(new Event('controllerchange'))
+        container.dispatchEvent(new Event('controllerchange'))
       })
-      act(() => {
-        installing2.state = 'installed'
-        installing2.dispatchEvent(new Event('statechange'))
-      })
-      expect(result.current.updateAvailable).toBe(true)
-    })
-
-    it('stays false when serviceWorker is unavailable', () => {
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: undefined,
-      })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
-      expect(result.current.updateAvailable).toBe(false)
+      expect(window.location.reload).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('visibilitychange', () => {
-    it('calls reg.update() when the tab becomes visible', async () => {
+    it('calls reg.update() and maybeApply when tab becomes visible', async () => {
       const reg = new MockRegistration()
+      const waiting = new MockServiceWorker()
+      reg.waiting = waiting
+      const container = makeMockContainer(reg)
       Object.defineProperty(navigator, 'serviceWorker', {
         configurable: true,
-        value: makeMockContainer(reg),
+        value: container,
       })
-      renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
+
+      // Already applied on startup — reset to test visibility trigger independently
+      waiting.postMessage.mockClear()
 
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
       act(() => { document.dispatchEvent(new Event('visibilitychange')) })
@@ -155,13 +172,13 @@ describe('useServiceWorkerUpdate', () => {
       expect(reg.update).toHaveBeenCalledTimes(1)
     })
 
-    it('does not call reg.update() when the tab becomes hidden', async () => {
+    it('does not call reg.update() when tab becomes hidden', async () => {
       const reg = new MockRegistration()
       Object.defineProperty(navigator, 'serviceWorker', {
         configurable: true,
         value: makeMockContainer(reg),
       })
-      renderHook(() => useServiceWorkerUpdate())
+      renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
 
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
@@ -176,7 +193,7 @@ describe('useServiceWorkerUpdate', () => {
         configurable: true,
         value: makeMockContainer(reg),
       })
-      const { unmount } = renderHook(() => useServiceWorkerUpdate())
+      const { unmount } = renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
       unmount()
 
@@ -184,64 +201,6 @@ describe('useServiceWorkerUpdate', () => {
       act(() => { document.dispatchEvent(new Event('visibilitychange')) })
 
       expect(reg.update).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('applyUpdate', () => {
-    beforeEach(() => {
-      vi.stubGlobal('location', { reload: vi.fn() })
-    })
-
-    it('posts SKIP_WAITING to the waiting SW, then reloads on controllerchange', async () => {
-      const reg = new MockRegistration()
-      const waiting = new MockServiceWorker()
-      reg.waiting = waiting
-      const container = makeMockContainer(reg)
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: container,
-      })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
-      await act(async () => {})
-
-      act(() => { result.current.applyUpdate() })
-      expect(waiting.postMessage).toHaveBeenCalledWith('SKIP_WAITING')
-      expect(window.location.reload).not.toHaveBeenCalled()
-
-      act(() => { container.dispatchEvent(new Event('controllerchange')) })
-      expect(window.location.reload).toHaveBeenCalledTimes(1)
-    })
-
-    it('reloads only once even if controllerchange fires multiple times', async () => {
-      const reg = new MockRegistration()
-      reg.waiting = new MockServiceWorker()
-      const container = makeMockContainer(reg)
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: container,
-      })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
-      await act(async () => {})
-
-      act(() => {
-        result.current.applyUpdate()
-        container.dispatchEvent(new Event('controllerchange'))
-        container.dispatchEvent(new Event('controllerchange'))
-      })
-      expect(window.location.reload).toHaveBeenCalledTimes(1)
-    })
-
-    it('reloads immediately when no waiting SW', async () => {
-      const reg = new MockRegistration()
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: makeMockContainer(reg),
-      })
-      const { result } = renderHook(() => useServiceWorkerUpdate())
-      await act(async () => {})
-
-      act(() => { result.current.applyUpdate() })
-      expect(window.location.reload).toHaveBeenCalledTimes(1)
     })
   })
 })

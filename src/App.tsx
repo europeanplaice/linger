@@ -132,14 +132,13 @@ export default function App() {
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
-  const { updateAvailable: swUpdateAvailable, applyUpdate } = useServiceWorkerUpdate()
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
-  const updateAvailable = swUpdateAvailable || previewParams.includes('update-banner')
   const forceEmptyState = previewParams.includes('empty-state')
   const [selectedDate, setSelectedDate] = useState(todayYmd)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
+  useServiceWorkerUpdate(editorDirty)
   const [autoSave, setAutoSave] = useState(() => localStorage.getItem('linger_autosave') === 'true')
   const [pendingDate, setPendingDate] = useState<string | null>(null)
   const [retrySaveAfterReauth, setRetrySaveAfterReauth] = useState(false)
@@ -516,15 +515,7 @@ export default function App() {
     <a href="#main-content" className="skip-link">
       {language === 'ja' ? 'コンテンツへスキップ' : 'Skip to main content'}
     </a>
-    <div className={`app${updateAvailable && !editorDirty ? ' app--has-update-banner' : ''}`}>
-      {updateAvailable && !editorDirty && (
-        <div className="update-banner" role="status">
-          <span>{t.update.available}</span>
-          <button className="update-banner-reload" onClick={applyUpdate}>
-            {t.update.reload}
-          </button>
-        </div>
-      )}
+    <div className="app">
       <AnimatePresence>
         {tokenExpired && <SessionExpiredModal onReauth={handleReauth} />}
       </AnimatePresence>
