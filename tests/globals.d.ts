@@ -14,6 +14,11 @@ interface Window {
     mode: () => 'serif' | 'sans'
     toggle: () => void
   }
+  exportButtonHarness: {
+    render: () => void
+    exportCalls: () => number
+    progressCalls: () => { done: number; total: number }[]
+  }
   settingsHarness: {
     render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string }) => void
     getStoredAutoSave: () => string | null
