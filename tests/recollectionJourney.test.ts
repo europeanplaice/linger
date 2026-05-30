@@ -155,6 +155,32 @@ test.describe('RecollectionJourney', () => {
     expect(second).toContain('Entry gamma.')
   })
 
+  test('"Meet another day" keeps card height stable across snippet lengths', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      dates: [rand1, rand2, rand3],
+      contents: {
+        [rand1]: 'Tiny.',
+        [rand2]: 'This entry has enough words to wrap across multiple lines in the recollection card preview, showing the longer text path without changing the surrounding layout.',
+        [rand3]: 'Another entry.',
+      },
+      serendipityPrefetch: [rand1, rand2, rand3],
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    const card = section.locator('.recollection-card').first()
+    await expect(card).toContainText('Tiny.')
+    const firstBox = await card.boundingBox()
+
+    await section.locator('.recollection-another').click()
+    await expect(card).toContainText('This entry has enough words')
+    const secondBox = await card.boundingBox()
+
+    expect(firstBox).not.toBeNull()
+    expect(secondBox).not.toBeNull()
+    expect(Math.abs(firstBox!.height - secondBox!.height)).toBeLessThan(1)
+  })
+
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {
     await loadHarness(page)
     await render(page, {

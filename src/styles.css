@@ -3098,10 +3098,12 @@ dialog.recollection-dialog::backdrop {
   font-size: 0.88rem;
   line-height: 1.6;
   color: var(--text-muted);
+  block-size: calc(1.6em * 3);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
-  overflow: hidden;
+  line-clamp: 3;
+  overflow: clip;
 }
 .recollection-card-empty {
   font-style: italic;
