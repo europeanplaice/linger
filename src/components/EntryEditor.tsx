@@ -34,6 +34,7 @@ interface Props {
   isSignedIn: boolean
   isOnline: boolean
   onExpired: () => void
+  onGoToToday?: () => void
   refreshSignal?: number
 }
 
@@ -81,7 +82,7 @@ function SpinnerIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, refreshSignal = 0 }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -697,6 +698,17 @@ useEffect(() => {
               </motion.span>
             </AnimatePresence>
           </motion.button>
+          {!isToday && onGoToToday && (
+            <button
+              type="button"
+              className="btn-today-fab"
+              onClick={onGoToToday}
+              aria-label={t.common.today}
+              title={t.common.today}
+            >
+              {t.common.today}
+            </button>
+          )}
           <div className="more-menu-container" ref={moreMenuRef}>
             <motion.button className="btn-more" onClick={() => setShowMoreMenu(v => !v)} aria-label={t.entry.moreOptions}
               whileTap={{ scale: 0.88 }}

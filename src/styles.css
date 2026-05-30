@@ -1748,6 +1748,7 @@ dialog.export-confirm-dialog::backdrop {
 }
 .editor-actions button:disabled { opacity: 0.5; cursor: default; }
 .editor-actions .btn-save:disabled { cursor: not-allowed; }
+.btn-today-fab { display: none; }
 .editor-actions .btn-save {
   display: inline-flex;
   align-items: center;
@@ -2681,6 +2682,32 @@ dialog.history-dialog::backdrop {
     display: none;
   }
   .editor-actions button .btn-icon { width: 20px; height: 20px; }
+
+  /* Today FAB — stacked above the save FAB. Not affected by keyboard-inset so it
+     naturally disappears behind the keyboard when the user is typing. */
+  .btn-today-fab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.6rem);
+    z-index: 89;
+    width: 3.5rem;
+    height: 3.5rem;
+    min-width: 3.5rem;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    background: var(--surface);
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    box-shadow: 0 4px 12px var(--shadow-light);
+    cursor: pointer;
+  }
+
   .more-menu-discard { display: flex; }
   .more-menu .btn-text { display: inline; }
   .btn-settings .btn-text { display: inline; }

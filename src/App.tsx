@@ -619,6 +619,7 @@ export default function App() {
           isSignedIn={!tokenExpired}
           isOnline={isOnline}
           onExpired={handleExpired}
+          onGoToToday={() => selectDate(todayYmd())}
           refreshSignal={entryRefreshSignal}
         />
       </main>
