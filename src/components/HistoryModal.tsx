@@ -83,14 +83,39 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
       <div className="history-modal-body">
         <div className="history-revision-list">
           {listLoading && Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className="history-skeleton-row" />
+            <motion.div
+              key={i}
+              className="history-skeleton-row"
+              initial={{ opacity: 0, y: 6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.18, delay: i * 0.025, ease: 'easeOut' }}
+            />
           ))}
           {!listLoading && listError && (
             <div className="history-list-error">{listError}</div>
           )}
-          <ul>
+          <motion.ul
+            key={listLoading ? 'history-list-loading' : 'history-list-loaded'}
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: {},
+              show: {
+                transition: {
+                  staggerChildren: 0.04,
+                  delayChildren: 0.03,
+                },
+              },
+            }}
+          >
             {showUnsavedEntry && (
-              <li>
+              <motion.li
+                variants={{
+                  hidden: { opacity: 0, y: 8, scale: 0.98, filter: 'blur(3px)' },
+                  show: { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' },
+                }}
+                transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+              >
                 <button
                   type="button"
                   className={`history-revision-item${selectedId === '__unsaved__' ? ' selected' : ''}`}
@@ -100,10 +125,17 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
                   <span className="history-revision-time">{t.history.unsaved}</span>
                   <span className="history-revision-badge unsaved-badge">{t.history.unsaved}</span>
                 </button>
-              </li>
+              </motion.li>
             )}
             {!listLoading && !listError && revisions.map((rev, i) => (
-              <li key={rev.id}>
+              <motion.li
+                key={rev.id}
+                variants={{
+                  hidden: { opacity: 0, y: 8, scale: 0.98, filter: 'blur(3px)' },
+                  show: { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' },
+                }}
+                transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+              >
                 <button
                   type="button"
                   className={`history-revision-item${selectedId === rev.id ? ' selected' : ''}`}
@@ -113,35 +145,61 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
                   <span className="history-revision-time">{formatRevisionTime(rev.modifiedTime, locale, t.dates)}</span>
                   {i === 0 && !showUnsavedEntry && <span className="history-revision-badge">{t.history.current}</span>}
                 </button>
-              </li>
+              </motion.li>
             ))}
-          </ul>
+          </motion.ul>
         </div>
         <div className="history-preview-pane">
           {previewLoading && (
-            <div className="history-preview-skeleton">
+            <motion.div
+              className="history-preview-skeleton"
+              initial={{ opacity: 0, y: 8, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+            >
               {[80, 65, 90, 40, 75, 55].map((w, i) => (
-                <div
+                <motion.div
                   key={i}
                   className={`history-preview-skeleton-row${w <= 45 ? ' short' : w <= 70 ? ' medium' : ''}`}
                   style={{ width: `${w}%` }}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.16, delay: i * 0.025, ease: 'easeOut' }}
                 />
               ))}
-            </div>
+            </motion.div>
           )}
           {!previewLoading && previewError && (
-            <div className="history-preview-error">{previewError}</div>
+            <motion.div
+              key={`history-preview-error-${selectedId ?? 'none'}`}
+              className="history-preview-error"
+              initial={{ opacity: 0, y: 8, filter: 'blur(3px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              {previewError}
+            </motion.div>
           )}
           {!previewLoading && !previewError && diffHtml && (
-            <div
+            <motion.div
+              key={`history-preview-diff-${selectedId ?? 'none'}`}
               className="history-preview-diff"
               dangerouslySetInnerHTML={{ __html: diffHtml }}
+              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
             />
           )}
           {!previewLoading && !previewError && !diffHtml && (
-            <div className="history-preview-diff">
+            <motion.div
+              key={`history-preview-text-${selectedId ?? 'none'}`}
+              className="history-preview-diff"
+              initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+            >
               {previewContent ?? ''}
-            </div>
+            </motion.div>
           )}
           <div className="history-modal-footer">
             {restoreError && <span className="history-restore-error">{restoreError}</span>}
