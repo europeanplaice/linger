@@ -23,7 +23,7 @@ export interface DiaryState {
   refreshEntries: () => Promise<void>
   prefetch: (dates: string[], concurrency?: number) => Promise<void>
   retryPendingSave: () => Promise<LoadedDiaryEntry | null>
-  exportAll: (format: 'txt' | 'md', onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+  exportAll: (onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
 }
 
 export interface SearchResult {
@@ -450,7 +450,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     return save(pending.date, pending.content, pending.baseVersion, false, pending.baseContent)
   }, [save])
 
-  const exportAll = useCallback(async (format: 'txt' | 'md', onProgress?: (done: number, total: number) => void): Promise<{ date: string; content: string }[]> => {
+  const exportAll = useCallback(async (onProgress?: (done: number, total: number) => void): Promise<{ date: string; content: string }[]> => {
     if (!isSignedIn) throw new Error('Not signed in')
 
     const dates = Array.from(cache.keys()).sort((a, b) => a.localeCompare(b))
@@ -462,9 +462,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       onProgress?.(done, total)
       const entry = loaded?.entry
       if (!entry) return { date, content: '' }
-      const content = format === 'md'
-        ? `---\ndate: ${entry.date}\n---\n\n${entry.content}`
-        : entry.content
+      const content = `---\ndate: ${entry.date}\n---\n\n${entry.content}`
       return { date, content }
     })
 

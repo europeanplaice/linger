@@ -1,6 +1,6 @@
 # Linger — Google Drive Diary
 
-A minimalist personal diary app. Entries are stored as Markdown files in your own Google Drive.
+A minimalist personal diary app. Entries are stored as plain-text files in your own Google Drive.
 
 **[-> Open the app](https://linger.europeanplaice.com/)**
 
@@ -14,9 +14,9 @@ A minimalist personal diary app. Entries are stored as Markdown files in your ow
 - Delete entries with an explicit confirmation step
 - Detect cross-device edit conflicts and choose whether to load latest, keep local edits, or overwrite
 - View and restore past revisions of an entry
-- Export all entries as a ZIP of Markdown files
+- Export all entries as a ZIP of plain-text files
 - Settings modal for theme (light / dark / system), font, and language (English / Japanese)
-- Data stays in your Google Drive (`linger_diary/` folder), one Markdown file per day
+- Data stays in your Google Drive (`linger_diary/` folder), one plain-text file per day
 - Warns before reload or date changes when there are unsaved edits
 - Works on mobile with a drawer sidebar, Android back-button support, and keyboard-aware layout
 - Installable as a Progressive Web App

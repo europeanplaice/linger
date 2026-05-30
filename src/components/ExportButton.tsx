@@ -3,7 +3,7 @@ import { useI18n } from '../i18n'
 
 interface ExportButtonProps {
   dates: string[]
-  onExport: (format: 'txt' | 'md', onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+  onExport: (onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
 }
 
 export function ExportButton({ dates, onExport }: ExportButtonProps) {
@@ -11,7 +11,6 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [format, setFormat] = useState<'txt' | 'md'>('txt')
   const dialogRef = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -32,14 +31,14 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
     setProgress({ done: 0, total: dates.length })
 
     try {
-      const entries = await onExport(format, (done, total) => {
+      const entries = await onExport((done, total) => {
         setProgress({ done, total })
       })
 
       const { default: JSZip } = await import('jszip')
       const zip = new JSZip()
       for (const { date, content } of entries) {
-        zip.file(`diary-${date}.${format}`, content)
+        zip.file(`diary-${date}.txt`, content)
       }
 
       const blob = await zip.generateAsync({ type: 'blob' })
@@ -57,7 +56,7 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
       setExporting(false)
       setProgress(null)
     }
-  }, [exporting, dates.length, format, onExport])
+  }, [exporting, dates.length, onExport])
 
   const handleExportClick = () => {
     if (dates.length === 0) return
@@ -95,24 +94,6 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
         <p className="export-confirm-desc">
           {t.export.confirmDesc(dates.length)}
         </p>
-        <div className="export-format-select">
-          <button
-            className={`export-format-btn${format === 'txt' ? ' active' : ''}`}
-            onClick={() => setFormat('txt')}
-            type="button"
-          >
-            <span className="export-format-btn-label">{t.export.formatTxt}</span>
-            <span className="export-format-btn-desc">{t.export.formatTxtDesc}</span>
-          </button>
-          <button
-            className={`export-format-btn${format === 'md' ? ' active' : ''}`}
-            onClick={() => setFormat('md')}
-            type="button"
-          >
-            <span className="export-format-btn-label">{t.export.formatMd}</span>
-            <span className="export-format-btn-desc">{t.export.formatMdDesc}</span>
-          </button>
-        </div>
         <div className="export-confirm-actions">
           <button className="export-confirm-cancel" onClick={close}>{t.common.cancel}</button>
           <button className="export-confirm-start" onClick={doExport}>{t.export.start}</button>

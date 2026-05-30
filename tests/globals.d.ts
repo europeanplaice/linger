@@ -18,7 +18,7 @@ interface Window {
     render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string }) => void
     getStoredAutoSave: () => string | null
     getStoredTheme: () => string | null
-    exportCalls: () => { format: 'txt' | 'md'; onProgress: (done: number, total: number) => void }[]
+    exportCalls: () => { hasProgress: boolean }[]
     setExportReject: (v: boolean) => void
   }
   searchHarness: {
@@ -46,7 +46,7 @@ interface Window {
     >
     triggerGetContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<import('../src/types').LoadedDiaryEntry | null>
     search: (query: string) => Promise<import('../src/hooks/useDiary').SearchResult>
-    exportAll: (format: 'txt' | 'md') => Promise<{ date: string; content: string }[]>
+    exportAll: () => Promise<{ date: string; content: string }[]>
     refreshEntries: () => Promise<void>
     retryPendingSave: () => Promise<
       | { ok: true; result: import('../src/types').LoadedDiaryEntry | null }

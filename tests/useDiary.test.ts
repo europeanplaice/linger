@@ -320,7 +320,7 @@ test.describe('useDiary Drive read batching', () => {
         ...entries.map(entry => ({ status: 200, body: entry, delayMs: 200 })),
       )
       ;(window as any).__exportResult = null
-      void window.diaryHarness.exportAll('txt').then(result => {
+      void window.diaryHarness.exportAll().then(result => {
         ;(window as any).__exportResult = result
       })
     }, {
@@ -335,32 +335,14 @@ test.describe('useDiary Drive read batching', () => {
     expect(await page.evaluate(() => window.diaryHarness.progressCalls())).toHaveLength(6)
   })
 
-  test('exportAll with txt format returns plain content without frontmatter', async ({ page }) => {
+  test('exportAll returns txt storage content with YAML frontmatter', async ({ page }) => {
     await loadHarness(page)
     await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
 
     await page.evaluate((entry) => {
       window.diaryHarness.q({ status: 200, body: entry })
       ;(window as any).__exportResult = null
-      void window.diaryHarness.exportAll('txt').then(result => {
-        ;(window as any).__exportResult = result
-      })
-    }, datedEntryResponse('2026-05-01', 'hello world'))
-
-    await expect.poll(() => page.evaluate(() => (window as any).__exportResult?.length ?? 0)).toBe(1)
-    const content = await page.evaluate(() => (window as any).__exportResult[0].content)
-    expect(content).toBe('hello world')
-    expect(content).not.toContain('---')
-  })
-
-  test('exportAll with md format returns content with YAML frontmatter', async ({ page }) => {
-    await loadHarness(page)
-    await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
-
-    await page.evaluate((entry) => {
-      window.diaryHarness.q({ status: 200, body: entry })
-      ;(window as any).__exportResult = null
-      void window.diaryHarness.exportAll('md').then(result => {
+      void window.diaryHarness.exportAll().then(result => {
         ;(window as any).__exportResult = result
       })
     }, datedEntryResponse('2026-05-01', 'hello world'))

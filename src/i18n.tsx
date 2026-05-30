@@ -199,10 +199,6 @@ const dictionaries = {
       exportAll: 'Export all',
       confirmTitle: 'Export all entries?',
       confirmDesc: (count: number) => `${count} entries will be downloaded as a ZIP file. This may take a while.`,
-      formatTxt: '.txt',
-      formatTxtDesc: 'Plain text (no import)',
-      formatMd: '.md',
-      formatMdDesc: 'Markdown with metadata (re-importable)',
       start: 'Start export',
     },
     history: {
@@ -405,10 +401,6 @@ const dictionaries = {
       exportAll: 'すべて出力',
       confirmTitle: 'すべての日記をエクスポートしますか？',
       confirmDesc: (count: number) => `${count}件の日記を ZIP ファイルとしてダウンロードします。時間がかかる場合があります。`,
-      formatTxt: '.txt',
-      formatTxtDesc: 'テキスト形式（インポート不可）',
-      formatMd: '.md',
-      formatMdDesc: 'Markdown形式（後で再インポート可能）',
       start: 'エクスポート開始',
     },
     history: {

@@ -17,7 +17,7 @@ interface SettingsModalProps {
   fontSize: FontSize
   onFontSizeChange: (size: FontSize) => void
   dates: string[]
-  onExport: (format: 'txt' | 'md', onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+  onExport: (onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
   onClose: () => void
   email?: string
 }

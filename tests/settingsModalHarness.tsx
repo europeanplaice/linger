@@ -5,7 +5,7 @@ import type { FontSize } from '../src/hooks/useFontSize'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
-type ExportCall = { format: 'txt' | 'md'; onProgress: (done: number, total: number) => void }[]
+type ExportCall = { hasProgress: boolean }[]
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
 
@@ -36,8 +36,8 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
     })
   }, [])
 
-  const handleExport = useCallback(async (format: 'txt' | 'md', onProgress: (done: number, total: number) => void) => {
-    exportCalls.push({ format, onProgress })
+  const handleExport = useCallback(async (onProgress: (done: number, total: number) => void) => {
+    exportCalls.push({ hasProgress: typeof onProgress === 'function' })
     if (exportReject) throw new Error('Export failed')
     return []
   }, [])

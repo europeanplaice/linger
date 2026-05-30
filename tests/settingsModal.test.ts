@@ -237,26 +237,7 @@ test.describe('SettingsModal — export confirm modal', () => {
     await expect(page.locator('.export-confirm-dialog')).not.toBeVisible()
   })
 
-  test('format selector is visible with txt active by default', async ({ page }) => {
-    await loadHarness(page)
-    await render(page, { modalOpen: true })
-
-    await page.locator('.btn-export-modern').click()
-    await expect(page.locator('.export-format-btn').first()).toHaveClass(/active/)
-    await expect(page.locator('.export-format-btn').last()).not.toHaveClass(/active/)
-  })
-
-  test('clicking md button activates it and deactivates txt', async ({ page }) => {
-    await loadHarness(page)
-    await render(page, { modalOpen: true })
-
-    await page.locator('.btn-export-modern').click()
-    await page.locator('.export-format-btn').last().click()
-    await expect(page.locator('.export-format-btn').last()).toHaveClass(/active/)
-    await expect(page.locator('.export-format-btn').first()).not.toHaveClass(/active/)
-  })
-
-  test('Start export passes txt format to handler by default', async ({ page }) => {
+  test('Start export calls handler', async ({ page }) => {
     await loadHarness(page)
     await render(page, { modalOpen: true })
 
@@ -265,20 +246,7 @@ test.describe('SettingsModal — export confirm modal', () => {
 
     const calls = await page.evaluate(() => window.settingsHarness.exportCalls())
     expect(calls.length).toBe(1)
-    expect(calls[0].format).toBe('txt')
-  })
-
-  test('Start export passes md format to handler after switching', async ({ page }) => {
-    await loadHarness(page)
-    await render(page, { modalOpen: true })
-
-    await page.locator('.btn-export-modern').click()
-    await page.locator('.export-format-btn').last().click()
-    await page.locator('.export-confirm-start').click()
-
-    const calls = await page.evaluate(() => window.settingsHarness.exportCalls())
-    expect(calls.length).toBe(1)
-    expect(calls[0].format).toBe('md')
+    expect(calls[0].hasProgress).toBe(true)
   })
 
   test('export button is disabled when no dates', async ({ page }) => {

@@ -1469,42 +1469,6 @@ dialog.export-confirm-dialog::backdrop {
 .export-confirm-start:hover {
   opacity: 0.9;
 }
-.export-format-select {
-  display: flex;
-  gap: 0.5rem;
-}
-.export-format-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  background: var(--bg);
-  border: 1.5px solid var(--border);
-  border-radius: 7px;
-  padding: 0.55rem 0.75rem;
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  transition: border-color 0.15s;
-}
-.export-format-btn:hover {
-  border-color: var(--accent);
-}
-.export-format-btn.active {
-  border-color: var(--accent);
-}
-.export-format-btn-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text);
-  font-family: monospace;
-}
-.export-format-btn-desc {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  line-height: 1.3;
-}
-
 /* ── SW update banner ── */
 .update-banner {
   align-items: center;
