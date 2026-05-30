@@ -134,8 +134,7 @@ export function SettingsSelect({ value, onChange, options, 'aria-label': ariaLab
             aria-selected={option.value === value}
             tabIndex={-1}
             className={`settings-select-option ${option.value === value ? 'selected' : ''}`}
-            onMouseDown={e => {
-              if (e.button !== 0) return
+            onClick={() => {
               onChange(option.value)
               close()
             }}
