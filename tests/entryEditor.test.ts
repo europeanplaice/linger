@@ -288,6 +288,44 @@ test.describe('EntryEditor — date header', () => {
 
     expect(loadedHeaderBottom).toBe(loadingHeaderBottom)
   })
+
+  test('keeps day navigation tap feedback scale-only on coarse pointers', async ({ page }) => {
+    await page.addInitScript(() => {
+      const nativeMatchMedia = window.matchMedia.bind(window)
+      window.matchMedia = (query: string) => {
+        if (query.includes('pointer: coarse')) {
+          return {
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          } as MediaQueryList
+        }
+        return nativeMatchMedia(query)
+      }
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const nextButton = page.getByRole('button', { name: 'Next day' })
+    const box = await nextButton.boundingBox()
+    expect(box).not.toBeNull()
+
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(50)
+
+    const inlineStyle = await nextButton.evaluate(el => el.getAttribute('style') ?? '')
+    await page.mouse.up()
+
+    expect(inlineStyle).not.toContain('background')
+    expect(inlineStyle).not.toContain('color')
+  })
 })
 
 test.describe('EntryEditor — auto-save', () => {
@@ -681,6 +719,45 @@ test.describe('EntryEditor — Open in Drive', () => {
 })
 
 test.describe('EntryEditor — Share Entry', () => {
+  test('more menu keeps the compact popup style', async ({ page }) => {
+    await loadHarness(page)
+    await page.evaluate(() => {
+      window.editorHarness.render({
+        date: '2026-05-01',
+        initialContent: 'saved content',
+        version: '1',
+        token: 'mock-token',
+      })
+    })
+    await page.waitForSelector('textarea.editor-textarea')
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    const menu = page.locator('.more-menu')
+    await expect(menu).toBeVisible()
+
+    const metrics = await menu.evaluate(el => {
+      const styles = getComputedStyle(el)
+      return {
+        width: el.getBoundingClientRect().width,
+        background: styles.backgroundColor,
+        borderWidth: styles.borderTopWidth,
+        borderRadius: styles.borderTopLeftRadius,
+        padding: styles.paddingTop,
+        shadow: styles.boxShadow,
+        itemCount: el.querySelectorAll('.more-menu-item').length,
+      }
+    })
+
+    expect(metrics.width).toBeGreaterThanOrEqual(120)
+    expect(metrics.width).toBeLessThan(180)
+    expect(metrics.background).toBe('rgb(250, 249, 246)')
+    expect(parseFloat(metrics.borderWidth)).toBeGreaterThanOrEqual(1)
+    expect(metrics.borderRadius).toBe('8px')
+    expect(metrics.padding).toBe('4px')
+    expect(metrics.shadow).not.toBe('none')
+    expect(metrics.itemCount).toBe(4)
+  })
+
   test('Share Entry is disabled when no saved entry exists', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: '', version: null })

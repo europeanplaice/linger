@@ -8,14 +8,10 @@ import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
+import { Clock3, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
-const coarsePointer = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
-const dayNavWhileTap = coarsePointer
-  ? { scale: 0.82, backgroundColor: 'var(--border)', color: 'var(--text)' }
-  : { scale: 0.82 }
-const dayNavTransition = coarsePointer
-  ? { type: 'spring' as const, stiffness: 600, damping: 25, backgroundColor: { duration: 0 }, color: { duration: 0 } }
-  : { type: 'spring' as const, stiffness: 600, damping: 25 }
+const dayNavWhileTap = { scale: 0.82 }
+const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
 
 interface Props {
   date: string
@@ -732,13 +728,16 @@ useEffect(() => {
           )}
           <div className="more-menu-container" ref={moreMenuRef}>
             <motion.button className="btn-more" onClick={() => setShowMoreMenu(v => !v)} aria-label={t.entry.moreOptions}
-              aria-haspopup="true" aria-expanded={showMoreMenu}
+              aria-expanded={showMoreMenu}
+              aria-controls={showMoreMenu ? 'entry-more-menu' : undefined}
               whileTap={{ scale: 0.88 }}
               transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-            >···</motion.button>
+            >
+              <MoreHorizontal className="btn-icon" aria-hidden="true" size={18} strokeWidth={2.2} />
+            </motion.button>
             <AnimatePresence>
               {showMoreMenu && (
-                <motion.div className="more-menu"
+                <motion.div id="entry-more-menu" className="more-menu"
                   initial={{ opacity: 0, scale: 0.91, y: -6 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.91, y: -6 }}
@@ -752,7 +751,7 @@ useEffect(() => {
                   )}
                   {isSignedIn && fileIdRef.current && (
                     <button type="button" className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
-                      <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      <Clock3 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
                       {t.entry.history}
                     </button>
                   )}
@@ -761,26 +760,26 @@ useEffect(() => {
                       setShowMoreMenu(false)
                       window.open(`https://drive.google.com/file/d/${fileIdRef.current}/view`, '_blank')
                     }}>
-                      <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      <ExternalLink className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
                       {t.entry.openInDrive}
                     </button>
                   )}
                   <button
                     type="button"
-                                       className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                    className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
                     onClick={fileIdRef.current ? handleShareEntry : undefined}
                     disabled={!fileIdRef.current}
                   >
-                    <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    <Share2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
                     {t.entry.shareEntry}
                   </button>
                   <button
                     type="button"
-                                       className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                    className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
                     onClick={fileIdRef.current ? del : undefined}
                     disabled={!fileIdRef.current}
                   >
-                    <svg className="btn-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                    <Trash2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
                     {t.common.delete}
                   </button>
                 </motion.div>

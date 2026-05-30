@@ -306,6 +306,37 @@ test.describe('SettingsModal — Drive folder link', () => {
 })
 
 test.describe('SettingsModal — font size select', () => {
+  test('font size dropdown keeps the compact popup style', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Font size' }).click()
+    const dropdown = page.getByRole('listbox', { name: 'Font size' })
+    await expect(dropdown).toBeVisible()
+
+    const metrics = await dropdown.evaluate(el => {
+      const styles = getComputedStyle(el)
+      return {
+        width: el.getBoundingClientRect().width,
+        background: styles.backgroundColor,
+        borderWidth: styles.borderTopWidth,
+        borderRadius: styles.borderTopLeftRadius,
+        padding: styles.paddingTop,
+        shadow: styles.boxShadow,
+        optionCount: el.querySelectorAll('[role="option"]').length,
+      }
+    })
+
+    expect(metrics.width).toBeGreaterThanOrEqual(96)
+    expect(metrics.width).toBeLessThan(160)
+    expect(metrics.background).toBe('rgb(250, 249, 246)')
+    expect(parseFloat(metrics.borderWidth)).toBeGreaterThanOrEqual(1)
+    expect(metrics.borderRadius).toBe('8px')
+    expect(metrics.padding).toBe('4px')
+    expect(metrics.shadow).not.toBe('none')
+    expect(metrics.optionCount).toBe(4)
+  })
+
   test('shows a select with four size options', async ({ page }) => {
     await loadHarness(page)
     await render(page)

@@ -534,9 +534,8 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 /* Hover + :active styles only apply to devices with a real pointer (mouse).
-   On touch devices we rely on framer-motion's whileTap (scale) for feedback,
-   which avoids the sticky :active state mobile Chrome leaves behind when the
-   click handler triggers a re-render before pointerup is dispatched. */
+   Touch devices use motion scale only; color/background animations can leave
+   inline styles behind when a date-change render interrupts pointerup. */
 @media (hover: hover) and (pointer: fine) {
   .btn-day-nav:hover { background: var(--border); color: var(--text); }
   .btn-day-nav:active { background: var(--border); color: var(--text); }
@@ -1219,6 +1218,8 @@ dialog.settings-dialog::backdrop {
   top: calc(anchor(bottom) + 4px);
   right: anchor(right);
   min-width: anchor-size(width);
+  width: max-content;
+  max-width: calc(100vw - 2rem);
   position-try-fallbacks: --ss-flip-up;
   /* Appearance */
   background: var(--bg);
@@ -1265,6 +1266,7 @@ dialog.settings-dialog::backdrop {
   outline: none;
   padding: 0.5rem 0.7rem;
   transition: background 0.1s;
+  white-space: nowrap;
 }
 .settings-select-check {
   color: var(--accent);
@@ -1883,55 +1885,102 @@ dialog.export-confirm-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: none;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
   width: 2.4rem;
   min-width: 2.4rem;
   height: 2.4rem;
   padding: 0;
-  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
   color: var(--text-muted);
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
 }
-.editor-actions .btn-more:hover,
-.editor-actions .btn-more:focus,
-.editor-actions .btn-more:active { background: none; }
+.editor-actions .btn-more:hover {
+  background: var(--sidebar-bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+.editor-actions .btn-more:focus-visible,
+.editor-actions .btn-more[aria-expanded="true"] {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--save-glow);
+}
+.editor-actions .btn-more:active { background: var(--selected-bg); }
 .restoring-header-placeholder {
   pointer-events: none;
   visibility: hidden;
 }
 .more-menu {
   position: absolute;
-  top: calc(100% + 0.35rem);
+  top: calc(100% + 4px);
   right: 0;
   min-width: 8rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px var(--shadow-heavy);
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  padding: 0.25rem;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
   z-index: 120;
   overflow: hidden;
+  transform-origin: top right;
 }
-.more-menu-item {
+.editor-actions .more-menu .more-menu-item {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.75rem;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
   width: 100%;
-  background: none;
+  background: transparent;
   border: none;
+  border-radius: 5px;
   text-align: left;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
-.more-menu-item:hover { background: var(--border); }
+.editor-actions .more-menu .more-menu-item .btn-icon {
+  width: 0.8rem;
+  height: 0.8rem;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.editor-actions .more-menu .more-menu-item:not(:disabled):hover,
+.editor-actions .more-menu .more-menu-item:not(:disabled):focus-visible {
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.editor-actions .more-menu .more-menu-item:not(:disabled):hover .btn-icon,
+.editor-actions .more-menu .more-menu-item:not(:disabled):focus-visible .btn-icon {
+  color: var(--accent);
+}
+.editor-actions .more-menu .more-menu-item:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
 .more-menu-item-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 .more-menu-discard { display: none; }
-.more-menu-delete { color: var(--danger); }
+.editor-actions .more-menu .more-menu-delete {
+  color: var(--danger);
+}
+.editor-actions .more-menu .more-menu-delete .btn-icon {
+  color: currentColor;
+}
+.editor-actions .more-menu .more-menu-delete:not(:disabled):hover,
+.editor-actions .more-menu .more-menu-delete:not(:disabled):focus-visible {
+  background: color-mix(in srgb, var(--danger) 12%, var(--card-bg));
+  color: var(--danger);
+}
 .editor-share-toast {
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -2794,7 +2843,7 @@ dialog.history-dialog::backdrop {
   .more-menu .btn-text { display: inline; }
   .btn-settings .btn-text { display: inline; }
   .btn-recollection .btn-text { display: inline; }
-  .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; font-size: 1.6rem; background: none; }
+  .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; }
 
   @media (max-width: 340px) {
     .entry-date-weekday { display: none; }
