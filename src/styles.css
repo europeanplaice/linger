@@ -1582,7 +1582,7 @@ dialog.export-confirm-dialog::backdrop {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 0.9rem 2rem 1.5rem;
+  padding: 0.4rem 2rem 1.5rem;
   position: relative;
   max-width: 680px;
   margin: 0 auto;
@@ -2557,7 +2557,7 @@ dialog.history-dialog::backdrop {
 
   .main { width: 100%; }
 
-  .editor { padding: 1rem 1rem 1rem; }
+  .editor { padding: 0.6rem 1rem 1rem; }
 
   .editor-charcount {
     text-align: left;
