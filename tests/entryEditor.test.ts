@@ -758,6 +758,50 @@ test.describe('EntryEditor — Share Entry', () => {
     expect(metrics.itemCount).toBe(4)
   })
 
+  test('delete menu icon keeps the danger color while hovered and pressed', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      initialContent: 'saved content',
+      version: '1',
+      token: 'mock-token',
+    })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    const deleteItem = page.locator('.more-menu-delete')
+    await deleteItem.hover()
+
+    const hovered = await deleteItem.evaluate(el => {
+      const probe = document.createElement('span')
+      probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--danger')
+      document.body.append(probe)
+      const danger = getComputedStyle(probe).color
+      probe.remove()
+      const icon = el.querySelector('.btn-icon')
+
+      return {
+        danger,
+        item: getComputedStyle(el).color,
+        icon: icon ? getComputedStyle(icon).color : '',
+      }
+    })
+    expect(hovered.item).toBe(hovered.danger)
+    expect(hovered.icon).toBe(hovered.danger)
+
+    await page.mouse.down()
+    const pressed = await deleteItem.evaluate(el => {
+      const icon = el.querySelector('.btn-icon')
+      return {
+        item: getComputedStyle(el).color,
+        icon: icon ? getComputedStyle(icon).color : '',
+      }
+    })
+    await page.mouse.up()
+
+    expect(pressed.item).toBe(hovered.danger)
+    expect(pressed.icon).toBe(hovered.danger)
+  })
+
   test('Share Entry is disabled when no saved entry exists', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: '', version: null })

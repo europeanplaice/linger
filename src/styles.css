@@ -1977,9 +1977,15 @@ dialog.export-confirm-dialog::backdrop {
   color: currentColor;
 }
 .editor-actions .more-menu .more-menu-delete:not(:disabled):hover,
-.editor-actions .more-menu .more-menu-delete:not(:disabled):focus-visible {
+.editor-actions .more-menu .more-menu-delete:not(:disabled):focus-visible,
+.editor-actions .more-menu .more-menu-delete:not(:disabled):active {
   background: color-mix(in srgb, var(--danger) 12%, var(--card-bg));
   color: var(--danger);
+}
+.editor-actions .more-menu .more-menu-delete:not(:disabled):hover .btn-icon,
+.editor-actions .more-menu .more-menu-delete:not(:disabled):focus-visible .btn-icon,
+.editor-actions .more-menu .more-menu-delete:not(:disabled):active .btn-icon {
+  color: currentColor;
 }
 .editor-share-toast {
   font-size: 0.75rem;
