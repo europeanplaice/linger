@@ -9,6 +9,7 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Write daily diary entries, with manual save via button or Ctrl/Cmd+S
 - Optional Drive auto-save after a few seconds of editing
 - Calendar view to navigate by date, with dots marking days that have entries
+- Recollection Journey — a serendipity view that surfaces "on this day" past entries and random older ones
 - Previous/next day controls, plus Alt+Left / Alt+Right and Alt+Up for today
 - Full-text search via Drive API, with on-demand snippet extraction from matched entries
 - Delete entries with an explicit confirmation step
@@ -78,6 +79,9 @@ The browser stores only non-sensitive preferences in `localStorage`:
 - `linger_fontsize` — font size (`sm` / `md` / `lg` / `xl`)
 - `linger_language` — `en` / `ja`
 - `linger_had_session` — `true`/`false` flag indicating whether the user was previously signed in (used to show the "continue with your previous session" prompt on the login screen)
+- `linger_session_user` — last signed-in email; used to detect cross-device account switches and clear stale cached data
+- `linger_ext_migrated` — one-time flag set after the `.md` → `.txt` file-extension migration runs
+- `gp-save-timings` — recent save durations (up to 10 samples) used to animate the save progress bar
 
 No tokens or diary content are ever written to `localStorage`.
 
@@ -87,6 +91,7 @@ No tokens or diary content are ever written to `localStorage`.
 - `CalendarView` — monthly grid built with native `Date` arithmetic; dots on dates with entries
 - `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
+- `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random older ones
 - `SettingsModal` — theme, font, language, auto-save, export, keyboard shortcuts
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
@@ -166,10 +171,7 @@ Some UI states are hard to trigger naturally during development. Append `?previe
 
 | Param | Effect |
 |---|---|
-| `?preview=update-banner` | Forces the SW update banner visible at the top of the app |
 | `?preview=empty-state` | Forces the "No entries yet" hint in the sidebar |
-
-Params can be combined: `?preview=update-banner&preview=empty-state`
 
 > Note: Google OAuth requires the redirect URI to be registered. For local dev, add
 > `http://localhost:8788/auth/callback` to your OAuth client's Authorized redirect URIs.
