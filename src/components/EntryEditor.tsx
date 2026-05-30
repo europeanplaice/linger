@@ -79,6 +79,8 @@ function SpinnerIcon() {
 }
 
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+
 export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
@@ -677,6 +679,7 @@ useEffect(() => {
             disabled={saving || !isDirty || loadFailed}
             aria-busy={saving}
             aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : t.entry.save}
+            title={isMac ? '⌘S' : 'Ctrl+S'}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           >
