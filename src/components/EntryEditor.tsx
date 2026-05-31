@@ -720,14 +720,14 @@ useEffect(() => {
             onClick={handleExplicitSave}
             disabled={autoSave || saving || !isDirty || loadFailed}
             aria-busy={saving}
-            aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : t.entry.save}
+            aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}
             title={autoSave ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           >
             <AnimatePresence mode="wait" initial={false}>
               <motion.span
-                key={saving ? 'saving' : status === savedStatus ? 'saved' : 'save'}
+                key={saving ? 'saving' : status === savedStatus ? 'saved' : autoSave ? 'auto-save' : 'save'}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -735,7 +735,7 @@ useEffect(() => {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
               >
                 {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-                <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : t.entry.save}</span>
+                <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}</span>
               </motion.span>
             </AnimatePresence>
           </motion.button>
