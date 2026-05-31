@@ -2260,10 +2260,6 @@ dialog.session-expired-dialog::backdrop {
 }
 
 .editor-textarea {
-  --editor-scroll-fade-top: 1.5rem;
-  --editor-scroll-fade-bottom: 3.5rem;
-  --editor-scroll-mask-top: transparent;
-  --editor-scroll-mask-bottom: transparent;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2284,28 +2280,6 @@ dialog.session-expired-dialog::backdrop {
   line-break: strict;
   padding-top: 0.2rem;
   text-rendering: optimizeLegibility;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    var(--editor-scroll-mask-top) 0,
-    black var(--editor-scroll-fade-top),
-    black calc(100% - var(--editor-scroll-fade-bottom)),
-    var(--editor-scroll-mask-bottom) 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    var(--editor-scroll-mask-top) 0,
-    black var(--editor-scroll-fade-top),
-    black calc(100% - var(--editor-scroll-fade-bottom)),
-    var(--editor-scroll-mask-bottom) 100%
-  );
-}
-
-.editor-scroll-wrap.scroll-at-top .editor-textarea {
-  --editor-scroll-mask-top: black;
-}
-
-.editor-scroll-wrap.scroll-at-bottom .editor-textarea {
-  --editor-scroll-mask-bottom: black;
 }
 
 [data-font="serif"] .editor-textarea {
