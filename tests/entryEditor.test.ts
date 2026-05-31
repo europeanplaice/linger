@@ -885,7 +885,7 @@ test.describe('EntryEditor — Share Entry', () => {
 })
 
 test.describe('EntryEditor — save progress', () => {
-  test('shows inline saving state without overlay on explicit save button click', async ({ page }) => {
+  test('shows inline saving state and progress bar on explicit save button click', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
@@ -903,13 +903,14 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
+    await expect(page.locator('.save-progress-bar')).toHaveCount(1)
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
-  test('shows inline saving state without overlay on Ctrl+S save', async ({ page }) => {
+  test('shows inline saving state and progress bar on Ctrl+S save', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
@@ -929,13 +930,14 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
+    await expect(page.locator('.save-progress-bar')).toHaveCount(1)
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
-  test('does not show saving overlay on auto-save', async ({ page }) => {
+  test('does not show saving progress or overlay on auto-save', async ({ page }) => {
     await page.clock.install({ time: 0 })
     await loadHarness(page)
     await page.evaluate(() => {
@@ -957,7 +959,8 @@ test.describe('EntryEditor — save progress', () => {
     await page.clock.fastForward(1501)
     await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
 
-    // Overlay should NOT appear during auto-save
+    // Visual save progress should stay quiet during auto-save.
+    await expect(page.locator('.save-progress-bar')).toHaveCount(0)
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
