@@ -73,11 +73,25 @@ describe('getEntryContent', () => {
     const entry = { date: '2026-05-01', content: 'hello' }
     mockFetch(driveMarkdownResponse(entry))
 
-    const result = await getEntryContent('token', 'file-123')
+    const result = await getEntryContent('token', 'file-123', '2026-05-01')
     expect(result).toEqual(entry)
     const fetchCall = (vi.mocked(fetch).mock.calls[0] as any)
     expect(fetchCall[1].headers['Accept-Encoding']).toBe('gzip')
     expect(fetchCall[1].headers['User-Agent']).toContain('(gzip)')
+  })
+
+  it('parses a bare body (no frontmatter) using the filename date', async () => {
+    mockFetch(new Response('just the body\nwith lines', { status: 200, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } }))
+
+    const result = await getEntryContent('token', 'file-123', '2026-05-01')
+    expect(result).toEqual({ date: '2026-05-01', content: 'just the body\nwith lines' })
+  })
+
+  it('strips legacy frontmatter and prefers the filename date', async () => {
+    mockFetch(driveMarkdownResponse({ date: '2026-01-01', content: 'legacy body' }))
+
+    const result = await getEntryContent('token', 'file-123', '2026-05-01')
+    expect(result).toEqual({ date: '2026-05-01', content: 'legacy body' })
   })
 
   it('retries on 429 then succeeds', async () => {
@@ -86,7 +100,7 @@ describe('getEntryContent', () => {
       .mockResolvedValueOnce(new Response('Too Many Requests', { status: 429 }))
       .mockResolvedValueOnce(driveMarkdownResponse(entry)))
 
-    const result = await getEntryContent('token', 'file-123')
+    const result = await getEntryContent('token', 'file-123', '2026-05-01')
     expect(result.content).toBe('hello')
   })
 
@@ -96,7 +110,7 @@ describe('getEntryContent', () => {
       .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
       .mockResolvedValueOnce(driveMarkdownResponse(entry)))
 
-    const result = await getEntryContent('token', 'file-123')
+    const result = await getEntryContent('token', 'file-123', '2026-05-01')
     expect(result.content).toBe('ok')
   })
 
@@ -105,13 +119,13 @@ describe('getEntryContent', () => {
       Promise.resolve(new Response('Server Error', { status: 503 })),
     ))
 
-    await expect(getEntryContent('token', 'file-123')).rejects.toThrow(DriveError)
+    await expect(getEntryContent('token', 'file-123', '2026-05-01')).rejects.toThrow(DriveError)
   })
 
   it('throws DriveError immediately on 404 (no retry)', async () => {
     mockFetch(new Response('Not Found', { status: 404 }))
 
-    await expect(getEntryContent('token', 'file-123')).rejects.toThrow(DriveError)
+    await expect(getEntryContent('token', 'file-123', '2026-05-01')).rejects.toThrow(DriveError)
   })
 
   it('respects Retry-After header', async () => {
@@ -124,7 +138,7 @@ describe('getEntryContent', () => {
         .mockResolvedValueOnce(new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '1' } }))
         .mockResolvedValueOnce(driveMarkdownResponse(entry)))
 
-      const promise = getEntryContent('token', 'file-123')
+      const promise = getEntryContent('token', 'file-123', '2026-05-01')
       await vi.runAllTimersAsync()
       await promise
 
@@ -238,8 +252,7 @@ describe('saveEntry', () => {
     expect(fetchCall[0]).toContain('uploadType=media')
     expect(fetchCall[1].method).toBe('PATCH')
     expect(fetchCall[1].headers['Content-Type']).toBe('text/plain; charset=UTF-8')
-    expect(fetchCall[1].body).toContain('date: 2026-05-01')
-    expect(fetchCall[1].body).toContain('updated')
+    expect(fetchCall[1].body).toBe('updated')
   })
 
   it('sends If-Match header when ifMatch is provided', async () => {

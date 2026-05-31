@@ -51,7 +51,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
       return new Response(null, { status: 304 })
     }
 
-    const entry = await getEntryContent(accessToken, meta.id)
+    const entry = await getEntryContent(accessToken, meta.id, date)
     return jsonResponse({ entry, meta }, 200, meta.version ? { ETag: meta.version } : undefined)
   } catch (e) {
     if (e instanceof DriveError) {
@@ -110,7 +110,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
           throw e
         }
         if ((currentMeta.version ?? null) !== body.baseVersion) {
-          const remoteEntry = await getEntryContent(accessToken, currentMeta.id)
+          const remoteEntry = await getEntryContent(accessToken, currentMeta.id, date)
           if (body.baseContent == null || remoteEntry.content !== body.baseContent) {
             return jsonResponse({ conflict: { entry: remoteEntry, meta: currentMeta } }, 409)
           }
@@ -129,7 +129,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
             if (e2 instanceof DriveError && e2.status === 404) return jsonResponse({ conflict: null }, 409)
             throw e2
           }
-          const remoteEntry = await getEntryContent(accessToken, meta.id)
+          const remoteEntry = await getEntryContent(accessToken, meta.id, date)
           if (body.baseContent != null && remoteEntry.content === body.baseContent) {
             // Content is identical despite the version bump — safe to overwrite
             const savedMeta = await saveEntry(accessToken, entry, folderId, meta.id)
@@ -150,7 +150,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     if (!meta && hasBaseVersion && !body.force && body.baseVersion != null) return jsonResponse({ conflict: null }, 409)
 
     if (meta && hasBaseVersion && !body.force && (meta.version ?? null) !== (body.baseVersion ?? null)) {
-      const remoteEntry = await getEntryContent(accessToken, meta.id)
+      const remoteEntry = await getEntryContent(accessToken, meta.id, date)
       if (body.baseContent == null || remoteEntry.content !== body.baseContent) {
         return jsonResponse({ conflict: { entry: remoteEntry, meta } }, 409)
       }

@@ -181,7 +181,7 @@ const dictionaries = {
       storageItems: [
         <>A folder named <b>linger_diary</b> is created automatically</>,
         'One text file per day: diary-YYYY-MM-DD.txt',
-        'Format: YAML frontmatter (date) + plain text body',
+        'Format: plain text body (the date comes from the filename)',
         'This app only accesses files it created (scope: drive.file)',
       ] as ReactNode[],
       viewInDrive: 'View diary folder in Google Drive',
@@ -379,7 +379,7 @@ const dictionaries = {
       storageItems: [
         <><b>linger_diary</b> というフォルダが自動作成されます</>,
         '1日につき1つのテキストファイル: diary-YYYY-MM-DD.txt',
-        '形式: YAMLフロントマター (date) + 本文',
+        '形式: 本文のみ（日付はファイル名から取得）',
         'このアプリは自分で作成したファイルだけにアクセスします（scope: drive.file）',
       ] as ReactNode[],
       viewInDrive: 'Google Drive でフォルダを開く',
