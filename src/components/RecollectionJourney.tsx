@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { haptics } from '../utils/haptics'
 import { useI18n } from '../i18n'
-import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestWithDistance } from '../utils/date'
+import { todayYmd, parseYmd, diaryDateLabel, weekdayLabel, sameMonthDayInPastYears, nearestWithDistance } from '../utils/date'
+import { buildPeriodicSpecs } from '../utils/recollectionDates'
+import type { PeriodicKind } from '../utils/recollectionDates'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -55,34 +57,37 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   const onThisDay = useMemo(() => sameMonthDayInPastYears(dates, today), [dates, today])
 
   const periodic = useMemo<PeriodicEntry[]>(() => {
-    const ref = parseYmd(today)
-    if (!ref) return []
-    const shiftDays = (days: number) => {
-      const d = new Date(ref.y, ref.m - 1, ref.d)
-      d.setDate(d.getDate() - days)
-      return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    const labelFor = (kind: PeriodicKind, approx: boolean): string => {
+      switch (kind) {
+        case 'week':   return t.recollection.weekAgo(1, approx)
+        case 'month1': return t.recollection.monthsAgo(1, approx)
+        case 'month6': return t.recollection.monthsAgo(6, approx)
+        case 'year1':  return t.recollection.yearsAgo(1, approx)
+        case 'year5':  return t.recollection.yearsAgo(5, approx)
+        case 'year10': return t.recollection.yearsAgo(10, approx)
+        case 'year20': return t.recollection.yearsAgo(20, approx)
+      }
     }
-    const shiftMonths = (months: number) => {
-      const { year, month } = addMonths(ref.y, ref.m, -months)
-      const day = Math.min(ref.d, daysInMonth(year, month))
-      return ymd(year, month, day)
-    }
-    const specs = [
-      { target: shiftDays(7),    tol: 3,  build: (a: boolean) => t.recollection.weekAgo(1, a) },
-      { target: shiftMonths(1),  tol: 7,  build: (a: boolean) => t.recollection.monthsAgo(1, a) },
-      { target: shiftMonths(6),  tol: 10, build: (a: boolean) => t.recollection.monthsAgo(6, a) },
-      { target: shiftMonths(12), tol: 14, build: (a: boolean) => t.recollection.yearsAgo(1, a) },
-    ]
+
+    // Years already shown in On This Day — skip periodic specs for the same year
+    const onThisDayYears = new Set(
+      onThisDay.map(d => parseYmd(d)?.y).filter((y): y is number => y !== undefined)
+    )
+
+    const specs = buildPeriodicSpecs(dates, today)
     const used = new Set<string>([today, ...onThisDay])
     const out: PeriodicEntry[] = []
+
     for (const s of specs) {
+      if (s.yearTarget !== undefined && onThisDayYears.has(s.yearTarget)) continue
       const found = nearestWithDistance(dates, s.target, s.tol)
       if (found && !used.has(found.date)) {
         used.add(found.date)
-        out.push({ date: found.date, eyebrow: s.build(found.distance > 0) })
+        out.push({ date: found.date, eyebrow: labelFor(s.kind, found.distance > 0) })
       }
     }
-    return out
+
+    return out.slice(0, 3)
   }, [dates, today, onThisDay, t])
 
   const randomCandidates = useMemo(() => {
