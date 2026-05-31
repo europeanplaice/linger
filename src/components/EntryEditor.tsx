@@ -7,7 +7,7 @@ import { todayYmd, weekdayLabel, diaryDateLabel } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
-import { useSaveProgress } from '../hooks/useSaveProgress'
+import { haptics } from '../utils/haptics'
 import { Clock3, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
@@ -36,16 +36,18 @@ interface Props {
 
 function SaveIcon() {
   return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/>
+    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 16V8m0 0-3 3m3-3 3 3"/>
+      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
     </svg>
   )
 }
 
 function CheckIcon() {
   return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
+      <path d="m9 15 2 2 4-4"/>
     </svg>
   )
 }
@@ -92,7 +94,6 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
-  const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
   const [text, setText] = useState('')
   const charCount = text.length
@@ -253,13 +254,11 @@ useEffect(() => {
     if (savingRef.current) return false
     if (loadFailedRef.current) return false
     setSaving(true)
-    startSave()
     if (explicit) {
       setStatus('')
       setHasConflict(false)
       setConflictRemote(null)
     }
-    let success = false
     try {
       const currentText = textRef.current
       const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
@@ -270,7 +269,7 @@ useEffect(() => {
       fileIdRef.current = newId
       setPendingOfflineSave(false)
       setStatus(savedStatus)
-      success = true
+      if (explicit) haptics.success()
       return true
     } catch (e) {
       // Offline: the fetch never reached Drive. Keep the edits dirty and let the
@@ -288,15 +287,16 @@ useEffect(() => {
         setHasConflict(true)
         setConflictRemote(e.remote)
         setStatus(t.entry.changedElsewhere)
+        haptics.warning()
       } else {
         setStatus(t.entry.saveFailed)
+        haptics.error()
       }
       return false
     } finally {
       setSaving(false)
-      completeSave(success)
     }
-  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave])
+  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue])
 
   const handleExplicitSave = useCallback(async () => {
     const ok = await save(true)
@@ -422,6 +422,7 @@ useEffect(() => {
       setShowDeleteModal(false)
       applyLoadedEntry(null)
       setStatus('')
+      haptics.delete()
     } catch {
       setStatus(t.entry.deleteFailed)
       setShowDeleteModal(false)
@@ -648,20 +649,6 @@ useEffect(() => {
       )}
     </AnimatePresence>
     <div className="editor">
-      {saveProgress !== null && (
-        <div className="save-progress-bar" aria-hidden="true">
-          <div
-            className="save-progress-bar-fill"
-            style={{
-              width: `${saveProgress * 100}%`,
-              opacity: saveProgress >= 1 ? 0 : 1,
-              transition: saveProgress >= 1
-                ? 'width 0.15s ease-out, opacity 0.45s ease 0.1s'
-                : 'width 60ms linear',
-            }}
-          />
-        </div>
-      )}
       <div className="editor-header">
         <div className="editor-date-group">
           <button className="btn-menu" onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
