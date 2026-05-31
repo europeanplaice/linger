@@ -37,16 +37,18 @@ interface Props {
 
 function SaveIcon() {
   return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/>
+    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 16V8m0 0-3 3m3-3 3 3"/>
+      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
     </svg>
   )
 }
 
 function CheckIcon() {
   return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
+      <path d="m9 15 2 2 4-4"/>
     </svg>
   )
 }
