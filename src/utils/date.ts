@@ -80,7 +80,7 @@ export function sameMonthDayInPastYears(dates: string[], today: string = todayYm
  * Find the entry date closest to `target` (YYYY-MM-DD), within `maxDistanceDays`.
  * Returns null if no entry falls inside the window.
  */
-export function nearestEntryWithin(dates: string[], target: string, maxDistanceDays: number): string | null {
+export function nearestWithDistance(dates: string[], target: string, maxDistanceDays: number): { date: string; distance: number } | null {
   const t = dateFromYmd(target)
   if (!t) return null
   let best: string | null = null
@@ -97,7 +97,11 @@ export function nearestEntryWithin(dates: string[], target: string, maxDistanceD
       best = d
     }
   }
-  return best
+  return best !== null ? { date: best, distance: bestDist } : null
+}
+
+export function nearestEntryWithin(dates: string[], target: string, maxDistanceDays: number): string | null {
+  return nearestWithDistance(dates, target, maxDistanceDays)?.date ?? null
 }
 
 function mondayStart(date: Date): Date {

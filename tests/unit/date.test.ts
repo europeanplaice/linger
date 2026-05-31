@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -336,6 +336,25 @@ describe('date utils', () => {
     it('prefers the earlier (past) date on a tie, regardless of input order', () => {
       expect(nearestEntryWithin(['2026-05-18', '2026-05-12'], '2026-05-15', 5)).toBe('2026-05-12')
       expect(nearestEntryWithin(['2026-05-12', '2026-05-18'], '2026-05-15', 5)).toBe('2026-05-12')
+    })
+  })
+
+  describe('nearestWithDistance', () => {
+    it('returns date and distance 0 for an exact match', () => {
+      expect(nearestWithDistance(['2026-05-15'], '2026-05-15', 5)).toEqual({ date: '2026-05-15', distance: 0 })
+    })
+
+    it('returns the correct distance for an offset entry', () => {
+      const dates = ['2026-05-10', '2026-05-14', '2026-05-20']
+      expect(nearestWithDistance(dates, '2026-05-15', 3)).toEqual({ date: '2026-05-14', distance: 1 })
+    })
+
+    it('returns null when nothing is within the window', () => {
+      expect(nearestWithDistance(['2026-05-01'], '2026-05-15', 3)).toBeNull()
+    })
+
+    it('prefers the earlier (past) date on a tie and reports the shared distance', () => {
+      expect(nearestWithDistance(['2026-05-18', '2026-05-12'], '2026-05-15', 5)).toEqual({ date: '2026-05-12', distance: 3 })
     })
   })
 
