@@ -415,6 +415,9 @@ test.describe('EntryEditor — auto-save', () => {
 
     await page.fill('textarea.editor-textarea', 'dirty auto-save content')
     await expect(page.locator('button.btn-save')).toBeDisabled()
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Auto-save')
+    await expect(page.locator('button.btn-save .btn-text')).toHaveText('Auto-save')
+    await expect(page.locator('button.btn-save')).not.toHaveAttribute('title', /.+/)
 
     await page.keyboard.press('Control+S')
     expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
@@ -426,6 +429,27 @@ test.describe('EntryEditor — auto-save', () => {
     expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'dirty auto-save content', baseVersion: '1' },
     ])
+  })
+
+  test('auto-save uses the same inline saving state without enabling the manual action', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: true })
+
+    await page.evaluate(() => window.editorHarness.blockSave())
+    await page.fill('textarea.editor-textarea', 'dirty auto-save content')
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.clock.fastForward(1501)
+
+    const save = page.locator('button.btn-save')
+    await expect(save).toBeDisabled()
+    await expect(save).toHaveAttribute('aria-busy', 'true')
+    await expect(save).toHaveAttribute('aria-label', 'Saving')
+    await expect(save.locator('.btn-text')).toHaveText('Saving…')
+    await expect(page.locator('.save-progress-bar')).toHaveCount(0)
+
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect(save).toHaveAttribute('aria-label', 'Saved')
   })
 })
 
@@ -1268,6 +1292,23 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await page.fill('textarea.editor-textarea', 'edited content')
 
     await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-meta-unsaved')).toHaveText('Unsaved')
+  })
+
+  test('unsaved label stays visible during auto-save without adding a text separator', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: true })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+
+    const unsaved = page.locator('.editor-meta-unsaved')
+    await expect(unsaved).toBeVisible()
+    await expect(unsaved).toHaveText('Unsaved')
+
+    const marginLeft = await unsaved.evaluate(el => getComputedStyle(el).marginLeft)
+    expect(parseFloat(marginLeft)).toBeGreaterThan(0)
+    expect(await unsaved.textContent()).not.toContain('·')
   })
 
   test('unsaved label disappears after saving', async ({ page }) => {
@@ -1301,6 +1342,19 @@ test.describe('EntryEditor — save button appearance', () => {
     await page.fill('textarea.editor-textarea', 'edited content')
     await expect(save).toBeEnabled()
     await expect.poll(() => save.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(TRANSPARENT)
+  })
+
+  test('saved save button does not run an extra flash animation', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    const save = page.locator('button.btn-save')
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await save.click()
+    await expect(save).toHaveClass(/btn-saved/)
+
+    expect(await save.evaluate(el => getComputedStyle(el).animationName)).toBe('none')
   })
 
   test('mobile save FAB is hidden when not dirty and visible when dirty', async ({ page }) => {
