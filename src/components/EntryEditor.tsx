@@ -9,7 +9,7 @@ import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
 import { haptics } from '../utils/haptics'
-import { Clock3, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
+import { Clock3, CloudUpload, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -38,12 +38,7 @@ interface Props {
 }
 
 function SaveIcon() {
-  return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 16V8m0 0-3 3m3-3 3 3"/>
-      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
-    </svg>
-  )
+  return <CloudUpload className="btn-icon" aria-hidden="true" size={15} strokeWidth={1.5} />
 }
 
 function CheckIcon() {
