@@ -528,13 +528,9 @@ useEffect(() => {
   const [scrollAtTop, setScrollAtTop] = useState(true)
   const [scrollAtBottom, setScrollAtBottom] = useState(true)
 
-  useEffect(() => {
+  const attachScrollListeners = useCallback(() => {
     const el = textareaRef.current
-    if (!el || loading) {
-      setScrollAtTop(true)
-      setScrollAtBottom(true)
-      return
-    }
+    if (!el) return
     const update = () => {
       setScrollAtTop(el.scrollTop < 2)
       setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
@@ -547,7 +543,16 @@ useEffect(() => {
       el.removeEventListener('scroll', update)
       ro.disconnect()
     }
-  }, [loading, text])
+  }, [])
+
+  useEffect(() => {
+    if (loading) {
+      setScrollAtTop(true)
+      setScrollAtBottom(true)
+      return
+    }
+    return attachScrollListeners()
+  }, [loading, text, attachScrollListeners])
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -940,6 +945,7 @@ useEffect(() => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
+                onAnimationComplete={attachScrollListeners}
               />
             )}
           </AnimatePresence>
