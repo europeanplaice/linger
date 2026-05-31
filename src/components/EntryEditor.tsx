@@ -824,7 +824,7 @@ useEffect(() => {
           )}
         </AnimatePresence>
         <AnimatePresence initial={false}>
-          {isDirty && !autoSave && !loading && (
+          {isDirty && !loading && (
             <motion.span
               key="unsaved"
               className="editor-meta-unsaved"
