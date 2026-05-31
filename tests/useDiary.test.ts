@@ -335,7 +335,7 @@ test.describe('useDiary Drive read batching', () => {
     expect(await page.evaluate(() => window.diaryHarness.progressCalls())).toHaveLength(6)
   })
 
-  test('exportAll returns txt storage content with YAML frontmatter', async ({ page }) => {
+  test('exportAll returns the bare body text (no frontmatter)', async ({ page }) => {
     await loadHarness(page)
     await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
 
@@ -349,8 +349,7 @@ test.describe('useDiary Drive read batching', () => {
 
     await expect.poll(() => page.evaluate(() => (window as any).__exportResult?.length ?? 0)).toBe(1)
     const content = await page.evaluate(() => (window as any).__exportResult[0].content)
-    expect(content).toContain('---\ndate: 2026-05-01\n---')
-    expect(content).toContain('hello world')
+    expect(content).toBe('hello world')
   })
 })
 

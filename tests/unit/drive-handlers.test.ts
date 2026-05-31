@@ -71,7 +71,7 @@ describe('get entry handler', () => {
       meta: { id: 'entry-1', version: '7' },
     })
     expect(drive.findEntryMeta).toHaveBeenCalledOnce()
-    expect(drive.getEntryContent).toHaveBeenCalledWith('tok', 'entry-1')
+    expect(drive.getEntryContent).toHaveBeenCalledWith('tok', 'entry-1', '2026-05-01')
     expect(drive.getEntryMeta).not.toHaveBeenCalled()
   })
 
@@ -224,7 +224,7 @@ describe('post entry handler', () => {
     const res = await onPostEntry(ctx as any)
 
     expect(res.status).toBe(200)
-    expect(drive.getEntryContent).toHaveBeenCalledWith('tok', 'entry-1')
+    expect(drive.getEntryContent).toHaveBeenCalledWith('tok', 'entry-1', '2026-05-01')
     expect(drive.saveEntry).toHaveBeenCalledOnce()
     expect(drive.saveEntry).toHaveBeenCalledWith(
       'tok',

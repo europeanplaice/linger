@@ -462,8 +462,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       onProgress?.(done, total)
       const entry = loaded?.entry
       if (!entry) return { date, content: '' }
-      const content = `---\ndate: ${entry.date}\n---\n\n${entry.content}`
-      return { date, content }
+      return { date, content: entry.content }
     })
 
     return results

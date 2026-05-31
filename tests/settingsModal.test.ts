@@ -170,7 +170,7 @@ test.describe('SettingsModal — about data storage', () => {
     await expect(listItems).toHaveCount(4)
     await expect(listItems.nth(0)).toContainText('linger_diary')
     await expect(listItems.nth(1)).toContainText('diary-YYYY-MM-DD.txt')
-    await expect(listItems.nth(2)).toContainText('YAML frontmatter')
+    await expect(listItems.nth(2)).toContainText('plain text body')
     await expect(listItems.nth(3)).toContainText('drive.file')
   })
 

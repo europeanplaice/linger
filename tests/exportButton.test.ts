@@ -42,7 +42,7 @@ test.describe('ExportButton', () => {
       'diary-2026-05-01.txt',
       'diary-2026-05-02.txt',
     ])
-    expect(await zip.file('diary-2026-05-01.txt')?.async('string')).toBe('---\ndate: 2026-05-01\n---\n\nfirst entry')
-    expect(await zip.file('diary-2026-05-02.txt')?.async('string')).toBe('---\ndate: 2026-05-02\n---\n\nsecond entry')
+    expect(await zip.file('diary-2026-05-01.txt')?.async('string')).toBe('first entry')
+    expect(await zip.file('diary-2026-05-02.txt')?.async('string')).toBe('second entry')
   })
 })

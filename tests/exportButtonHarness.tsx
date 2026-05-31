@@ -6,11 +6,11 @@ import '../src/styles.css'
 const entries = [
   {
     date: '2026-05-01',
-    content: '---\ndate: 2026-05-01\n---\n\nfirst entry',
+    content: 'first entry',
   },
   {
     date: '2026-05-02',
-    content: '---\ndate: 2026-05-02\n---\n\nsecond entry',
+    content: 'second entry',
   },
 ]
 

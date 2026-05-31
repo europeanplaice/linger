@@ -272,22 +272,29 @@ export async function getDiaryFileMeta(
 }
 
 function serializeEntry(entry: DiaryEntry): string {
-  return `---\ndate: ${entry.date}\n---\n\n${entry.content}`
+  return entry.content
 }
 
-function parseEntry(text: string): DiaryEntry {
+// Parses a diary file body. The authoritative date comes from the filename and
+// is passed in via `date`. Legacy files carry a `---\ndate: …\n---` frontmatter
+// block: when present it is stripped from the body, and its date is used as a
+// fallback if no `date` was provided. New files have no frontmatter, so the
+// whole text is the body. Never throws.
+function parseEntry(text: string, date: string): DiaryEntry {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
-  if (!match) throw new Error('Invalid diary format')
-  const frontmatter = match[1]
-  const content = match[2].replace(/^\n/, '')
-  const date = frontmatter.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
-  return { date, content }
+  if (match) {
+    const frontmatter = match[1]
+    const content = match[2].replace(/^\n/, '')
+    const fmDate = frontmatter.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
+    return { date: date || fmDate, content }
+  }
+  return { date, content: text }
 }
 
-export async function getEntryContent(token: string, fileId: string): Promise<DiaryEntry> {
+export async function getEntryContent(token: string, fileId: string, date: string): Promise<DiaryEntry> {
   return driveWithRetry(
     () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token) }),
-    async r => parseEntry(await r.text()),
+    async r => parseEntry(await r.text(), date),
   )
 }
 
@@ -382,9 +389,11 @@ export async function listRevisions(token: string, fileId: string): Promise<Driv
 }
 
 export async function getRevisionContent(token: string, fileId: string, revisionId: string): Promise<DiaryEntry> {
+  // The date is not available here; old revisions carry it in frontmatter and
+  // new revisions have none. An empty date is acceptable for revision display.
   return driveWithRetry(
     () => fetch(`${BASE}/files/${fileId}/revisions/${revisionId}?alt=media`, { headers: driveHeaders(token) }),
-    async r => parseEntry(await r.text()),
+    async r => parseEntry(await r.text(), ''),
   )
 }
 
