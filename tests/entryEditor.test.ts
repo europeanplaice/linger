@@ -369,6 +369,7 @@ test.describe('EntryEditor — auto-save', () => {
     await renderEditor(page, { date: '2026-05-01', initialContent: '' })
 
     await page.fill('textarea.editor-textarea', 'auto-save content')
+    await expect(page.locator('button.btn-save')).toBeDisabled()
     // Ensure React has registered the auto-save timer after the fill
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
@@ -385,13 +386,14 @@ test.describe('EntryEditor — auto-save', () => {
   test('auto-save does not fire while hasConflict is true', async ({ page }) => {
     await page.clock.install()
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', saveReject: 'conflict' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', saveReject: 'conflict', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'edited text')
 
     // Click save button explicitly to get an EntryConflictError shown in the UI
     await page.locator('button.btn-save').click()
     await page.waitForSelector('.conflict-panel')
+    await page.evaluate(() => window.editorHarness.setAutoSave(true))
 
     await page.evaluate(() => window.editorHarness.clearCalls())
 
@@ -404,6 +406,26 @@ test.describe('EntryEditor — auto-save', () => {
     // Auto-save should NOT have fired because hasConflict is true
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toHaveLength(0)
+  })
+
+  test('Save button and Ctrl+S stay inactive while auto-save is enabled', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: true })
+
+    await page.fill('textarea.editor-textarea', 'dirty auto-save content')
+    await expect(page.locator('button.btn-save')).toBeDisabled()
+
+    await page.keyboard.press('Control+S')
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.clock.fastForward(1501)
+    await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
+
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'dirty auto-save content', baseVersion: '1' },
+    ])
   })
 })
 
@@ -463,7 +485,7 @@ test.describe('EntryEditor — offline', () => {
 test.describe('EntryEditor — keyboard save', () => {
   test('Ctrl+S saves dirty content without clicking the save button', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'keyboard saved content')
     await page.keyboard.press('Control+S')
@@ -476,7 +498,7 @@ test.describe('EntryEditor — keyboard save', () => {
 
   test('Ctrl+S passes the saved text as baseContent', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'keyboard saved content')
     await page.keyboard.press('Control+S')
@@ -495,7 +517,7 @@ test.describe('EntryEditor — keyboard save', () => {
 test.describe('EntryEditor — repeated saves', () => {
   test('uses the saved version as the base for the next save of the same entry', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'first edit')
     await page.locator('button.btn-save').click()
@@ -528,7 +550,7 @@ test.describe('EntryEditor — repeated saves', () => {
 test.describe('EntryEditor — conflict resolution', () => {
   test('loads the latest remote content from the conflict panel', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'local edits')
     await page.locator('button.btn-save').click()
@@ -546,7 +568,7 @@ test.describe('EntryEditor — conflict resolution', () => {
 
   test('keeps local edits when resolving a conflict locally', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'local edits')
     await page.locator('button.btn-save').click()
@@ -561,7 +583,7 @@ test.describe('EntryEditor — conflict resolution', () => {
 
   test('overwrites the remote entry with force and the remote version', async ({ page }) => {
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict' })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'local edits')
     await page.locator('button.btn-save').click()
@@ -892,6 +914,7 @@ test.describe('EntryEditor — save progress', () => {
         date: '2026-05-01',
         initialContent: 'saved content',
         version: '1',
+        autoSave: false,
       })
     })
     await page.waitForSelector('textarea.editor-textarea')
@@ -917,6 +940,7 @@ test.describe('EntryEditor — save progress', () => {
         date: '2026-05-01',
         initialContent: 'saved content',
         version: '1',
+        autoSave: false,
       })
     })
     await page.waitForSelector('textarea.editor-textarea')

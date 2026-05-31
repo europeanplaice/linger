@@ -104,6 +104,7 @@ interface Window {
     windowOpenCalls: () => { url: string; target: string }[]
     EntryConflictError: typeof import('../src/hooks/useDiary').EntryConflictError
     setToken: (token: string | null) => void
+    setAutoSave: (autoSave: boolean) => void
     expiredCalls: () => number
     setDate: (date: string) => void
     setRefreshSignal: (n: number) => void

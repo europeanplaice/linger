@@ -267,6 +267,10 @@ window.editorHarness = {
     currentGetContentReject = undefined
     doRender()
   },
+  setAutoSave: (autoSave: boolean) => {
+    lastRenderAutoSave = autoSave
+    doRender()
+  },
   setDate: (date: string) => {
     lastRenderDate = date
     doRender()

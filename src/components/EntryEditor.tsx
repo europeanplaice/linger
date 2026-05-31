@@ -460,20 +460,20 @@ useEffect(() => {
     if (!isOnline || !pendingOfflineSaveRef.current) return
     if (textRef.current === savedTextRef.current) { setPendingOfflineSave(false); return }
     if (savingRef.current || hasConflictRef.current || loadingRef.current || loadFailedRef.current) return
-    void save(true)
-  }, [isOnline, save])
+    void save(!autoSave)
+  }, [autoSave, isOnline, save])
 
   // Ctrl+S / Cmd+S explicit save
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (isDirty) handleExplicitSave()
+        if (!autoSave && isDirty) handleExplicitSave()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isDirty, handleExplicitSave])
+  }, [autoSave, isDirty, handleExplicitSave])
 
   useEffect(() => {
     if (status !== savedStatus) return
@@ -718,10 +718,10 @@ useEffect(() => {
           <motion.button
             className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
             onClick={handleExplicitSave}
-            disabled={saving || !isDirty || loadFailed}
+            disabled={autoSave || saving || !isDirty || loadFailed}
             aria-busy={saving}
             aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : t.entry.save}
-            title={isMac ? '⌘S' : 'Ctrl+S'}
+            title={autoSave ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           >
