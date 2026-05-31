@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
+import { haptics } from '../utils/haptics'
 import { useI18n } from '../i18n'
 import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestWithDistance } from '../utils/date'
 import type { DiaryState } from '../hooks/useDiary'
@@ -156,7 +157,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     const preview = previews.get(date)
     const weekday = weekdayLabel(date, locale)
     return (
-      <motion.button key={date} className="recollection-card" onClick={() => onSelect(date)} variants={cardItemVariants}>
+      <motion.button key={date} className="recollection-card" onClick={() => { haptics.tap(); onSelect(date) }} variants={cardItemVariants}>
         <span className="recollection-card-eyebrow">{eyebrow}</span>
         <span className="recollection-card-date">
           {diaryDateLabel(date, true, 'long', locale)}

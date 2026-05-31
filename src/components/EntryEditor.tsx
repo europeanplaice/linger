@@ -8,6 +8,7 @@ import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
+import { haptics } from '../utils/haptics'
 import { Clock3, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
@@ -271,6 +272,7 @@ useEffect(() => {
       setPendingOfflineSave(false)
       setStatus(savedStatus)
       success = true
+      if (explicit) haptics.success()
       return true
     } catch (e) {
       // Offline: the fetch never reached Drive. Keep the edits dirty and let the
@@ -288,8 +290,10 @@ useEffect(() => {
         setHasConflict(true)
         setConflictRemote(e.remote)
         setStatus(t.entry.changedElsewhere)
+        haptics.warning()
       } else {
         setStatus(t.entry.saveFailed)
+        haptics.error()
       }
       return false
     } finally {
@@ -422,6 +426,7 @@ useEffect(() => {
       setShowDeleteModal(false)
       applyLoadedEntry(null)
       setStatus('')
+      haptics.delete()
     } catch {
       setStatus(t.entry.deleteFailed)
       setShowDeleteModal(false)
