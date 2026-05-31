@@ -856,19 +856,18 @@ test.describe('EntryEditor — Share Entry', () => {
 
 test.describe('EntryEditor — save progress', () => {
   test('shows inline saving state without overlay on explicit save button click', async ({ page }) => {
-    await page.clock.install({ time: 0 })
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
         date: '2026-05-01',
         initialContent: 'saved content',
         version: '1',
-        saveDelayMs: 500,
       })
     })
     await page.waitForSelector('textarea.editor-textarea')
 
     await page.fill('textarea.editor-textarea', 'new content')
+    await page.evaluate(() => window.editorHarness.blockSave())
     await page.locator('button.btn-save').click()
 
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
@@ -876,19 +875,17 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
-    await page.clock.fastForward(500)
+    await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
   test('shows inline saving state without overlay on Ctrl+S save', async ({ page }) => {
-    await page.clock.install({ time: 0 })
     await loadHarness(page)
     await page.evaluate(() => {
       window.editorHarness.render({
         date: '2026-05-01',
         initialContent: 'saved content',
         version: '1',
-        saveDelayMs: 3000,
       })
     })
     await page.waitForSelector('textarea.editor-textarea')
@@ -896,15 +893,15 @@ test.describe('EntryEditor — save progress', () => {
     await page.fill('textarea.editor-textarea', 'keyboard save')
     await expect(page.locator('button.btn-save')).toBeEnabled()
 
+    await page.evaluate(() => window.editorHarness.blockSave())
     await page.keyboard.press('Control+S')
 
-    // Wait for the save button to enter saving state (aria-busy="true")
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
-    await page.clock.fastForward(3000)
+    await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
   })
 
@@ -1012,6 +1009,9 @@ test.describe('EntryEditor — silent refresh race condition', () => {
     ).toBeGreaterThanOrEqual(2)
 
     // User types new content while the fetch is still in-flight
+    // Click to focus and move cursor to end before typing
+    await page.locator('textarea.editor-textarea').click()
+    await page.keyboard.press('Control+End')
     await page.locator('textarea.editor-textarea').pressSequentially('\nuser typed here')
 
     // Resolve the in-flight fetch — the trailing assertion retries until stable

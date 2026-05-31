@@ -108,6 +108,8 @@ interface Window {
     setContentForDate: (date: string, content: string, version: string | null) => void
     blockGetContent: (date: string) => void
     unblockGetContent: () => void
+    blockSave: () => void
+    unblockSave: () => void
     setOnline: (online: boolean) => void
   }
   historyHarness: {

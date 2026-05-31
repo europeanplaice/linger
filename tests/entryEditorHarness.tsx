@@ -47,6 +47,8 @@ let currentRefreshSignal = 0
 const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
 let getContentBlockedForDate: string | null = null
 let getContentBlockResolvers: Array<() => void> = []
+let saveBlocked = false
+let saveBlockResolvers: Array<() => void> = []
 
 function delaySave(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -124,6 +126,9 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         // Simulate a network failure while offline, mirroring fetch in production.
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           throw new Error('Network error')
+        }
+        if (saveBlocked) {
+          await new Promise<void>(resolve => saveBlockResolvers.push(resolve))
         }
         if (currentSaveDelayMs > 0) {
           await delaySave(currentSaveDelayMs)
@@ -205,6 +210,8 @@ window.editorHarness = {
     currentDeleteDelayMs = opts.deleteDelayMs ?? 0
     currentToken = opts.token ?? null
     currentSaveDelayMs = opts.saveDelayMs ?? 0
+    saveBlocked = false
+    saveBlockResolvers = []
     currentRemoteContent = opts.initialContent ?? ''
     currentRemoteVersion = opts.version ?? null
     lastRenderDate = opts.date ?? '2026-05-01'
@@ -266,6 +273,15 @@ window.editorHarness = {
     getContentBlockedForDate = null
     const resolvers = getContentBlockResolvers
     getContentBlockResolvers = []
+    resolvers.forEach(r => r())
+  },
+  blockSave: () => {
+    saveBlocked = true
+  },
+  unblockSave: () => {
+    saveBlocked = false
+    const resolvers = saveBlockResolvers
+    saveBlockResolvers = []
     resolvers.forEach(r => r())
   },
   setOnline: (online: boolean) => {
