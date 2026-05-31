@@ -832,7 +832,7 @@ useEffect(() => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-            >{` · ${t.common.unsaved}`}</motion.span>
+            >{t.common.unsaved}</motion.span>
           )}
         </AnimatePresence>
       </div>

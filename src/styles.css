@@ -1665,6 +1665,7 @@ dialog.export-confirm-dialog::backdrop {
 }
 .editor-meta-unsaved {
   color: var(--text-muted);
+  margin-left: 0.5em;
 }
 .editor-meta-offline {
   display: inline-flex;
