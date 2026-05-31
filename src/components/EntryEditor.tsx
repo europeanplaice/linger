@@ -528,7 +528,11 @@ useEffect(() => {
   const [scrollAtTop, setScrollAtTop] = useState(true)
   const [scrollAtBottom, setScrollAtBottom] = useState(true)
 
+  const scrollCleanupRef = useRef<(() => void) | undefined>(undefined)
+
   const attachScrollListeners = useCallback(() => {
+    scrollCleanupRef.current?.()
+    scrollCleanupRef.current = undefined
     const el = textareaRef.current
     if (!el) return
     const update = () => {
@@ -539,7 +543,7 @@ useEffect(() => {
     el.addEventListener('scroll', update, { passive: true })
     const ro = new ResizeObserver(update)
     ro.observe(el)
-    return () => {
+    scrollCleanupRef.current = () => {
       el.removeEventListener('scroll', update)
       ro.disconnect()
     }
@@ -549,9 +553,12 @@ useEffect(() => {
     if (loading) {
       setScrollAtTop(true)
       setScrollAtBottom(true)
+      scrollCleanupRef.current?.()
+      scrollCleanupRef.current = undefined
       return
     }
-    return attachScrollListeners()
+    attachScrollListeners()
+    return () => { scrollCleanupRef.current?.(); scrollCleanupRef.current = undefined }
   }, [loading, text, attachScrollListeners])
 
   async function handleShareEntry() {
