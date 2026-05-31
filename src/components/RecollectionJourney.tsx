@@ -67,10 +67,10 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
       return ymd(year, month, day)
     }
     const specs = [
-      { target: shiftDays(7),    tol: 3,  near: 2, build: (a: boolean) => t.recollection.weekAgo(1, a) },
-      { target: shiftMonths(1),  tol: 7,  near: 5, build: (a: boolean) => t.recollection.monthsAgo(1, a) },
-      { target: shiftMonths(6),  tol: 10, near: 5, build: (a: boolean) => t.recollection.monthsAgo(6, a) },
-      { target: shiftMonths(12), tol: 14, near: 7, build: (a: boolean) => t.recollection.yearsAgo(1, a) },
+      { target: shiftDays(7),    tol: 3,  build: (a: boolean) => t.recollection.weekAgo(1, a) },
+      { target: shiftMonths(1),  tol: 7,  build: (a: boolean) => t.recollection.monthsAgo(1, a) },
+      { target: shiftMonths(6),  tol: 10, build: (a: boolean) => t.recollection.monthsAgo(6, a) },
+      { target: shiftMonths(12), tol: 14, build: (a: boolean) => t.recollection.yearsAgo(1, a) },
     ]
     const used = new Set<string>([today, ...onThisDay])
     const out: PeriodicEntry[] = []
@@ -78,7 +78,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
       const found = nearestWithDistance(dates, s.target, s.tol)
       if (found && !used.has(found.date)) {
         used.add(found.date)
-        out.push({ date: found.date, eyebrow: s.build(found.distance > s.near) })
+        out.push({ date: found.date, eyebrow: s.build(found.distance > 0) })
       }
     }
     return out
