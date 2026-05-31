@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { useI18n } from '../i18n'
-import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestEntryWithin } from '../utils/date'
+import { todayYmd, ymd, parseYmd, diaryDateLabel, weekdayLabel, addMonths, daysInMonth, sameMonthDayInPastYears, nearestWithDistance } from '../utils/date'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -67,18 +67,18 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
       return ymd(year, month, day)
     }
     const specs = [
-      { target: shiftDays(7), tol: 3, eyebrow: t.recollection.weekAgo(1) },
-      { target: shiftMonths(1), tol: 7, eyebrow: t.recollection.monthsAgo(1) },
-      { target: shiftMonths(3), tol: 8, eyebrow: t.recollection.monthsAgo(3) },
-      { target: shiftMonths(6), tol: 10, eyebrow: t.recollection.monthsAgo(6) },
+      { target: shiftDays(7),    tol: 3,  build: (a: boolean) => t.recollection.weekAgo(1, a) },
+      { target: shiftMonths(1),  tol: 7,  build: (a: boolean) => t.recollection.monthsAgo(1, a) },
+      { target: shiftMonths(6),  tol: 10, build: (a: boolean) => t.recollection.monthsAgo(6, a) },
+      { target: shiftMonths(12), tol: 14, build: (a: boolean) => t.recollection.yearsAgo(1, a) },
     ]
     const used = new Set<string>([today, ...onThisDay])
     const out: PeriodicEntry[] = []
     for (const s of specs) {
-      const found = nearestEntryWithin(dates, s.target, s.tol)
-      if (found && !used.has(found)) {
-        used.add(found)
-        out.push({ date: found, eyebrow: s.eyebrow })
+      const found = nearestWithDistance(dates, s.target, s.tol)
+      if (found && !used.has(found.date)) {
+        used.add(found.date)
+        out.push({ date: found.date, eyebrow: s.build(found.distance > 0) })
       }
     }
     return out

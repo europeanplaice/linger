@@ -27,20 +27,20 @@ describe('recollectionDatesToPrefetch', () => {
     })
   })
 
-  describe('periodic (1 week / 1 month / 3 months / 6 months ago)', () => {
+  describe('periodic (1 week / 1 month / 6 months / 1 year ago)', () => {
     it('includes entries near each periodic target', () => {
-      const weekAgo    = '2026-05-15'  // 7 days, tol 3
-      const monthAgo   = '2026-04-22'  // 1 month, tol 7
-      const threeMonths = '2026-02-22' // 3 months, tol 8
-      const sixMonths  = '2025-11-22'  // 6 months, tol 10
+      const weekAgo   = '2026-05-15'  // 7 days, tol 3
+      const monthAgo  = '2026-04-22'  // 1 month, tol 7
+      const sixMonths = '2025-11-22'  // 6 months, tol 10
+      const oneYear   = '2025-05-15'  // ~1 year (7 days from 2025-05-22), tol 14
       const result = recollectionDatesToPrefetch(
-        [weekAgo, monthAgo, threeMonths, sixMonths],
+        [weekAgo, monthAgo, sixMonths, oneYear],
         TODAY,
       )
       expect(result).toContain(weekAgo)
       expect(result).toContain(monthAgo)
-      expect(result).toContain(threeMonths)
       expect(result).toContain(sixMonths)
+      expect(result).toContain(oneYear)
     })
 
     it('accepts nearest entry within tolerance', () => {
