@@ -98,7 +98,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const charCount = text.length
   const [savedText, setSavedText] = useState('')
   const [baseVersion, setBaseVersion] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
   const [loadFailed, setLoadFailed] = useState(false)
@@ -528,13 +528,13 @@ useEffect(() => {
   const [scrollAtTop, setScrollAtTop] = useState(true)
   const [scrollAtBottom, setScrollAtBottom] = useState(true)
 
-  useEffect(() => {
+  const scrollCleanupRef = useRef<(() => void) | undefined>(undefined)
+
+  const attachScrollListeners = useCallback(() => {
+    scrollCleanupRef.current?.()
+    scrollCleanupRef.current = undefined
     const el = textareaRef.current
-    if (!el || loading) {
-      setScrollAtTop(true)
-      setScrollAtBottom(true)
-      return
-    }
+    if (!el) return
     const update = () => {
       setScrollAtTop(el.scrollTop < 2)
       setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
@@ -543,11 +543,23 @@ useEffect(() => {
     el.addEventListener('scroll', update, { passive: true })
     const ro = new ResizeObserver(update)
     ro.observe(el)
-    return () => {
+    scrollCleanupRef.current = () => {
       el.removeEventListener('scroll', update)
       ro.disconnect()
     }
-  }, [loading, text])
+  }, [])
+
+  useEffect(() => {
+    if (loading) {
+      setScrollAtTop(true)
+      setScrollAtBottom(true)
+      scrollCleanupRef.current?.()
+      scrollCleanupRef.current = undefined
+      return
+    }
+    attachScrollListeners()
+    return () => { scrollCleanupRef.current?.(); scrollCleanupRef.current = undefined }
+  }, [loading, text, attachScrollListeners])
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -887,41 +899,63 @@ useEffect(() => {
           transition={{ type: 'spring', stiffness: 320, damping: 36 }}
           style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}
         >
-          {loading ? (
-            <div className="entry-skeleton" aria-label={t.entry.loadingEntry} aria-live="polite">
-              <div className="entry-skeleton-row short" />
-              <div className="entry-skeleton-row" />
-              <div className="entry-skeleton-row medium" />
-              <div className="entry-skeleton-row" />
-              <div className="entry-skeleton-row long" />
-              <div className="entry-skeleton-row medium" />
-            </div>
-          ) : loadFailed ? (
-            <div className="entry-load-error" role="alert">
-              <strong>{t.entry.failedToLoad}</strong>
-              <p>{t.entry.failedToLoadHint}</p>
-              <button onClick={() => loadFreshEntry()} disabled={refreshing}>
-                {refreshing ? t.entry.refreshingEntry : t.entry.refreshEntry}
-              </button>
-            </div>
-          ) : (
-            <motion.textarea
-              ref={textareaRef}
-              className="editor-textarea"
-              value={text}
-              onChange={e => {
-                if (loadFailed) return
-                textRef.current = e.target.value
-                setText(e.target.value)
-                if (status && status !== savedStatus) setStatus('')
-              }}
-              readOnly={loadFailed}
-              placeholder={t.entry.placeholder}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-            />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            {loading ? (
+              <motion.div
+                key="skeleton"
+                className="entry-skeleton"
+                aria-label={t.entry.loadingEntry}
+                aria-live="polite"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+              >
+                <div className="entry-skeleton-row short" />
+                <div className="entry-skeleton-row" />
+                <div className="entry-skeleton-row medium" />
+                <div className="entry-skeleton-row" />
+                <div className="entry-skeleton-row long" />
+                <div className="entry-skeleton-row medium" />
+              </motion.div>
+            ) : loadFailed ? (
+              <motion.div
+                key="load-error"
+                className="entry-load-error"
+                role="alert"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+              >
+                <strong>{t.entry.failedToLoad}</strong>
+                <p>{t.entry.failedToLoadHint}</p>
+                <button onClick={() => loadFreshEntry()} disabled={refreshing}>
+                  {refreshing ? t.entry.refreshingEntry : t.entry.refreshEntry}
+                </button>
+              </motion.div>
+            ) : (
+              <motion.textarea
+                key="textarea"
+                ref={textareaRef}
+                className="editor-textarea"
+                value={text}
+                onChange={e => {
+                  if (loadFailed) return
+                  textRef.current = e.target.value
+                  setText(e.target.value)
+                  if (status && status !== savedStatus) setStatus('')
+                }}
+                readOnly={loadFailed}
+                placeholder={t.entry.placeholder}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                onAnimationComplete={attachScrollListeners}
+              />
+            )}
+          </AnimatePresence>
         </motion.div>
       </AnimatePresence>
       </div>

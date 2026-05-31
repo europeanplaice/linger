@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
-import { AnimatePresence, MotionConfig } from 'motion/react'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
 import { useTheme } from './hooks/useTheme'
@@ -541,12 +541,20 @@ export default function App() {
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
         )}
-        {diary.dates.length > 0 && (
-          <button className="btn-recollection" onClick={() => setRecollectionOpen(true)}>
+        <AnimatePresence>
+          {diary.dates.length > 0 && (
+          <motion.button
+            className="btn-recollection"
+            onClick={() => setRecollectionOpen(true)}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}>
             <svg className="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
             <span className="btn-text">{t.recollection.open}</span>
-          </button>
-        )}
+          </motion.button>
+          )}
+        </AnimatePresence>
         <div className="sidebar-bottom">
           {email && <div className="user-email" title={email}>{email}</div>}
           <button className="btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
