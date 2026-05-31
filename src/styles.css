@@ -1815,13 +1815,7 @@ dialog.export-confirm-dialog::backdrop {
 }
 .editor-actions .btn-save.btn-saved {
   opacity: 0.55;
-  background: var(--accent);
   cursor: default;
-  animation: saved-button-flash 0.5s ease-out;
-}
-@keyframes saved-button-flash {
-  0%   { background: var(--save-success-flash); opacity: 1; }
-  100% { background: var(--accent); opacity: 0.55; }
 }
 .btn-delete { background: var(--danger) !important; color: var(--on-danger) !important; }
 .btn-delete:not(:disabled):hover { background: var(--danger-hover) !important; }
