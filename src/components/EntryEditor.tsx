@@ -32,6 +32,8 @@ interface Props {
   onExpired: () => void
   onGoToToday?: () => void
   refreshSignal?: number
+  knownDates?: Set<string>
+  diaryListLoaded?: boolean
 }
 
 function SaveIcon() {
@@ -92,7 +94,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0 }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded }: Props) {
   const { t, locale } = useI18n()
   const savedStatus = t.entry.savedStatus
   const [text, setText] = useState('')
@@ -178,9 +180,13 @@ useEffect(() => {
     fileIdRef.current = entry?.meta.id ?? null
   }, [setBaseVersionValue, setSavedTextValue])
 
+  const dateKnownAbsent = diaryListLoaded === true && knownDates !== undefined && !knownDates.has(date)
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    // If we already know this date has no entry (list is loaded and date absent),
+    // skip the skeleton — show the empty editor immediately.
+    setLoading(!dateKnownAbsent)
     setRefreshing(false)
     setText('')
     setSavedTextValue('')
@@ -210,7 +216,7 @@ useEffect(() => {
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [date, applyLoadedEntry])
+  }, [date, applyLoadedEntry, dateKnownAbsent])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)

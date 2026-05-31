@@ -81,6 +81,8 @@ interface Window {
       pendingNavDate?: string | null
       token?: string | null
       saveDelayMs?: number
+      knownDates?: string[]
+      diaryListLoaded?: boolean
     }) => void
     saveCalls: () => { date: string; content: string; baseVersion: string | null; force?: boolean }[]
     saveCallsWithBaseContent: () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache } from '../lib/diaryCache'
@@ -13,6 +13,7 @@ interface EntryCache {
 
 export interface DiaryState {
   loading: boolean
+  freshListLoaded: boolean
   error: string | null
   dates: string[]                                      // sorted desc
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
@@ -68,6 +69,7 @@ async function mapWithConcurrency<T, R>(
 
 export function useDiary(isSignedIn: boolean, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string): DiaryState {
   const [loading, setLoading] = useState(false)
+  const [freshListLoaded, setFreshListLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
   const cacheRef = useRef(cache)
@@ -205,11 +207,13 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   useEffect(() => {
     if (!isSignedIn) {
       const empty = new Map<string, EntryCache>()
+      setFreshListLoaded(false)
       cacheRef.current = empty
       setCache(empty)
       clearCache().catch(() => {})
       return
     }
+    setFreshListLoaded(false)
     setLoading(true)
     setError(null)
     ;(async () => {
@@ -239,6 +243,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         }
         // Always sync with Drive to pick up remote changes and evict stale content
         const freshCache = await loadEntryList(true, canUsePersistentCache)
+        setFreshListLoaded(true)
 
         // Prefetch the 3 most recent entries that aren't already in memory
         const recentDates = Array.from(freshCache.keys())
@@ -252,6 +257,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
         console.error('Failed to load diary entries:', e)
         setError(String(e))
+        setFreshListLoaded(false)
       } finally {
         setLoading(false)
       }
@@ -496,8 +502,8 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     return () => clearTimeout(id)
   }, [selectedDate])
 
-  const dates = Array.from(cache.keys()).sort((a, b) => b.localeCompare(a))
-  const hasLegacyMdFiles = Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name))
+  const dates = useMemo(() => Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)), [cache])
+  const hasLegacyMdFiles = useMemo(() => Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache])
 
-  return { loading, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }
+  return { loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }
 }

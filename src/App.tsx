@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
@@ -430,7 +430,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [selectDate, toggleTheme, toggleFont])
 
-  const datesSet = new Set(diary.dates)
+  const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
 
   const handleReauth = useCallback(() => {
     retryAfterExpired()
@@ -620,6 +620,8 @@ export default function App() {
           onExpired={handleExpired}
           onGoToToday={() => selectDate(todayYmd())}
           refreshSignal={entryRefreshSignal}
+          knownDates={datesSet}
+          diaryListLoaded={diary.freshListLoaded}
         />
       </main>
     </div>

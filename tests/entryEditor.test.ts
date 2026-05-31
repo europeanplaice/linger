@@ -43,6 +43,36 @@ test.describe('EntryEditor — date header', () => {
     await expect(page.locator('textarea.editor-textarea')).toHaveAttribute('placeholder', 'Write your thoughts here...')
   })
 
+  test('skips the loading skeleton when the fresh entry list says the date has no entry', async ({ page }) => {
+    await loadHarness(page)
+    await page.evaluate(() => {
+      window.editorHarness.render({
+        date: '2026-05-02',
+        getContentDelayMs: 1000,
+        knownDates: ['2026-05-01'],
+        diaryListLoaded: true,
+      })
+    })
+
+    await expect(page.locator('.entry-skeleton')).toHaveCount(0)
+    await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+  })
+
+  test('keeps the loading skeleton when list absence is not from a fresh entry list', async ({ page }) => {
+    await loadHarness(page)
+    await page.evaluate(() => {
+      window.editorHarness.render({
+        date: '2026-05-02',
+        getContentDelayMs: 1000,
+        knownDates: ['2026-05-01'],
+        diaryListLoaded: false,
+      })
+    })
+
+    await expect(page.locator('.entry-skeleton')).toBeVisible({ timeout: 200 })
+    await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
+  })
+
   test('shows a load error state without the writing placeholder', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => {

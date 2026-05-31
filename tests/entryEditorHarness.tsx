@@ -42,6 +42,8 @@ let lastRenderDate = '2026-05-01'
 let lastRenderAutoSave = true
 let lastRenderGetContentDelayMs = 0
 let lastRenderPendingNavDate: string | null = null
+let lastRenderKnownDates: string[] | undefined
+let lastRenderDiaryListLoaded: boolean | undefined
 
 let currentRefreshSignal = 0
 const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
@@ -70,18 +72,22 @@ function doRender() {
         pendingNavDate={lastRenderPendingNavDate}
         token={currentToken}
         refreshSignal={currentRefreshSignal}
+        knownDates={lastRenderKnownDates}
+        diaryListLoaded={lastRenderDiaryListLoaded}
       />
     </I18nProvider>
   )
 }
 
-function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal }: {
+function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal, knownDates, diaryListLoaded }: {
   date: string
   autoSave: boolean
   getContentDelayMs: number
   pendingNavDate: string | null
   token: string | null
   refreshSignal: number
+  knownDates?: string[]
+  diaryListLoaded?: boolean
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
   const isOnline = useOnline()
@@ -95,6 +101,8 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       date={date}
       autoSave={autoSave}
       refreshSignal={refreshSignal}
+      knownDates={knownDates === undefined ? undefined : new Set(knownDates)}
+      diaryListLoaded={diaryListLoaded}
       getContent={async (d) => {
         getContentCalls.push({ date: d })
         if (d === getContentBlockedForDate) {
@@ -193,6 +201,8 @@ window.editorHarness = {
     pendingNavDate?: string | null
     token?: string | null
     saveDelayMs?: number
+    knownDates?: string[]
+    diaryListLoaded?: boolean
   }) => {
     saveCalls = []
     fullSaveCalls = []
@@ -218,6 +228,8 @@ window.editorHarness = {
     lastRenderAutoSave = opts.autoSave ?? true
     lastRenderGetContentDelayMs = opts.getContentDelayMs ?? 0
     lastRenderPendingNavDate = opts.pendingNavDate ?? null
+    lastRenderKnownDates = opts.knownDates
+    lastRenderDiaryListLoaded = opts.diaryListLoaded
     currentRefreshSignal = 0
     contentByDate.clear()
     getContentBlockedForDate = null
