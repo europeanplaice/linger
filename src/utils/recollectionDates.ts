@@ -28,10 +28,10 @@ export function recollectionDatesToPrefetch(dates: string[], today = todayYmd())
   }
 
   const periodicSpecs = [
-    { target: shiftDays(7), tol: 3 },
-    { target: shiftMonths(1), tol: 7 },
-    { target: shiftMonths(3), tol: 8 },
-    { target: shiftMonths(6), tol: 10 },
+    { target: shiftDays(7),    tol: 3 },
+    { target: shiftMonths(1),  tol: 7 },
+    { target: shiftMonths(6),  tol: 10 },
+    { target: shiftMonths(12), tol: 14 },
   ]
 
   const used = new Set<string>([today, ...onThisDay])
