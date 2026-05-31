@@ -52,7 +52,6 @@
   --expired-border: #f5c6c0;
   --danger-hover: #a93226;
   --save-success-flash: #5fad77;
-  --save-progress: #c58f22;
   --save-glow: rgba(74,106,74,0.25);
   --save-btn-shadow: rgba(44,44,44,0.18);
   --spinner-border: rgba(255,255,255,0.42);
@@ -118,7 +117,6 @@
   --expired-border: #be5046;
   --danger-hover: #be5046;
   --save-success-flash: #98c379;
-  --save-progress: #d19a66;
   --save-glow: rgba(152,195,121,0.5);
   --save-btn-shadow: rgba(200,200,200,0.15);
   --spinner-border: rgba(255,255,255,0.25);
@@ -1557,23 +1555,6 @@ dialog.export-confirm-dialog::backdrop {
 
 /* ── Main / Editor ── */
 .main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.save-progress-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 5px;
-  pointer-events: none;
-  z-index: 10;
-}
-[data-theme="dark"] .save-progress-bar {
-  background: rgba(255, 255, 255, 0.06);
-}
-.save-progress-bar-fill {
-  height: 100%;
-  background: var(--save-progress);
-  border-radius: 0 2px 2px 0;
-}
 .editor {
   display: flex;
   flex-direction: column;

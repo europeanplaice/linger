@@ -7,7 +7,6 @@ import { todayYmd, weekdayLabel, diaryDateLabel } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
-import { useSaveProgress } from '../hooks/useSaveProgress'
 import { haptics } from '../utils/haptics'
 import { Clock3, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
@@ -95,7 +94,6 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0 }: Props) {
   const { t, locale } = useI18n()
-  const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
   const [text, setText] = useState('')
   const charCount = text.length
@@ -256,13 +254,11 @@ useEffect(() => {
     if (savingRef.current) return false
     if (loadFailedRef.current) return false
     setSaving(true)
-    startSave()
     if (explicit) {
       setStatus('')
       setHasConflict(false)
       setConflictRemote(null)
     }
-    let success = false
     try {
       const currentText = textRef.current
       const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
@@ -273,7 +269,6 @@ useEffect(() => {
       fileIdRef.current = newId
       setPendingOfflineSave(false)
       setStatus(savedStatus)
-      success = true
       if (explicit) haptics.success()
       return true
     } catch (e) {
@@ -300,9 +295,8 @@ useEffect(() => {
       return false
     } finally {
       setSaving(false)
-      completeSave(success)
     }
-  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave])
+  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue])
 
   const handleExplicitSave = useCallback(async () => {
     const ok = await save(true)
@@ -655,20 +649,6 @@ useEffect(() => {
       )}
     </AnimatePresence>
     <div className="editor">
-      {saveProgress !== null && (
-        <div className="save-progress-bar" aria-hidden="true">
-          <div
-            className="save-progress-bar-fill"
-            style={{
-              width: `${saveProgress * 100}%`,
-              opacity: saveProgress >= 1 ? 0 : 1,
-              transition: saveProgress >= 1
-                ? 'width 0.15s ease-out, opacity 0.45s ease 0.1s'
-                : 'width 60ms linear',
-            }}
-          />
-        </div>
-      )}
       <div className="editor-header">
         <div className="editor-date-group">
           <button className="btn-menu" onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
