@@ -5,6 +5,8 @@ import { useI18n } from '../i18n'
 import { todayYmd, parseYmd, diaryDateLabel, weekdayLabel, sameMonthDayInPastYears, nearestWithDistance } from '../utils/date'
 import { buildPeriodicSpecs } from '../utils/recollectionDates'
 import type { PeriodicKind } from '../utils/recollectionDates'
+import { weightedOrder } from '../utils/serendipityWeights'
+import { loadSeen, recordSeen } from '../utils/serendipitySeen'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -28,15 +30,6 @@ interface PeriodicEntry {
 function excerpt(content: string, max = 140): string {
   const text = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('  ')
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
 }
 
 const cardContainerVariants = {
@@ -96,7 +89,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   }, [dates, today, onThisDay, periodic])
 
   const [randomQueue] = useState<string[]>(() => {
-    const q = shuffle(randomCandidates)
+    const q = weightedOrder(randomCandidates, { today, recentlyShown: loadSeen() })
     const pinned = (serendipityPrefetch ?? []).filter(d => randomCandidates.includes(d))
     for (let i = pinned.length - 1; i >= 0; i--) {
       const idx = q.indexOf(pinned[i])
@@ -109,6 +102,11 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   const nextDate1 = randomQueue[randomIdx + 1] ?? null
   const nextDate2 = randomQueue[randomIdx + 2] ?? null
   const nextDate3 = randomQueue[randomIdx + 3] ?? null
+
+  // Remember which serendipity day was surfaced so reopening avoids an immediate repeat.
+  useEffect(() => {
+    if (randomDate) recordSeen(randomDate)
+  }, [randomDate])
 
   const [previews, setPreviews] = useState<Map<string, Preview>>(new Map())
   const previewsRef = useRef(previews)
