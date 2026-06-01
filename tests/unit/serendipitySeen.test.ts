@@ -30,8 +30,8 @@ describe('serendipitySeen', () => {
   })
 
   it('caps stored history at 30 entries', () => {
-    for (let i = 0; i < 40; i++) recordSeen(`2020-01-${String((i % 28) + 1).padStart(2, '0')}-${i}`, i)
-    expect(loadSeen().length).toBeLessThanOrEqual(30)
+    for (let i = 0; i < 40; i++) recordSeen(`${2000 + i}-06-15`, i)
+    expect(loadSeen().length).toBe(30)
   })
 
   it('recovers gracefully from corrupt JSON', () => {

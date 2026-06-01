@@ -85,6 +85,20 @@ describe('weightedOrder', () => {
     expect(out[0]).toBe('2018-09-09')
   })
 
+  it('nudges empty-content dates toward the back', () => {
+    const out = weightedOrder(candidates, {
+      today: TODAY,
+      emptyDates: new Set(['2018-09-09']),
+      rng: () => 0.5,
+    })
+    expect(out[out.length - 1]).toBe('2018-09-09')
+  })
+
+  it('handles rng returning 0 without producing Infinity keys', () => {
+    const out = weightedOrder(candidates, { today: TODAY, rng: () => 0 })
+    expect(out.slice().sort()).toEqual(candidates.slice().sort())
+  })
+
   it('handles an empty candidate list', () => {
     expect(weightedOrder([], { today: TODAY })).toEqual([])
   })
