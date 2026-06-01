@@ -1619,7 +1619,7 @@ dialog.export-confirm-dialog::backdrop {
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--text-muted);
-  padding-bottom: 0.35rem;
+  padding-bottom: 0.2rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   margin-bottom: 0;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
@@ -2274,7 +2274,7 @@ dialog.session-expired-dialog::backdrop {
 .editor-scroll-wrap::before {
   top: 0;
   height: 32px;
-  background: linear-gradient(to bottom, var(--bg) 0, var(--bg) 8px, transparent 100%);
+  background: linear-gradient(to bottom, var(--bg) 0, var(--bg) 0px, transparent 100%);
 }
 
 .editor-scroll-wrap::after {
