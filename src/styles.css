@@ -894,7 +894,7 @@ body {
   background: none;
   border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   cursor: pointer;
   color: var(--text-muted);
   padding: 0.2rem 0.75rem;

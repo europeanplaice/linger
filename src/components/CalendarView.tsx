@@ -319,7 +319,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
         <button type="button" onClick={next} aria-label={t.calendar.nextMonth}>›</button>
       </div>
       <div className="calendar-today-row">
-        <button type="button" className="today-btn" onClick={goToToday} aria-label={t.calendar.goToCurrentMonth}>{t.common.today}</button>
+        <button type="button" className="today-btn" onClick={goToToday}>{t.common.today}</button>
       </div>
       <div className="calendar-grid-wrap">
         <AnimatePresence mode="popLayout" custom={directionRef.current} initial={false}>
