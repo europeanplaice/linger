@@ -2692,7 +2692,7 @@ dialog.history-dialog::backdrop {
   }
 
   .editor-header h2 {
-    font-size: 1.1rem;
+    font-size: clamp(0.72rem, 3vw, 1.1rem);
     min-width: 0;
     overflow: hidden;
   }
@@ -2847,8 +2847,11 @@ dialog.history-dialog::backdrop {
   .btn-recollection .btn-text { display: inline; }
   .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; }
 
-  @media (max-width: 340px) {
+  @media (max-width: 390px) {
     .entry-date-weekday { display: none; }
+  }
+
+  @media (max-width: 340px) {
     .btn-day-nav {
       min-width: 2.75rem;
       padding: 0.3rem 0.35rem;
