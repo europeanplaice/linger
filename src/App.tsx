@@ -18,6 +18,8 @@ import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
+import { weightedOrder } from './utils/serendipityWeights'
+import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
@@ -229,7 +231,7 @@ export default function App() {
     if (!initialLoadComplete) return
     const toFetch = recollectionDatesToPrefetch(diaryDatesRef.current)
     const candidates = recollectionRandomCandidates(diaryDatesRef.current)
-    const shuffled = candidates.slice().sort(() => Math.random() - 0.5)
+    const shuffled = weightedOrder(candidates, { today: todayYmd(), recentlyShown: loadSeen() })
     const prefetch = shuffled.slice(0, 2) as [string, string] | [string] | []
     setSerendipityPrefetch(prefetch)
     const allToFetch = [...toFetch, ...prefetch]

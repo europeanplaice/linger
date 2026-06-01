@@ -210,6 +210,32 @@ test.describe('RecollectionJourney', () => {
       .toContain(rand5)
   })
 
+  test('records the shown serendipity date to localStorage (avoids déjà-vu next open)', async ({ page }) => {
+    await loadHarness(page)
+    await page.evaluate(() => localStorage.removeItem('linger_serendipity_seen'))
+    await render(page, {
+      dates: [rand1, rand2, rand3],
+      contents: { [rand1]: 'Entry alpha.', [rand2]: 'Entry beta.', [rand3]: 'Entry gamma.' },
+    })
+
+    const section = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    await expect(section).toBeVisible()
+
+    const readSeen = () =>
+      page.evaluate(() => JSON.parse(localStorage.getItem('linger_serendipity_seen') || '[]') as { date: string }[])
+
+    // The first surfaced day is recorded.
+    await expect.poll(() => readSeen().then(s => s.length)).toBeGreaterThan(0)
+    const first = await readSeen()
+    expect([rand1, rand2, rand3]).toContain(first[0].date)
+
+    // Advancing records the next day too (newest first, distinct).
+    await section.locator('.recollection-another').click()
+    await expect.poll(() => readSeen().then(s => s.length)).toBeGreaterThanOrEqual(2)
+    const after = await readSeen()
+    expect(after[0].date).not.toBe(first[0].date)
+  })
+
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
