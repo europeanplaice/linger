@@ -17,7 +17,7 @@ test.describe('CalendarView', () => {
     await page.getByRole('button', { name: 'Previous month' }).click()
     await expect(monthSelect).toHaveValue('3')
 
-    await page.getByRole('button', { name: 'Go to current month' }).click()
+    await page.getByRole('button', { name: 'Today' }).click()
     const expectedMonth = await page.evaluate(() => String(new Date().getMonth()))
     const expectedYear = await page.evaluate(() => String(new Date().getFullYear()))
 
