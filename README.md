@@ -98,6 +98,9 @@ No tokens or diary content are ever written to `localStorage`.
 - `ExportButton` — triggers ZIP export of all entries
 - `ErrorBoundary` — catches render errors and displays a fallback UI
 
+### Analytics
+The app uses **Cloudflare Web Analytics** — cookie-free, no individual tracking, no personal data collected. It captures aggregated page views, referrers, country, device/browser, and Core Web Vitals. Data is retained by Cloudflare for 6 months.
+
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
 The workflow runs lint, unit tests, and Playwright e2e tests, then deploys with `wrangler pages deploy`.
