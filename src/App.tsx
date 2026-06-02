@@ -65,7 +65,7 @@ function dismissActiveTextCursor() {
   window.getSelection()?.removeAllRanges()
 }
 
-function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string; onTitleClick: () => void }) {
+function RestoringScreen({ selectedDate }: { selectedDate: string }) {
   const { t, locale } = useI18n()
   const weekday = weekdayLabel(selectedDate, locale)
   const dateParts = diaryDateParts(selectedDate, locale, true)
@@ -75,7 +75,7 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
     <div className="app restoring-app">
       <aside className="sidebar restoring-sidebar open">
         <div className="sidebar-top">
-          <h1 className="app-title"><button className="app-title-btn" onClick={onTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</button></h1>
+          <h1 className="app-title"><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
         </div>
         <div className="restoring-search" />
         <CalendarView dates={new Set()} selectedDate={selectedDate} onSelect={() => {}} />
@@ -322,9 +322,6 @@ export default function App() {
     doNavigateToDate(d)
   }, [doNavigateToDate])
 
-  const handleTitleClick = useCallback(() => {
-    selectDate(todayYmd())
-  }, [selectDate])
 
   const handlePendingNavigate = useCallback(() => {
     if (pendingDate) doNavigateToDate(pendingDate)
@@ -507,7 +504,7 @@ export default function App() {
 
   if (status === 'initializing') {
     return hadSession
-      ? <RestoringScreen selectedDate={selectedDate} onTitleClick={handleTitleClick} />
+      ? <RestoringScreen selectedDate={selectedDate} />
       : null
   }
 
@@ -540,7 +537,7 @@ export default function App() {
       />
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
-          <h1 className="app-title"><button className="app-title-btn" onClick={handleTitleClick}><AppIcon className="app-title-icon" /> {t.appTitle}</button></h1>
+          <h1 className="app-title"><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
           <div className="sidebar-actions">
             <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
             <button className="btn-signout" onClick={handleSignOut} title={t.app.signOut}><LogOut size={14} /></button>

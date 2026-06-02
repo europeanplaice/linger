@@ -423,24 +423,11 @@ body {
 .app-title {
   display: inline-flex;
   align-items: center;
+  gap: 0.5rem;
   font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
-.app-title-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
-}
-.app-title-btn:hover { opacity: 0.75; }
 .app-title-icon {
   width: 1.65rem;
   height: 1.65rem;
