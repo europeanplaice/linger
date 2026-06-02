@@ -3,6 +3,9 @@ import '../src/styles.css'
 import { CalendarView } from '../src/components/CalendarView'
 import { I18nProvider } from '../src/i18n'
 
+const theme = new URLSearchParams(location.search).get('theme')
+if (theme) document.documentElement.setAttribute('data-theme', theme)
+
 const root = createRoot(document.getElementById('root') as HTMLElement)
 const selectedDates: string[] = []
 

@@ -8,6 +8,9 @@ import type { LoadedDiaryEntry } from '../src/types'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
+const theme = new URLSearchParams(location.search).get('theme')
+if (theme) document.documentElement.setAttribute('data-theme', theme)
+
 type SaveCall = { date: string; content: string; baseVersion: string | null; force?: boolean }
 type FullSaveCall = SaveCall & { baseContent?: string | null }
 type DeleteCall = { date: string }
