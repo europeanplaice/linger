@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -209,6 +209,38 @@ describe('date utils', () => {
         const result = diaryDateLabel('2025-12-31', true, 'long', 'en-US', false)
         expect(result).toContain('2025')
       })
+    })
+  })
+
+  describe('diaryDateParts', () => {
+    it('splits Japanese dates with the year first', () => {
+      const result = diaryDateParts('2025-06-02', 'ja-JP')
+      expect(result.year).toBe('2025年')
+      expect(result.monthDay).toBe('6月2日')
+      expect(result.yearFirst).toBe(true)
+    })
+
+    it('splits English dates with the year last', () => {
+      const result = diaryDateParts('2025-06-02', 'en-US')
+      expect(result.year).toBe('2025')
+      expect(result.monthDay).toBe('June 2')
+      expect(result.yearFirst).toBe(false)
+    })
+
+    it('omits the year for current-year dates when omitCurrentYear=true', () => {
+      const currentYear = new Date().getFullYear()
+      const result = diaryDateParts(`${currentYear}-06-02`, 'en-US', true)
+      expect(result.year).toBeNull()
+      expect(result.monthDay).toBe('June 2')
+    })
+
+    it('keeps the year for past dates even when omitCurrentYear=true', () => {
+      const result = diaryDateParts('2020-06-02', 'en-US', true)
+      expect(result.year).toBe('2020')
+    })
+
+    it('returns the original string as monthDay for invalid dates', () => {
+      expect(diaryDateParts('invalid')).toEqual({ year: null, monthDay: 'invalid', yearFirst: false })
     })
   })
 

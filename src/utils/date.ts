@@ -50,6 +50,32 @@ function isSameYear(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear()
 }
 
+export interface DiaryDateParts {
+  year: string | null // "2025年" / "2025", null when omitted
+  monthDay: string // "6月2日" / "June 2"
+  yearFirst: boolean // ja=true, en=false
+}
+
+/**
+ * Split a diary date into year / month-day segments so the header can flex-wrap
+ * them (e.g. drop the year to its own line on narrow screens) instead of clipping.
+ * Each Intl sub-format yields the locale-correct piece, so no literal parsing is needed.
+ */
+export function diaryDateParts(date: string, locale = DEFAULT_DATE_LOCALE, omitCurrentYear = false): DiaryDateParts {
+  const d = dateFromYmd(date)
+  if (!d) return { year: null, monthDay: date, yearFirst: false }
+
+  const monthDay = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric' }).format(d)
+  const showYear = !(omitCurrentYear && isSameYear(d, new Date()))
+  if (!showYear) return { year: null, monthDay, yearFirst: false }
+
+  const year = new Intl.DateTimeFormat(locale, { year: 'numeric' }).format(d)
+  const parts = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }).formatToParts(d)
+  const yi = parts.findIndex(p => p.type === 'year')
+  const mi = parts.findIndex(p => p.type === 'month')
+  return { year, monthDay, yearFirst: yi < mi }
+}
+
 export function diaryDateLabel(date: string, includeYear = true, month: 'long' | 'short' = 'long', locale = DEFAULT_DATE_LOCALE, omitCurrentYear = false): string {
   const d = dateFromYmd(date)
   if (!d) return date

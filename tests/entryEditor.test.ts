@@ -108,24 +108,25 @@ test.describe('EntryEditor — date header', () => {
     await expect(page.locator('.entry-date-text')).toHaveAttribute('data-today', 'true')
   })
 
-  test('shortens the month label on mobile', async ({ page }) => {
+  test('splits the date into year and month-day segments on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2024-12-31', initialContent: '' })
 
-    await expect(page.locator('.entry-date-label-full')).toBeHidden()
-    await expect(page.locator('.entry-date-label-short')).toBeVisible()
-    await expect(page.locator('.entry-date-label-short')).toHaveText('Dec 31, 2024')
+    await expect(page.locator('.entry-date-text .entry-date-monthday')).toHaveText('December 31')
+    await expect(page.locator('.entry-date-text .entry-date-year')).toContainText('2024')
+    // Full date must be visible (not clipped) even at the narrowest width.
+    await expect(page.locator('.entry-date-text .entry-date-monthday')).toBeVisible()
+    await expect(page.locator('.entry-date-text .entry-date-year')).toBeVisible()
   })
 
-  test('keeps the full month label on desktop', async ({ page }) => {
+  test('keeps the full month name on desktop', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2024-09-01', initialContent: '' })
 
-    await expect(page.locator('.entry-date-label-full')).toBeVisible()
-    await expect(page.locator('.entry-date-label-full')).toHaveText('September 1, 2024')
-    await expect(page.locator('.entry-date-label-short')).toBeHidden()
+    await expect(page.locator('.entry-date-text .entry-date-monthday')).toHaveText('September 1')
+    await expect(page.locator('.entry-date-text .entry-date-year')).toContainText('2024')
   })
 
    test('places mobile save action near the bottom-right thumb zone', async ({ page }) => {

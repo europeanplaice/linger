@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import type { LoadedDiaryEntry } from '../types'
-import { todayYmd, weekdayLabel, diaryDateLabel } from '../utils/date'
+import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
@@ -123,6 +123,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   useEffect(() => { pendingOfflineSaveRef.current = pendingOfflineSave }, [pendingOfflineSave])
   const tokenExpiredForDateRef = useRef<string | null>(null)
   const weekday = weekdayLabel(date, locale)
+  const dateParts = diaryDateParts(date, locale, true)
   const isToday = date === todayYmd()
   const isFuture = date > todayYmd()
   const daysDiff = (() => {
@@ -682,9 +683,17 @@ useEffect(() => {
               data-today={isToday || undefined}
               aria-label={isToday ? `${diaryDateLabel(date, true, 'long', locale, true)}${weekday ? ` ${weekday}` : ''}, ${t.common.today}` : undefined}
             >
-              <span className="entry-date-label-full">{diaryDateLabel(date, true, 'long', locale, true)}</span>
-              <span className="entry-date-label-short">{diaryDateLabel(date, true, 'short', locale, true)}</span>
-              {weekday && <span className="entry-date-weekday">{weekday}</span>}
+              {dateParts.yearFirst && dateParts.year && <span className="entry-date-year">{dateParts.year}</span>}
+              <span className="entry-date-monthday">
+                {dateParts.monthDay}
+                {weekday && !(!dateParts.yearFirst && dateParts.year) && <span className="entry-date-weekday">{weekday}</span>}
+              </span>
+              {!dateParts.yearFirst && dateParts.year && (
+                <span className="entry-date-year">
+                  {dateParts.year}
+                  {weekday && <span className="entry-date-weekday">{weekday}</span>}
+                </span>
+              )}
             </span>
           </h2>
           <motion.button className="btn-day-nav" onClick={onNextDay} aria-label={t.entry.nextDay}

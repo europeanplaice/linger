@@ -16,7 +16,7 @@ import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal } from './components/SettingsModal'
 import { RecollectionJourney } from './components/RecollectionJourney'
 import { AppIcon } from './components/AppIcon'
-import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel } from './utils/date'
+import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel, diaryDateParts } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
 import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
@@ -68,6 +68,7 @@ function dismissActiveTextCursor() {
 function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string; onTitleClick: () => void }) {
   const { t, locale } = useI18n()
   const weekday = weekdayLabel(selectedDate, locale)
+  const dateParts = diaryDateParts(selectedDate, locale, true)
   const isToday = selectedDate === todayYmd()
 
   return (
@@ -91,9 +92,17 @@ function RestoringScreen({ selectedDate, onTitleClick }: { selectedDate: string;
                   data-today={isToday || undefined}
                   aria-label={isToday ? `${diaryDateLabel(selectedDate, true, 'long', locale, true)}${weekday ? ` ${weekday}` : ''}, ${t.common.today}` : undefined}
                 >
-                  <span className="entry-date-label-full">{diaryDateLabel(selectedDate, true, 'long', locale, true)}</span>
-                  <span className="entry-date-label-short">{diaryDateLabel(selectedDate, true, 'short', locale, true)}</span>
-                  {weekday && <span className="entry-date-weekday">{weekday}</span>}
+                  {dateParts.yearFirst && dateParts.year && <span className="entry-date-year">{dateParts.year}</span>}
+                  <span className="entry-date-monthday">
+                    {dateParts.monthDay}
+                    {weekday && !(!dateParts.yearFirst && dateParts.year) && <span className="entry-date-weekday">{weekday}</span>}
+                  </span>
+                  {!dateParts.yearFirst && dateParts.year && (
+                    <span className="entry-date-year">
+                      {dateParts.year}
+                      {weekday && <span className="entry-date-weekday">{weekday}</span>}
+                    </span>
+                  )}
                 </span>
               </h2>
               <span className="btn-day-nav restoring-header-placeholder" aria-hidden="true">›</span>

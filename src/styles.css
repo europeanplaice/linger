@@ -1658,10 +1658,20 @@ dialog.export-confirm-dialog::backdrop {
 }
 .entry-date-text {
   align-items: baseline;
-  gap: 0.4rem;
+  gap: 0.1rem 0.4rem;
   display: inline-flex;
+  flex-wrap: wrap;
   line-height: 1.15;
   min-width: 0;
+}
+/* Each segment stays intact; wrapping happens only between the year and the date.
+   The weekday lives inside the trailing segment so it never dangles on its own line. */
+.entry-date-year,
+.entry-date-monthday {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
 }
 .editor-meta-unsaved {
   color: var(--text-muted);
@@ -1698,9 +1708,6 @@ dialog.export-confirm-dialog::backdrop {
 .entry-date-text[data-today] .entry-date-weekday {
   color: var(--today-text);
   font-weight: 700;
-}
-.entry-date-label-short {
-  display: none;
 }
 .entry-date-weekday {
   color: var(--text-muted);
@@ -2692,9 +2699,7 @@ dialog.history-dialog::backdrop {
   }
 
   .editor-header h2 {
-    font-size: clamp(0.72rem, 3vw, 1.1rem);
     min-width: 0;
-    overflow: hidden;
   }
 
   .editor-date-group {
@@ -2710,15 +2715,8 @@ dialog.history-dialog::backdrop {
   }
 
   .entry-date-text {
-    display: inline-flex;
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-
-  .entry-date-label-full { display: none; }
-  .entry-date-label-short { display: inline; }
 
   .editor-actions button {
     padding: 0.5rem 0.8rem;
@@ -2846,10 +2844,6 @@ dialog.history-dialog::backdrop {
   .btn-settings .btn-text { display: inline; }
   .btn-recollection .btn-text { display: inline; }
   .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; }
-
-  @media (max-width: 390px) {
-    .entry-date-weekday { display: none; }
-  }
 
   @media (max-width: 340px) {
     .btn-day-nav {
