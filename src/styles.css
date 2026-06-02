@@ -1785,6 +1785,18 @@ dialog.export-confirm-dialog::backdrop {
   opacity: 0.85;
   animation: save-button-pulse 1.1s ease-in-out infinite;
 }
+/* Save button stays ghost (transparent) while saving — no colour flash. */
+.editor-actions .btn-save.btn-saving {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+  opacity: 1;
+  animation: none;
+}
+.editor-actions .btn-save.btn-saving .btn-saving-spinner {
+  border-color: var(--border);
+  border-top-color: var(--accent);
+}
 .btn-saving-spinner {
   width: 0.72rem;
   height: 0.72rem;
@@ -1809,6 +1821,9 @@ dialog.export-confirm-dialog::backdrop {
   to { transform: translateX(10px); }
 }
 .editor-actions .btn-save.btn-saved {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
   opacity: 0.55;
   cursor: default;
 }
