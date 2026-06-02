@@ -113,8 +113,15 @@ test.describe('EntryEditor — date header', () => {
     await loadHarness(page)
     await renderEditor(page, { date: '2024-12-31', initialContent: '' })
 
+    const weekday = await page.evaluate(() =>
+      new Date(2024, 11, 31).toLocaleDateString(undefined, { weekday: 'short' })
+    )
+
+    // monthday segment contains only the date — no weekday bleed
     await expect(page.locator('.entry-date-text .entry-date-monthday')).toHaveText('December 31')
+    // weekday travels with the year segment for year-last locales
     await expect(page.locator('.entry-date-text .entry-date-year')).toContainText('2024')
+    await expect(page.locator('.entry-date-text .entry-date-year')).toContainText(weekday)
     // Full date must be visible (not clipped) even at the narrowest width.
     await expect(page.locator('.entry-date-text .entry-date-monthday')).toBeVisible()
     await expect(page.locator('.entry-date-text .entry-date-year')).toBeVisible()
@@ -125,8 +132,13 @@ test.describe('EntryEditor — date header', () => {
     await loadHarness(page)
     await renderEditor(page, { date: '2024-09-01', initialContent: '' })
 
+    const weekday = await page.evaluate(() =>
+      new Date(2024, 8, 1).toLocaleDateString(undefined, { weekday: 'short' })
+    )
+
     await expect(page.locator('.entry-date-text .entry-date-monthday')).toHaveText('September 1')
     await expect(page.locator('.entry-date-text .entry-date-year')).toContainText('2024')
+    await expect(page.locator('.entry-date-text .entry-date-year')).toContainText(weekday)
   })
 
    test('places mobile save action near the bottom-right thumb zone', async ({ page }) => {
