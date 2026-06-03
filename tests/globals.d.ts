@@ -105,6 +105,7 @@ interface Window {
     EntryConflictError: typeof import('../src/hooks/useDiary').EntryConflictError
     setToken: (token: string | null) => void
     setAutoSave: (autoSave: boolean) => void
+    setPendingNavDate: (date: string | null) => void
     expiredCalls: () => number
     setDate: (date: string) => void
     setRefreshSignal: (n: number) => void

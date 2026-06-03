@@ -701,6 +701,7 @@ test.describe('EntryEditor — unsaved navigation save', () => {
       initialContent: 'saved content',
       version: '1',
       pendingNavDate: '2026-05-02',
+      autoSave: false,
     })
 
     await page.fill('textarea.editor-textarea', 'changed content')
@@ -724,6 +725,7 @@ test.describe('EntryEditor — unsaved navigation save', () => {
       version: '1',
       saveReject: 'error',
       pendingNavDate: '2026-05-02',
+      autoSave: false,
     })
 
     await page.fill('textarea.editor-textarea', 'changed content')
@@ -737,6 +739,49 @@ test.describe('EntryEditor — unsaved navigation save', () => {
       { date: '2026-05-02' },
     ])
     await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
+  })
+
+  test('auto-save mode persists and continues navigation without showing the banner', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      initialContent: 'saved content',
+      version: '1',
+      autoSave: true,
+    })
+
+    // Make the entry dirty, then request a day switch via the harness.
+    await page.fill('textarea.editor-textarea', 'changed content')
+    await page.evaluate(() => window.editorHarness.setPendingNavDate('2026-05-02'))
+
+    // The banner never appears; the edits are saved and navigation proceeds.
+    await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
+    await page.waitForFunction(() => window.editorHarness.pendingNavigateCalls().length > 0)
+
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([
+      { date: '2026-05-02' },
+    ])
+    const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
+    expect(saveCalls.at(-1)).toMatchObject({ date: '2026-05-01', content: 'changed content', baseVersion: '1' })
+    expect(await page.evaluate(() => window.editorHarness.cancelNavigationCalls())).toEqual([])
+  })
+
+  test('auto-save mode falls back to the banner when the save fails', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      initialContent: 'saved content',
+      version: '1',
+      saveReject: 'conflict',
+      autoSave: true,
+    })
+
+    await page.fill('textarea.editor-textarea', 'changed content')
+    await page.evaluate(() => window.editorHarness.setPendingNavDate('2026-05-02'))
+
+    // Auto-save hit a conflict, so navigation is held and the banner appears.
+    await expect(page.locator('.unsaved-nav-banner')).toBeVisible()
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([])
   })
 })
 

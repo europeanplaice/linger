@@ -68,6 +68,9 @@ const entryVariants = {
 const SAVED_STATUS_VISIBLE_MS = 1600
 const SAVED_STATUS_EXIT_MS = 220
 const AUTO_SAVE_MS = 1500
+// Even while the user keeps typing (which resets the debounce), persist at least
+// this often so a long uninterrupted writing session is never left unsaved.
+const AUTO_SAVE_MAX_WAIT_MS = 10000
 const KEYBOARD_INSET_VAR = '--mobile-keyboard-inset-bottom'
 
 
@@ -107,6 +110,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [deleting, setDeleting] = useState(false)
   const [discardedText, setDiscardedText] = useState<string | null>(null)
   const discardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // True while auto-save is silently persisting before an auto-confirmed day switch;
+  // suppresses the "unsaved — leave?" banner so it doesn't flash in auto-save mode.
+  const [autoNavSaving, setAutoNavSaving] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
@@ -283,7 +289,7 @@ useEffect(() => {
       // reconnect effect retry rather than reporting a hard failure.
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setPendingOfflineSave(true)
-        if (explicit) setStatus(t.entry.offlineSavePending)
+        setStatus(t.entry.offlineSavePending)
         return false
       }
       if (!explicit) {
@@ -321,6 +327,23 @@ useEffect(() => {
       onCancelNavigation()
     }
   }, [save, onPendingNavigate, onCancelNavigation])
+
+  // In auto-save mode a pending day switch shouldn't surface the "save before
+  // leaving?" banner — just persist the edits and navigate. If the save fails
+  // (offline / conflict), fall back to showing the banner for manual resolution.
+  useEffect(() => {
+    if (!pendingNavDate || !autoSave) { setAutoNavSaving(false); return }
+    let active = true
+    setAutoNavSaving(true)
+    void (async () => {
+      // Nothing unsaved (e.g. already flushed) — just navigate.
+      const ok = textRef.current === savedTextRef.current ? true : await save(false)
+      if (!active) return
+      setAutoNavSaving(false)
+      if (ok) onPendingNavigate()
+    })()
+    return () => { active = false }
+  }, [pendingNavDate, autoSave, save, onPendingNavigate])
 
   const loadRemote = () => {
     const remoteText = conflictRemote?.entry.content ?? ''
@@ -439,17 +462,53 @@ useEffect(() => {
     }
   }
 
-  // Drive auto-save after a short idle period (only when auto-save is enabled)
+  // Persist the pending edits now, bypassing the debounce. Used when the page is
+  // about to be hidden/unloaded, on blur, and when leaving the entry — so the
+  // ~1.5s idle window can't silently drop the latest keystrokes.
+  const flushPendingAutoSave = useCallback(() => {
+    if (!autoSave) return
+    if (savingRef.current || hasConflictRef.current || loadingRef.current || loadFailedRef.current) return
+    if (textRef.current === savedTextRef.current) return
+    void save(false)
+  }, [autoSave, save])
+
+  // Tracks when the current unsaved streak began. Unlike the debounce timer it is
+  // NOT reset by each keystroke, so it can cap the maximum time before a save.
+  const dirtyStreakStartRef = useRef<number | null>(null)
+
+  // Drive auto-save after a short idle period (only when auto-save is enabled),
+  // but never wait longer than AUTO_SAVE_MAX_WAIT_MS since edits first went dirty.
   useEffect(() => {
-    if (!autoSave || !isDirty) return
+    if (!autoSave || !isDirty) {
+      dirtyStreakStartRef.current = null
+      return
+    }
+    if (dirtyStreakStartRef.current === null) dirtyStreakStartRef.current = Date.now()
+    const elapsed = Date.now() - dirtyStreakStartRef.current
+    const wait = Math.max(0, Math.min(AUTO_SAVE_MS, AUTO_SAVE_MAX_WAIT_MS - elapsed))
     const id = window.setTimeout(() => {
       if (savingRef.current || hasConflictRef.current || loadingRef.current) return
       if (loadFailedRef.current) return
       if (textRef.current === savedTextRef.current) return
       save(false)
-    }, AUTO_SAVE_MS)
+    }, wait)
     return () => window.clearTimeout(id)
   }, [text, isDirty, save, autoSave])
+
+  // Flush a pending auto-save when the tab is being hidden or torn down. On mobile
+  // visibilitychange/pagehide are the only reliable "leaving" signals (beforeunload
+  // often doesn't fire), so these guard against losing edits made in the last moment.
+  useEffect(() => {
+    if (!autoSave) return
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingAutoSave() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flushPendingAutoSave)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flushPendingAutoSave)
+      flushPendingAutoSave()
+    }
+  }, [autoSave, flushPendingAutoSave])
 
   // When connectivity returns, retry a save that failed while offline.
   useEffect(() => {
@@ -872,7 +931,7 @@ useEffect(() => {
           </motion.div>
         )}
       </AnimatePresence>
-      {pendingNavDate && (
+      {pendingNavDate && !autoNavSaving && (
         <div className="unsaved-nav-banner">
           <span>{t.entry.unsavedLeave}</span>
           <div className="unsaved-nav-actions">
@@ -954,6 +1013,7 @@ useEffect(() => {
                   setText(e.target.value)
                   if (status && status !== savedStatus) setStatus('')
                 }}
+                onBlur={flushPendingAutoSave}
                 readOnly={loadFailed}
                 placeholder={t.entry.placeholder}
                 initial={{ opacity: 0, y: 6 }}

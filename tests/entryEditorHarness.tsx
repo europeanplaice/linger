@@ -45,6 +45,8 @@ let lastRenderDate = '2026-05-01'
 let lastRenderAutoSave = true
 let lastRenderGetContentDelayMs = 0
 let lastRenderPendingNavDate: string | null = null
+// Captures App's pendingNavDate setter so tests can request a day switch after mount.
+let appSetPendingNavDate: ((d: string | null) => void) | null = null
 let lastRenderKnownDates: string[] | undefined
 let lastRenderDiaryListLoaded: boolean | undefined
 
@@ -93,6 +95,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
   diaryListLoaded?: boolean
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
+  appSetPendingNavDate = setPendingNavDate
   const isOnline = useOnline()
 
   function onExpired() {
@@ -273,6 +276,9 @@ window.editorHarness = {
   setAutoSave: (autoSave: boolean) => {
     lastRenderAutoSave = autoSave
     doRender()
+  },
+  setPendingNavDate: (date: string | null) => {
+    appSetPendingNavDate?.(date)
   },
   setDate: (date: string) => {
     lastRenderDate = date
