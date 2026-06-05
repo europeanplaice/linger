@@ -193,6 +193,7 @@ useEffect(() => {
   }, [setBaseVersionValue, setSavedTextValue])
 
   const dateKnownAbsent = diaryListLoaded === true && knownDates !== undefined && !knownDates.has(date)
+  const isNewEmptyEntry = dateKnownAbsent && text === '' && savedText === '' && baseVersion === null
 
   useEffect(() => {
     let cancelled = false
@@ -1044,7 +1045,7 @@ useEffect(() => {
                 }}
                 onBlur={flushPendingAutoSave}
                 readOnly={loadFailed}
-                placeholder={t.entry.placeholder}
+                placeholder={isNewEmptyEntry ? t.entry.newPlaceholder : t.entry.placeholder}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
@@ -1056,7 +1057,7 @@ useEffect(() => {
         </motion.div>
       </AnimatePresence>
       </div>
-      {!loading && !loadFailed && (
+      {!loading && !loadFailed && !isNewEmptyEntry && (
         <div className="editor-charcount" aria-hidden="true">
           {t.entry.charCount(charCount)}
         </div>

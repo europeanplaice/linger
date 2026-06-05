@@ -17,6 +17,8 @@ async function renderEditor(
     pendingNavDate?: string | null
     token?: string | null
     autoSave?: boolean
+    knownDates?: string[]
+    diaryListLoaded?: boolean
   } = {},
 ) {
   const date = opts.date ?? '2026-05-01'
@@ -25,10 +27,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -41,6 +43,36 @@ test.describe('EntryEditor — date header', () => {
     await renderEditor(page, { date: '2026-05-02', initialContent: '', version: null })
 
     await expect(page.locator('textarea.editor-textarea')).toHaveAttribute('placeholder', 'Write your thoughts here...')
+  })
+
+  test('shows a softer placeholder for a new empty entry', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-02',
+      initialContent: '',
+      version: null,
+      knownDates: ['2026-05-01'],
+      diaryListLoaded: true,
+    })
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveAttribute('placeholder', 'What would you like to remember about today?')
+  })
+
+  test('hides the character count until a new empty entry has text', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-02',
+      initialContent: '',
+      version: null,
+      knownDates: ['2026-05-01'],
+      diaryListLoaded: true,
+    })
+
+    await expect(page.locator('.editor-charcount')).toHaveCount(0)
+
+    await page.locator('textarea.editor-textarea').fill('Started writing')
+
+    await expect(page.locator('.editor-charcount')).toHaveText('15 chars')
   })
 
   test('skips the loading skeleton when the fresh entry list says the date has no entry', async ({ page }) => {
