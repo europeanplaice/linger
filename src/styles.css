@@ -2261,11 +2261,69 @@ dialog.session-expired-dialog::backdrop {
   z-index: 2;
 }
 
+@property --entry-date-mask-start {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+@property --entry-date-mask-end {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
 .editor-scroll-wrap {
+  --entry-date-mask-start: 0%;
+  --entry-date-mask-end: 0%;
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black var(--entry-date-mask-start),
+    black calc(100% - var(--entry-date-mask-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black var(--entry-date-mask-start),
+    black calc(100% - var(--entry-date-mask-end)),
+    transparent 100%
+  );
+}
+
+.editor-scroll-wrap.date-transition-mask-left {
+  animation: entry-date-mask-left 240ms ease-out both;
+}
+
+.editor-scroll-wrap.date-transition-mask-right {
+  animation: entry-date-mask-right 240ms ease-out both;
+}
+
+@keyframes entry-date-mask-left {
+  0% {
+    --entry-date-mask-start: 7%;
+    --entry-date-mask-end: 0%;
+  }
+  100% {
+    --entry-date-mask-start: 0%;
+    --entry-date-mask-end: 0%;
+  }
+}
+
+@keyframes entry-date-mask-right {
+  0% {
+    --entry-date-mask-start: 0%;
+    --entry-date-mask-end: 7%;
+  }
+  100% {
+    --entry-date-mask-start: 0%;
+    --entry-date-mask-end: 0%;
+  }
 }
 
 .editor-scroll-wrap::before,
@@ -2298,6 +2356,31 @@ dialog.session-expired-dialog::backdrop {
 
 .editor-scroll-wrap:not(.scroll-at-bottom)::after {
   opacity: 1;
+}
+
+@supports (not (mask-image: linear-gradient(to right, black, transparent))) and (not (-webkit-mask-image: linear-gradient(to right, black, transparent))) {
+  .editor-scroll-wrap.date-transition-mask-left::before,
+  .editor-scroll-wrap.date-transition-mask-right::after {
+    opacity: 1;
+  }
+
+  .editor-scroll-wrap.date-transition-mask-left::before {
+    top: 0;
+    bottom: 0;
+    right: auto;
+    width: 2rem;
+    height: auto;
+    background: linear-gradient(to right, var(--bg), transparent);
+  }
+
+  .editor-scroll-wrap.date-transition-mask-right::after {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    width: 2rem;
+    height: auto;
+    background: linear-gradient(to left, var(--bg), transparent);
+  }
 }
 
 .editor-textarea {

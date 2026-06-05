@@ -71,6 +71,7 @@ const entryVariants = {
   center: { x: 0, opacity: 1 },
   exit: (dir: number) => ({ x: dir * -64, opacity: 0 }),
 }
+const entryTransition = { duration: 0.24, ease: 'easeOut' as const }
 
 const SAVED_STATUS_VISIBLE_MS = 1600
 const SAVED_STATUS_EXIT_MS = 220
@@ -607,8 +608,18 @@ useEffect(() => {
   const [shareMsgVisible, setShareMsgVisible] = useState(false)
   const [scrollAtTop, setScrollAtTop] = useState(true)
   const [scrollAtBottom, setScrollAtBottom] = useState(true)
+  const [dateTransitionMask, setDateTransitionMask] = useState(false)
+  const [dateTransitionMaskSide, setDateTransitionMaskSide] = useState<'left' | 'right'>('right')
 
   const scrollCleanupRef = useRef<(() => void) | undefined>(undefined)
+  const dateTransitionMaskDateRef = useRef(date)
+
+  useEffect(() => {
+    if (dateTransitionMaskDateRef.current === date) return
+    dateTransitionMaskDateRef.current = date
+    setDateTransitionMaskSide(directionRef.current < 0 ? 'left' : 'right')
+    setDateTransitionMask(true)
+  }, [date])
 
   const attachScrollListeners = useCallback(() => {
     scrollCleanupRef.current?.()
@@ -969,7 +980,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-      <div className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}`}>
+      <div className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}${dateTransitionMask ? ` date-transition-mask date-transition-mask-${dateTransitionMaskSide}` : ''}`}>
       <AnimatePresence initial={false} custom={directionRef.current}>
         <motion.div
           key={date}
@@ -978,7 +989,10 @@ useEffect(() => {
           initial="enter"
           animate="center"
           exit="exit"
-          transition={{ type: 'spring', stiffness: 320, damping: 36 }}
+          transition={entryTransition}
+          onAnimationComplete={(definition) => {
+            if (definition === 'center') setDateTransitionMask(false)
+          }}
           style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}
         >
           <AnimatePresence mode="wait" initial={false}>
