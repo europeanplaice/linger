@@ -551,6 +551,38 @@ test.describe('EntryEditor — keyboard save', () => {
   })
 })
 
+test.describe('EntryEditor — toolbar focus retention', () => {
+  test('clicking save keeps the textarea focused so the mobile keyboard stays open', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await expect(page.locator('textarea.editor-textarea')).toBeFocused()
+
+    await page.locator('button.btn-save').click()
+
+    // The save still runs...
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'edited content', baseVersion: '1' },
+    ])
+    // ...but onPointerDown preventDefault keeps focus on the textarea, so the
+    // virtual keyboard never collapses and the toolbar doesn't shift.
+    await expect(page.locator('textarea.editor-textarea')).toBeFocused()
+  })
+
+  test('tapping a day-nav button does not steal focus from the textarea', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    await page.locator('textarea.editor-textarea').focus()
+    await expect(page.locator('textarea.editor-textarea')).toBeFocused()
+
+    await page.locator('button.btn-day-nav').first().click()
+
+    await expect(page.locator('textarea.editor-textarea')).toBeFocused()
+  })
+})
+
 test.describe('EntryEditor — repeated saves', () => {
   test('uses the saved version as the base for the next save of the same entry', async ({ page }) => {
     await loadHarness(page)

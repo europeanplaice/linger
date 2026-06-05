@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
@@ -13,6 +14,12 @@ import { Clock3, CloudUpload, ExternalLink, MoreHorizontal, Share2, Trash2 } fro
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
+
+// Keep the textarea focused (and the mobile keyboard open) when tapping a
+// toolbar button, so the keyboard doesn't collapse and shift the toolbar down.
+function preventFocusSteal(e: ReactPointerEvent) {
+  e.preventDefault()
+}
 
 interface Props {
   date: string
@@ -732,8 +739,8 @@ useEffect(() => {
       )}
       <div className="editor-header">
         <div className="editor-date-group">
-          <button className="btn-menu" onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
-          <motion.button className="btn-day-nav" onClick={onPrevDay} aria-label={t.entry.previousDay}
+          <button className="btn-menu" onPointerDown={preventFocusSteal} onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
+          <motion.button className="btn-day-nav" onPointerDown={preventFocusSteal} onClick={onPrevDay} aria-label={t.entry.previousDay}
             whileTap={dayNavWhileTap} transition={dayNavTransition}
           >‹</motion.button>
           <h2>
@@ -755,7 +762,7 @@ useEffect(() => {
               )}
             </span>
           </h2>
-          <motion.button className="btn-day-nav" onClick={onNextDay} aria-label={t.entry.nextDay}
+          <motion.button className="btn-day-nav" onPointerDown={preventFocusSteal} onClick={onNextDay} aria-label={t.entry.nextDay}
             whileTap={dayNavWhileTap} transition={dayNavTransition}
           >›</motion.button>
         </div>
@@ -764,6 +771,7 @@ useEffect(() => {
             {isDirty && !loading && !saving && !autoSave && (
               <motion.button
                 className="btn-discard"
+                onPointerDown={preventFocusSteal}
                 onClick={handleDiscardClick}
                 aria-label={t.common.discard}
                 initial={{ opacity: 0, width: 0, marginRight: '-0.7rem' }}
@@ -780,6 +788,7 @@ useEffect(() => {
           </AnimatePresence>
           <motion.button
             className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
+            onPointerDown={preventFocusSteal}
             onClick={handleExplicitSave}
             disabled={autoSave || saving || !isDirty || loadFailed}
             aria-busy={saving}
@@ -797,6 +806,7 @@ useEffect(() => {
             <button
               type="button"
               className="btn-today-fab"
+              onPointerDown={preventFocusSteal}
               onClick={onGoToToday}
               aria-label={t.common.today}
               title={t.common.today}
@@ -806,7 +816,7 @@ useEffect(() => {
             </button>
           )}
           <div className="more-menu-container" ref={moreMenuRef}>
-            <motion.button className="btn-more" onClick={() => setShowMoreMenu(v => !v)} aria-label={t.entry.moreOptions}
+            <motion.button className="btn-more" onPointerDown={preventFocusSteal} onClick={() => setShowMoreMenu(v => !v)} aria-label={t.entry.moreOptions}
               aria-expanded={showMoreMenu}
               aria-controls={showMoreMenu ? 'entry-more-menu' : undefined}
               whileTap={{ scale: 0.88 }}
