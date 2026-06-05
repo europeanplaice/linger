@@ -11,14 +11,15 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Calendar view to navigate by date, with dots marking days that have entries
 - Recollection Journey — a serendipity view that surfaces "on this day" past entries and random older ones
 - Previous/next day controls, plus Alt+Left / Alt+Right and Alt+Up for today
+- Keyboard shortcuts for save, day navigation, search focus, theme, and font toggles
 - Full-text search via Drive API, with on-demand snippet extraction from matched entries
 - Delete entries with an explicit confirmation step
 - Detect cross-device edit conflicts and choose whether to load latest, keep local edits, or overwrite
 - View and restore past revisions of an entry
 - Export all entries as a ZIP of plain-text files
-- Settings modal for theme (light / dark / system), font, and language (English / Japanese)
+- Settings modal for theme (light / dark / system), font family, font size, auto-save, language (English / Japanese), export, and sharing the app URL
 - Data stays in your Google Drive (`linger_diary/` folder), one plain-text file per day
-- Warns before reload or date changes when there are unsaved edits
+- Warns before reload or date changes when there are unsaved edits, and retries offline saves when the connection returns
 - Works on mobile with a drawer sidebar, Android back-button support, and keyboard-aware layout
 - Installable as a Progressive Web App
 
@@ -36,7 +37,8 @@ Uses **OAuth 2.0 Authorization Code Flow with PKCE** via Cloudflare Pages Functi
 4. Subsequent requests include the session cookie; the Cloudflare middleware resolves the session,
    refreshes the access token if needed, and proxies the Drive API call.
 
-Scope: `drive.file` — non-sensitive, only accesses files this app created.
+Drive scope: `drive.file` — non-sensitive, only accesses files this app created.
+The login flow also requests `openid email` so the app can identify the signed-in account and clear local cache on account switches.
 
 ### Drive storage
 All Drive API v3 calls are made server-side by Cloudflare Pages Functions at `/api/drive/…`.
@@ -44,21 +46,18 @@ The browser never holds an OAuth token. Diary entries are stored as individual p
 
 ```
 /linger_diary/
-  diary-YYYY-MM-DD.txt   ← YAML frontmatter (date) + plain-text body
+  diary-YYYY-MM-DD.txt   ← plain-text body
 ```
 
 New entries are written as `.txt`. Legacy `.md` files remain readable and are renamed to `.txt` by a one-time migration on first sign-in.
 
-Each file looks like:
+Current `.txt` files contain only the entry body:
 
-```markdown
----
-date: YYYY-MM-DD
-updated_at: <ISO 8601 timestamp>
----
-
-Entry content here…
+```text
+Entry content here...
 ```
+
+Legacy files that still contain YAML frontmatter are also readable; the frontmatter is stripped on load and the date from the filename remains authoritative.
 
 Folder ID is cached in the Cloudflare KV session record after first lookup.
 File upload uses multipart/related to set both metadata and content in one request.
@@ -69,10 +68,11 @@ Drive 429/5xx responses are retried with exponential backoff.
   exposes `{ status, tokenExpired, hadSession, email, signIn, signOut, handleExpired, retryAfterExpired }`
 - `useDiary` (`src/hooks/useDiary.ts`) — on sign-in, calls `listEntries` via the `/api/drive/…`
   proxy; lazily fetches content per entry into a `Map<date, EntryCache>`;
-  exposes `{ loading, error, dates, getContent, save, remove, search, refreshEntries, retryPendingSave, exportAll }`
+  hydrates recent entry metadata/content from IndexedDB, syncs Drive changes incrementally, prefetches likely next entries,
+  and exposes `{ loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }`
 
-### Local storage
-The browser stores only non-sensitive preferences in `localStorage`:
+### Browser storage
+The browser stores only non-sensitive preferences and small UI hints in `localStorage`:
 - `linger_autosave` — whether auto-save is enabled
 - `linger_theme` — `light` / `dark` / `system`
 - `linger_font` — font preference
@@ -81,9 +81,12 @@ The browser stores only non-sensitive preferences in `localStorage`:
 - `linger_had_session` — `true`/`false` flag indicating whether the user was previously signed in (used to show the "continue with your previous session" prompt on the login screen)
 - `linger_session_user` — last signed-in email; used to detect cross-device account switches and clear stale cached data
 - `linger_ext_migrated` — one-time flag set after the `.md` → `.txt` file-extension migration runs
+- `linger_serendipity_seen` — recently surfaced Recollection Journey dates, stored as dates only to avoid immediate repeats
 - `gp-save-timings` — recent save durations (up to 10 samples) used to animate the save progress bar
 
-No tokens or diary content are ever written to `localStorage`.
+Diary metadata, recently opened entry content, and snippets are cached in IndexedDB (`linger_diary_cache`) so the sidebar and recent entries can render quickly before the Drive network round trip completes. The cache is scoped to the last signed-in email and is cleared on sign-out or account switch.
+
+No OAuth tokens are exposed to the browser or written to browser storage. Diary content is never written to `localStorage`.
 
 ### Components
 - `LoginScreen` — shown when not signed in
@@ -92,18 +95,19 @@ No tokens or diary content are ever written to `localStorage`.
 - `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
 - `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random older ones
-- `SettingsModal` — theme, font, language, auto-save, export, keyboard shortcuts
+- `SettingsModal` — language, theme, font family/size, auto-save, export, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
 - `ExportButton` — triggers ZIP export of all entries
 - `ErrorBoundary` — catches render errors and displays a fallback UI
+- `useServiceWorkerUpdate` — applies waiting PWA updates when the tab is hidden and the current entry is not dirty
 
 ### Analytics
 The app uses **Cloudflare Web Analytics** — cookie-free, no individual tracking, no personal data collected. It captures aggregated page views, referrers, country, device/browser, and Core Web Vitals. Data is retained by Cloudflare for 6 months.
 
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
-The workflow runs lint, unit tests, and Playwright e2e tests, then deploys with `wrangler pages deploy`.
+The workflow runs lint, unit tests, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
 
 `vite.config.ts` uses `base: '/'` (correct for a custom domain).
 
