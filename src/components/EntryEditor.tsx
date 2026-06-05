@@ -497,6 +497,11 @@ useEffect(() => {
       if (savingRef.current || hasConflictRef.current || loadingRef.current) return
       if (loadFailedRef.current) return
       if (textRef.current === savedTextRef.current) return
+      // Open a fresh max-wait window from this save. Without this, once elapsed
+      // passes AUTO_SAVE_MAX_WAIT_MS an uninterrupted typing session that keeps
+      // overlapping in-flight saves would re-fire a save on nearly every
+      // keystroke instead of at most once per window.
+      dirtyStreakStartRef.current = Date.now()
       save(false)
     }, wait)
     return () => window.clearTimeout(id)
