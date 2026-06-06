@@ -197,7 +197,8 @@ const dictionaries = {
       progress: (done: number, total: number) => `Exporting... (${done}/${total})`,
       exportAll: 'Export all',
       confirmTitle: 'Export all entries?',
-      confirmDesc: (count: number) => `${count} entries will be downloaded as a ZIP file. This may take a while.`,
+      confirmDesc: (count: number) => `${count} entries will be downloaded as a single ZIP file. This may take a while.`,
+      formatNote: 'Inside the ZIP, each day is a plain-text file:',
       start: 'Start export',
     },
     history: {
@@ -398,7 +399,8 @@ const dictionaries = {
       progress: (done: number, total: number) => `エクスポート中... (${done}/${total})`,
       exportAll: 'すべて出力',
       confirmTitle: 'すべての日記をエクスポートしますか？',
-      confirmDesc: (count: number) => `${count}件の日記を ZIP ファイルとしてダウンロードします。時間がかかる場合があります。`,
+      confirmDesc: (count: number) => `${count}件の日記を 1 つの ZIP ファイルとしてダウンロードします。時間がかかる場合があります。`,
+      formatNote: 'ZIP の中身は、1 日ごとのテキストファイルです:',
       start: 'エクスポート開始',
     },
     history: {
