@@ -980,7 +980,7 @@ body {
 dialog.settings-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
-  width: min(440px, 90vw);
+  width: min(520px, 90vw);
   max-height: min(90dvh, 90vh);
   box-shadow: 0 8px 32px var(--shadow-heavy);
   overflow: hidden;
