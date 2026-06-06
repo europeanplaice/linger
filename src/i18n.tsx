@@ -33,6 +33,8 @@ const dictionaries = {
     app: {
       closeMenu: 'Close menu',
       signOut: 'Sign out',
+      signOutConfirmTitle: 'Sign out?',
+      signOutConfirmDesc: 'You will need to sign in with Google again to access your diary.',
       loadError: 'Failed to load entries. Check your connection and try again.',
       noEntriesHint: 'No entries yet. Start by writing today\'s diary.',
       loading: 'Loading…',
@@ -247,6 +249,8 @@ const dictionaries = {
     app: {
       closeMenu: 'メニューを閉じる',
       signOut: 'ログアウト',
+      signOutConfirmTitle: 'ログアウトしますか？',
+      signOutConfirmDesc: '日記を再び表示するには、もう一度 Google でログインする必要があります。',
       loadError: '日記の読み込みに失敗しました。接続を確認して、もう一度お試しください。',
       noEntriesHint: 'まだ日記がありません。今日から書き始めましょう！',
       loading: '読み込み中...',

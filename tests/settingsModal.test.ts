@@ -406,4 +406,41 @@ test.describe('SettingsModal — sign out button', () => {
     await signOut.hover()
     expect(await bg(signOut)).toBe(restSignOut)
   })
+
+  test('does not sign out immediately — shows a confirmation dialog first', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.locator('.settings-signout-btn').click()
+
+    const confirm = page.locator('.signout-confirm-dialog')
+    await expect(confirm).toBeVisible()
+    expect(await page.evaluate(() => window.settingsHarness.signOutCount())).toBe(0)
+  })
+
+  test('cancelling the confirmation keeps the session', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.locator('.settings-signout-btn').click()
+    const confirm = page.locator('.signout-confirm-dialog')
+    await confirm.locator('.signout-confirm-cancel').click()
+
+    await expect(confirm).toBeHidden()
+    // Settings modal stays open and no sign out was triggered.
+    await expect(page.locator('.settings-dialog')).toBeVisible()
+    expect(await page.evaluate(() => window.settingsHarness.signOutCount())).toBe(0)
+  })
+
+  test('confirming triggers sign out', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.locator('.settings-signout-btn').click()
+    const confirm = page.locator('.signout-confirm-dialog')
+    await confirm.locator('.signout-confirm-start').click()
+
+    await page.waitForFunction(() => window.settingsHarness.signOutCount() === 1)
+    expect(await page.evaluate(() => window.settingsHarness.signOutCount())).toBe(1)
+  })
 })

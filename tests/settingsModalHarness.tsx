@@ -11,6 +11,7 @@ const root = createRoot(document.getElementById('root') as HTMLElement)
 
 const exportCalls: ExportCall = []
 let exportReject = false
+let signOutCount = 0
 let renderCount = 0
 
 interface AppProps {
@@ -58,7 +59,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           dates={['2026-05-01', '2026-05-02']}
           onExport={handleExport}
           onClose={() => setOpen(false)}
-          onSignOut={() => {}}
+          onSignOut={() => { signOutCount++ }}
           email={email}
         />
       )}
@@ -70,6 +71,7 @@ window.settingsHarness = {
   render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string } = {}) => {
     exportCalls.splice(0)
     exportReject = false
+    signOutCount = 0
     root.render(
       <I18nProvider>
         <App
@@ -87,4 +89,5 @@ window.settingsHarness = {
   getStoredTheme: () => localStorage.getItem('linger_theme'),
   exportCalls: () => [...exportCalls],
   setExportReject: (v: boolean) => { exportReject = v },
+  signOutCount: () => signOutCount,
 }

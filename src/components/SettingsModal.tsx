@@ -26,13 +26,25 @@ interface SettingsModalProps {
 export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, dates, onExport, onClose, onSignOut, email }: SettingsModalProps) {
   const { t, language, setLanguage } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const signOutDialogRef = useRef<HTMLDialogElement>(null)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
 
   useEffect(() => {
     const dialog = dialogRef.current!
     dialog.showModal()
     return () => { if (dialog.open) dialog.close() }
   }, [])
+
+  useEffect(() => {
+    const dialog = signOutDialogRef.current
+    if (!dialog) return
+    if (signOutConfirmOpen) {
+      dialog.showModal()
+    } else if (dialog.open) {
+      dialog.close()
+    }
+  }, [signOutConfirmOpen])
 
   async function handleShareApp() {
     try {
@@ -77,7 +89,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <span className="settings-item-label">{t.settings.account}</span>
             {email && <span className="settings-account-email" title={email}>{email}</span>}
           </div>
-          <button className="settings-action-btn settings-signout-btn" onClick={onSignOut}>
+          <button className="settings-action-btn settings-signout-btn" onClick={() => setSignOutConfirmOpen(true)}>
             <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             {t.app.signOut}
           </button>
@@ -264,6 +276,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">{t.settings.github}</a>
         </div>
       </div>
+
+      <dialog
+        ref={signOutDialogRef}
+        className="signout-confirm-dialog"
+        aria-labelledby="signout-confirm-title"
+        onCancel={(e) => { e.preventDefault(); setSignOutConfirmOpen(false) }}
+        onClick={(e) => { if (e.target === signOutDialogRef.current) setSignOutConfirmOpen(false) }}
+      >
+        <h4 id="signout-confirm-title" className="signout-confirm-title">{t.app.signOutConfirmTitle}</h4>
+        <p className="signout-confirm-desc">{t.app.signOutConfirmDesc}</p>
+        <div className="signout-confirm-actions">
+          <button className="signout-confirm-cancel" onClick={() => setSignOutConfirmOpen(false)}>{t.common.cancel}</button>
+          <button className="signout-confirm-start" onClick={() => { setSignOutConfirmOpen(false); onSignOut() }}>{t.app.signOut}</button>
+        </div>
+      </dialog>
     </motion.dialog>
   )
 }
