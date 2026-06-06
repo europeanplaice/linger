@@ -25,6 +25,7 @@ interface Window {
     getStoredTheme: () => string | null
     exportCalls: () => { hasProgress: boolean }[]
     setExportReject: (v: boolean) => void
+    signOutCount: () => number
   }
   searchHarness: {
     render: (opts?: {

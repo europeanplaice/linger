@@ -1445,7 +1445,8 @@ dialog.settings-dialog::backdrop {
 }
 
 /* ── Export confirm dialog ── */
-dialog.export-confirm-dialog {
+dialog.export-confirm-dialog,
+dialog.signout-confirm-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1.5rem;
@@ -1456,18 +1457,22 @@ dialog.export-confirm-dialog {
   gap: 0.8rem;
   margin: auto;
 }
-dialog.export-confirm-dialog::backdrop {
+dialog.export-confirm-dialog::backdrop,
+dialog.signout-confirm-dialog::backdrop {
   background: var(--overlay-heavy);
 }
 @starting-style {
-  dialog.export-confirm-dialog::backdrop { background: transparent; }
+  dialog.export-confirm-dialog::backdrop,
+  dialog.signout-confirm-dialog::backdrop { background: transparent; }
 }
-.export-confirm-title {
+.export-confirm-title,
+.signout-confirm-title {
   font-size: 1rem;
   font-weight: 600;
   margin: 0;
 }
-.export-confirm-desc {
+.export-confirm-desc,
+.signout-confirm-desc {
   font-size: 0.85rem;
   color: var(--text-muted);
   line-height: 1.5;
@@ -1502,13 +1507,15 @@ dialog.export-confirm-dialog::backdrop {
 .export-format-file {
   padding-left: 0.4rem;
 }
-.export-confirm-actions {
+.export-confirm-actions,
+.signout-confirm-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.6rem;
   margin-top: 0.3rem;
 }
-.export-confirm-cancel {
+.export-confirm-cancel,
+.signout-confirm-cancel {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1518,10 +1525,12 @@ dialog.export-confirm-dialog::backdrop {
   color: var(--text);
   cursor: pointer;
 }
-.export-confirm-cancel:hover {
+.export-confirm-cancel:hover,
+.signout-confirm-cancel:hover {
   background: var(--border);
 }
-.export-confirm-start {
+.export-confirm-start,
+.signout-confirm-start {
   background: var(--accent);
   border: none;
   border-radius: 6px;
@@ -1531,7 +1540,8 @@ dialog.export-confirm-dialog::backdrop {
   color: #fff;
   cursor: pointer;
 }
-.export-confirm-start:hover {
+.export-confirm-start:hover,
+.signout-confirm-start:hover {
   opacity: 0.9;
 }
 
