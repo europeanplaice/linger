@@ -1473,6 +1473,35 @@ dialog.export-confirm-dialog::backdrop {
   line-height: 1.5;
   margin: 0;
 }
+.export-format-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: -0.2rem 0 0;
+}
+.export-format-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+.export-format-zip {
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+}
+.export-format-file {
+  padding-left: 0.4rem;
+}
 .export-confirm-actions {
   display: flex;
   justify-content: flex-end;

@@ -249,6 +249,37 @@ test.describe('SettingsModal — export confirm modal', () => {
     expect(calls[0].hasProgress).toBe(true)
   })
 
+  test('confirm modal explains the ZIP format with a note', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    await page.locator('.btn-export-modern').click()
+
+    const note = page.locator('.export-format-note')
+    await expect(note).toBeVisible()
+    await expect(note).toContainText('plain-text file')
+  })
+
+  test('confirm modal shows a file tree with the zip name and per-day files', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    await page.locator('.btn-export-modern').click()
+
+    const tree = page.locator('.export-format-tree')
+    await expect(tree).toBeVisible()
+
+    // ZIP archive name line.
+    await expect(tree.locator('.export-format-zip')).toContainText('linger_diary_export_')
+    await expect(tree.locator('.export-format-zip')).toContainText('.zip')
+
+    // One file line per entry date, named diary-YYYY-MM-DD.txt.
+    const files = tree.locator('.export-format-file')
+    await expect(files).toHaveCount(2)
+    await expect(files.nth(0)).toContainText('diary-2026-05-01.txt')
+    await expect(files.nth(1)).toContainText('diary-2026-05-02.txt')
+  })
+
   test('export button is disabled when no dates', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => {

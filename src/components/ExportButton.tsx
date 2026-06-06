@@ -65,6 +65,9 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
 
   const close = () => setConfirmOpen(false)
 
+  const zipName = `linger_diary_export_${new Date().toISOString().slice(0, 10)}.zip`
+  const sampleDates = [...dates].sort().slice(-3)
+
   return (
     <div className="settings-export">
       <button
@@ -94,6 +97,15 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
         <p className="export-confirm-desc">
           {t.export.confirmDesc(dates.length)}
         </p>
+        <p className="export-format-note">{t.export.formatNote}</p>
+        <pre className="export-format-tree" aria-hidden="true">
+          <span className="export-format-zip">{zipName}</span>
+          {sampleDates.map((date, i) => (
+            <span key={date} className="export-format-file">
+              {i === sampleDates.length - 1 ? '└' : '├'} diary-{date}.txt
+            </span>
+          ))}
+        </pre>
         <div className="export-confirm-actions">
           <button className="export-confirm-cancel" onClick={close}>{t.common.cancel}</button>
           <button className="export-confirm-start" onClick={doExport}>{t.export.start}</button>
