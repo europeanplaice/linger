@@ -104,6 +104,8 @@ test('clears linger_had_session on sign-out', async ({ page }) => {
 
   await page.locator('.btn-settings').click()
   await page.locator('.settings-signout-btn').click()
+  // Sign-out is now confirmed through a dialog before it takes effect.
+  await page.locator('.signout-confirm-start').click()
   await expect(page.locator('.login-screen')).toBeVisible()
 
   const value = await page.evaluate(() => localStorage.getItem('linger_had_session'))
