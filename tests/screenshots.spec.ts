@@ -84,3 +84,31 @@ test('capture search', async ({ page }) => {
   await page.waitForTimeout(800)
   await page.screenshot({ path: 'public/screenshots/search.png' })
 })
+
+test.describe('mobile', () => {
+  test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
+
+  test('capture mobile editor', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('linger_language', 'en'))
+    await mockBackend(page)
+    await page.goto(baseUrl)
+    await page.waitForSelector('.editor-textarea')
+    await page.waitForFunction(() => {
+      const ta = document.querySelector('.editor-textarea') as HTMLTextAreaElement | null
+      return !!ta && ta.value.length > 50
+    })
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: 'public/screenshots/mobile-editor.png' })
+  })
+
+  test('capture mobile calendar', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('linger_language', 'en'))
+    await mockBackend(page)
+    await page.goto(baseUrl)
+    await page.waitForSelector('.editor-textarea')
+    await page.locator('.btn-menu').click()
+    await page.waitForSelector('.calendar-grid')
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: 'public/screenshots/mobile-calendar.png' })
+  })
+})
