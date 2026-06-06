@@ -1062,16 +1062,7 @@ dialog.settings-dialog::backdrop {
   white-space: nowrap;
 }
 .settings-signout-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
   flex-shrink: 0;
-}
-.settings-signout-btn:hover {
-  filter: none;
-  background: var(--border);
-  color: var(--text);
-  box-shadow: none;
 }
 .settings-switch {
   position: relative;

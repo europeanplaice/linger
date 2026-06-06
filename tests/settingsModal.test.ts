@@ -386,3 +386,24 @@ test.describe('SettingsModal — font size select', () => {
     await expect(trigger.locator('span')).toHaveText('Extra large')
   })
 })
+
+test.describe('SettingsModal — sign out button', () => {
+  test('matches the other action buttons at rest and on hover', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const signOut = page.locator('.settings-signout-btn')
+    const share = page.locator('.settings-action-btn:not(.settings-signout-btn)').first()
+    const bg = (loc: import('@playwright/test').Locator) =>
+      loc.evaluate(el => getComputedStyle(el).backgroundColor)
+
+    // At rest, sign out uses the same accent background as other action buttons.
+    const restSignOut = await bg(signOut)
+    const restShare = await bg(share)
+    expect(restSignOut).toBe(restShare)
+
+    // On hover the background must not change (no light/white flip — regression guard).
+    await signOut.hover()
+    expect(await bg(signOut)).toBe(restSignOut)
+  })
+})
