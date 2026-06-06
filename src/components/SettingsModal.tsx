@@ -19,10 +19,11 @@ interface SettingsModalProps {
   dates: string[]
   onExport: (onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
   onClose: () => void
+  onSignOut: () => void
   email?: string
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, dates, onExport, onClose, email }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, dates, onExport, onClose, onSignOut, email }: SettingsModalProps) {
   const { t, language, setLanguage } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
@@ -71,6 +72,17 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <button className="settings-modal-close" onClick={onClose} aria-label={t.settings.close}>×</button>
       </div>
       <div className="settings-list">
+        <div className="settings-item settings-account-item">
+          <div className="settings-account-info">
+            <span className="settings-item-label">{t.settings.account}</span>
+            {email && <span className="settings-account-email" title={email}>{email}</span>}
+          </div>
+          <button className="settings-action-btn settings-signout-btn" onClick={onSignOut}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            {t.app.signOut}
+          </button>
+        </div>
+        <div className="settings-divider" />
         <div className="settings-item">
           <span className="settings-item-label">{t.common.language}</span>
           <SettingsSelect

@@ -23,7 +23,6 @@ import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
-import { LogOut } from 'lucide-react'
 
 const DATE_HASH_RE = /^\d{4}-\d{2}-\d{2}$/
 const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
@@ -540,7 +539,6 @@ export default function App() {
           <h1 className="app-title"><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
           <div className="sidebar-actions">
             <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
-            <button className="btn-signout" onClick={handleSignOut} title={t.app.signOut}><LogOut size={14} /></button>
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
@@ -585,6 +583,7 @@ export default function App() {
             dates={diary.dates}
             onExport={diary.exportAll}
             onClose={() => setSettingsOpen(false)}
+            onSignOut={handleSignOut}
             email={email ?? undefined}
           />
         )}

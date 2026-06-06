@@ -152,6 +152,7 @@ const dictionaries = {
     settings: {
       title: 'Settings',
       close: 'Close settings',
+      account: 'Account',
       theme: 'Theme',
       themeLight: 'Light',
       themeDark: 'Dark',
@@ -352,6 +353,7 @@ const dictionaries = {
     settings: {
       title: '設定',
       close: '設定を閉じる',
+      account: 'アカウント',
       theme: 'テーマ',
       themeLight: 'ライト',
       themeDark: 'ダーク',

@@ -102,7 +102,8 @@ test('clears linger_had_session on sign-out', async ({ page }) => {
   await page.goto(baseUrl)
   await expect(page.locator('.editor-textarea')).toBeVisible()
 
-  await page.locator('.btn-signout').click()
+  await page.locator('.btn-settings').click()
+  await page.locator('.settings-signout-btn').click()
   await expect(page.locator('.login-screen')).toBeVisible()
 
   const value = await page.evaluate(() => localStorage.getItem('linger_had_session'))

@@ -58,6 +58,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           dates={['2026-05-01', '2026-05-02']}
           onExport={handleExport}
           onClose={() => setOpen(false)}
+          onSignOut={() => {}}
           email={email}
         />
       )}
