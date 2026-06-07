@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import license from 'rollup-plugin-license'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { resolve } from 'path'
 
@@ -119,6 +119,47 @@ export default defineConfig({
         const updated = readFileSync(headersPath, 'utf-8')
           .replace('__INLINE_SCRIPT_HASHES__', hashes.join(' '))
         writeFileSync(headersPath, updated)
+      },
+    },
+    {
+      // Build-time prerender: render the signed-out <Landing> to static HTML and
+      // inject it into dist/index.html's #root so `/` ships real, crawlable
+      // content in its initial HTML. Runs before sw-cache-version so the injected
+      // markup is included in the service-worker cache hash.
+      name: 'prerender-landing',
+      apply: 'build',
+      async writeBundle() {
+        const esbuild = require('esbuild') as typeof import('esbuild')
+        const cacheDir = resolve(__dirname, 'node_modules/.cache/linger-prerender')
+        mkdirSync(cacheDir, { recursive: true })
+        const outfile = resolve(cacheDir, 'prerender.cjs')
+        await esbuild.build({
+          entryPoints: [resolve(__dirname, 'src/prerender.tsx')],
+          outfile,
+          bundle: true,
+          // CJS so React's server renderer can require() Node builtins at runtime.
+          format: 'cjs',
+          platform: 'node',
+          jsx: 'automatic',
+          define: {
+            'import.meta.env.BASE_URL': '"/"',
+            'import.meta.env.DEV': 'false',
+            'import.meta.env.PROD': 'true',
+            'import.meta.env.MODE': '"production"',
+            'process.env.NODE_ENV': '"production"',
+          },
+          logLevel: 'silent',
+        })
+        const { renderLanding } = require(outfile) as { renderLanding: () => string }
+        const html = renderLanding()
+        const indexPath = resolve(__dirname, 'dist/index.html')
+        const index = readFileSync(indexPath, 'utf-8')
+        const marker = '<div id="root"></div>'
+        if (!index.includes(marker)) {
+          throw new Error('prerender-landing: empty #root not found in dist/index.html')
+        }
+        writeFileSync(indexPath, index.replace(marker, `<div id="root">${html}</div>`))
+        rmSync(cacheDir, { recursive: true, force: true })
       },
     },
     {

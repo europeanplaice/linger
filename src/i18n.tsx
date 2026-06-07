@@ -439,6 +439,8 @@ interface I18nContextValue {
 }
 
 function readStoredLanguage(): Language {
+  // Guarded for Node: the build-time prerender renders this provider server-side.
+  if (typeof window === 'undefined') return 'en'
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored === 'en' || stored === 'ja') {
     return stored
@@ -476,11 +478,25 @@ const fallbackContext: I18nContextValue = {
 
 const I18nContext = createContext<I18nContextValue>(fallbackContext)
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(readStoredLanguage)
+export function I18nProvider({
+  children,
+  initialLanguage,
+}: {
+  children: ReactNode
+  // Forces a language regardless of storage; used by the build-time prerender so
+  // the canonical static HTML at `/` is always English.
+  initialLanguage?: Language
+}) {
+  const [language, setLanguageState] = useState<Language>(
+    () => initialLanguage ?? readStoredLanguage(),
+  )
 
   const setLanguage = useCallback((nextLanguage: Language) => {
-    localStorage.setItem(STORAGE_KEY, nextLanguage)
+    try {
+      localStorage.setItem(STORAGE_KEY, nextLanguage)
+    } catch {
+      // Storage may be unavailable (private mode / SSR); language still applies in-memory.
+    }
     setLanguageState(nextLanguage)
   }, [])
 

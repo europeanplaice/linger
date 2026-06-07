@@ -15,9 +15,10 @@ test('no app shell shown during auth check when no prior session', async ({ page
 
   await page.goto(baseUrl)
 
-  // While checkSession() is pending and hadSession=false, render returns null — no app shell
+  // While checkSession() is pending and hadSession=false, the landing (which matches
+  // the prerendered HTML at /) is shown — but never the app shell.
   await expect(page.locator('.restoring-app')).toHaveCount(0)
-  await expect(page.locator('.login-screen')).toHaveCount(0)
+  await expect(page.locator('.login-screen')).toBeVisible()
 
   releaseSession()
   await expect(page.locator('.login-screen')).toBeVisible()
