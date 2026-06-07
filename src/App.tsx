@@ -7,7 +7,7 @@ import { useFont } from './hooks/useFont'
 import { useFontSize } from './hooks/useFontSize'
 import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
 import { useOnline } from './hooks/useOnline'
-import { LoginScreen } from './components/LoginScreen'
+import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
 import { EntryEditor } from './components/EntryEditor'
@@ -149,6 +149,13 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
   useServiceWorkerUpdate(editorDirty)
+
+  // The `session-restoring` class (set by an inline script in index.html when a
+  // prior session exists) hides the prerendered landing before React mounts. Once
+  // React owns the DOM it must come off, so a later sign-out reveals the landing.
+  useEffect(() => {
+    document.documentElement.classList.remove('session-restoring')
+  }, [])
   const [autoSave, setAutoSave] = useState(() => localStorage.getItem('linger_autosave') === 'true')
   const [pendingDate, setPendingDate] = useState<string | null>(null)
   const [retrySaveAfterReauth, setRetrySaveAfterReauth] = useState(false)
@@ -502,14 +509,17 @@ export default function App() {
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
 
   if (status === 'initializing') {
+    // A returning session restores into the app shell; everyone else (including
+    // crawlers and first-time visitors) sees the landing, which matches the
+    // build-time prerendered HTML so there is no flash before React mounts.
     return hadSession
       ? <RestoringScreen selectedDate={selectedDate} />
-      : null
+      : <Landing onSignIn={signIn} onRetry={retryAfterExpired} />
   }
 
   if (status === 'signedOut' && !tokenExpired) {
     return (
-      <LoginScreen
+      <Landing
         onSignIn={signIn}
         onRetry={retryAfterExpired}
         tokenExpired={tokenExpired}

@@ -6,19 +6,16 @@ interface Props {
   onSignIn: () => void
   onRetry?: () => void
   tokenExpired?: boolean
+  // When true, render a plain (non-animated) card so the build-time prerendered
+  // HTML is visible immediately, before React mounts. The client always animates.
+  staticRender?: boolean
 }
 
-export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
+export function LoginScreen({ onSignIn, onRetry, tokenExpired, staticRender }: Props) {
   const { t, language, setLanguage } = useI18n()
 
-  return (
-    <main className="login-screen">
-      <motion.div
-        className="login-card"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
-      >
+  const cardBody = (
+    <>
         <AppIcon className="login-logo" fetchPriority="high" />
         <h1>{t.documentTitle}</h1>
         <p>{t.login.privateDiary}</p>
@@ -75,7 +72,23 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
             日本語
           </button>
         </div>
-      </motion.div>
+    </>
+  )
+
+  return (
+    <main className="login-screen">
+      {staticRender ? (
+        <div className="login-card">{cardBody}</div>
+      ) : (
+        <motion.div
+          className="login-card"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+        >
+          {cardBody}
+        </motion.div>
+      )}
     </main>
   )
 }

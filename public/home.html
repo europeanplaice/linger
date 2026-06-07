@@ -4,8 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <title>Linger — Private Diary</title>
-  <meta name="description" content="Linger is a private diary app that stores your entries in your own Google Drive." />
+  <title>Linger — Private diary in your own Google Drive</title>
+  <meta name="description" content="Linger is a private diary app that stores your entries as plain-text files in your own Google Drive. Write daily, browse by calendar, full-text search, and keep full ownership of your data." />
+  <link rel="canonical" href="https://linger.europeanplaice.com/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Linger" />
+  <meta property="og:title" content="Linger — Private diary in your own Google Drive" />
+  <meta property="og:description" content="A private diary app that stores your entries in your own Google Drive. You own your data — Linger only accesses the files it creates." />
+  <meta property="og:url" content="https://linger.europeanplaice.com/" />
+  <meta property="og:image" content="https://linger.europeanplaice.com/screenshots/editor.png" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="820" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Linger — Private diary in your own Google Drive" />
+  <meta name="twitter:description" content="A private diary app that stores your entries in your own Google Drive. You own your data — Linger only accesses the files it creates." />
+  <meta name="twitter:image" content="https://linger.europeanplaice.com/screenshots/editor.png" />
   <style>
     body {
       font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -47,6 +60,41 @@
     li { font-size: 0.95rem; color: #555; }
     code { font-size: 0.88rem; background: #eee; padding: 0.1em 0.35em; border-radius: 3px; }
     a { color: #5a7a5a; }
+    .shots {
+      margin: 2.5rem 0 1rem;
+    }
+    .shots figure {
+      margin: 0 0 1.5rem;
+    }
+    .shots img {
+      width: 100%;
+      height: auto;
+      border: 1px solid #e3e1da;
+      border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(44, 62, 80, 0.10);
+      display: block;
+    }
+    .shots figcaption {
+      margin-top: 0.6rem;
+      font-size: 0.85rem;
+      color: #888;
+      text-align: center;
+    }
+    .shots-mobile {
+      display: flex;
+      gap: 1.2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .shots-mobile figure {
+      margin: 0;
+      flex: 0 1 auto;
+    }
+    .shots-mobile img {
+      width: auto;
+      max-height: 520px;
+      max-width: 44vw;
+    }
     .footer {
       margin-top: 3rem;
       font-size: 0.85rem;
@@ -63,6 +111,32 @@
     <p class="subtitle">Your private diary, stored in your own Google Drive.</p>
     <a href="/" class="btn">Open app</a>
   </div>
+
+  <section class="shots">
+    <figure>
+      <img src="/screenshots/editor.png" width="1280" height="820"
+           alt="Linger diary editor showing a dated entry alongside a monthly calendar in the sidebar" />
+      <figcaption>Write your day. Browse past entries on the calendar.</figcaption>
+    </figure>
+    <figure>
+      <img src="/screenshots/search.png" width="1280" height="820"
+           alt="Linger full-text search listing matching diary entries with highlighted keywords" />
+      <figcaption>Full-text search across everything you've written.</figcaption>
+    </figure>
+    <div class="shots-mobile">
+      <figure>
+        <img src="/screenshots/mobile-editor.png" width="390" height="844"
+             alt="Linger diary editor on a phone screen" />
+      </figure>
+      <figure>
+        <img src="/screenshots/mobile-calendar.png" width="390" height="844"
+             alt="Linger calendar drawer open on a phone screen" />
+      </figure>
+    </div>
+    <p class="shots-mobile-caption" style="text-align:center;font-size:0.85rem;color:#888;margin-top:0.6rem;">
+      Works just as well on your phone.
+    </p>
+  </section>
 
   <h2>What is Linger?</h2>
   <p>
