@@ -1,4 +1,3 @@
-import { motion } from 'motion/react'
 import { AppIcon } from './AppIcon'
 import { useI18n } from '../i18n'
 
@@ -6,12 +5,9 @@ interface Props {
   onSignIn: () => void
   onRetry?: () => void
   tokenExpired?: boolean
-  // When true, render a plain (non-animated) card so the build-time prerendered
-  // HTML is visible immediately, before React mounts. The client always animates.
-  staticRender?: boolean
 }
 
-export function LoginScreen({ onSignIn, onRetry, tokenExpired, staticRender }: Props) {
+export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
@@ -77,18 +73,9 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired, staticRender }: P
 
   return (
     <main className="login-screen">
-      {staticRender ? (
-        <div className="login-card">{cardBody}</div>
-      ) : (
-        <motion.div
-          className="login-card"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
-        >
-          {cardBody}
-        </motion.div>
-      )}
+      {/* Plain (non-animated) card so the build-time prerendered HTML stays put
+          when React mounts over it — no flash before hydration. */}
+      <div className="login-card">{cardBody}</div>
     </main>
   )
 }

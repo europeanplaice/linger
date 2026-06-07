@@ -8,7 +8,7 @@ import { Landing } from './components/Landing'
 export function renderLanding(): string {
   return renderToStaticMarkup(
     <I18nProvider initialLanguage="en">
-      <Landing onSignIn={() => {}} staticRender />
+      <Landing onSignIn={() => {}} />
     </I18nProvider>,
   )
 }
