@@ -143,7 +143,7 @@ export default function App() {
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
-  const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry()
+  const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
