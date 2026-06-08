@@ -181,6 +181,8 @@ const dictionaries = {
       fontSizeMd: 'Medium',
       fontSizeLg: 'Large',
       fontSizeXl: 'Extra large',
+      holidayCountry: 'Holidays',
+      holidayCountryOff: 'Off',
       aboutDataStorage: 'About data storage',
       storageIntro: 'Your diary entries are stored in your Google Drive:',
       storageItems: [
@@ -385,6 +387,8 @@ const dictionaries = {
       fontSizeMd: '中',
       fontSizeLg: '大',
       fontSizeXl: '特大',
+      holidayCountry: '祝日',
+      holidayCountryOff: '表示しない',
       aboutDataStorage: 'データ保存について',
       storageIntro: '日記は Google Drive に保存されます:',
       storageItems: [

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SettingsModal } from '../src/components/SettingsModal'
 import type { FontSize } from '../src/hooks/useFontSize'
+import type { HolidayCountry } from '../src/utils/holidays'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
@@ -28,6 +29,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(initialTheme)
   const [font, setFont] = useState<'serif' | 'sans'>('serif')
   const [fontSize, setFontSize] = useState<FontSize>(initialFontSize)
+  const [holidayCountry, setHolidayCountry] = useState<HolidayCountry>('off')
 
   const handleAutoSaveToggle = useCallback(() => {
     setAutoSave(prev => {
@@ -56,6 +58,8 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onFontToggle={() => setFont(f => f === 'serif' ? 'sans' : 'serif')}
           fontSize={fontSize}
           onFontSizeChange={setFontSize}
+          holidayCountry={holidayCountry}
+          onHolidayCountryChange={setHolidayCountry}
           dates={['2026-05-01', '2026-05-02']}
           onExport={handleExport}
           onClose={() => setOpen(false)}

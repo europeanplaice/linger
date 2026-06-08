@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
@@ -6,6 +6,8 @@ import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { FontSize } from '../hooks/useFontSize'
+import type { HolidayCountry } from '../utils/holidays'
+import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 
 interface SettingsModalProps {
   autoSave: boolean
@@ -16,6 +18,8 @@ interface SettingsModalProps {
   onFontToggle: () => void
   fontSize: FontSize
   onFontSizeChange: (size: FontSize) => void
+  holidayCountry: HolidayCountry
+  onHolidayCountryChange: (country: HolidayCountry) => void
   dates: string[]
   onExport: (onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
   onClose: () => void
@@ -23,8 +27,22 @@ interface SettingsModalProps {
   email?: string
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, dates, onExport, onClose, onSignOut, email }: SettingsModalProps) {
-  const { t, language, setLanguage } = useI18n()
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email }: SettingsModalProps) {
+  const { t, locale, language, setLanguage } = useI18n()
+
+  // Localized country names come from Intl, so no hardcoded country dictionary.
+  const holidayOptions = useMemo(() => {
+    let regionNames: Intl.DisplayNames | null = null
+    try {
+      regionNames = new Intl.DisplayNames([locale], { type: 'region' })
+    } catch {
+      regionNames = null
+    }
+    return [
+      { value: 'off', label: t.settings.holidayCountryOff },
+      ...HOLIDAY_COUNTRY_CODES.map(code => ({ value: code, label: regionNames?.of(code) ?? code })),
+    ]
+  }, [locale, t])
   const dialogRef = useRef<HTMLDialogElement>(null)
   const signOutDialogRef = useRef<HTMLDialogElement>(null)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
@@ -105,6 +123,16 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               { value: 'ja', label: t.common.japanese },
               { value: 'en', label: t.common.english },
             ]}
+          />
+        </div>
+        <div className="settings-divider" />
+        <div className="settings-item">
+          <span className="settings-item-label">{t.settings.holidayCountry}</span>
+          <SettingsSelect
+            aria-label={t.settings.holidayCountry}
+            value={holidayCountry}
+            onChange={val => onHolidayCountryChange(isHolidayCountry(val) ? val : 'off')}
+            options={holidayOptions}
           />
         </div>
         <div className="settings-divider" />

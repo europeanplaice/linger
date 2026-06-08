@@ -5,6 +5,7 @@ import { useDiary } from './hooks/useDiary'
 import { useTheme } from './hooks/useTheme'
 import { useFont } from './hooks/useFont'
 import { useFontSize } from './hooks/useFontSize'
+import { useHolidayCountry } from './hooks/useHolidayCountry'
 import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
 import { useOnline } from './hooks/useOnline'
 import { Landing } from './components/Landing'
@@ -142,6 +143,7 @@ export default function App() {
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
+  const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry()
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -552,7 +554,7 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} />
+        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
@@ -590,6 +592,8 @@ export default function App() {
             onFontToggle={toggleFont}
             fontSize={fontSize}
             onFontSizeChange={setFontSize}
+            holidayCountry={holidayCountry}
+            onHolidayCountryChange={setHolidayCountry}
             dates={diary.dates}
             onExport={diary.exportAll}
             onClose={() => setSettingsOpen(false)}

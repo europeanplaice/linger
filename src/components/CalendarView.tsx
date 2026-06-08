@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import { ChevronDown } from 'lucide-react'
 import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../utils/date'
 import { useI18n } from '../i18n'
+import { useHolidays } from '../hooks/useHolidays'
+import type { HolidayCountry } from '../utils/holidays'
 
 interface Props {
   dates: Set<string>
@@ -10,6 +12,7 @@ interface Props {
   onSelect: (date: string) => void
   onPrefetch?: (date: string) => void
   onMonthChange?: (year: number, month: number) => void
+  holidayCountry?: HolidayCountry
 }
 
 interface MonthYearPickerProps {
@@ -211,8 +214,8 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange }: Props) {
-  const { t } = useI18n()
+export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off' }: Props) {
+  const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
   todayRef.current = todayStr
@@ -259,6 +262,8 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
   useEffect(() => {
     onMonthChangeRef.current?.(year, month)
   }, [year, month])
+
+  const yearHolidays = useHolidays(holidayCountry, year)
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = daysInMonthUtil(year, month + 1)
@@ -348,12 +353,15 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const hasEntry = dates.has(dateStr)
               const isSelected = dateStr === selectedDate
               const isToday = dateStr === todayStr
+              const holiday = yearHolidays[dateStr]
+              const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
-                  aria-label={dateStr}
-                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : ''].filter(Boolean).join(' ')}
+                  aria-label={holidayName ? `${dateStr} ${holidayName}` : dateStr}
+                  title={holidayName}
+                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
