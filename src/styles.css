@@ -1855,11 +1855,6 @@ dialog.signout-confirm-dialog::backdrop {
   padding: 0.1rem 0.5rem;
   line-height: 1.4;
 }
-/* On today, tint the weekday to match the today pill — warmer and more distinct from the muted gray. */
-.entry-date-text[data-today] .entry-date-weekday {
-  color: var(--today-text);
-  font-weight: 700;
-}
 .entry-date-weekday {
   color: var(--text-muted);
   font-size: 0.62em;
