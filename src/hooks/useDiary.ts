@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
-import { getAllCached, putCached, deleteCached, clearCache } from '../lib/diaryCache'
-import type { CachedEntry } from '../lib/diaryCache'
+import { getAllCached, putCached, deleteCached, clearCache, getAllDrafts, putDraft, deleteDraft } from '../lib/diaryCache'
+import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
+import type { AuthStatus } from './useAuth'
 import { shiftDate } from '../utils/date'
 
 interface EntryCache {
@@ -45,6 +46,48 @@ export class EntryConflictError extends Error {
 
 type PendingSave = { date: string; content: string; baseVersion: string | null; baseContent?: string | null }
 
+const SEARCH_RESULT_LIMIT = 30
+const SEARCH_REMOTE_FETCH_LIMIT = 30
+
+function normalizeForSearch(s: string): string {
+  return s.normalize('NFKC').toLowerCase()
+}
+
+function headSnippet(text: string): string {
+  return text.slice(0, 120).replace(/\n/g, ' ')
+}
+
+// Substring-match every term (case-insensitive, falling back to NFKC
+// normalization so half/full-width forms match); the snippet centres on the
+// first term's match. Returns null when any term is missing.
+function localMatchSnippet(text: string, terms: string[]): string | null {
+  const plain = text.toLowerCase()
+  let normalized: string | null = null
+  let snippetSource = text
+  let snippetIdx = -1
+  for (const term of terms) {
+    let idx = plain.indexOf(term.toLowerCase())
+    let source = text
+    if (idx === -1) {
+      normalized ??= normalizeForSearch(text)
+      idx = normalized.indexOf(normalizeForSearch(term))
+      source = normalized
+    }
+    if (idx === -1) return null
+    if (snippetIdx === -1) {
+      snippetIdx = idx
+      snippetSource = source
+    }
+  }
+  return snippetSource.slice(Math.max(0, snippetIdx - 40), snippetIdx + 80).replace(/\n/g, ' ')
+}
+
+// A fetch that never produced an HTTP response — the device is offline or the
+// request failed at the network layer. These edits are kept as local drafts.
+function isNetworkFailure(e: unknown): boolean {
+  return (typeof navigator !== 'undefined' && !navigator.onLine) || e instanceof TypeError
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -67,7 +110,8 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-export function useDiary(isSignedIn: boolean, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string): DiaryState {
+export function useDiary(authStatus: AuthStatus, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string): DiaryState {
+  const isSignedIn = authStatus === 'signedIn'
   const [loading, setLoading] = useState(false)
   const [freshListLoaded, setFreshListLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -210,7 +254,10 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
       setFreshListLoaded(false)
       cacheRef.current = empty
       setCache(empty)
-      clearCache().catch(() => {})
+      // Only wipe the persistent cache once the session is known to be gone;
+      // while auth is still restoring ('initializing') the cache must survive
+      // so the IDB preload below has data after a reload.
+      if (authStatus === 'signedOut') clearCache().catch(() => {})
       return
     }
     setFreshListLoaded(false)
@@ -262,7 +309,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         setLoading(false)
       }
     })()
-  }, [isSignedIn, email, loadEntryList, updateCache, getContent])
+  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent])
 
   const refreshEntries = useCallback(async (): Promise<void> => {
     if (!isSignedIn) return
@@ -351,12 +398,18 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
           return next
         })
         if (email !== null) putCached({ date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
+        deleteDraft(date).catch(() => {})
         return { entry, meta }
       } catch (e) {
         if (e instanceof TokenExpiredError) {
           pendingSaveRef.current = { date, content, baseVersion, baseContent }
           onExpiredRef.current()
           throw e
+        }
+        if (email !== null && !(e instanceof SaveConflictError) && isNetworkFailure(e)) {
+          // The save never reached Drive — keep the edit as a durable local
+          // draft so it survives a reload and is synced once back online.
+          putDraft({ date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
         }
         if (e instanceof SaveConflictError) {
           if (e.remote) {
@@ -383,10 +436,66 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
     return run
   }, [isSignedIn, email, updateCache])
 
+  const selectedDateRef = useRef(selectedDate)
+  useEffect(() => { selectedDateRef.current = selectedDate }, [selectedDate])
+
+  const replayingDraftsRef = useRef(false)
+
+  // Push drafts persisted while offline back to Drive. Runs after the initial
+  // Drive sync and whenever connectivity returns. The date open in the editor
+  // is skipped — the editor owns that draft and retries it itself.
+  const replayDrafts = useCallback(async (): Promise<void> => {
+    if (!isSignedIn || replayingDraftsRef.current) return
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return
+    replayingDraftsRef.current = true
+    try {
+      const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
+      for (const draft of drafts) {
+        if (draft.conflicted) continue
+        if (draft.date === selectedDateRef.current) continue
+        const cached = cacheRef.current.get(draft.date)
+        if (cached?.content?.content === draft.content) {
+          deleteDraft(draft.date).catch(() => {})
+          continue
+        }
+        try {
+          await save(draft.date, draft.content, draft.baseVersion, false, draft.baseContent)
+        } catch (e) {
+          if (e instanceof TokenExpiredError) return
+          if (e instanceof EntryConflictError) {
+            // Leave resolution to the user in the editor; stop auto-retrying.
+            putDraft({ ...draft, conflicted: true }).catch(() => {})
+          }
+          // Network failures: the draft stays for the next replay.
+        }
+      }
+    } finally {
+      replayingDraftsRef.current = false
+    }
+  }, [isSignedIn, save])
+
+  const replayDraftsRef = useRef(replayDrafts)
+  useEffect(() => { replayDraftsRef.current = replayDrafts })
+
+  useEffect(() => {
+    if (!freshListLoaded) return
+    replayDraftsRef.current().catch(() => {})
+  }, [freshListLoaded])
+
+  useEffect(() => {
+    if (!isSignedIn) return
+    const onOnline = () => { replayDraftsRef.current().catch(() => {}) }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [isSignedIn])
+
   const remove = useCallback(async (date: string): Promise<void> => {
     if (!isSignedIn) throw new Error('Not signed in')
     const existing = cacheRef.current.get(date)
-    if (!existing) return
+    if (!existing) {
+      deleteDraft(date).catch(() => {})
+      return
+    }
     try {
       await deleteEntry(date)
       updateCache(prev => {
@@ -395,6 +504,7 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
         return next
       })
       deleteCached(date).catch(() => {})
+      deleteDraft(date).catch(() => {})
     } catch (e) {
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
       throw e
@@ -404,49 +514,76 @@ export function useDiary(isSignedIn: boolean, email: string | null, onExpired: (
   const search = useCallback(async (query: string): Promise<SearchResult> => {
     if (!isSignedIn || !query.trim()) return { results: [], unindexedCount: 0, totalCount: 0 }
 
-    const files = await searchEntries(query)
+    const terms = query.trim().split(/\s+/).filter(Boolean)
     const cached = cacheRef.current
-    const normalizedQuery = query.toLowerCase()
-    const candidates = files
-      .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md|txt)$/, ''), fileId: f.id }))
-      .filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date))
 
-    const totalCount = candidates.length
-    candidates.sort((a, b) => b.date.localeCompare(a.date))
-    const limited = candidates.slice(0, 30)
+    // Local pass: substring-match entries whose content is already cached.
+    // This works offline and catches CJK text that Drive's fullText tokenizer
+    // misses.
+    const found = new Map<string, string>()
+    let uncachedCount = 0
+    for (const [date, entry] of cached) {
+      if (!entry.content) {
+        uncachedCount++
+        continue
+      }
+      const snippet = localMatchSnippet(entry.content.content, terms)
+      if (snippet !== null) found.set(date, snippet)
+    }
 
+    // Remote pass: Drive fullText search covers entries without local content,
+    // plus tokenizer matches that substring search can't reproduce.
     let failedCount = 0
-    const mapped = await mapWithConcurrency(limited, 5, async ({ date, fileId }) => {
-      const cachedEntry = cached.get(date)
-      if (cachedEntry?.content) {
-        const text = cachedEntry.content.content
-        const idx = text.toLowerCase().indexOf(normalizedQuery)
-        const snippet = text.slice(Math.max(0, idx - 40), idx + 80).replace(/\n/g, ' ')
-        return { date, snippet }
+    let unfetchedMatches = 0
+    try {
+      const files = await searchEntries(query)
+      const candidates = files
+        .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md|txt)$/, ''), fileId: f.id }))
+        .filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date) && !found.has(date))
+
+      const toFetch: { date: string; fileId: string }[] = []
+      for (const c of candidates) {
+        const text = cached.get(c.date)?.content?.content
+        if (text !== undefined) {
+          // Content is cached but the substring pass missed it — Drive matched
+          // via tokenization, so include it with a leading snippet.
+          found.set(c.date, headSnippet(text))
+        } else {
+          toFetch.push(c)
+        }
       }
 
-      try {
-        const loaded = await getEntryByDate(date, undefined, fileId)
-        if (!loaded || loaded === 'not-modified') return null
-        const text = loaded.entry.content
-        const idx = text.toLowerCase().indexOf(normalizedQuery)
-        const snippet = text.slice(Math.max(0, idx - 40), idx + 80).replace(/\n/g, ' ')
-        updateCache(prev => {
-          const next = new Map(prev)
-          const ex = next.get(date)
-          if (ex) next.set(date, { ...ex, content: loaded.entry, snippet })
-          return next
-        })
-        return { date, snippet }
-      } catch {
-        failedCount++
-        return null
-      }
-    })
+      toFetch.sort((a, b) => b.date.localeCompare(a.date))
+      const limited = toFetch.slice(0, SEARCH_REMOTE_FETCH_LIMIT)
+      unfetchedMatches = toFetch.length - limited.length
 
-    const results = mapped.filter((r): r is { date: string; snippet: string } => r !== null)
+      await mapWithConcurrency(limited, 5, async ({ date, fileId }) => {
+        try {
+          const loaded = await getEntryByDate(date, undefined, fileId)
+          if (!loaded || loaded === 'not-modified') return
+          const text = loaded.entry.content
+          const snippet = localMatchSnippet(text, terms) ?? headSnippet(text)
+          updateCache(prev => {
+            const next = new Map(prev)
+            const ex = next.get(date)
+            if (ex) next.set(date, { ...ex, content: loaded.entry, snippet })
+            return next
+          })
+          found.set(date, snippet)
+        } catch {
+          failedCount++
+        }
+      })
+    } catch {
+      // Drive search unavailable (offline or API error) — fall back to the
+      // local results; entries without cached content could not be searched.
+      failedCount = uncachedCount
+    }
+
+    const results = Array.from(found, ([date, snippet]) => ({ date, snippet }))
     results.sort((a, b) => b.date.localeCompare(a.date))
-    return { results, unindexedCount: failedCount, totalCount }
+    const totalCount = results.length + unfetchedMatches
+    return { results: results.slice(0, SEARCH_RESULT_LIMIT), unindexedCount: failedCount, totalCount }
   }, [isSignedIn, updateCache])
 
   const retryPendingSave = useCallback(async (): Promise<LoadedDiaryEntry | null> => {

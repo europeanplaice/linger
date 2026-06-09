@@ -831,3 +831,223 @@ test.describe('useDiary save — entry not found at save time', () => {
     expect(calls).toHaveLength(1)
   })
 })
+
+test.describe('useDiary search — local-first', () => {
+  test('matches cached content locally even when Drive search returns nothing', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
+
+    // Load content into the in-memory cache
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', '今日は公園まで走った。気持ちよかった。') })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Drive's tokenizer finds nothing, but the local substring pass must hit
+    const result = await page.evaluate(() => {
+      window.diaryHarness.q({ status: 200, body: { files: [] } })
+      return window.diaryHarness.search('走った')
+    })
+
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].date).toBe('2026-05-01')
+    expect(result.results[0].snippet).toContain('走った')
+    expect(result.totalCount).toBe(1)
+    expect(result.unindexedCount).toBe(0)
+  })
+
+  test('matches half-width query against full-width cached text via NFKC', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01')] })
+
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', 'ＴＯＥＩＣの勉強をした') })
+
+    const result = await page.evaluate(() => {
+      window.diaryHarness.q({ status: 200, body: { files: [] } })
+      return window.diaryHarness.search('toeic')
+    })
+
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].date).toBe('2026-05-01')
+  })
+
+  test('returns local results when Drive search is unavailable', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01'), datedFileMeta('2026-05-02')] })
+
+    // Only 2026-05-01 has cached content; 2026-05-02 stays uncached
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', 'a day with a needle in it') })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    const result = await page.evaluate(() => {
+      window.diaryHarness.q({ status: 400, body: { error: 'unavailable' } })
+      return window.diaryHarness.search('needle')
+    })
+
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].date).toBe('2026-05-01')
+    // The uncached entry could not be searched
+    expect(result.unindexedCount).toBe(1)
+  })
+
+  test('merges local hits with Drive hits for uncached entries', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01'), datedFileMeta('2026-05-02')] })
+
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', 'local needle entry') })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    const result = await page.evaluate(({ files, entry }) => {
+      window.diaryHarness.q(
+        { status: 200, body: { files } },
+        { status: 200, body: entry },
+      )
+      return window.diaryHarness.search('needle')
+    }, {
+      files: [datedFileMeta('2026-05-02')],
+      entry: datedEntryResponse('2026-05-02', 'remote needle entry'),
+    })
+
+    expect(result.results.map(r => r.date)).toEqual(['2026-05-02', '2026-05-01'])
+    expect(result.totalCount).toBe(2)
+
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    // One search call + one content fetch for the uncached hit — the cached
+    // entry must not be re-fetched
+    expect(calls).toHaveLength(2)
+  })
+})
+
+test.describe('useDiary offline drafts', () => {
+  test('persists a draft when a save fails offline and replays it on reconnect', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await context.setOffline(true)
+    // Queue left empty — the fetch fails like a dead network
+    const failed = await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'offline text', null))
+    expect(failed).toMatchObject({ ok: false })
+
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toMatchObject([
+      { date: '2026-05-01', content: 'offline text', baseVersion: null },
+    ])
+
+    // Queue the response before going online — the browser may fire its own
+    // 'online' event the moment connectivity returns
+    await page.evaluate(({ meta }) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+    }, { meta: fileMeta('1') })
+    await context.setOffline(false)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+
+    // Replay saves the draft and removes it
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls.at(-1)).toMatchObject({ url: '/api/drive/entry/2026-05-01', method: 'POST' })
+  })
+
+  test('marks a draft conflicted when replay hits a conflict and stops retrying it', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [fileMeta('1')] })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'offline edit', '1'))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(1)
+
+    await page.evaluate(({ remote }) => {
+      window.diaryHarness.q({ status: 409, body: { conflict: remote } })
+    }, { remote: entryResponse('2', 'changed on another device') })
+    await context.setOffline(false)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toMatchObject([
+      { date: '2026-05-01', content: 'offline edit', conflicted: true },
+    ])
+
+    // A later reconnect must not retry the conflicted draft
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await page.waitForTimeout(200)
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
+  })
+
+  test('replay skips the date currently open in the editor', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'offline text', null))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(1)
+
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-01'))
+    // Drop the record of the failed offline save attempt
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+    await context.setOffline(false)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await page.waitForTimeout(200)
+
+    // The editor owns the open date's draft — no background save attempt
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(0)
+    expect(await page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(1)
+  })
+
+  test('a successful save clears the draft for that date', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'offline text', null))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(1)
+
+    // Keep the date "open in the editor" so the auto-replay on reconnect skips
+    // it and the explicit save below is the one that consumes the response
+    await page.evaluate(() => window.diaryHarness.setSelectedDate('2026-05-01'))
+    await context.setOffline(false)
+    const result = await page.evaluate(({ meta }) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+      return window.diaryHarness.save('2026-05-01', 'offline text, finished later', null)
+    }, { meta: fileMeta('1') })
+
+    expect(result).toMatchObject({ ok: true })
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+  })
+
+  test('replays drafts from a previous session after the entry list loads', async ({ page }) => {
+    await loadHarness(page)
+    await page.evaluate(async ({ meta }) => {
+      // Same account as the previous session — otherwise the cross-account
+      // guard rightly wipes the drafts
+      window.diaryHarness.seedLocalStorageUser('user@example.com')
+      await window.diaryHarness.seedDrafts([{
+        date: '2026-05-01',
+        content: 'written while offline',
+        baseVersion: null,
+        baseContent: null,
+        savedAt: Date.now(),
+      }])
+      window.diaryHarness.q(
+        { status: 200, body: { files: [] } },
+        { status: 200, body: meta },
+      )
+      window.diaryHarness.start()
+    }, { meta: fileMeta('1') })
+    await page.waitForSelector('#harness-ready')
+
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
+  })
+})

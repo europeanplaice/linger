@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
+import { getDraft, deleteDraft } from '../lib/diaryCache'
+import type { DraftEntry } from '../lib/diaryCache'
 import type { LoadedDiaryEntry } from '../types'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
@@ -192,6 +194,18 @@ useEffect(() => {
     fileIdRef.current = entry?.meta.id ?? null
   }, [setBaseVersionValue, setSavedTextValue])
 
+  // Restore an offline draft as dirty text. Keeping the draft's own
+  // baseVersion/baseContent means a save still goes through normal conflict
+  // detection if the entry changed on another device since the draft was made.
+  const applyDraft = useCallback((draft: DraftEntry, fileId: string | null) => {
+    setText(draft.content)
+    setSavedTextValue(draft.baseContent ?? '')
+    setBaseVersionValue(draft.baseVersion)
+    fileIdRef.current = fileId
+    setPendingOfflineSave(true)
+    setStatus(t.entry.draftRestored)
+  }, [setBaseVersionValue, setSavedTextValue, t])
+
   const dateKnownAbsent = diaryListLoaded === true && knownDates !== undefined && !knownDates.has(date)
   const isNewEmptyEntry = dateKnownAbsent && text === '' && savedText === '' && baseVersion === null
 
@@ -213,23 +227,46 @@ useEffect(() => {
     setDiscardedText(null)
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
-    getContentRef.current(date).then(entry => {
+    void (async () => {
+      let entry: LoadedDiaryEntry | null = null
+      let loadError: unknown = null
+      try {
+        entry = await getContentRef.current(date)
+      } catch (e) {
+        loadError = e
+      }
       if (cancelled) return
-      applyLoadedEntry(entry)
-    }).catch((e) => {
-      if (!cancelled) {
-        if (e instanceof TokenExpiredError) {
-          tokenExpiredForDateRef.current = date
-          return
+      if (loadError instanceof TokenExpiredError) {
+        tokenExpiredForDateRef.current = date
+        setLoading(false)
+        return
+      }
+      const draft = await getDraft(date).catch(() => undefined)
+      if (cancelled) return
+      if (loadError === null) {
+        if (draft && draft.content !== (entry?.entry.content ?? '')) {
+          applyDraft(draft, entry?.meta.id ?? null)
+        } else {
+          // No draft, or the draft already made it to Drive — drop it.
+          if (draft) deleteDraft(date).catch(() => {})
+          applyLoadedEntry(entry)
         }
+      } else if (draft) {
+        // Couldn't reach Drive but an offline draft exists — let the user keep
+        // editing it; it syncs once connectivity returns.
+        applyDraft(draft, null)
+      } else if (dateKnownAbsent && typeof navigator !== 'undefined' && !navigator.onLine) {
+        // Offline on a date known to have no entry: writing is safe, the text
+        // is preserved as a draft on the first save attempt.
+        applyLoadedEntry(null)
+      } else {
         setLoadFailed(true)
         setStatus(t.entry.failedToLoad)
       }
-    }).finally(() => {
-      if (!cancelled) setLoading(false)
-    })
+      setLoading(false)
+    })()
     return () => { cancelled = true }
-  }, [date, applyLoadedEntry, dateKnownAbsent])
+  }, [date, applyLoadedEntry, applyDraft, dateKnownAbsent])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
@@ -361,6 +398,8 @@ useEffect(() => {
     setBaseVersionValue(conflictRemote?.meta.version ?? null)
     setHasConflict(false)
     setConflictRemote(null)
+    setPendingOfflineSave(false)
+    deleteDraft(date).catch(() => {})
     setStatus(conflictRemote ? t.entry.loadedLatest : t.entry.remoteDeleted)
   }
 
@@ -380,6 +419,7 @@ useEffect(() => {
       setBaseVersionValue(saved.meta.version ?? null)
       setHasConflict(false)
       setConflictRemote(null)
+      setPendingOfflineSave(false)
       setStatus(savedStatus)
     } catch {
       setStatus(t.entry.saveFailed)
@@ -437,6 +477,15 @@ useEffect(() => {
     const previous = text
     setText(savedTextRef.current)
     setStatus('')
+    deleteDraft(date).catch(() => {})
+    if (pendingOfflineSaveRef.current) {
+      setPendingOfflineSave(false)
+      // A restored draft's base may lag the latest cached entry — reload it.
+      const capturedDate = date
+      getContentRef.current(date)
+        .then(entry => { if (currentDateRef.current === capturedDate) applyLoadedEntry(entry) })
+        .catch(() => {})
+    }
     setDiscardedText(previous)
     if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
     discardToastTimerRef.current = setTimeout(() => setDiscardedText(null), 5000)

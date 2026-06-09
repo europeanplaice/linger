@@ -188,7 +188,7 @@ export default function App() {
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
   const loadingSeenRef = useRef(false)
 
-  const diary = useDiary(isSignedIn, email, handleExpired, useCallback((dates: string[]) => {
+  const diary = useDiary(status, email, handleExpired, useCallback((dates: string[]) => {
     if (selectedDateRef.current && dates.includes(selectedDateRef.current)) {
       setEntryRefreshSignal(v => v + 1)
     }
