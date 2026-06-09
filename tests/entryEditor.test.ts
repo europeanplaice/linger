@@ -1534,3 +1534,116 @@ test.describe('EntryEditor — Today FAB', () => {
     expect(count).toBe(1)
   })
 })
+
+type TestDraft = {
+  date: string
+  content: string
+  baseVersion: string | null
+  baseContent: string | null
+  savedAt: number
+  conflicted?: boolean
+}
+
+async function clearDraftDb(page: import('@playwright/test').Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase('linger_diary_cache')
+    req.onsuccess = () => resolve()
+    req.onerror = () => resolve()
+  }))
+}
+
+async function seedDraft(page: import('@playwright/test').Page, draft: TestDraft) {
+  await page.evaluate((d) => new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open('linger_diary_cache', 2)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
+      if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
+    }
+    req.onsuccess = () => {
+      const db = req.result
+      const put = db.transaction('drafts', 'readwrite').objectStore('drafts').put(d)
+      put.onsuccess = () => { db.close(); resolve() }
+      put.onerror = () => { db.close(); reject(put.error) }
+    }
+    req.onerror = () => reject(req.error)
+  }), draft)
+}
+
+async function getDrafts(page: import('@playwright/test').Page): Promise<TestDraft[]> {
+  return page.evaluate(() => new Promise<TestDraft[]>((resolve, reject) => {
+    const req = indexedDB.open('linger_diary_cache', 2)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
+      if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
+    }
+    req.onsuccess = () => {
+      const db = req.result
+      const all = db.transaction('drafts', 'readonly').objectStore('drafts').getAll()
+      all.onsuccess = () => { db.close(); resolve(all.result as TestDraft[]) }
+      all.onerror = () => { db.close(); reject(all.error) }
+    }
+    req.onerror = () => reject(req.error)
+  }))
+}
+
+test.describe('EntryEditor — offline drafts', () => {
+  test('restores a persisted draft as unsaved changes and saves with the draft base', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await seedDraft(page, {
+      date: '2026-05-01',
+      content: 'draft text written offline',
+      baseVersion: '1',
+      baseContent: 'saved text',
+      savedAt: Date.now(),
+    })
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('draft text written offline')
+    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-status-line')).toHaveText('Restored unsaved changes from this device.')
+
+    await page.locator('button.btn-save').click()
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCallsWithBaseContent())).toMatchObject([
+      { date: '2026-05-01', content: 'draft text written offline', baseVersion: '1', baseContent: 'saved text' },
+    ])
+  })
+
+  test('drops a stale draft that matches the loaded content', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await seedDraft(page, {
+      date: '2026-05-01',
+      content: 'same text',
+      baseVersion: '1',
+      baseContent: 'older text',
+      savedAt: Date.now(),
+    })
+    await renderEditor(page, { initialContent: 'same text', version: '2', token: 'tok', autoSave: false })
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('same text')
+    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect.poll(() => getDrafts(page)).toEqual([])
+  })
+
+  test('discarding restored draft edits removes the draft and reloads the saved entry', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await seedDraft(page, {
+      date: '2026-05-01',
+      content: 'draft to discard',
+      baseVersion: '1',
+      baseContent: 'saved text',
+      savedAt: Date.now(),
+    })
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('draft to discard')
+
+    await page.locator('button.btn-discard').click()
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved text')
+    await expect.poll(() => getDrafts(page)).toEqual([])
+  })
+})

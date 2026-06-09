@@ -46,7 +46,7 @@ function Harness() {
 
   useEffect(() => { _setSelectedDate = setSelectedDate }, [])
 
-  const diary = useDiary(true, currentEmail, () => { expiredCount++ }, (dates) => {
+  const diary = useDiary('signedIn', currentEmail, () => { expiredCount++ }, (dates) => {
     evictedCalls.push([...dates])
   }, selectedDate)
 
@@ -134,12 +134,7 @@ window.diaryHarness = {
     else localStorage.setItem('linger_session_user', u)
   },
   seedIdb: async (entries: { date: string; meta: unknown; content?: unknown; snippet?: string }[]) => {
-    const db = await new Promise<IDBDatabase>((res, rej) => {
-      const r = indexedDB.open('linger_diary_cache', 1)
-      r.onupgradeneeded = () => r.result.createObjectStore('entries', { keyPath: 'date' })
-      r.onsuccess = () => res(r.result)
-      r.onerror = () => rej(r.error)
-    })
+    const db = await openHarnessDb()
     await Promise.all(entries.map(e => new Promise<void>((res, rej) => {
       const req = db.transaction('entries', 'readwrite').objectStore('entries').put(e)
       req.onsuccess = () => res()
@@ -147,4 +142,36 @@ window.diaryHarness = {
     })))
     db.close()
   },
+  seedDrafts: async (drafts) => {
+    const db = await openHarnessDb()
+    await Promise.all(drafts.map(d => new Promise<void>((res, rej) => {
+      const req = db.transaction('drafts', 'readwrite').objectStore('drafts').put(d)
+      req.onsuccess = () => res()
+      req.onerror = () => rej(req.error)
+    })))
+    db.close()
+  },
+  getDrafts: async () => {
+    const db = await openHarnessDb()
+    const drafts = await new Promise<unknown[]>((res, rej) => {
+      const req = db.transaction('drafts', 'readonly').objectStore('drafts').getAll()
+      req.onsuccess = () => res(req.result)
+      req.onerror = () => rej(req.error)
+    })
+    db.close()
+    return drafts as { date: string; content: string; baseVersion: string | null; baseContent: string | null; savedAt: number; conflicted?: boolean }[]
+  },
+}
+
+function openHarnessDb(): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((res, rej) => {
+    const r = indexedDB.open('linger_diary_cache', 2)
+    r.onupgradeneeded = () => {
+      const db = r.result
+      if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
+      if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
+    }
+    r.onsuccess = () => res(r.result)
+    r.onerror = () => rej(r.error)
+  })
 }

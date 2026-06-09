@@ -62,7 +62,7 @@ test.describe('SearchBar', () => {
       })
     })
     await page.getByPlaceholder('Search entries...').fill('alpha')
-    await expect(page.getByText('3 entries could not be loaded.')).toBeVisible()
+    await expect(page.getByText('3 entries could not be searched.')).toBeVisible()
   })
 
   test('does not show partial results warning when unindexedCount is 0', async ({ page }) => {
