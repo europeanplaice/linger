@@ -1994,7 +1994,7 @@ dialog.signout-confirm-dialog::backdrop {
 .editor-actions .btn-discard {
   background: transparent;
   border: 1px solid var(--border);
-  color: var(--text-muted);
+  color: var(--text);
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
