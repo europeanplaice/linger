@@ -2442,6 +2442,8 @@ dialog.session-expired-dialog::backdrop {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* Horizontal swipes are handled in JS (useSwipeNav) for day navigation. */
+  touch-action: pan-y pinch-zoom;
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,

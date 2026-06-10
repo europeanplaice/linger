@@ -11,6 +11,7 @@ import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
+import { useSwipeNav } from '../hooks/useSwipeNav'
 import { haptics } from '../utils/haptics'
 import { Clock3, CloudUpload, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
@@ -127,6 +128,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const scrollWrapRef = useRef<HTMLDivElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
   const [hasConflict, setHasConflict] = useState(false)
@@ -702,6 +704,11 @@ useEffect(() => {
     return () => { scrollCleanupRef.current?.(); scrollCleanupRef.current = undefined }
   }, [loading, text, attachScrollListeners])
 
+  // Horizontal swipe on the entry body navigates between days; goes through the
+  // same onPrevDay/onNextDay path as the buttons, so the unsaved-changes guard
+  // and the directional slide animation apply unchanged.
+  useSwipeNav(scrollWrapRef, { onSwipeLeft: onNextDay, onSwipeRight: onPrevDay })
+
   async function handleShareEntry() {
     setShowMoreMenu(false)
     const label = diaryDateLabel(date, true, 'long', locale)
@@ -1030,7 +1037,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-      <div className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}${dateTransitionMask ? ` date-transition-mask date-transition-mask-${dateTransitionMaskSide}` : ''}`}>
+      <div ref={scrollWrapRef} className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}${dateTransitionMask ? ` date-transition-mask date-transition-mask-${dateTransitionMaskSide}` : ''}`}>
       <AnimatePresence initial={false} custom={directionRef.current}>
         <motion.div
           key={date}

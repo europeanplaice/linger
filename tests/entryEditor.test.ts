@@ -1647,3 +1647,84 @@ test.describe('EntryEditor — offline drafts', () => {
     await expect.poll(() => getDrafts(page)).toEqual([])
   })
 })
+
+test.describe('EntryEditor — swipe day navigation', () => {
+  // Browsers without touch support (desktop WebKit) can't construct real
+  // TouchEvents, so fabricate plain events carrying the touches/changedTouches
+  // shape useSwipeNav reads. Gesture thresholds themselves are covered by the
+  // useSwipeNav unit tests; these verify the wiring to onPrevDay/onNextDay.
+  async function dispatchTouchSequence(
+    page: import('@playwright/test').Page,
+    steps: { type: string; x: number; y: number }[],
+  ) {
+    await page.evaluate((steps) => {
+      const el = document.querySelector('textarea.editor-textarea')!
+      for (const s of steps) {
+        const e = new Event(s.type, { bubbles: true })
+        const point = { clientX: s.x, clientY: s.y }
+        Object.defineProperty(e, 'touches', { value: s.type === 'touchend' ? [] : [point] })
+        Object.defineProperty(e, 'changedTouches', { value: [point] })
+        el.dispatchEvent(e)
+      }
+    }, steps)
+  }
+
+  test('swiping left on the entry body navigates to the next day', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { initialContent: 'hello', version: '1' })
+
+    await dispatchTouchSequence(page, [
+      { type: 'touchstart', x: 320, y: 240 },
+      { type: 'touchmove', x: 260, y: 240 },
+      { type: 'touchend', x: 200, y: 240 },
+    ])
+
+    await expect.poll(() => page.evaluate(() => window.editorHarness.nextDayCount())).toBe(1)
+    expect(await page.evaluate(() => window.editorHarness.prevDayCount())).toBe(0)
+  })
+
+  test('swiping right on the entry body navigates to the previous day', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { initialContent: 'hello', version: '1' })
+
+    await dispatchTouchSequence(page, [
+      { type: 'touchstart', x: 200, y: 240 },
+      { type: 'touchmove', x: 260, y: 240 },
+      { type: 'touchend', x: 320, y: 240 },
+    ])
+
+    await expect.poll(() => page.evaluate(() => window.editorHarness.prevDayCount())).toBe(1)
+    expect(await page.evaluate(() => window.editorHarness.nextDayCount())).toBe(0)
+  })
+
+  test('a vertical scroll gesture does not navigate', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { initialContent: 'hello', version: '1' })
+
+    await dispatchTouchSequence(page, [
+      { type: 'touchstart', x: 300, y: 150 },
+      { type: 'touchmove', x: 305, y: 250 },
+      { type: 'touchend', x: 220, y: 400 },
+    ])
+
+    expect(await page.evaluate(() => window.editorHarness.prevDayCount())).toBe(0)
+    expect(await page.evaluate(() => window.editorHarness.nextDayCount())).toBe(0)
+  })
+
+  test('a swipe while text is selected does not navigate', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { initialContent: 'hello world', version: '1' })
+
+    await page.evaluate(() => {
+      const ta = document.querySelector('textarea.editor-textarea') as HTMLTextAreaElement
+      ta.setSelectionRange(0, 5)
+    })
+    await dispatchTouchSequence(page, [
+      { type: 'touchstart', x: 320, y: 240 },
+      { type: 'touchmove', x: 260, y: 240 },
+      { type: 'touchend', x: 200, y: 240 },
+    ])
+
+    expect(await page.evaluate(() => window.editorHarness.nextDayCount())).toBe(0)
+  })
+})

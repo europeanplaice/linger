@@ -29,6 +29,8 @@ let windowOpenCalls: WindowOpenCall[] = []
 let getContentCalls: GetContentCall[] = []
 let menuClickCount = 0
 let goToTodayCount = 0
+let prevDayCount = 0
+let nextDayCount = 0
 let dirtyChanges: boolean[] = []
 
 let currentSaveReject: 'conflict' | 'error' | undefined
@@ -174,8 +176,8 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       onMenuClick={() => { menuClickCount++ }}
       onGoToToday={() => { goToTodayCount++ }}
       onDirtyChange={(isDirty) => { dirtyChanges.push(isDirty) }}
-      onPrevDay={() => {}}
-      onNextDay={() => {}}
+      onPrevDay={() => { prevDayCount++ }}
+      onNextDay={() => { nextDayCount++ }}
       pendingNavDate={pendingNavDate}
       onPendingNavigate={() => {
         pendingNavigateCalls.push({ date: pendingNavDate })
@@ -219,6 +221,8 @@ window.editorHarness = {
     getContentCalls = []
     menuClickCount = 0
     goToTodayCount = 0
+    prevDayCount = 0
+    nextDayCount = 0
     dirtyChanges = []
     currentSaveReject = opts.saveReject
     currentGetContentReject = opts.getContentReject
@@ -254,6 +258,8 @@ window.editorHarness = {
   cancelNavigationCalls: () => [...cancelNavigationCalls],
   menuClickCount: () => menuClickCount,
   goToTodayCount: () => goToTodayCount,
+  prevDayCount: () => prevDayCount,
+  nextDayCount: () => nextDayCount,
   dirtyChanges: () => [...dirtyChanges],
   clearCalls: () => {
     saveCalls = []

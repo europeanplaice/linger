@@ -102,6 +102,8 @@ interface Window {
     cancelNavigationCalls: () => { date: string | null }[]
     menuClickCount: () => number
     goToTodayCount: () => number
+    prevDayCount: () => number
+    nextDayCount: () => number
     dirtyChanges: () => boolean[]
     clearCalls: () => void
     windowOpenCalls: () => { url: string; target: string }[]
