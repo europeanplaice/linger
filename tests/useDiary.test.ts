@@ -1262,7 +1262,7 @@ test.describe('useDiary retryPendingSave — session expiry flow', () => {
     const calls = await page.evaluate(() => window.diaryHarness.calls())
     const saveCall = calls.find((c: { url: string; method: string; body?: string }) =>
       c.url.includes('2026-05-01') && c.method === 'POST')
-    expect(saveCall).toBeTruthy()
+    if (!saveCall) throw new Error('Expected the pending save to be replayed')
     const body = JSON.parse(saveCall.body ?? '{}') as { content?: string }
     expect(body.content).toBe('my diary text')
   })

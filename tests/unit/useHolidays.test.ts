@@ -1,6 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HolidayMap } from '../../src/utils/holidays'
+import type { HolidayInfo, HolidayMap } from '../../src/utils/holidays'
 
 // Use year values far in the future so tests never collide with the
 // module-level cache populated by other tests in this file.
@@ -8,6 +8,10 @@ let nextYear = 3000
 
 function freshYear() {
   return nextYear++
+}
+
+function holiday(name: string): HolidayInfo {
+  return { localName: name, name }
 }
 
 const { mockFetchHolidays } = vi.hoisted(() => ({
@@ -45,14 +49,14 @@ describe('useHolidays', () => {
     expect(result.current).toEqual({})
 
     // Resolve the stale fetch — the active flag should suppress the state update
-    act(() => resolveFetch({ '2000-01-01': 'Holiday' }))
+    act(() => resolveFetch({ '2000-01-01': holiday('Holiday') }))
     await new Promise(r => setTimeout(r, 0))
     expect(result.current).toEqual({})
   })
 
   it('fetches holidays and exposes the map', async () => {
     const year = freshYear()
-    const holidays: HolidayMap = { '3100-01-01': 'Future Day' }
+    const holidays: HolidayMap = { '3100-01-01': holiday('Future Day') }
     mockFetchHolidays.mockResolvedValueOnce(holidays)
 
     const { result } = renderHook(() => useHolidays('JP', year))
@@ -63,7 +67,7 @@ describe('useHolidays', () => {
 
   it('deduplicates in-flight requests: two hooks with the same key share one fetch', async () => {
     const year = freshYear()
-    const holidays: HolidayMap = { '3200-01-01': 'Day' }
+    const holidays: HolidayMap = { '3200-01-01': holiday('Day') }
     let resolveFetch!: (m: HolidayMap) => void
     mockFetchHolidays.mockImplementation(() => new Promise<HolidayMap>(r => { resolveFetch = r }))
 
@@ -84,7 +88,7 @@ describe('useHolidays', () => {
 
   it('does not cache a failed fetch so the next call retries', async () => {
     const year = freshYear()
-    const holidays: HolidayMap = { '3300-01-01': 'Retry Day' }
+    const holidays: HolidayMap = { '3300-01-01': holiday('Retry Day') }
 
     // First call fails
     mockFetchHolidays.mockRejectedValueOnce(new Error('network'))
@@ -106,7 +110,7 @@ describe('useHolidays', () => {
 
   it('serves a cached result synchronously on mount without refetching', async () => {
     const year = freshYear()
-    const holidays: HolidayMap = { '3500-01-01': 'Cached Day' }
+    const holidays: HolidayMap = { '3500-01-01': holiday('Cached Day') }
 
     // First hook populates the module-level cache
     mockFetchHolidays.mockResolvedValueOnce(holidays)
@@ -136,7 +140,7 @@ describe('useHolidays', () => {
           if (String(args[0]).includes('unmounted')) reject(new Error('state update after unmount'))
           else origError(...args)
         })
-        act(() => resolveFetch({ '3400-01-01': 'Late Day' }))
+        act(() => resolveFetch({ '3400-01-01': holiday('Late Day') }))
         setTimeout(() => {
           vi.mocked(console.error).mockRestore()
           resolve()
