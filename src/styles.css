@@ -1864,6 +1864,7 @@ dialog.signout-confirm-dialog::backdrop {
   font-weight: 600;
   letter-spacing: 0;
 }
+.entry-date-weekday.holiday { color: var(--danger); }
 .editor-actions {
   display: flex;
   align-items: center;

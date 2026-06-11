@@ -643,6 +643,7 @@ export default function App() {
           refreshSignal={entryRefreshSignal}
           knownDates={datesSet}
           diaryListLoaded={diary.freshListLoaded}
+          holidayCountry={holidayCountry}
         />
       </main>
     </div>

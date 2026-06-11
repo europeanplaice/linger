@@ -12,6 +12,8 @@ import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
 import { useSwipeNav } from '../hooks/useSwipeNav'
+import { useHolidays } from '../hooks/useHolidays'
+import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
 import { Clock3, CloudUpload, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
@@ -45,6 +47,7 @@ interface Props {
   refreshSignal?: number
   knownDates?: Set<string>
   diaryListLoaded?: boolean
+  holidayCountry?: HolidayCountry
 }
 
 function SaveIcon() {
@@ -104,7 +107,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off' }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -143,6 +146,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const weekday = weekdayLabel(date, locale)
   const dateParts = diaryDateParts(date, locale, true)
   const isToday = date === todayYmd()
+  const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
+  const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
   const daysDiff = (() => {
     const today = todayYmd()
@@ -825,12 +830,12 @@ useEffect(() => {
               {dateParts.yearFirst && dateParts.year && <span className="entry-date-year">{dateParts.year}</span>}
               <span className="entry-date-monthday">
                 {dateParts.monthDay}
-                {weekday && !(!dateParts.yearFirst && dateParts.year) && <span className="entry-date-weekday">{weekday}</span>}
+                {weekday && !(!dateParts.yearFirst && dateParts.year) && <span className={`entry-date-weekday${isHoliday ? ' holiday' : ''}`}>{weekday}</span>}
               </span>
               {!dateParts.yearFirst && dateParts.year && (
                 <span className="entry-date-year">
                   {dateParts.year}
-                  {weekday && <span className="entry-date-weekday">{weekday}</span>}
+                  {weekday && <span className={`entry-date-weekday${isHoliday ? ' holiday' : ''}`}>{weekday}</span>}
                 </span>
               )}
             </span>
