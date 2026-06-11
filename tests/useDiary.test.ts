@@ -1139,3 +1139,160 @@ test.describe('useDiary offline drafts', () => {
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
   })
 })
+
+test.describe('useDiary offline drafts — multi-draft replay', () => {
+  test('a network failure on one draft does not block others from replaying', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+
+    // Write two drafts while offline
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'draft one', null))
+    await page.evaluate(() => window.diaryHarness.save('2026-05-02', 'draft two', null))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(2)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Come back online: first draft save fails (400 — throws without retrying),
+    // second succeeds
+    await context.setOffline(false)
+    await page.evaluate(({ meta }) => {
+      window.diaryHarness.q(
+        { status: 400, body: { error: 'server error' } },
+        { status: 200, body: meta },
+      )
+      window.dispatchEvent(new Event('online'))
+    }, { meta: datedFileMeta('2026-05-02', '1') })
+
+    // Second draft replayed successfully and removed; first stays (will retry later)
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts()), { timeout: 3000 })
+      .toMatchObject([{ date: '2026-05-01', content: 'draft one' }])
+  })
+
+  test('a TokenExpiredError during replay aborts the loop and preserves remaining drafts', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'draft one', null))
+    await page.evaluate(() => window.diaryHarness.save('2026-05-02', 'draft two', null))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toHaveLength(2)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // 401 on the first draft → replay loop must abort entirely
+    await context.setOffline(false)
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 401, body: {} })
+      window.dispatchEvent(new Event('online'))
+    })
+
+    // Both drafts must still be present (loop aborted after the 401)
+    await expect.poll(async () => {
+      const calls = await page.evaluate(() => window.diaryHarness.calls())
+      return calls.length
+    }, { timeout: 2000 }).toBeGreaterThan(0)
+
+    const drafts = await page.evaluate(() => window.diaryHarness.getDrafts())
+    expect(drafts).toHaveLength(2)
+    const expiredCalls = await page.evaluate(() => window.diaryHarness.expiredCalls())
+    expect(expiredCalls).toBeGreaterThan(0)
+  })
+
+  test('replay deletes a draft without saving when its content already matches the cached entry', async ({ page }) => {
+    await loadHarness(page)
+    // Start with 2026-05-01 listed and content pre-loaded
+    await startHarness(page, { files: [datedFileMeta('2026-05-01', '1')] })
+
+    // Load content so it's in the in-memory cache
+    await page.evaluate(({ entry }) => {
+      window.diaryHarness.q({ status: 200, body: entry })
+      return window.diaryHarness.triggerGetContent('2026-05-01')
+    }, { entry: datedEntryResponse('2026-05-01', 'already synced') })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Seed a draft with the exact same content (stale offline draft, now redundant)
+    await page.evaluate(async () => {
+      await window.diaryHarness.seedDrafts([{
+        date: '2026-05-01',
+        content: 'already synced',
+        baseVersion: '1',
+        baseContent: null,
+        savedAt: Date.now(),
+      }])
+      window.diaryHarness.clearExpiredCalls()
+    })
+
+    // Trigger replay
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+
+    // No save call should have been made
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls).toHaveLength(0)
+  })
+})
+
+test.describe('useDiary retryPendingSave — session expiry flow', () => {
+  test('retryPendingSave replays the pending content after a 401 save failure', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Save hits a 401 → stores the pending save and fires onExpired
+    const failed = await page.evaluate(() => {
+      window.diaryHarness.q({ status: 401, body: {} })
+      return window.diaryHarness.save('2026-05-01', 'my diary text', null)
+    })
+    expect(failed.ok).toBe(false)
+
+    const expiredCount = await page.evaluate(() => window.diaryHarness.expiredCalls())
+    expect(expiredCount).toBeGreaterThan(0)
+
+    // Clear the 401 call record so only the retry appears below
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Re-auth completes → call retryPendingSave with a success response
+    const retry = await page.evaluate(({ meta }) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+      return window.diaryHarness.retryPendingSave()
+    }, { meta: fileMeta('1') })
+
+    expect(retry).toMatchObject({ ok: true })
+
+    // The replayed save must have used the original content, not an empty string
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    const saveCall = calls.find((c: { url: string; method: string; body?: string }) =>
+      c.url.includes('2026-05-01') && c.method === 'POST')
+    expect(saveCall).toBeTruthy()
+    const body = JSON.parse(saveCall.body ?? '{}') as { content?: string }
+    expect(body.content).toBe('my diary text')
+  })
+
+  test('retryPendingSave returns null when there is no pending save', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+
+    const result = await page.evaluate(() => window.diaryHarness.retryPendingSave())
+    expect(result).toMatchObject({ ok: true, result: null })
+  })
+
+  test('retryPendingSave clears the pending save so a second call returns null', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+
+    // First: induce a 401 to store a pending save
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 401, body: {} })
+      return window.diaryHarness.save('2026-05-01', 'once only', null)
+    })
+
+    // First retry succeeds
+    await page.evaluate(({ meta }) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+      return window.diaryHarness.retryPendingSave()
+    }, { meta: fileMeta('1') })
+
+    // Second retry: pending is cleared, should be null
+    const second = await page.evaluate(() => window.diaryHarness.retryPendingSave())
+    expect(second).toMatchObject({ ok: true, result: null })
+  })
+})
