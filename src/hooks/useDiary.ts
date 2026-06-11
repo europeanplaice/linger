@@ -18,7 +18,7 @@ export interface DiaryState {
   error: string | null
   dates: string[]                                      // sorted desc
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
-  getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
+  getContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
   save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
   remove: (date: string) => Promise<void>
   search: (query: string) => Promise<SearchResult>
@@ -48,6 +48,11 @@ type PendingSave = { date: string; content: string; baseVersion: string | null; 
 
 const SEARCH_RESULT_LIMIT = 30
 const SEARCH_REMOTE_FETCH_LIMIT = 30
+
+// All prefetch traffic (month warmup, neighbours, recollection, recent entries)
+// shares this budget so bursts can't pile up and rate-limit Drive while the
+// user is waiting on an entry they actually opened.
+const BG_FETCH_CONCURRENCY = 2
 
 function normalizeForSearch(s: string): string {
   return s.normalize('NFKC').toLowerCase()
@@ -119,6 +124,12 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const cacheRef = useRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
   const inflightRef = useRef<Map<string, Promise<LoadedDiaryEntry | null>>>(new Map())
+  // Low-priority fetch scheduler: queued background tasks, a promote handle per
+  // queued date (so a user navigation jumps the queue), and active counters.
+  const bgQueueRef = useRef<{ date: string; start: () => void; cancel: () => void }[]>([])
+  const bgPromoteRef = useRef<Map<string, () => void>>(new Map())
+  const bgActiveRef = useRef(0)
+  const fgActiveRef = useRef(0)
   const pendingSaveRef = useRef<PendingSave | null>(null)
   const onExpiredRef = useRef(onExpired)
   const onEvictedRef = useRef(onEntriesEvicted)
@@ -185,7 +196,17 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     return next
   }, [updateCache])
 
-  const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
+  // Starts queued background fetches while no user-initiated load is running
+  // and the background budget has room.
+  const pumpBgQueue = useCallback(() => {
+    while (fgActiveRef.current === 0 && bgActiveRef.current < BG_FETCH_CONCURRENCY) {
+      const task = bgQueueRef.current.shift()
+      if (!task) return
+      task.start()
+    }
+  }, [])
+
+  const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean; background?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
     if (!isSignedIn) return null
 
     const cached = cacheRef.current.get(date)
@@ -195,11 +216,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     // Dedupe concurrent fetches of the same entry — hover-intent, adjacent-day,
     // and month prefetch can all race for one date.
     if (!options.forceNetwork) {
+      // A user-initiated load of a date that is still waiting in the background
+      // queue starts it right now instead of behind the rest of the queue.
+      if (!options.background) bgPromoteRef.current.get(date)?.()
       const inflight = inflightRef.current.get(date)
       if (inflight) return inflight
     }
 
-    const fetchPromise = (async (): Promise<LoadedDiaryEntry | null> => {
+    const doFetch = async (): Promise<LoadedDiaryEntry | null> => {
       try {
         const current = cacheRef.current.get(date)
         const loaded = await getEntryByDate(date, undefined, current?.meta.id)
@@ -234,7 +258,33 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
         throw e
       }
-    })()
+    }
+
+    let fetchPromise: Promise<LoadedDiaryEntry | null>
+    if (options.background && !options.forceNetwork) {
+      fetchPromise = new Promise<LoadedDiaryEntry | null>((resolve, reject) => {
+        const start = (foreground: boolean) => {
+          bgPromoteRef.current.delete(date)
+          const queued = bgQueueRef.current.findIndex(t => t.date === date)
+          if (queued !== -1) bgQueueRef.current.splice(queued, 1)
+          if (foreground) fgActiveRef.current++
+          else bgActiveRef.current++
+          doFetch().then(resolve, reject).finally(() => {
+            if (foreground) fgActiveRef.current--
+            else bgActiveRef.current--
+            pumpBgQueue()
+          })
+        }
+        bgQueueRef.current.push({ date, start: () => start(false), cancel: () => { bgPromoteRef.current.delete(date); resolve(null) } })
+        bgPromoteRef.current.set(date, () => start(true))
+      })
+    } else {
+      fgActiveRef.current++
+      fetchPromise = doFetch().finally(() => {
+        fgActiveRef.current--
+        pumpBgQueue()
+      })
+    }
 
     if (!options.forceNetwork) {
       inflightRef.current.set(date, fetchPromise)
@@ -244,8 +294,9 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           if (inflightRef.current.get(date) === fetchPromise) inflightRef.current.delete(date)
         })
     }
+    if (options.background) pumpBgQueue()
     return fetchPromise
-  }, [isSignedIn, email, updateCache])
+  }, [isSignedIn, email, updateCache, pumpBgQueue])
 
   // Load entry list when signed in
   useEffect(() => {
@@ -254,6 +305,9 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       setFreshListLoaded(false)
       cacheRef.current = empty
       setCache(empty)
+      // Drop queued background fetches — a task starting after sign-out would
+      // 401 and wrongly surface the session-expired flow.
+      bgQueueRef.current.splice(0).forEach(t => t.cancel())
       // Only wipe the persistent cache once the session is known to be gone;
       // while auth is still restoring ('initializing') the cache must survive
       // so the IDB preload below has data after a reload.
@@ -298,7 +352,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           .slice(0, 3)
           .filter(d => !freshCache.get(d)?.content)
         for (const d of recentDates) {
-          getContent(d).catch(() => {})
+          getContent(d, { background: true }).catch(() => {})
         }
       } catch (e) {
         if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
@@ -619,7 +673,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const targets = dates.filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
     if (targets.length === 0) return
     await mapWithConcurrency(targets, Math.max(1, concurrency), async (d) => {
-      await getContent(d).catch(() => {})
+      await getContent(d, { background: true }).catch(() => {})
     })
   }, [isSignedIn, getContent])
 
@@ -634,7 +688,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const id = setTimeout(() => {
       ;[shiftDate(selectedDate, -1), shiftDate(selectedDate, 1), shiftDate(selectedDate, -2), shiftDate(selectedDate, 2)]
         .filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
-        .forEach(d => getContentRef.current(d).catch(() => {}))
+        .forEach(d => getContentRef.current(d, { background: true }).catch(() => {}))
     }, 300)
     return () => clearTimeout(id)
   }, [selectedDate])

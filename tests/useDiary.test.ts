@@ -789,6 +789,94 @@ test.describe('useDiary adjacent-day prefetch', () => {
   })
 })
 
+test.describe('useDiary background prefetch scheduling', () => {
+  test('limits background prefetches to two concurrent fetches', async ({ page }) => {
+    const dates = ['2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    // Let the sign-in recent-entry prefetch settle before measuring
+    await page.waitForTimeout(100)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate(({ entries, dates }) => {
+      window.diaryHarness.q(...entries.map((entry, i) => ({ status: 200, body: entry, delayMs: i < 2 ? 300 : 0 })))
+      for (const d of dates) {
+        void window.diaryHarness.triggerGetContent(d, { background: true })
+      }
+    }, { entries: dates.map(d => datedEntryResponse(d, `content ${d}`)), dates })
+
+    // Only the first two start; the rest wait in the queue behind the slow pair
+    await page.waitForTimeout(100)
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(2)
+
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 2000 }).toBe(4)
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    for (const d of dates) {
+      expect(calls.some(c => c.url.includes(d))).toBe(true)
+    }
+  })
+
+  test('a user-initiated load jumps ahead of queued background prefetches', async ({ page }) => {
+    const dates = ['2026-05-01', '2026-05-02', '2026-05-03']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    await page.waitForTimeout(100)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    const result = await page.evaluate(async ({ entries }) => {
+      // Two slow background fetches occupy the whole budget; the third date
+      // sits in the queue until the user opens it.
+      window.diaryHarness.q(
+        { status: 200, body: entries[0], delayMs: 500 },
+        { status: 200, body: entries[1], delayMs: 500 },
+        { status: 200, body: entries[2] },
+      )
+      void window.diaryHarness.triggerGetContent('2026-05-01', { background: true })
+      void window.diaryHarness.triggerGetContent('2026-05-02', { background: true })
+      void window.diaryHarness.triggerGetContent('2026-05-03', { background: true })
+      const started = Date.now()
+      const loaded = await window.diaryHarness.triggerGetContent('2026-05-03')
+      return { elapsed: Date.now() - started, content: loaded?.entry.content ?? null }
+    }, { entries: dates.map(d => datedEntryResponse(d, `content ${d}`)) })
+
+    // Resolved without waiting for the slow background fetches to finish
+    expect(result.content).toBe('content 2026-05-03')
+    expect(result.elapsed).toBeLessThan(400)
+
+    // The promoted fetch reused the queued request — no duplicate call for 05-03
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 2000 }).toBe(3)
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls.filter(c => c.url.includes('2026-05-03'))).toHaveLength(1)
+  })
+
+  test('background prefetches wait while a user-initiated load is in flight', async ({ page }) => {
+    const dates = ['2026-05-01', '2026-05-02']
+    await loadHarness(page)
+    await startHarness(page, { files: dates.map(d => datedFileMeta(d)) })
+    await page.waitForTimeout(100)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate(({ entries }) => {
+      window.diaryHarness.q(
+        { status: 200, body: entries[0], delayMs: 300 },
+        { status: 200, body: entries[1] },
+      )
+      void window.diaryHarness.triggerGetContent('2026-05-01')
+      void window.diaryHarness.triggerGetContent('2026-05-02', { background: true })
+    }, { entries: dates.map(d => datedEntryResponse(d, `content ${d}`)) })
+
+    await page.waitForTimeout(100)
+    const early = await page.evaluate(() => window.diaryHarness.calls())
+    expect(early).toHaveLength(1)
+    expect(early[0].url).toContain('2026-05-01')
+
+    // Once the foreground load resolves, the queued prefetch runs
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length, { timeout: 2000 }).toBe(2)
+    const calls = await page.evaluate(() => window.diaryHarness.calls())
+    expect(calls[1].url).toContain('2026-05-02')
+  })
+})
+
 test.describe('useDiary save — entry not found at save time', () => {
   test('save with no cache creates entry via POST with no fileId', async ({ page }) => {
     await loadHarness(page)

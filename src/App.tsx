@@ -255,7 +255,7 @@ export default function App() {
     if (allToFetch.length === 0) return
     let cancelled = false
     const run = () => {
-      if (!cancelled) allToFetch.forEach(d => diaryGetContentRef.current(d).catch(() => {}))
+      if (!cancelled) allToFetch.forEach(d => diaryGetContentRef.current(d, { background: true }).catch(() => {}))
     }
     if (typeof requestIdleCallback !== 'undefined') {
       const id = requestIdleCallback(run, { timeout: 10_000 })
@@ -351,7 +351,7 @@ export default function App() {
   useEffect(() => { diaryPrefetchRef.current = diary.prefetch }, [diary.prefetch])
 
   const prefetchEntry = useCallback((d: string) => {
-    diaryGetContentRef.current(d).catch(() => {})
+    diaryGetContentRef.current(d, { background: true }).catch(() => {})
   }, [])
 
   // Warm every entry in the month the calendar is showing. Debounced so paging
