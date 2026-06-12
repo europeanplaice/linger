@@ -23,6 +23,14 @@ export function useAuth(): AuthState {
   )
 
   useEffect(() => {
+    // Dev-only: ?preview-auth bypasses the session check for local UI work.
+    // import.meta.env.DEV is replaced with `false` in production builds so
+    // this block is dead code outside the dev server.
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview-auth')) {
+      setStatus('signedIn')
+      setEmail('preview@example.com')
+      return
+    }
     let cancelled = false
     checkSession().then(info => {
       if (cancelled) return

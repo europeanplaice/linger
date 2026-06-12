@@ -1716,7 +1716,7 @@ dialog.signout-confirm-dialog::backdrop {
   top: 0;
   left: 0;
   right: 0;
-  height: 5px;
+  height: 3px;
   pointer-events: none;
   z-index: 10;
 }
@@ -1828,7 +1828,7 @@ dialog.signout-confirm-dialog::backdrop {
   white-space: nowrap;
 }
 .editor-meta-unsaved {
-  color: var(--text-muted);
+  color: var(--unsaved-status);
   margin-left: 0.5em;
 }
 .editor-meta-offline {
@@ -1910,10 +1910,13 @@ dialog.signout-confirm-dialog::backdrop {
   justify-content: center;
   gap: 0.45rem;
   min-width: 5.7rem;
+  /* max-width drives the collapse animation for auto-save idle state. */
+  max-width: 12rem;
   /* Transparent border keeps width identical to the ghost (idle) state below,
      so the button doesn't shift when changes appear. */
   border: 1px solid transparent;
-  transition: opacity 0.4s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  transition: opacity 0.35s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease,
+              max-width 0.3s ease, padding-left 0.3s ease, padding-right 0.3s ease;
 }
 /* Idle state (nothing to save): quiet ghost button instead of a loud solid
    accent, so the resting editor stays calm. Saving/saved keep the solid look. */
@@ -1922,6 +1925,26 @@ dialog.signout-confirm-dialog::backdrop {
   border-color: var(--border);
   color: var(--text-muted);
   opacity: 1;
+}
+/* Auto-save mode idle (desktop only): collapse the button away so it doesn't
+   clutter the header with a permanently-disabled label. Expands smoothly when a
+   background save fires or the saved confirmation appears. Mobile has its own
+   FAB treatment and doesn't need this rule. */
+@media (min-width: 641px) {
+  .editor-actions .btn-save[data-autosave]:disabled:not(.btn-saving):not(.btn-saved) {
+    max-width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    border-color: transparent;
+  }
+}
+/* Active save button: hover feedback */
+.editor-actions .btn-save:not(:disabled):hover {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 8px var(--save-glow);
 }
 .editor-actions .btn-refresh-entry {
   background: transparent;
@@ -1983,23 +2006,25 @@ dialog.signout-confirm-dialog::backdrop {
   from { transform: translateX(0); }
   to { transform: translateX(10px); }
 }
+@keyframes saved-check-pop {
+  0%   { transform: scale(0.6); }
+  60%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
 .editor-actions .btn-save.btn-saved {
   background: transparent;
   border-color: var(--border);
-  color: var(--text-muted);
-  opacity: 0.55;
+  color: var(--accent);
+  opacity: 0.8;
   cursor: default;
+}
+.editor-actions .btn-save.btn-saved .btn-icon {
+  animation: saved-check-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .btn-delete { background: var(--danger) !important; color: var(--on-danger) !important; }
 .btn-delete:not(:disabled):hover { background: var(--danger-hover) !important; }
 .editor-actions .btn-discard {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.75rem;
+  display: none;
 }
 .editor-actions .btn-discard:hover { background: var(--border); color: var(--text); }
 .more-menu-container { position: relative; }
@@ -2091,7 +2116,10 @@ dialog.signout-confirm-dialog::backdrop {
   cursor: default;
 }
 .more-menu-item-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
-.more-menu-discard { display: none; }
+/* Discard lives in the ⋯ menu on all screen sizes.
+   On mobile it was already in the menu; on desktop we mirror that to keep the
+   destructive action behind one extra click and away from the Save button. */
+.more-menu-discard { display: flex; }
 .editor-actions .more-menu .more-menu-delete {
   color: var(--danger);
 }

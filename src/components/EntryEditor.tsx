@@ -872,6 +872,7 @@ useEffect(() => {
             aria-busy={saving}
             aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}
             title={autoSave ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
+            data-autosave={autoSave || undefined}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           >
