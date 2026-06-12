@@ -179,6 +179,7 @@ Some UI states are hard to trigger naturally during development. Append `?previe
 | Param | Effect |
 |---|---|
 | `?preview=empty-state` | Forces the "No entries yet" hint in the sidebar |
+| `?preview-auth` | Skips the `/auth/session` check and mounts the app as signed in — useful for iterating on editor UI without a backend running |
 
 > Note: Google OAuth requires the redirect URI to be registered. For local dev, add
 > `http://localhost:8788/auth/callback` to your OAuth client's Authorized redirect URIs.
