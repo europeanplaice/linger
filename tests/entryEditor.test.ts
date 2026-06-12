@@ -1641,7 +1641,8 @@ test.describe('EntryEditor — offline drafts', () => {
     await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('draft to discard')
 
-    await page.locator('button.btn-discard').click()
+    await page.locator('button.btn-more').click()
+    await page.locator('.more-menu-discard').click()
 
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved text')
     await expect.poll(() => getDrafts(page)).toEqual([])
