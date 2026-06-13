@@ -1740,12 +1740,14 @@ dialog.settings-dialog::backdrop {
   border-color: var(--accent);
 }
 .settings-anniversary-date-input {
+  align-self: flex-end;
   align-items: center;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
-  min-width: 10rem;
+  min-width: 7rem;
   text-align: start;
+  width: fit-content;
 }
 .settings-anniversary-date-input:hover {
   border-color: var(--text-muted);
@@ -1758,7 +1760,9 @@ dialog.settings-dialog::backdrop {
   color: var(--text-muted);
 }
 .settings-anniversary-date-picker {
+  align-self: flex-end;
   position: relative;
+  width: fit-content;
 }
 .settings-anniversary-date-popover {
   inset: unset;

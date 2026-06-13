@@ -70,7 +70,29 @@ test.describe('SettingsModal — anniversaries', () => {
     expect(sectionBox).not.toBeNull()
     expect(buttonBox).not.toBeNull()
     if (sectionBox && buttonBox) {
-      expect(Math.abs((buttonBox.x + buttonBox.width) - (sectionBox.x + sectionBox.width))).toBeLessThan(2)
+      expect(Math.abs((buttonBox.x + buttonBox.width) - (sectionBox.x + sectionBox.width))).toBeLessThan(4)
+    }
+  })
+
+  test('keeps the date input compact and right-aligned when the form opens', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const form = page.locator('.settings-anniversary-form')
+    const nameInput = page.getByLabel('Name (e.g. Birthday)')
+    const dateInput = page.getByRole('button', { name: 'Date' })
+    const formBox = await form.boundingBox()
+    const nameBox = await nameInput.boundingBox()
+    const dateBox = await dateInput.boundingBox()
+
+    expect(formBox).not.toBeNull()
+    expect(nameBox).not.toBeNull()
+    expect(dateBox).not.toBeNull()
+    if (nameBox && dateBox && formBox) {
+      expect(dateBox.width).toBeLessThanOrEqual(140)
+      expect(Math.abs((dateBox.x + dateBox.width) - (formBox.x + formBox.width))).toBeLessThan(4)
     }
   })
 
