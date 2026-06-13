@@ -3,6 +3,8 @@ import { jsonResponse } from '../../_shared/session'
 import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile } from '../../_shared/drive'
 
 const FILE_NAME = 'anniversaries.json'
+const MAX_ANNIVERSARIES = 10
+const MAX_ANNIVERSARY_BADGES = 3
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
@@ -34,11 +36,19 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   if (!Array.isArray(body)) {
     return jsonResponse({ error: 'Expected an array' }, 400)
   }
+  if (body.length > MAX_ANNIVERSARIES) {
+    return jsonResponse({ error: `At most ${MAX_ANNIVERSARIES} anniversaries are allowed` }, 400)
+  }
 
+  let enabledBadges = 0
   for (const item of body) {
     if (!item || typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.date !== 'string') {
       return jsonResponse({ error: 'Invalid anniversary entry' }, 400)
     }
+    if (item.showBadge !== undefined && typeof item.showBadge !== 'boolean') {
+      return jsonResponse({ error: 'Invalid showBadge value' }, 400)
+    }
+    if (item.showBadge !== false) enabledBadges += 1
     if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
       return jsonResponse({ error: 'Invalid date format (expected YYYY-MM-DD)' }, 400)
     }
@@ -47,6 +57,9 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) {
       return jsonResponse({ error: 'Invalid date' }, 400)
     }
+  }
+  if (enabledBadges > MAX_ANNIVERSARY_BADGES) {
+    return jsonResponse({ error: `At most ${MAX_ANNIVERSARY_BADGES} anniversary badges can be enabled` }, 400)
   }
 
   try {

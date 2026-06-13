@@ -38,6 +38,46 @@ test.describe('SettingsModal — anniversaries', () => {
     await row.getByRole('button', { name: 'Delete' }).click()
     await expect(row).toHaveCount(0)
   })
+
+  test('allows at most ten anniversaries', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      anniversaries: Array.from({ length: 10 }, (_, i) => ({
+        id: `anniversary-${i + 1}`,
+        label: `Anniversary ${i + 1}`,
+        date: `2020-${String(i + 1).padStart(2, '0')}-01`,
+        showBadge: i < 3 ? undefined : false,
+      })),
+    })
+
+    await expect(page.getByText('10 / 10 registered')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add' })).toBeDisabled()
+  })
+
+  test('allows at most three enabled anniversary badges', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      anniversaries: [
+        { id: 'one', label: 'One', date: '2020-01-01' },
+        { id: 'two', label: 'Two', date: '2020-02-01' },
+        { id: 'three', label: 'Three', date: '2020-03-01' },
+        { id: 'four', label: 'Four', date: '2020-04-01', showBadge: false },
+      ],
+    })
+
+    const firstSwitch = page.locator('.settings-anniversary-row', { hasText: 'One' })
+      .getByRole('switch', { name: 'Show badge' })
+    const fourthSwitch = page.locator('.settings-anniversary-row', { hasText: 'Four' })
+      .getByRole('switch', { name: 'Show badge' })
+
+    await expect(fourthSwitch).toHaveAttribute('aria-disabled', 'true')
+    await expect(fourthSwitch).toHaveAttribute('aria-checked', 'false')
+
+    await firstSwitch.click()
+    await expect(fourthSwitch).not.toHaveAttribute('aria-disabled', 'true')
+    await fourthSwitch.click()
+    await expect(fourthSwitch).toHaveAttribute('aria-checked', 'true')
+  })
 })
 
 test.describe('SettingsModal — auto-save toggle', () => {

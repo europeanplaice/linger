@@ -19,6 +19,7 @@ async function renderEditor(
     autoSave?: boolean
     knownDates?: string[]
     diaryListLoaded?: boolean
+    anniversaries?: import('../src/types').Anniversary[]
   } = {},
 ) {
   const date = opts.date ?? '2026-05-01'
@@ -27,10 +28,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, anniversaries }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, anniversaries })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, anniversaries: opts.anniversaries },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -1262,6 +1263,37 @@ test.describe('EntryEditor — date switch cancellation', () => {
 })
 
 test.describe('EntryEditor — editor meta info', () => {
+  test('shows enabled anniversaries regardless of distance from the selected date', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-01-01',
+      anniversaries: [
+        { id: 'birthday', label: 'Birthday', date: '2000-05-10' },
+        { id: 'hidden', label: 'Hidden', date: '2000-05-11', showBadge: false },
+      ],
+    })
+
+    const anniversary = page.locator('.editor-meta-anniversary')
+    await expect(anniversary).toHaveCount(1)
+    await expect(anniversary).toHaveText('Birthday in 129d')
+  })
+
+  test('shows at most three anniversary badges at once', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-01-01',
+      anniversaries: [
+        { id: 'one', label: 'One', date: '2000-01-02' },
+        { id: 'two', label: 'Two', date: '2000-01-03' },
+        { id: 'three', label: 'Three', date: '2000-01-04' },
+        { id: 'four', label: 'Four', date: '2000-01-05' },
+      ],
+    })
+
+    await expect(page.locator('.editor-meta-anniversary')).toHaveCount(3)
+    await expect(page.locator('.editor-meta')).not.toContainText('Four')
+  })
+
   test('shows days ago for saved past entries', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })

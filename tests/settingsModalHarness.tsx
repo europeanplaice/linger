@@ -3,7 +3,11 @@ import { createRoot } from 'react-dom/client'
 import { SettingsModal } from '../src/components/SettingsModal'
 import type { FontSize } from '../src/hooks/useFontSize'
 import type { HolidayCountry } from '../src/utils/holidays'
-import type { Anniversary } from '../src/types'
+import {
+  MAX_ANNIVERSARIES,
+  MAX_ANNIVERSARY_BADGES,
+  type Anniversary,
+} from '../src/types'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
@@ -70,12 +74,33 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           email={email}
           anniversaries={anniversaries}
           onAnniversaryAdd={(label, date) => {
-            setAnniversaries(prev => [...prev, { id: `anniversary-${prev.length + 1}`, label, date }])
+            setAnniversaries(prev => {
+              if (prev.length >= MAX_ANNIVERSARIES) return prev
+              const enabledBadges = prev.filter(a => a.showBadge !== false).length
+              return [
+                ...prev,
+                {
+                  id: `anniversary-${prev.length + 1}`,
+                  label,
+                  date,
+                  ...(enabledBadges >= MAX_ANNIVERSARY_BADGES ? { showBadge: false } : {}),
+                },
+              ]
+            })
           }}
           onAnniversaryRemove={id => setAnniversaries(prev => prev.filter(a => a.id !== id))}
-          onAnniversaryToggleBadge={id => setAnniversaries(prev => prev.map(a => (
-            a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a
-          )))}
+          onAnniversaryToggleBadge={id => setAnniversaries(prev => {
+            const target = prev.find(a => a.id === id)
+            if (
+              target?.showBadge === false
+              && prev.filter(a => a.showBadge !== false).length >= MAX_ANNIVERSARY_BADGES
+            ) {
+              return prev
+            }
+            return prev.map(a => (
+              a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a
+            ))
+          })}
         />
       )}
     </>

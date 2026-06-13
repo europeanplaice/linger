@@ -1522,6 +1522,11 @@ dialog.settings-dialog::backdrop {
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+.settings-anniversary-usage,
+.settings-anniversary-limit {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
 .settings-anniversary-list {
   display: flex;
   flex-direction: column;
@@ -1556,6 +1561,10 @@ dialog.settings-dialog::backdrop {
 }
 .settings-anniversary-badge-toggle.active {
   background: var(--accent);
+}
+.settings-anniversary-badge-toggle[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .settings-anniversary-badge-toggle-thumb {
   background: #fff;
@@ -1641,6 +1650,12 @@ dialog.settings-dialog::backdrop {
 .settings-anniversary-add-btn:hover {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
+}
+.settings-anniversary-add-btn:disabled {
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.45;
 }
 .settings-anniversary-form {
   display: flex;

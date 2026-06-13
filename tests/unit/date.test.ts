@@ -410,6 +410,17 @@ describe('date utils', () => {
         { id: 'b', label: 'Second', monthDay: '05-10', distance: 0 },
       ])
     })
+
+    it('includes distant anniversaries unless a maximum distance is provided', () => {
+      const anniversaries = [
+        { id: 'birthday', label: 'Birthday', date: '2000-05-10' },
+      ]
+
+      expect(anniversariesNearEntry('2026-01-01', anniversaries)).toEqual([
+        { id: 'birthday', label: 'Birthday', monthDay: '05-10', distance: 129 },
+      ])
+      expect(anniversariesNearEntry('2026-01-01', anniversaries, 7)).toEqual([])
+    })
   })
 
   describe('consecutiveMonthStreak', () => {

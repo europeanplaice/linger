@@ -9,7 +9,11 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 
-import type { Anniversary } from '../types'
+import {
+  MAX_ANNIVERSARIES,
+  MAX_ANNIVERSARY_BADGES,
+  type Anniversary,
+} from '../types'
 
 interface SettingsModalProps {
   autoSave: boolean
@@ -36,6 +40,10 @@ interface SettingsModalProps {
 export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Anniversary | null>(null)
+  const anniversaryLimitId = useId()
+  const badgeLimitId = useId()
+  const enabledBadgeCount = anniversaries.filter(a => a.showBadge !== false).length
+  const anniversaryLimitReached = anniversaries.length >= MAX_ANNIVERSARIES
 
   // Localized country names come from Intl, so no hardcoded country dictionary.
   const holidayOptions = useMemo(() => {
@@ -146,48 +154,73 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <div className="settings-item settings-item-anniversaries">
           <span className="settings-item-label">{t.settings.anniversaries}</span>
           <div className="settings-anniversary-section">
+            <span className="settings-anniversary-usage">
+              {t.settings.anniversaryUsage(anniversaries.length, MAX_ANNIVERSARIES)}
+            </span>
+            <span id={anniversaryLimitId} className="settings-anniversary-limit">
+              {t.settings.anniversaryRegistrationLimit(MAX_ANNIVERSARIES)}
+            </span>
+            <span id={badgeLimitId} className="settings-anniversary-limit">
+              {t.settings.anniversaryBadgeLimit(MAX_ANNIVERSARY_BADGES)}
+            </span>
             {anniversaries.length === 0 ? (
               <span className="settings-anniversary-none">{t.settings.anniversaryNone}</span>
             ) : (
               <div className="settings-anniversary-list">
-                {anniversaries.map(a => (
-                  <div key={a.id} className="settings-anniversary-row">
-                    <span className="settings-anniversary-label">{a.label}</span>
-                    <span className="settings-anniversary-date">{a.date}</span>
-                    {onAnniversaryToggleBadge && (
-                      <span className="settings-anniversary-badge-toggle-wrap">
-                        <button
-                          className={`settings-anniversary-badge-toggle ${a.showBadge !== false ? 'active' : ''}`}
-                          onClick={() => onAnniversaryToggleBadge(a.id)}
-                          role="switch"
-                          aria-checked={a.showBadge !== false}
-                          aria-label={t.settings.anniversaryBadgeLabel}
-                        >
-                          <span className="settings-anniversary-badge-toggle-thumb" />
-                        </button>
-                        <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
-                      </span>
-                    )}
-                    {onAnniversaryRemove && (
-                      pendingDelete?.id === a.id ? (
-                        <span className="settings-anniversary-confirm">
-                          <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
-                          <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
-                          <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                {anniversaries.map(a => {
+                  const badgeEnabled = a.showBadge !== false
+                  const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
+                  return (
+                    <div key={a.id} className="settings-anniversary-row">
+                      <span className="settings-anniversary-label">{a.label}</span>
+                      <span className="settings-anniversary-date">{a.date}</span>
+                      {onAnniversaryToggleBadge && (
+                        <span className="settings-anniversary-badge-toggle-wrap">
+                          <button
+                            type="button"
+                            className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
+                            onClick={() => {
+                              if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
+                            }}
+                            role="switch"
+                            aria-checked={badgeEnabled}
+                            aria-disabled={badgeLimitReached || undefined}
+                            aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
+                            aria-label={t.settings.anniversaryBadgeLabel}
+                          >
+                            <span className="settings-anniversary-badge-toggle-thumb" />
+                          </button>
+                          <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
                         </span>
-                      ) : (
-                        <button
-                          className="settings-anniversary-remove"
-                          onClick={() => setPendingDelete(a)}
-                          aria-label={t.settings.anniversaryRemove(a.label)}
-                        >×</button>
-                      )
-                    )}
-                  </div>
-                ))}
+                      )}
+                      {onAnniversaryRemove && (
+                        pendingDelete?.id === a.id ? (
+                          <span className="settings-anniversary-confirm">
+                            <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
+                            <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
+                            <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                          </span>
+                        ) : (
+                          <button
+                            className="settings-anniversary-remove"
+                            onClick={() => setPendingDelete(a)}
+                            aria-label={t.settings.anniversaryRemove(a.label)}
+                          >×</button>
+                        )
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
-            {onAnniversaryAdd && <AnniversaryAddForm onAdd={onAnniversaryAdd} t={t} />}
+            {onAnniversaryAdd && (
+              <AnniversaryAddForm
+                onAdd={onAnniversaryAdd}
+                t={t}
+                limitReached={anniversaryLimitReached}
+                limitDescriptionId={anniversaryLimitId}
+              />
+            )}
           </div>
         </div>
         <div className="settings-divider" />
@@ -378,7 +411,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   )
 }
 
-function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
+function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
+  onAdd: (label: string, date: string) => void
+  t: ReturnType<typeof useI18n>['t']
+  limitReached: boolean
+  limitDescriptionId: string
+}) {
   const labelId = useId()
   const dateId = useId()
   const [showForm, setShowForm] = useState(false)
@@ -425,7 +463,13 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string)
 
   if (!showForm) {
     return (
-      <button className="settings-anniversary-add-btn" onClick={openForm}>
+      <button
+        type="button"
+        className="settings-anniversary-add-btn"
+        onClick={openForm}
+        disabled={limitReached}
+        aria-describedby={limitReached ? limitDescriptionId : undefined}
+      >
         {t.settings.anniversaryAdd}
       </button>
     )

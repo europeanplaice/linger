@@ -40,20 +40,86 @@ export interface Anniversary {
   showBadge?: boolean
 }
 
-export function isAnniversary(v: unknown): v is Anniversary {
+export const MAX_ANNIVERSARIES = 10
+export const MAX_ANNIVERSARY_BADGES = 3
+
+function hasValidAnniversaryFields(v: unknown): v is {
+  id: string
+  label: string
+  showBadge?: boolean
+} {
   const a = v as Anniversary
-  if (!(typeof v === 'object' && v !== null
+  return typeof v === 'object' && v !== null
     && typeof a.id === 'string'
     && typeof a.label === 'string'
-    && /^\d{4}-\d{2}-\d{2}$/.test(a.date)
-    && (a.showBadge === undefined || typeof a.showBadge === 'boolean'))) {
-    return false
-  }
-  const [year, month, day] = a.date.split('-').map(Number)
+    && (a.showBadge === undefined || typeof a.showBadge === 'boolean')
+}
+
+function isValidAnniversaryDate(date: unknown): date is string {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+  const [year, month, day] = date.split('-').map(Number)
   const parsed = new Date(year, month - 1, day)
   return parsed.getFullYear() === year
     && parsed.getMonth() === month - 1
     && parsed.getDate() === day
+}
+
+export function isAnniversary(v: unknown): v is Anniversary {
+  return hasValidAnniversaryFields(v)
+    && isValidAnniversaryDate((v as { date?: unknown }).date)
+}
+
+export function normalizeAnniversary(v: unknown): Anniversary | null {
+  if (!hasValidAnniversaryFields(v)) return null
+  const candidate = v as {
+    id: string
+    label: string
+    date?: unknown
+    monthDay?: unknown
+    showBadge?: boolean
+  }
+  if (isValidAnniversaryDate(candidate.date)) {
+    return {
+      id: candidate.id,
+      label: candidate.label,
+      date: candidate.date,
+      ...(candidate.showBadge === undefined ? {} : { showBadge: candidate.showBadge }),
+    }
+  }
+  if (typeof candidate.monthDay !== 'string' || !/^\d{2}-\d{2}$/.test(candidate.monthDay)) {
+    return null
+  }
+  // Legacy records did not retain a year. Use a leap year so 02-29 remains valid.
+  const legacyDate = `2000-${candidate.monthDay}`
+  if (!isValidAnniversaryDate(legacyDate)) return null
+  return {
+    id: candidate.id,
+    label: candidate.label,
+    date: legacyDate,
+    ...(candidate.showBadge === undefined ? {} : { showBadge: candidate.showBadge }),
+  }
+}
+
+export function normalizeAnniversaries(v: unknown): Anniversary[] {
+  if (!Array.isArray(v)) return []
+  const result: Anniversary[] = []
+  let enabledBadges = 0
+
+  for (const value of v) {
+    if (result.length >= MAX_ANNIVERSARIES) break
+    const anniversary = normalizeAnniversary(value)
+    if (!anniversary) continue
+    if (anniversary.showBadge !== false) {
+      if (enabledBadges >= MAX_ANNIVERSARY_BADGES) {
+        result.push({ ...anniversary, showBadge: false })
+        continue
+      }
+      enabledBadges += 1
+    }
+    result.push(anniversary)
+  }
+
+  return result
 }
 
 export function isAnniversaryArray(v: unknown): v is Anniversary[] {

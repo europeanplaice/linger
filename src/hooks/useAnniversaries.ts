@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { isAnniversary, type Anniversary } from '../types'
+import {
+  MAX_ANNIVERSARIES,
+  MAX_ANNIVERSARY_BADGES,
+  normalizeAnniversaries,
+  type Anniversary,
+} from '../types'
 import { loadAnniversaries, saveAnniversaries, TokenExpiredError } from '../api/driveAnniversaries'
 import { useLatestRef } from './useEvent'
 
@@ -10,9 +15,7 @@ function loadLocal(): Anniversary[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter(isAnniversary)
-    return []
+    return normalizeAnniversaries(JSON.parse(raw))
   } catch {
     return []
   }
@@ -105,7 +108,17 @@ export function useAnniversaries(
   }, [authStatus, onTokenExpiredRef, persist])
 
   const add = useCallback((label: string, date: string) => {
-    const next = [...anniversariesRef.current, { id: generateId(), label, date }]
+    if (anniversariesRef.current.length >= MAX_ANNIVERSARIES) return
+    const enabledBadges = anniversariesRef.current.filter(a => a.showBadge !== false).length
+    const next = [
+      ...anniversariesRef.current,
+      {
+        id: generateId(),
+        label,
+        date,
+        ...(enabledBadges >= MAX_ANNIVERSARY_BADGES ? { showBadge: false } : {}),
+      },
+    ]
     mutationVersionRef.current += 1
     anniversariesRef.current = next
     setAnniversaries(next)
@@ -121,6 +134,14 @@ export function useAnniversaries(
   }, [persist])
 
   const toggleBadge = useCallback((id: string) => {
+    const target = anniversariesRef.current.find(a => a.id === id)
+    if (!target) return
+    if (
+      target.showBadge === false
+      && anniversariesRef.current.filter(a => a.showBadge !== false).length >= MAX_ANNIVERSARY_BADGES
+    ) {
+      return
+    }
     const next = anniversariesRef.current.map(a => a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a)
     mutationVersionRef.current += 1
     anniversariesRef.current = next

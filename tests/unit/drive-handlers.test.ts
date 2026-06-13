@@ -94,6 +94,45 @@ describe('anniversaries handler', () => {
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
 
+  it('rejects more than ten anniversaries', async () => {
+    const body = Array.from({ length: 11 }, (_, i) => ({
+      id: `anniversary-${i}`,
+      label: `Anniversary ${i}`,
+      date: '2020-05-10',
+      showBadge: false,
+    }))
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    })
+
+    const res = await onPutAnniversaries(ctx as any)
+
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects more than three enabled badges', async () => {
+    const body = Array.from({ length: 4 }, (_, i) => ({
+      id: `anniversary-${i}`,
+      label: `Anniversary ${i}`,
+      date: '2020-05-10',
+    }))
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    })
+
+    const res = await onPutAnniversaries(ctx as any)
+
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
   it('updates the existing Drive file', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
     const body = [{ id: 'birthday', label: 'Birthday', date: '2020-05-10' }]

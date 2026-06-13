@@ -86,6 +86,7 @@ interface Window {
       saveDelayMs?: number
       knownDates?: string[]
       diaryListLoaded?: boolean
+      anniversaries?: import('../src/types').Anniversary[]
     }) => void
     saveCalls: () => { date: string; content: string; baseVersion: string | null; force?: boolean }[]
     saveCallsWithBaseContent: () => {
