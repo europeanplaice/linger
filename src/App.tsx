@@ -22,6 +22,7 @@ import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './uti
 import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
+import { useAnniversaries } from './hooks/useAnniversaries'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
 
@@ -144,6 +145,7 @@ export default function App() {
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
+  const { anniversaries, add: addAnniversary, remove: removeAnniversary } = useAnniversaries(status, handleExpired)
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -554,7 +556,7 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} />
+        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} anniversaries={anniversaries} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
@@ -599,6 +601,9 @@ export default function App() {
             onClose={() => setSettingsOpen(false)}
             onSignOut={handleSignOut}
             email={email ?? undefined}
+            anniversaries={anniversaries}
+            onAnniversaryAdd={addAnniversary}
+            onAnniversaryRemove={removeAnniversary}
           />
         )}
       </AnimatePresence>
@@ -644,6 +649,7 @@ export default function App() {
           knownDates={datesSet}
           diaryListLoaded={diary.freshListLoaded}
           holidayCountry={holidayCountry}
+          anniversaries={anniversaries}
         />
       </main>
     </div>

@@ -130,6 +130,53 @@ export function nearestEntryWithin(dates: string[], target: string, maxDistanceD
   return nearestWithDistance(dates, target, maxDistanceDays)?.date ?? null
 }
 
+export interface AnniversaryProximity {
+  label: string
+  monthDay: string
+  distance: number
+}
+
+export function nearestAnniversaryOccurrence(
+  entryDate: string,
+  monthDay: string,
+  label: string,
+): AnniversaryProximity | null {
+  const parsed = parseYmd(entryDate)
+  if (!parsed) return null
+  const [mm, dd] = monthDay.split('-').map(Number)
+  if (!mm || !dd) return null
+
+  let best: { distance: number } | null = null
+
+  for (const yearOffset of [-1, 0, 1]) {
+    const y = parsed.y + yearOffset
+    const anniv = new Date(y, mm - 1, dd)
+    if (anniv.getMonth() !== mm - 1) continue
+    const dist = Math.round((anniv.getTime() - new Date(parsed.y, parsed.m - 1, parsed.d).getTime()) / 86_400_000)
+    if (best === null || Math.abs(dist) < Math.abs(best.distance)) {
+      best = { distance: dist }
+    }
+  }
+
+  return best ? { label, monthDay, distance: best.distance } : null
+}
+
+export function anniversariesNearEntry(
+  entryDate: string,
+  anniversaries: ReadonlyArray<{ label: string; monthDay: string }>,
+  maxDistanceDays = 7,
+): AnniversaryProximity[] {
+  const results: AnniversaryProximity[] = []
+  for (const a of anniversaries) {
+    const prox = nearestAnniversaryOccurrence(entryDate, a.monthDay, a.label)
+    if (prox && Math.abs(prox.distance) <= maxDistanceDays) {
+      results.push(prox)
+    }
+  }
+  results.sort((a, b) => Math.abs(a.distance) - Math.abs(b.distance))
+  return results
+}
+
 function mondayStart(date: Date): Date {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const offset = (d.getDay() + 6) % 7 // Monday = 0

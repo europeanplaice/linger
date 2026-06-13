@@ -9,6 +9,8 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 
+import type { Anniversary } from '../types'
+
 interface SettingsModalProps {
   autoSave: boolean
   onAutoSaveToggle: () => void
@@ -25,9 +27,12 @@ interface SettingsModalProps {
   onClose: () => void
   onSignOut: () => void
   email?: string
+  anniversaries?: Anniversary[]
+  onAnniversaryAdd?: (label: string, monthDay: string) => void
+  onAnniversaryRemove?: (id: string) => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
 
   // Localized country names come from Intl, so no hardcoded country dictionary.
@@ -134,6 +139,32 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             onChange={val => onHolidayCountryChange(isHolidayCountry(val) ? val : 'off')}
             options={holidayOptions}
           />
+        </div>
+        <div className="settings-divider" />
+        <div className="settings-item">
+          <span className="settings-item-label">{t.settings.anniversaries}</span>
+          <div className="settings-anniversary-section">
+            {anniversaries.length === 0 ? (
+              <span className="settings-anniversary-none">{t.settings.anniversaryNone}</span>
+            ) : (
+              <div className="settings-anniversary-list">
+                {anniversaries.map(a => (
+                  <div key={a.id} className="settings-anniversary-row">
+                    <span className="settings-anniversary-label">{a.label}</span>
+                    <span className="settings-anniversary-date">{a.monthDay}</span>
+                    {onAnniversaryRemove && (
+                      <button
+                        className="settings-anniversary-remove"
+                        onClick={() => onAnniversaryRemove(a.id)}
+                        aria-label={t.settings.anniversaryRemove(a.label)}
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {onAnniversaryAdd && <AnniversaryAddForm onAdd={onAnniversaryAdd} t={t} />}
+          </div>
         </div>
         <div className="settings-divider" />
         <div className="settings-item">
@@ -320,5 +351,71 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
       </dialog>
     </motion.dialog>
+  )
+}
+
+function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
+  const [showForm, setShowForm] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [newMonthDay, setNewMonthDay] = useState('')
+  const [errors, setErrors] = useState<string[]>([])
+
+  const validate = (): boolean => {
+    const errs: string[] = []
+    if (!newLabel.trim()) errs.push(t.settings.anniversaryEmptyLabel)
+    if (!/^\d{2}-\d{2}$/.test(newMonthDay)) {
+      errs.push(t.settings.anniversaryInvalidDate)
+    } else {
+      const [mm, dd] = newMonthDay.split('-').map(Number)
+      const d = new Date(2000, mm - 1, dd)
+      if (d.getMonth() !== mm - 1 || d.getDate() !== dd) errs.push(t.settings.anniversaryInvalidDate)
+    }
+    setErrors(errs)
+    return errs.length === 0
+  }
+
+  const handleAdd = () => {
+    if (!validate()) return
+    onAdd(newLabel.trim(), newMonthDay)
+    setNewLabel('')
+    setNewMonthDay('')
+    setErrors([])
+    setShowForm(false)
+  }
+
+  if (!showForm) {
+    return (
+      <button className="settings-anniversary-add-btn" onClick={() => setShowForm(true)}>
+        {t.settings.anniversaryAdd}
+      </button>
+    )
+  }
+
+  return (
+    <div className="settings-anniversary-form">
+      <input
+        className="settings-anniversary-input"
+        value={newLabel}
+        onChange={e => setNewLabel(e.target.value)}
+        placeholder={t.settings.anniversaryLabelPlaceholder}
+        aria-label={t.settings.anniversaryLabelPlaceholder}
+      />
+      <input
+        className="settings-anniversary-input settings-anniversary-date-input"
+        value={newMonthDay}
+        onChange={e => setNewMonthDay(e.target.value)}
+        placeholder={t.settings.anniversaryDatePlaceholder}
+        aria-label={t.settings.anniversaryDatePlaceholder}
+      />
+      {errors.length > 0 && (
+        <div className="settings-anniversary-errors">
+          {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
+        </div>
+      )}
+      <div className="settings-anniversary-form-actions">
+        <button className="settings-anniversary-save" onClick={handleAdd}>{t.settings.anniversarySave}</button>
+        <button className="settings-anniversary-cancel" onClick={() => { setShowForm(false); setErrors([]) }}>{t.settings.anniversaryCancel}</button>
+      </div>
+    </div>
   )
 }

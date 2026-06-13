@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ChevronDown } from 'lucide-react'
+import type { Anniversary } from '../types'
 import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../utils/date'
 import { useI18n } from '../i18n'
 import { useHolidays } from '../hooks/useHolidays'
@@ -13,6 +14,7 @@ interface Props {
   onPrefetch?: (date: string) => void
   onMonthChange?: (year: number, month: number) => void
   holidayCountry?: HolidayCountry
+  anniversaries?: Anniversary[]
 }
 
 interface MonthYearPickerProps {
@@ -214,7 +216,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off' }: Props) {
+export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', anniversaries = [] }: Props) {
   const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -355,13 +357,15 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const isToday = dateStr === todayStr
               const holiday = yearHolidays[dateStr]
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
+              const mmDd = `${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+              const hasAnniversary = anniversaries?.some(a => a.monthDay === mmDd) ?? false
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
                   aria-label={holidayName ? `${dateStr} ${holidayName}` : dateStr}
                   title={holidayName}
-                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : ''].filter(Boolean).join(' ')}
+                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasAnniversary ? 'anniversary' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}

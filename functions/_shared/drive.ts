@@ -397,5 +397,49 @@ export async function getRevisionContent(token: string, fileId: string, revision
   )
 }
 
+export async function readJsonFile<T>(token: string, fileId: string): Promise<T> {
+  return driveWithRetry(
+    () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token) }),
+    async r => JSON.parse(await r.text()) as T,
+  )
+}
+
+export async function writeJsonFile(
+  token: string,
+  folderId: string,
+  fileName: string,
+  content: unknown,
+  existingFileId?: string,
+): Promise<DriveFileMeta> {
+  const body = JSON.stringify(content)
+  const fields = encodeURIComponent('id,name,modifiedTime,version')
+
+  if (existingFileId) {
+    const { contentType, data } = buildMultipart({}, body, 'application/json; charset=UTF-8')
+    return driveWithRetry(
+      () => fetch(`${UPLOAD_BASE}/files/${existingFileId}?uploadType=multipart&fields=${fields}`, {
+        method: 'PATCH',
+        headers: driveHeaders(token, { 'Content-Type': contentType }),
+        body: data,
+      }),
+      r => r.json() as Promise<DriveFileMeta>,
+    )
+  }
+
+  const { contentType, data } = buildMultipart(
+    { name: fileName, mimeType: 'application/json', parents: [folderId] },
+    body,
+    'application/json; charset=UTF-8',
+  )
+  return driveWithRetry(
+    () => fetch(`${UPLOAD_BASE}/files?uploadType=multipart&fields=${fields}`, {
+      method: 'POST',
+      headers: driveHeaders(token, { 'Content-Type': contentType }),
+      body: data,
+    }),
+    r => r.json() as Promise<DriveFileMeta>,
+  )
+}
+
 // Re-export SESSION_TTL for route handlers that update the session
 export { SESSION_TTL }

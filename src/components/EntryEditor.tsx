@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
-import type { LoadedDiaryEntry } from '../types'
-import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts } from '../utils/date'
+import type { Anniversary, LoadedDiaryEntry } from '../types'
+import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, anniversariesNearEntry } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
@@ -53,6 +53,7 @@ interface Props {
   knownDates?: Set<string>
   diaryListLoaded?: boolean
   holidayCountry?: HolidayCountry
+  anniversaries?: Anniversary[]
 }
 
 function SaveIcon() {
@@ -107,7 +108,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off' }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', anniversaries = [] }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -148,6 +149,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
+  const anniversaryBadges = useMemo(
+    () => anniversariesNearEntry(date, anniversaries ?? [], 7).slice(0, 3),
+    [date, anniversaries],
+  )
   const daysDiff = (() => {
     const today = todayYmd()
     const [ty, tm, td] = today.split('-').map(Number)
@@ -827,6 +832,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         {isToday && <span className="editor-meta-today">{t.common.today}</span>}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
+        {anniversaryBadges.map(({ label, monthDay, distance }) => (
+          <span key={monthDay} className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}>
+            {distance === 0 ? t.entry.anniversaryOn(label)
+             : distance > 0 ? t.entry.anniversaryBefore(label, distance)
+             : t.entry.anniversaryAfter(label, Math.abs(distance))}
+          </span>
+        ))}
         <AnimatePresence initial={false}>
           {!isOnline && (
             <motion.span
