@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
+import { CalendarDays } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
+import { CalendarView } from './CalendarView'
 import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -36,6 +38,8 @@ interface SettingsModalProps {
   onAnniversaryRemove?: (id: string) => void
   onAnniversaryToggleBadge?: (id: string) => void
 }
+
+const calendarAnchorSupported = typeof CSS !== 'undefined' && CSS.supports('anchor-name', '--x')
 
 export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
@@ -421,6 +425,120 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   )
 }
 
+function AnniversaryDatePicker({ id, value, onChange, label }: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const uid = useId().replace(/[^a-z0-9]/gi, '-').replace(/^-|-$/g, '')
+
+  const close = useCallback((restoreFocus = true) => {
+    if ('hidePopover' in HTMLElement.prototype) popoverRef.current?.hidePopover()
+    setOpen(false)
+    if (restoreFocus) triggerRef.current?.focus()
+  }, [])
+
+  const show = useCallback(() => {
+    const popover = popoverRef.current
+    const trigger = triggerRef.current
+    if (!popover) return
+
+    if (!calendarAnchorSupported && trigger) {
+      const rect = trigger.getBoundingClientRect()
+      popover.style.top = `${rect.bottom + 6}px`
+      popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 328))}px`
+    }
+    if ('showPopover' in HTMLElement.prototype) popover.showPopover()
+    setOpen(true)
+    requestAnimationFrame(() => {
+      const selected = popover.querySelector<HTMLButtonElement>('.cal-day.selected')
+      const today = popover.querySelector<HTMLButtonElement>('.cal-day.today')
+      ;(selected ?? today)?.focus()
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!calendarAnchorSupported) return
+    const name = `--anniversary-calendar-${uid}`
+    triggerRef.current?.style.setProperty('anchor-name', name)
+    popoverRef.current?.style.setProperty('position-anchor', name)
+  }, [uid])
+
+  useEffect(() => {
+    if (!open) return
+    const handlePointer = (event: MouseEvent) => {
+      if (
+        !triggerRef.current?.contains(event.target as Node)
+        && !popoverRef.current?.contains(event.target as Node)
+      ) {
+        close(false)
+      }
+    }
+    document.addEventListener('mousedown', handlePointer)
+    return () => document.removeEventListener('mousedown', handlePointer)
+  }, [close, open])
+
+  const toggle = () => {
+    if (open) close()
+    else show()
+  }
+
+  return (
+    <div className="settings-anniversary-date-picker">
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        className={`settings-anniversary-input settings-anniversary-date-input${open ? ' open' : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-required="true"
+        onClick={toggle}
+        onKeyDown={event => {
+          if (event.key === 'Escape' && open) {
+            event.preventDefault()
+            event.stopPropagation()
+            close()
+          }
+        }}
+      >
+        <span className={value ? '' : 'settings-anniversary-date-placeholder'}>
+          {value || label}
+        </span>
+        <CalendarDays size={16} aria-hidden="true" />
+      </button>
+      <input type="hidden" name="anniversary-date" value={value} />
+      <div
+        ref={popoverRef}
+        popover="manual"
+        className="settings-anniversary-date-popover"
+        role="dialog"
+        aria-label={label}
+        onKeyDown={event => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            close()
+          }
+        }}
+      >
+        <CalendarView
+          dates={new Set()}
+          selectedDate={value}
+          onSelect={date => {
+            onChange(date)
+            close()
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
   onAdd: (label: string, date: string) => void
   t: ReturnType<typeof useI18n>['t']
@@ -499,14 +617,11 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
         autoFocus
       />
       <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
-      <input
+      <AnniversaryDatePicker
         id={dateId}
-        name="anniversary-date"
-        type="date"
-        className="settings-anniversary-input settings-anniversary-date-input"
         value={newDate}
-        onChange={e => setNewDate(e.target.value)}
-        required
+        onChange={setNewDate}
+        label={t.settings.anniversaryDatePlaceholder}
       />
       {errors.length > 0 && (
         <div className="settings-anniversary-errors" role="alert">

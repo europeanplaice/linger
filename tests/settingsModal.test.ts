@@ -22,7 +22,11 @@ test.describe('SettingsModal — anniversaries', () => {
 
     await page.getByRole('button', { name: 'Add' }).click()
     await page.getByLabel('Name (e.g. Birthday)').fill('Birthday')
-    await page.getByLabel('Date').fill('2020-05-10')
+    await page.getByRole('button', { name: 'Date' }).click()
+    const datePicker = page.locator('.settings-anniversary-date-popover')
+    await datePicker.locator('select').nth(1).selectOption('2020')
+    await datePicker.locator('select').nth(0).selectOption('4')
+    await datePicker.getByRole('button', { name: '2020-05-10' }).click()
     await page.getByRole('button', { name: 'Add' }).click()
 
     const row = page.locator('.settings-anniversary-row', { hasText: 'Birthday' })
@@ -118,6 +122,19 @@ test.describe('SettingsModal — anniversaries', () => {
     const form = page.locator('.settings-anniversary-form')
     await expect(form).toBeVisible()
     expect(await form.evaluate(el => el.scrollWidth)).toBe(await form.evaluate(el => el.clientWidth))
+
+    await page.getByRole('button', { name: 'Date' }).click()
+    const datePicker = page.locator('.settings-anniversary-date-popover')
+    await expect(datePicker).toBeVisible()
+    const pickerBox = await datePicker.boundingBox()
+    expect(pickerBox).not.toBeNull()
+    if (pickerBox) {
+      expect(pickerBox.x).toBeGreaterThanOrEqual(0)
+      expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(390)
+    }
+    await page.keyboard.press('Escape')
+    await expect(datePicker).toBeHidden()
+    await expect(page.locator('.settings-dialog')).toBeVisible()
 
     await page.getByRole('button', { name: 'Cancel' }).click()
     await page.getByRole('button', { name: 'Remove Wedding anniversary with a very long label' }).click()
