@@ -38,6 +38,8 @@ export interface Anniversary {
   label: string
   date: string   // YYYY-MM-DD
   showBadge?: boolean
+  emoji?: string       // custom emoji, default 🎀
+  recurring?: boolean  // true = yearly (shows Nth year), false/undefined = one-time
 }
 
 export const MAX_ANNIVERSARIES = 10
@@ -48,12 +50,16 @@ function hasValidAnniversaryFields(v: unknown): v is {
   id: string
   label: string
   showBadge?: boolean
+  emoji?: string
+  recurring?: boolean
 } {
   const a = v as Anniversary
   return typeof v === 'object' && v !== null
     && typeof a.id === 'string'
     && typeof a.label === 'string'
     && (a.showBadge === undefined || typeof a.showBadge === 'boolean')
+    && (a.emoji === undefined || typeof a.emoji === 'string')
+    && (a.recurring === undefined || typeof a.recurring === 'boolean')
 }
 
 function isValidAnniversaryDate(date: unknown): date is string {
@@ -78,6 +84,8 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
     date?: unknown
     monthDay?: unknown
     showBadge?: boolean
+    emoji?: string
+    recurring?: boolean
   }
   if (isValidAnniversaryDate(candidate.date)) {
     return {
@@ -85,6 +93,8 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
       label: candidate.label,
       date: candidate.date,
       ...(candidate.showBadge === undefined ? {} : { showBadge: candidate.showBadge }),
+      ...(candidate.emoji === undefined ? {} : { emoji: candidate.emoji }),
+      ...(candidate.recurring === undefined ? {} : { recurring: candidate.recurring }),
     }
   }
   if (typeof candidate.monthDay !== 'string' || !/^\d{2}-\d{2}$/.test(candidate.monthDay)) {
@@ -98,6 +108,8 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
     label: candidate.label,
     date: legacyDate,
     ...(candidate.showBadge === undefined ? {} : { showBadge: candidate.showBadge }),
+    ...(candidate.emoji === undefined ? {} : { emoji: candidate.emoji }),
+    ...(candidate.recurring === undefined ? {} : { recurring: candidate.recurring }),
   }
 }
 
@@ -129,4 +141,7 @@ export interface AnniversaryProximity {
   label: string
   date: string
   distance: number
+  emoji?: string
+  recurring?: boolean
+  nthYear?: number  // computed: how many years since the anniversary date (only for recurring)
 }

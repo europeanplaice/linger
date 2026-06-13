@@ -841,7 +841,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             {isFuture && t.entry.daysAhead(daysDiff)}
           </span>
         )}
-        {anniversaryBadges.map(({ id, label, date: anniversaryDate, distance }) => (
+        {anniversaryBadges.map(({ id, label, date: anniversaryDate, distance, emoji, nthYear }) => (
           <button
             key={id}
             type="button"
@@ -849,9 +849,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             onClick={() => onSelectDate(anniversaryDate)}
             aria-label={t.entry.anniversaryOpen(label, anniversaryDate)}
           >
-            {distance === 0 ? t.entry.anniversaryOn(label)
-             : distance > 0 ? t.entry.anniversaryBefore(label, distance)
-             : t.entry.anniversaryAfter(label, Math.abs(distance))}
+            {emoji ?? '🎀'}{' '}
+            {distance === 0 ? t.entry.anniversaryOn(label, nthYear)
+             : distance > 0 ? t.entry.anniversaryBefore(label, distance, nthYear)
+             : t.entry.anniversaryAfter(label, Math.abs(distance), nthYear)}
           </button>
         ))}
         <AnimatePresence initial={false}>

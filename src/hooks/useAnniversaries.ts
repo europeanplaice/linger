@@ -113,7 +113,7 @@ export function useAnniversaries(
     return () => { cancelled = true }
   }, [authStatus, onTokenExpiredRef, persist])
 
-  const add = useCallback((label: string, date: string) => {
+  const add = useCallback((label: string, date: string, emoji?: string, recurring?: boolean) => {
     if (anniversariesRef.current.length >= MAX_ANNIVERSARIES) return
     const enabledBadges = anniversariesRef.current.filter(a => a.showBadge !== false).length
     const next = [
@@ -123,6 +123,8 @@ export function useAnniversaries(
         label,
         date,
         ...(enabledBadges >= MAX_ANNIVERSARY_BADGES ? { showBadge: false } : {}),
+        ...(emoji ? { emoji } : {}),
+        ...(recurring !== undefined ? { recurring } : {}),
       },
     ]
     mutationVersionRef.current += 1
@@ -139,9 +141,9 @@ export function useAnniversaries(
     persist(next)
   }, [persist])
 
-  const update = useCallback((id: string, label: string, date: string) => {
+  const update = useCallback((id: string, label: string, date: string, emoji?: string, recurring?: boolean) => {
     const next = anniversariesRef.current.map(a =>
-      a.id === id ? { ...a, label, date } : a
+      a.id === id ? { ...a, label, date, ...(emoji ? { emoji } : { emoji: undefined }), recurring } : a
     )
     mutationVersionRef.current += 1
     anniversariesRef.current = next

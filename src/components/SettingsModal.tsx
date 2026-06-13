@@ -18,6 +18,8 @@ import {
   type Anniversary,
 } from '../types'
 
+const ANNIVERSARY_EMOJI_PRESETS = ['🎀', '🎂', '💍', '🕯️', '💫', '🎓', '🏠', '❤️']
+
 interface SettingsModalProps {
   autoSave: boolean
   onAutoSaveToggle: () => void
@@ -35,8 +37,8 @@ interface SettingsModalProps {
   onSignOut: () => void
   email?: string
   anniversaries?: Anniversary[]
-  onAnniversaryAdd?: (label: string, date: string) => void
-  onAnniversaryUpdate?: (id: string, label: string, date: string) => void
+  onAnniversaryAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
+  onAnniversaryUpdate?: (id: string, label: string, date: string, emoji?: string, recurring?: boolean) => void
   onAnniversaryRemove?: (id: string) => void
   onAnniversaryToggleBadge?: (id: string) => void
 }
@@ -202,8 +204,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                             >
                               <AnniversaryEditForm
                                 anniversary={a}
-                                onSave={(label, date) => {
-                                  onAnniversaryUpdate(a.id, label, date)
+                                onSave={(label, date, emoji, recurring) => {
+                                  onAnniversaryUpdate(a.id, label, date, emoji, recurring)
                                   setEditingId(null)
                                 }}
                                 onCancel={() => setEditingId(null)}
@@ -220,7 +222,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                             >
                               <div className="settings-anniversary-row">
                                 <div className="settings-anniversary-details">
-                                  <span className="settings-anniversary-label">{a.label}</span>
+                                  <span className="settings-anniversary-label">
+                                    <span className="settings-anniversary-emoji">{a.emoji || '🎀'}</span>
+                                    {a.label}
+                                    {a.recurring !== false && <span className="settings-anniversary-recurring-tag">{t.settings.anniversaryRecurring}</span>}
+                                  </span>
                                   <time className="settings-anniversary-date" dateTime={a.date}>{a.date}</time>
                                 </div>
                                 <div className="settings-anniversary-actions">
@@ -628,7 +634,7 @@ function validateAnniversaryFields(
 
 function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
   anniversary: Anniversary
-  onSave: (label: string, date: string) => void
+  onSave: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   onCancel: () => void
   t: ReturnType<typeof useI18n>['t']
 }) {
@@ -636,6 +642,8 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
   const dateId = useId()
   const [label, setLabel] = useState(anniversary.label)
   const [date, setDate] = useState(anniversary.date)
+  const [emoji, setEmoji] = useState(anniversary.emoji ?? '')
+  const [recurring, setRecurring] = useState(anniversary.recurring ?? true)
   const [errors, setErrors] = useState<string[]>([])
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -643,7 +651,7 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
     const errs = validateAnniversaryFields(label, date, t)
     setErrors(errs)
     if (errs.length > 0) return
-    onSave(label.trim(), date)
+    onSave(label.trim(), date, emoji || undefined, recurring)
   }
 
   return (
@@ -677,6 +685,36 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
         onChange={setDate}
         label={t.settings.anniversaryDatePlaceholder}
       />
+      <div className="settings-anniversary-extras">
+        <div className="settings-anniversary-emoji-picker">
+          <span className="settings-anniversary-emoji-label">{t.settings.anniversaryEmoji}</span>
+          <div className="settings-anniversary-emoji-options">
+            {ANNIVERSARY_EMOJI_PRESETS.map(e => (
+              <button
+                key={e}
+                type="button"
+                className={`settings-anniversary-emoji-btn${emoji === e ? ' active' : ''}`}
+                onClick={() => setEmoji(prev => prev === e ? '' : e)}
+                aria-pressed={emoji === e}
+              >{e}</button>
+            ))}
+          </div>
+        </div>
+        <div className="settings-anniversary-recurring-toggle">
+          <button
+            type="button"
+            className={`settings-anniversary-type-btn${recurring ? ' active' : ''}`}
+            onClick={() => setRecurring(true)}
+            aria-pressed={recurring}
+          >{t.settings.anniversaryRecurring}</button>
+          <button
+            type="button"
+            className={`settings-anniversary-type-btn${!recurring ? ' active' : ''}`}
+            onClick={() => setRecurring(false)}
+            aria-pressed={!recurring}
+          >{t.settings.anniversaryOneTime}</button>
+        </div>
+      </div>
       {errors.length > 0 && (
         <div className="settings-anniversary-errors" role="alert">
           {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
@@ -691,7 +729,7 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
 }
 
 function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
-  onAdd: (label: string, date: string) => void
+  onAdd: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   t: ReturnType<typeof useI18n>['t']
   limitReached: boolean
   limitDescriptionId: string
@@ -701,12 +739,16 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
   const [showForm, setShowForm] = useState(false)
   const [newLabel, setNewLabel] = useState('')
   const [newDate, setNewDate] = useState('')
+  const [newEmoji, setNewEmoji] = useState('')
+  const [newRecurring, setNewRecurring] = useState(true)
   const [errors, setErrors] = useState<string[]>([])
 
   const openForm = () => {
     setShowForm(true)
     setNewLabel('')
     setNewDate('')
+    setNewEmoji('')
+    setNewRecurring(true)
     setErrors([])
   }
 
@@ -720,7 +762,7 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
     const errs = validateAnniversaryFields(newLabel, newDate, t)
     setErrors(errs)
     if (errs.length > 0) return
-    onAdd(newLabel.trim(), newDate)
+    onAdd(newLabel.trim(), newDate, newEmoji || undefined, newRecurring)
     closeForm()
   }
 
@@ -770,6 +812,36 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
             onChange={setNewDate}
             label={t.settings.anniversaryDatePlaceholder}
           />
+          <div className="settings-anniversary-extras">
+            <div className="settings-anniversary-emoji-picker">
+              <span className="settings-anniversary-emoji-label">{t.settings.anniversaryEmoji}</span>
+              <div className="settings-anniversary-emoji-options">
+                {ANNIVERSARY_EMOJI_PRESETS.map(e => (
+                  <button
+                    key={e}
+                    type="button"
+                    className={`settings-anniversary-emoji-btn${newEmoji === e ? ' active' : ''}`}
+                    onClick={() => setNewEmoji(prev => prev === e ? '' : e)}
+                    aria-pressed={newEmoji === e}
+                  >{e}</button>
+                ))}
+              </div>
+            </div>
+            <div className="settings-anniversary-recurring-toggle">
+              <button
+                type="button"
+                className={`settings-anniversary-type-btn${newRecurring ? ' active' : ''}`}
+                onClick={() => setNewRecurring(true)}
+                aria-pressed={newRecurring}
+              >{t.settings.anniversaryRecurring}</button>
+              <button
+                type="button"
+                className={`settings-anniversary-type-btn${!newRecurring ? ' active' : ''}`}
+                onClick={() => setNewRecurring(false)}
+                aria-pressed={!newRecurring}
+              >{t.settings.anniversaryOneTime}</button>
+            </div>
+          </div>
           {errors.length > 0 && (
             <div className="settings-anniversary-errors" role="alert">
               {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}

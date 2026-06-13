@@ -421,6 +421,20 @@ describe('date utils', () => {
       ])
       expect(anniversariesNearEntry('2026-01-01', anniversaries, 7)).toEqual([])
     })
+
+    it('propagates emoji and computes nthYear correctly for recurring anniversaries', () => {
+      const anniversaries = [
+        { id: 'anniv1', label: 'Anniversary 1', date: '2024-05-10', emoji: '🎂', recurring: true },
+        { id: 'anniv2', label: 'Anniversary 2', date: '2020-05-10', emoji: '💍', recurring: false },
+        { id: 'legacy', label: 'Legacy', date: '2000-05-10', emoji: '🕯️', recurring: true },
+      ]
+
+      expect(anniversariesNearEntry('2026-05-10', anniversaries)).toEqual([
+        { id: 'legacy', label: 'Legacy', date: '2000-05-10', distance: -9496, emoji: '🕯️', recurring: true, nthYear: undefined },
+        { id: 'anniv2', label: 'Anniversary 2', date: '2020-05-10', distance: -2191, emoji: '💍', recurring: false, nthYear: undefined },
+        { id: 'anniv1', label: 'Anniversary 1', date: '2024-05-10', distance: -730, emoji: '🎂', recurring: true, nthYear: 2 },
+      ])
+    })
   })
 
   describe('consecutiveMonthStreak', () => {

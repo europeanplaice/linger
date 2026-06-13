@@ -137,6 +137,8 @@ export function anniversaryProximity(
   anniversaryDate: string,
   id: string,
   label: string,
+  emoji?: string,
+  recurring?: boolean,
 ): AnniversaryProximity | null {
   const entry = parseYmd(entryDate)
   const anniversary = parseYmd(anniversaryDate)
@@ -146,17 +148,25 @@ export function anniversaryProximity(
   const anniversaryDay = Date.UTC(anniversary.y, anniversary.m - 1, anniversary.d)
   const distance = Math.round((anniversaryDay - entryDay) / 86_400_000)
 
-  return { id, label, date: anniversaryDate, distance }
+  let nthYear: number | undefined
+  if (recurring && anniversary.y > 0 && anniversary.y !== 2000) {
+    // For recurring anniversaries, calculate how many years since the event.
+    // anniversary.y === 2000 means legacy data where year was unknown.
+    nthYear = entry.y - anniversary.y
+    if (nthYear < 0) nthYear = undefined
+  }
+
+  return { id, label, date: anniversaryDate, distance, emoji, recurring, nthYear }
 }
 
 export function anniversariesNearEntry(
   entryDate: string,
-  anniversaries: ReadonlyArray<{ id: string; label: string; date: string }>,
+  anniversaries: ReadonlyArray<{ id: string; label: string; date: string; emoji?: string; recurring?: boolean }>,
   maxDistanceDays?: number,
 ): AnniversaryProximity[] {
   const results: AnniversaryProximity[] = []
   for (const a of anniversaries) {
-    const prox = anniversaryProximity(entryDate, a.date, a.id, a.label)
+    const prox = anniversaryProximity(entryDate, a.date, a.id, a.label, a.emoji, a.recurring)
     if (prox && (maxDistanceDays === undefined || Math.abs(prox.distance) <= maxDistanceDays)) {
       results.push(prox)
     }

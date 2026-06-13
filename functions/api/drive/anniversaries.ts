@@ -53,7 +53,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   }
 
   let enabledBadges = 0
-  const sanitized: { id: string; label: string; date: string; showBadge?: boolean }[] = []
+  const sanitized: { id: string; label: string; date: string; showBadge?: boolean; emoji?: string; recurring?: boolean }[] = []
 
   for (const item of body) {
     if (!item || typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.date !== 'string') {
@@ -61,6 +61,12 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     }
     if (item.showBadge !== undefined && typeof item.showBadge !== 'boolean') {
       return jsonResponse({ error: 'Invalid showBadge value' }, 400)
+    }
+    if (item.emoji !== undefined && typeof item.emoji !== 'string') {
+      return jsonResponse({ error: 'Invalid emoji value' }, 400)
+    }
+    if (item.recurring !== undefined && typeof item.recurring !== 'boolean') {
+      return jsonResponse({ error: 'Invalid recurring value' }, 400)
     }
 
     const id = item.id.trim()
@@ -91,6 +97,8 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       label,
       date: item.date,
       ...(item.showBadge === undefined ? {} : { showBadge: item.showBadge }),
+      ...(item.emoji === undefined ? {} : { emoji: item.emoji }),
+      ...(item.recurring === undefined ? {} : { recurring: item.recurring }),
     })
   }
   if (enabledBadges > MAX_ANNIVERSARY_BADGES) {

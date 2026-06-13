@@ -6,6 +6,7 @@ import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../util
 import { useI18n } from '../i18n'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
+import type { Anniversary } from '../types'
 
 interface Props {
   dates: Set<string>
@@ -14,6 +15,7 @@ interface Props {
   onPrefetch?: (date: string) => void
   onMonthChange?: (year: number, month: number) => void
   holidayCountry?: HolidayCountry
+  anniversaries?: Anniversary[]
 }
 
 interface MonthYearPickerProps {
@@ -215,7 +217,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off' }: Props) {
+export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', anniversaries = [] }: Props) {
   const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -265,6 +267,25 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
   }, [year, month])
 
   const yearHolidays = useHolidays(holidayCountry, year)
+
+  // Anniversaries that fall on a day in the current month. We match by month+day,
+  // ignoring the anniversary's year, so a yearly anniversary appears every year.
+  const monthAnniversaries = useMemo(() => {
+    const map = new Map<number, Anniversary[]>()
+    for (const a of anniversaries) {
+      if (a.showBadge === false) continue
+      const parts = a.date.match(/^\d{4}-(\d{2})-(\d{2})$/)
+      if (!parts) continue
+      const aMonth = Number(parts[1]) - 1  // 0-indexed to match `month` state
+      const aDay = Number(parts[2])
+      if (aMonth === month) {
+        const list = map.get(aDay) || []
+        list.push(a)
+        map.set(aDay, list)
+      }
+    }
+    return map
+  }, [anniversaries, month])
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = daysInMonthUtil(year, month + 1)
@@ -356,14 +377,17 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const isToday = dateStr === todayStr
               const holiday = yearHolidays[dateStr]
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
-              const accessibleDetails = holidayName
+              const dayAnniversaries = day !== null ? (monthAnniversaries.get(day) ?? []) : []
+              const hasAnniversary = dayAnniversaries.length > 0
+              const anniversaryTitle = dayAnniversaries.map(a => `${a.emoji ?? '🎀'} ${a.label}`).join(', ')
+              const accessibleDetails = [holidayName, anniversaryTitle].filter(Boolean).join('; ') || undefined
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
                   aria-label={accessibleDetails ? `${dateStr} ${accessibleDetails}` : dateStr}
                   title={accessibleDetails || undefined}
-                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : ''].filter(Boolean).join(' ')}
+                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasAnniversary ? 'anniversary' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
@@ -372,6 +396,11 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
                 >
                   {day}
                   <span className="dot" aria-hidden="true" />
+                  {hasAnniversary && (
+                    <span className="cal-day-anniversary" aria-hidden="true">
+                      {dayAnniversaries[0].emoji ?? '🎀'}
+                    </span>
+                  )}
                 </motion.button>
               )
             })}
