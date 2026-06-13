@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { CalendarDays } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
@@ -178,79 +178,120 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <span className="settings-anniversary-none">{t.settings.anniversaryNone}</span>
             ) : (
               <div className="settings-anniversary-list">
-                {anniversaries.map(a => {
-                  const badgeEnabled = a.showBadge !== false
-                  const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
-                  if (editingId === a.id && onAnniversaryUpdate) {
+                <AnimatePresence initial={false} mode="popLayout">
+                  {anniversaries.map(a => {
+                    const badgeEnabled = a.showBadge !== false
+                    const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
                     return (
-                      <AnniversaryEditForm
+                      <motion.div
                         key={a.id}
-                        anniversary={a}
-                        onSave={(label, date) => {
-                          onAnniversaryUpdate(a.id, label, date)
-                          setEditingId(null)
-                        }}
-                        onCancel={() => setEditingId(null)}
-                        t={t}
-                      />
-                    )
-                  }
-                  return (
-                    <div key={a.id} className="settings-anniversary-row">
-                      <div className="settings-anniversary-details">
-                        <span className="settings-anniversary-label">{a.label}</span>
-                        <time className="settings-anniversary-date" dateTime={a.date}>{a.date}</time>
-                      </div>
-                      <div className="settings-anniversary-actions">
-                        {onAnniversaryToggleBadge && (
-                          <span className="settings-anniversary-badge-toggle-wrap">
-                            <button
-                              type="button"
-                              className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
-                              onClick={() => {
-                                if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
-                              }}
-                              role="switch"
-                              aria-checked={badgeEnabled}
-                              aria-disabled={badgeLimitReached || undefined}
-                              aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
-                              aria-label={t.settings.anniversaryBadgeLabel}
+                        layout
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.18 }}
+                      >
+                        <AnimatePresence mode="wait" initial={false}>
+                          {editingId === a.id && onAnniversaryUpdate ? (
+                            <motion.div
+                              key="edit"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.12 }}
                             >
-                              <span className="settings-anniversary-badge-toggle-thumb" />
-                            </button>
-                            <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
-                          </span>
-                        )}
-                        {onAnniversaryUpdate && (
-                          <button
-                            type="button"
-                            className="settings-anniversary-edit"
-                            onClick={() => { setPendingDelete(null); setEditingId(a.id) }}
-                            aria-label={t.settings.anniversaryEdit(a.label)}
-                          >✎</button>
-                        )}
-                        {onAnniversaryRemove && (
-                          pendingDelete?.id === a.id ? (
-                            <span className="settings-anniversary-confirm">
-                              <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
-                              <span className="settings-anniversary-confirm-actions">
-                                <button type="button" className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
-                                <button type="button" className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
-                              </span>
-                            </span>
+                              <AnniversaryEditForm
+                                anniversary={a}
+                                onSave={(label, date) => {
+                                  onAnniversaryUpdate(a.id, label, date)
+                                  setEditingId(null)
+                                }}
+                                onCancel={() => setEditingId(null)}
+                                t={t}
+                              />
+                            </motion.div>
                           ) : (
-                            <button
-                              type="button"
-                              className="settings-anniversary-remove"
-                              onClick={() => { setEditingId(null); setPendingDelete(a) }}
-                              aria-label={t.settings.anniversaryRemove(a.label)}
-                            >×</button>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+                            <motion.div
+                              key="display"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.12 }}
+                            >
+                              <div className="settings-anniversary-row">
+                                <div className="settings-anniversary-details">
+                                  <span className="settings-anniversary-label">{a.label}</span>
+                                  <time className="settings-anniversary-date" dateTime={a.date}>{a.date}</time>
+                                </div>
+                                <div className="settings-anniversary-actions">
+                                  {onAnniversaryToggleBadge && (
+                                    <span className="settings-anniversary-badge-toggle-wrap">
+                                      <button
+                                        type="button"
+                                        className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
+                                        onClick={() => {
+                                          if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
+                                        }}
+                                        role="switch"
+                                        aria-checked={badgeEnabled}
+                                        aria-disabled={badgeLimitReached || undefined}
+                                        aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
+                                        aria-label={t.settings.anniversaryBadgeLabel}
+                                      >
+                                        <span className="settings-anniversary-badge-toggle-thumb" />
+                                      </button>
+                                      <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
+                                    </span>
+                                  )}
+                                  {onAnniversaryUpdate && (
+                                    <button
+                                      type="button"
+                                      className="settings-anniversary-edit"
+                                      onClick={() => { setPendingDelete(null); setEditingId(a.id) }}
+                                      aria-label={t.settings.anniversaryEdit(a.label)}
+                                    >✎</button>
+                                  )}
+                                  {onAnniversaryRemove && (
+                                    <AnimatePresence mode="wait" initial={false}>
+                                      {pendingDelete?.id === a.id ? (
+                                        <motion.span
+                                          key="confirm"
+                                          className="settings-anniversary-confirm"
+                                          initial={{ opacity: 0, x: 8 }}
+                                          animate={{ opacity: 1, x: 0 }}
+                                          exit={{ opacity: 0, x: 8 }}
+                                          transition={{ duration: 0.15 }}
+                                        >
+                                          <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
+                                          <span className="settings-anniversary-confirm-actions">
+                                            <button type="button" className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
+                                            <button type="button" className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                                          </span>
+                                        </motion.span>
+                                      ) : (
+                                        <motion.button
+                                          key="remove"
+                                          type="button"
+                                          className="settings-anniversary-remove"
+                                          onClick={() => { setEditingId(null); setPendingDelete(a) }}
+                                          aria-label={t.settings.anniversaryRemove(a.label)}
+                                          initial={{ opacity: 0 }}
+                                          animate={{ opacity: 1 }}
+                                          exit={{ opacity: 0 }}
+                                          transition={{ duration: 0.12 }}
+                                        >×</motion.button>
+                                      )}
+                                    </AnimatePresence>
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </motion.div>
+                    )
+                  })}
+                </AnimatePresence>
               </div>
             )}
             {onAnniversaryAdd && (
@@ -658,13 +699,11 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
   const labelId = useId()
   const dateId = useId()
   const [showForm, setShowForm] = useState(false)
-  const [formKey, setFormKey] = useState(0)
   const [newLabel, setNewLabel] = useState('')
   const [newDate, setNewDate] = useState('')
   const [errors, setErrors] = useState<string[]>([])
 
   const openForm = () => {
-    setFormKey(k => k + 1)
     setShowForm(true)
     setNewLabel('')
     setNewDate('')
@@ -685,50 +724,63 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
     closeForm()
   }
 
-  if (!showForm) {
-    return (
-      <button
-        type="button"
-        className="settings-anniversary-add-btn"
-        onClick={openForm}
-        disabled={limitReached}
-        aria-describedby={limitReached ? limitDescriptionId : undefined}
-      >
-        {t.settings.anniversaryAdd}
-      </button>
-    )
-  }
-
   return (
-    <form className="settings-anniversary-form" key={formKey} onSubmit={handleAdd}>
-      <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
-      <input
-        id={labelId}
-        name="anniversary-label"
-        className="settings-anniversary-input"
-        value={newLabel}
-        onChange={e => setNewLabel(e.target.value)}
-        placeholder={t.settings.anniversaryLabelPlaceholder}
-        maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
-        required
-        autoFocus
-      />
-      <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
-      <AnniversaryDatePicker
-        id={dateId}
-        value={newDate}
-        onChange={setNewDate}
-        label={t.settings.anniversaryDatePlaceholder}
-      />
-      {errors.length > 0 && (
-        <div className="settings-anniversary-errors" role="alert">
-          {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
-        </div>
+    <AnimatePresence mode="wait">
+      {!showForm ? (
+        <motion.button
+          key="add-btn"
+          type="button"
+          className="settings-anniversary-add-btn"
+          onClick={openForm}
+          disabled={limitReached}
+          aria-describedby={limitReached ? limitDescriptionId : undefined}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12 }}
+        >
+          {t.settings.anniversaryAdd}
+        </motion.button>
+      ) : (
+        <motion.form
+          key="add-form"
+          className="settings-anniversary-form"
+          onSubmit={handleAdd}
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.15 }}
+        >
+          <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
+          <input
+            id={labelId}
+            name="anniversary-label"
+            className="settings-anniversary-input"
+            value={newLabel}
+            onChange={e => setNewLabel(e.target.value)}
+            placeholder={t.settings.anniversaryLabelPlaceholder}
+            maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
+            required
+            autoFocus
+          />
+          <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
+          <AnniversaryDatePicker
+            id={dateId}
+            value={newDate}
+            onChange={setNewDate}
+            label={t.settings.anniversaryDatePlaceholder}
+          />
+          {errors.length > 0 && (
+            <div className="settings-anniversary-errors" role="alert">
+              {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
+            </div>
+          )}
+          <div className="settings-anniversary-form-actions">
+            <button type="submit" className="settings-anniversary-save">{t.settings.anniversarySave}</button>
+            <button type="button" className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
+          </div>
+        </motion.form>
       )}
-      <div className="settings-anniversary-form-actions">
-        <button type="submit" className="settings-anniversary-save">{t.settings.anniversarySave}</button>
-        <button type="button" className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
-      </div>
-    </form>
+    </AnimatePresence>
   )
 }
