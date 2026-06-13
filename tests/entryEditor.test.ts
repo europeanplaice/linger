@@ -1275,7 +1275,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const anniversary = page.locator('.editor-meta-anniversary')
     await expect(anniversary).toHaveCount(1)
-    await expect(anniversary).toHaveText('Birthday in 129d')
+    await expect(anniversary).toHaveText('Birthday 9367d ago')
   })
 
   test('shows at most three anniversary badges at once', async ({ page }) => {
@@ -1283,10 +1283,10 @@ test.describe('EntryEditor — editor meta info', () => {
     await renderEditor(page, {
       date: '2026-01-01',
       anniversaries: [
-        { id: 'one', label: 'One', date: '2000-01-02' },
-        { id: 'two', label: 'Two', date: '2000-01-03' },
-        { id: 'three', label: 'Three', date: '2000-01-04' },
-        { id: 'four', label: 'Four', date: '2000-01-05' },
+        { id: 'one', label: 'One', date: '2025-12-31' },
+        { id: 'two', label: 'Two', date: '2026-01-01' },
+        { id: 'three', label: 'Three', date: '2026-01-02' },
+        { id: 'four', label: 'Four', date: '2026-02-01' },
       ],
     })
 

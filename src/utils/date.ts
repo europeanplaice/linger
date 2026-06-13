@@ -132,30 +132,21 @@ export function nearestEntryWithin(dates: string[], target: string, maxDistanceD
   return nearestWithDistance(dates, target, maxDistanceDays)?.date ?? null
 }
 
-export function nearestAnniversaryOccurrence(
+export function anniversaryProximity(
   entryDate: string,
-  monthDay: string,
+  anniversaryDate: string,
   id: string,
   label: string,
 ): AnniversaryProximity | null {
-  const parsed = parseYmd(entryDate)
-  if (!parsed) return null
-  const [mm, dd] = monthDay.split('-').map(Number)
-  if (!mm || !dd) return null
+  const entry = parseYmd(entryDate)
+  const anniversary = parseYmd(anniversaryDate)
+  if (!entry || !anniversary) return null
 
-  let best: { distance: number } | null = null
+  const entryDay = Date.UTC(entry.y, entry.m - 1, entry.d)
+  const anniversaryDay = Date.UTC(anniversary.y, anniversary.m - 1, anniversary.d)
+  const distance = Math.round((anniversaryDay - entryDay) / 86_400_000)
 
-  for (const yearOffset of [-1, 0, 1]) {
-    const y = parsed.y + yearOffset
-    const anniv = new Date(y, mm - 1, dd)
-    if (anniv.getMonth() !== mm - 1) continue
-    const dist = Math.round((anniv.getTime() - new Date(parsed.y, parsed.m - 1, parsed.d).getTime()) / 86_400_000)
-    if (best === null || Math.abs(dist) < Math.abs(best.distance)) {
-      best = { distance: dist }
-    }
-  }
-
-  return best ? { id, label, monthDay, distance: best.distance } : null
+  return { id, label, date: anniversaryDate, distance }
 }
 
 export function anniversariesNearEntry(
@@ -165,8 +156,7 @@ export function anniversariesNearEntry(
 ): AnniversaryProximity[] {
   const results: AnniversaryProximity[] = []
   for (const a of anniversaries) {
-    const monthDay = a.date.slice(5)
-    const prox = nearestAnniversaryOccurrence(entryDate, monthDay, a.id, a.label)
+    const prox = anniversaryProximity(entryDate, a.date, a.id, a.label)
     if (prox && (maxDistanceDays === undefined || Math.abs(prox.distance) <= maxDistanceDays)) {
       results.push(prox)
     }

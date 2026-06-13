@@ -129,6 +129,6 @@ export function isAnniversaryArray(v: unknown): v is Anniversary[] {
 export interface AnniversaryProximity {
   id: string
   label: string
-  monthDay: string
+  date: string
   distance: number
 }

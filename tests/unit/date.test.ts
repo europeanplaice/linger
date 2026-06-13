@@ -391,23 +391,23 @@ describe('date utils', () => {
   })
 
   describe('anniversariesNearEntry', () => {
-    it('finds annual occurrences across a year boundary', () => {
+    it('calculates the difference between full calendar dates', () => {
       expect(anniversariesNearEntry('2026-01-02', [
-        { id: 'new-year', label: 'New Year', date: '2000-01-01' },
-        { id: 'year-end', label: 'Year End', date: '2000-12-31' },
+        { id: 'new-year', label: 'New Year', date: '2026-01-01' },
+        { id: 'year-end', label: 'Year End', date: '2025-12-31' },
       ])).toEqual([
-        { id: 'new-year', label: 'New Year', monthDay: '01-01', distance: -1 },
-        { id: 'year-end', label: 'Year End', monthDay: '12-31', distance: -2 },
+        { id: 'new-year', label: 'New Year', date: '2026-01-01', distance: -1 },
+        { id: 'year-end', label: 'Year End', date: '2025-12-31', distance: -2 },
       ])
     })
 
-    it('keeps distinct identities for anniversaries on the same day', () => {
+    it('includes the year when dates share the same month and day', () => {
       expect(anniversariesNearEntry('2026-05-10', [
-        { id: 'a', label: 'First', date: '2000-05-10' },
-        { id: 'b', label: 'Second', date: '2001-05-10' },
+        { id: 'future', label: 'Future', date: '2026-05-12' },
+        { id: 'past', label: 'Past', date: '2020-05-10' },
       ])).toEqual([
-        { id: 'a', label: 'First', monthDay: '05-10', distance: 0 },
-        { id: 'b', label: 'Second', monthDay: '05-10', distance: 0 },
+        { id: 'future', label: 'Future', date: '2026-05-12', distance: 2 },
+        { id: 'past', label: 'Past', date: '2020-05-10', distance: -2191 },
       ])
     })
 
@@ -417,7 +417,7 @@ describe('date utils', () => {
       ]
 
       expect(anniversariesNearEntry('2026-01-01', anniversaries)).toEqual([
-        { id: 'birthday', label: 'Birthday', monthDay: '05-10', distance: 129 },
+        { id: 'birthday', label: 'Birthday', date: '2000-05-10', distance: -9367 },
       ])
       expect(anniversariesNearEntry('2026-01-01', anniversaries, 7)).toEqual([])
     })
