@@ -835,8 +835,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       </div>
       <div className={`editor-meta${loading && !isToday ? ' editor-meta--loading' : ''}${isFuture ? ' editor-meta--future' : ''}`}>
         {isToday && <span className="editor-meta-today">{t.common.today}</span>}
-        {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
-        {isFuture && t.entry.daysAhead(daysDiff)}
+        {!isToday && (
+          <span className="editor-meta-time">
+            {!isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
+            {isFuture && t.entry.daysAhead(daysDiff)}
+          </span>
+        )}
         {anniversaryBadges.map(({ id, label, date: anniversaryDate, distance }) => (
           <button
             key={id}

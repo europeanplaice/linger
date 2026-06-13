@@ -2158,10 +2158,14 @@ dialog.signout-confirm-dialog::backdrop {
   padding-bottom: 0.1rem;
 }
 .editor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--text-muted);
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.3rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   margin-bottom: 0;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
@@ -2169,6 +2173,7 @@ dialog.signout-confirm-dialog::backdrop {
   -webkit-backdrop-filter: blur(8px);
   position: relative;
   z-index: 2;
+  width: 100%;
 }
 .editor-meta:empty {
   display: none;
@@ -2223,7 +2228,6 @@ dialog.signout-confirm-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  margin-left: 0.5rem;
   color: var(--warning);
 }
 .editor-meta-offline-dot {
@@ -2250,8 +2254,13 @@ dialog.signout-confirm-dialog::backdrop {
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   line-height: 1.4;
-  margin-left: 0.4rem;
+  position: relative;
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s, transform 0.15s;
+}
+.editor-meta-anniversary::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
 }
 .editor-meta-anniversary:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -3442,6 +3451,10 @@ dialog.history-dialog::backdrop {
 
   .editor-status-line {
     font-size: 0.76rem;
+  }
+  .editor-meta {
+    gap: 0.3rem 0.4rem;
+    padding-bottom: 0.4rem;
   }
 
   .conflict-panel {
