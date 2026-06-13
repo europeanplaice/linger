@@ -1275,7 +1275,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const anniversary = page.locator('.editor-meta-anniversary')
     await expect(anniversary).toHaveCount(1)
-    await expect(anniversary).toHaveText('Birthday 9367d ago')
+    await expect(anniversary).toHaveText('🎀 Birthday 9367d ago')
   })
 
   test('opens the anniversary entry by click or keyboard', async ({ page }) => {
