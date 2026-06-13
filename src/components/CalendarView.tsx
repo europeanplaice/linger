@@ -286,7 +286,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
       }
     }
     return map
-  }, [anniversaries, month])
+  }, [anniversaries, month, year])
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = daysInMonthUtil(year, month + 1)
