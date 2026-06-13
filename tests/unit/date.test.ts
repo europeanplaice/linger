@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak, anniversariesNearEntry } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -387,6 +387,28 @@ describe('date utils', () => {
 
     it('prefers the earlier (past) date on a tie and reports the shared distance', () => {
       expect(nearestWithDistance(['2026-05-18', '2026-05-12'], '2026-05-15', 5)).toEqual({ date: '2026-05-12', distance: 3 })
+    })
+  })
+
+  describe('anniversariesNearEntry', () => {
+    it('finds annual occurrences across a year boundary', () => {
+      expect(anniversariesNearEntry('2026-01-02', [
+        { id: 'new-year', label: 'New Year', date: '2000-01-01' },
+        { id: 'year-end', label: 'Year End', date: '2000-12-31' },
+      ])).toEqual([
+        { id: 'new-year', label: 'New Year', monthDay: '01-01', distance: -1 },
+        { id: 'year-end', label: 'Year End', monthDay: '12-31', distance: -2 },
+      ])
+    })
+
+    it('keeps distinct identities for anniversaries on the same day', () => {
+      expect(anniversariesNearEntry('2026-05-10', [
+        { id: 'a', label: 'First', date: '2000-05-10' },
+        { id: 'b', label: 'Second', date: '2001-05-10' },
+      ])).toEqual([
+        { id: 'a', label: 'First', monthDay: '05-10', distance: 0 },
+        { id: 'b', label: 'Second', monthDay: '05-10', distance: 0 },
+      ])
     })
   })
 

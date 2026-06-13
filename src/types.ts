@@ -42,11 +42,18 @@ export interface Anniversary {
 
 export function isAnniversary(v: unknown): v is Anniversary {
   const a = v as Anniversary
-  return typeof v === 'object' && v !== null
+  if (!(typeof v === 'object' && v !== null
     && typeof a.id === 'string'
     && typeof a.label === 'string'
     && /^\d{4}-\d{2}-\d{2}$/.test(a.date)
-    && (a.showBadge === undefined || typeof a.showBadge === 'boolean')
+    && (a.showBadge === undefined || typeof a.showBadge === 'boolean'))) {
+    return false
+  }
+  const [year, month, day] = a.date.split('-').map(Number)
+  const parsed = new Date(year, month - 1, day)
+  return parsed.getFullYear() === year
+    && parsed.getMonth() === month - 1
+    && parsed.getDate() === day
 }
 
 export function isAnniversaryArray(v: unknown): v is Anniversary[] {
@@ -54,6 +61,7 @@ export function isAnniversaryArray(v: unknown): v is Anniversary[] {
 }
 
 export interface AnniversaryProximity {
+  id: string
   label: string
   monthDay: string
   distance: number

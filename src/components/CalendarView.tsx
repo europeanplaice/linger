@@ -358,13 +358,17 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const holiday = yearHolidays[dateStr]
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
               const mmDd = `${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-              const hasAnniversary = anniversaries?.some(a => a.date.slice(5) === mmDd) ?? false
+              const anniversaryLabels = anniversaries
+                .filter(a => a.date.slice(5) === mmDd)
+                .map(a => a.label)
+              const hasAnniversary = anniversaryLabels.length > 0
+              const accessibleDetails = [holidayName, ...anniversaryLabels].filter(Boolean).join(', ')
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
-                  aria-label={holidayName ? `${dateStr} ${holidayName}` : dateStr}
-                  title={holidayName}
+                  aria-label={accessibleDetails ? `${dateStr} ${accessibleDetails}` : dateStr}
+                  title={accessibleDetails || undefined}
                   className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasAnniversary ? 'anniversary' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}

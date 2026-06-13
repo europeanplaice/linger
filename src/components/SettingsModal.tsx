@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
@@ -379,6 +379,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
 }
 
 function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
+  const labelId = useId()
+  const dateId = useId()
   const [showForm, setShowForm] = useState(false)
   const [formKey, setFormKey] = useState(0)
   const [newLabel, setNewLabel] = useState('')
@@ -414,7 +416,8 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string)
     return errs.length === 0
   }
 
-  const handleAdd = () => {
+  const handleAdd = (event: React.FormEvent) => {
+    event.preventDefault()
     if (!validate()) return
     onAdd(newLabel.trim(), newDate)
     closeForm()
@@ -429,31 +432,37 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string)
   }
 
   return (
-    <div className="settings-anniversary-form" key={formKey}>
+    <form className="settings-anniversary-form" key={formKey} onSubmit={handleAdd}>
+      <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
       <input
+        id={labelId}
+        name="anniversary-label"
         className="settings-anniversary-input"
         value={newLabel}
         onChange={e => setNewLabel(e.target.value)}
         placeholder={t.settings.anniversaryLabelPlaceholder}
-        aria-label={t.settings.anniversaryLabelPlaceholder}
+        required
         autoFocus
       />
+      <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
       <input
+        id={dateId}
+        name="anniversary-date"
         type="date"
         className="settings-anniversary-input settings-anniversary-date-input"
         value={newDate}
         onChange={e => setNewDate(e.target.value)}
-        aria-label={t.settings.anniversaryDatePlaceholder}
+        required
       />
       {errors.length > 0 && (
-        <div className="settings-anniversary-errors">
+        <div className="settings-anniversary-errors" role="alert">
           {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
         </div>
       )}
       <div className="settings-anniversary-form-actions">
-        <button className="settings-anniversary-save" onClick={handleAdd}>{t.settings.anniversarySave}</button>
-        <button className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
+        <button type="submit" className="settings-anniversary-save">{t.settings.anniversarySave}</button>
+        <button type="button" className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
       </div>
-    </div>
+    </form>
   )
 }

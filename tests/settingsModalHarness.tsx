@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { SettingsModal } from '../src/components/SettingsModal'
 import type { FontSize } from '../src/hooks/useFontSize'
 import type { HolidayCountry } from '../src/utils/holidays'
+import type { Anniversary } from '../src/types'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
@@ -21,15 +22,17 @@ interface AppProps {
   themeMode: 'light' | 'dark' | 'system'
   fontSize: FontSize
   email?: string
+  anniversaries?: Anniversary[]
 }
 
-function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email }: AppProps) {
+function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, anniversaries: initialAnniversaries = [] }: AppProps) {
   const [autoSave, setAutoSave] = useState(initialAutoSave)
   const [open, setOpen] = useState(initialOpen)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(initialTheme)
   const [font, setFont] = useState<'serif' | 'sans'>('serif')
   const [fontSize, setFontSize] = useState<FontSize>(initialFontSize)
   const [holidayCountry, setHolidayCountry] = useState<HolidayCountry>('off')
+  const [anniversaries, setAnniversaries] = useState(initialAnniversaries)
 
   const handleAutoSaveToggle = useCallback(() => {
     setAutoSave(prev => {
@@ -65,6 +68,14 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onClose={() => setOpen(false)}
           onSignOut={() => { signOutCount++ }}
           email={email}
+          anniversaries={anniversaries}
+          onAnniversaryAdd={(label, date) => {
+            setAnniversaries(prev => [...prev, { id: `anniversary-${prev.length + 1}`, label, date }])
+          }}
+          onAnniversaryRemove={id => setAnniversaries(prev => prev.filter(a => a.id !== id))}
+          onAnniversaryToggleBadge={id => setAnniversaries(prev => prev.map(a => (
+            a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a
+          )))}
         />
       )}
     </>
@@ -72,7 +83,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
 }
 
 window.settingsHarness = {
-  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string } = {}) => {
+  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, anniversaries }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string; anniversaries?: Anniversary[] } = {}) => {
     exportCalls.splice(0)
     exportReject = false
     signOutCount = 0
@@ -84,6 +95,7 @@ window.settingsHarness = {
           themeMode={initialTheme ?? 'light'}
           fontSize={initialFontSize ?? 'md'}
           email={email}
+          anniversaries={anniversaries}
           key={++renderCount}
         />
       </I18nProvider>

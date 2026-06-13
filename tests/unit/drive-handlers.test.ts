@@ -4,6 +4,7 @@ import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
 import { onRequestGet as onGetRevision } from '../../functions/api/drive/revisions/[fileId]/[revisionId]'
 import { onRequestGet as onChanges } from '../../functions/api/drive/changes'
+import { onRequestGet as onGetAnniversaries, onRequestPut as onPutAnniversaries } from '../../functions/api/drive/anniversaries'
 import * as drive from '../../functions/_shared/drive'
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
@@ -19,6 +20,9 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   getRevisionContent: vi.fn().mockResolvedValue({ date: '2026-05-01', content: 'hi', updated_at: '' }),
   getStartPageToken: vi.fn().mockResolvedValue('tok-init'),
   getChanges: vi.fn().mockResolvedValue({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' }),
+  findJsonFile: vi.fn().mockResolvedValue(null),
+  readJsonFile: vi.fn().mockResolvedValue([]),
+  writeJsonFile: vi.fn().mockResolvedValue({ id: 'anniversaries-file', name: 'anniversaries.json' }),
 }))
 
 function makeContext(overrides: Record<string, unknown> = {}) {
@@ -57,6 +61,59 @@ describe('search handler', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as { files: unknown[] }
     expect(body.files).toHaveLength(1)
+  })
+})
+
+describe('anniversaries handler', () => {
+  it('returns the stored list', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValueOnce([
+      { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
+    ])
+
+    const res = await onGetAnniversaries(makeContext() as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([
+      { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
+    ])
+    expect(drive.readJsonFile).toHaveBeenCalledWith('tok', 'anniversaries-file')
+  })
+
+  it('rejects impossible calendar dates', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify([{ id: 'bad', label: 'Bad', date: '2026-02-30' }]),
+      }),
+    })
+
+    const res = await onPutAnniversaries(ctx as any)
+
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('updates the existing Drive file', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
+    const body = [{ id: 'birthday', label: 'Birthday', date: '2020-05-10' }]
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    })
+
+    const res = await onPutAnniversaries(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(drive.writeJsonFile).toHaveBeenCalledWith(
+      'tok',
+      'folder-1',
+      'anniversaries.json',
+      body,
+      'anniversaries-file',
+    )
   })
 })
 

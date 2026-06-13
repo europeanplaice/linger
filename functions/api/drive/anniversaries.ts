@@ -1,19 +1,8 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, readJsonFile, writeJsonFile } from '../../_shared/drive'
+import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile } from '../../_shared/drive'
 
 const FILE_NAME = 'anniversaries.json'
-
-async function findAnniversariesFile(token: string, folderId: string): Promise<string | null> {
-  const q = encodeURIComponent(`name='${FILE_NAME}' and '${folderId}' in parents and trashed=false`)
-  const fields = encodeURIComponent('files(id)')
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&pageSize=1`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) return null
-  const body = await res.json() as { files?: { id: string }[] }
-  return body.files?.[0]?.id ?? null
-}
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
@@ -21,7 +10,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
 
   try {
     const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const fileId = await findAnniversariesFile(accessToken, folderId)
+    const fileId = await findJsonFile(accessToken, folderId, FILE_NAME)
     if (!fileId) return jsonResponse([])
     const data = await readJsonFile<unknown>(accessToken, fileId)
     return jsonResponse(data)
@@ -62,7 +51,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
 
   try {
     const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const existingFileId = await findAnniversariesFile(accessToken, folderId) ?? undefined
+    const existingFileId = await findJsonFile(accessToken, folderId, FILE_NAME) ?? undefined
     const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, body, existingFileId)
     return jsonResponse(meta)
   } catch (e) {

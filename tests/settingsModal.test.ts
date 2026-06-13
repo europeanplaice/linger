@@ -7,13 +7,38 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { autoSave?: boolean; modalOpen?: boolean } = {},
+  opts: { autoSave?: boolean; modalOpen?: boolean; anniversaries?: import('../src/types').Anniversary[] } = {},
 ) {
-  await page.evaluate(({ autoSave, modalOpen }) => {
-    window.settingsHarness.render({ autoSave, modalOpen })
-  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen })
+  await page.evaluate(({ autoSave, modalOpen, anniversaries }) => {
+    window.settingsHarness.render({ autoSave, modalOpen, anniversaries })
+  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen, anniversaries: opts.anniversaries })
   await page.waitForSelector('.settings-dialog')
 }
+
+test.describe('SettingsModal — anniversaries', () => {
+  test('adds, toggles, and confirms deletion of an anniversary', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Add' }).click()
+    await page.getByLabel('Name (e.g. Birthday)').fill('Birthday')
+    await page.getByLabel('Date').fill('2020-05-10')
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const row = page.locator('.settings-anniversary-row', { hasText: 'Birthday' })
+    await expect(row).toContainText('2020-05-10')
+
+    const badgeSwitch = row.getByRole('switch', { name: 'Show badge' })
+    await expect(badgeSwitch).toHaveAttribute('aria-checked', 'true')
+    await badgeSwitch.click()
+    await expect(badgeSwitch).toHaveAttribute('aria-checked', 'false')
+
+    await row.getByRole('button', { name: 'Remove Birthday' }).click()
+    await expect(row).toContainText('Delete anniversary "Birthday"?')
+    await row.getByRole('button', { name: 'Delete' }).click()
+    await expect(row).toHaveCount(0)
+  })
+})
 
 test.describe('SettingsModal — auto-save toggle', () => {
   test('is checked by default when localStorage has no value', async ({ page }) => {

@@ -404,6 +404,17 @@ export async function readJsonFile<T>(token: string, fileId: string): Promise<T>
   )
 }
 
+export async function findJsonFile(token: string, folderId: string, fileName: string): Promise<string | null> {
+  const escapedName = fileName.replace(/'/g, "\\'")
+  const q = encodeURIComponent(`name='${escapedName}' and '${folderId}' in parents and trashed=false`)
+  const fields = encodeURIComponent('files(id)')
+  const res = await driveWithRetry(
+    () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token) }),
+    r => r.json() as Promise<{ files?: { id: string }[] }>,
+  )
+  return res.files?.[0]?.id ?? null
+}
+
 export async function writeJsonFile(
   token: string,
   folderId: string,

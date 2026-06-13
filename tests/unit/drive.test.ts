@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
   ensureFolder, getEntryContent, saveEntry, deleteEntry,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
-  listEntries, getStartPageToken, getChanges, migrateMdToTxt,
+  listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
 } from '../../functions/_shared/drive'
 
 function mockFetch(response: unknown): void {
@@ -31,6 +31,22 @@ describe('DriveError', () => {
     expect(e.status).toBe(404)
     expect(e.message).toBe('Not found')
     expect(e.name).toBe('DriveError')
+  })
+})
+
+describe('findJsonFile', () => {
+  it('returns the matching file id', async () => {
+    mockFetch(driveJsonResponse({ files: [{ id: 'anniversaries-file' }] }))
+
+    await expect(findJsonFile('token', 'folder-1', 'anniversaries.json'))
+      .resolves.toBe('anniversaries-file')
+  })
+
+  it('propagates Drive errors instead of treating them as a missing file', async () => {
+    mockFetch(new Response('Forbidden', { status: 403 }))
+
+    await expect(findJsonFile('token', 'folder-1', 'anniversaries.json'))
+      .rejects.toMatchObject({ name: 'DriveError', status: 403 })
   })
 })
 

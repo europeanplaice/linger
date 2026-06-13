@@ -836,8 +836,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         {isToday && <span className="editor-meta-today">{t.common.today}</span>}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
-        {anniversaryBadges.map(({ label, monthDay, distance }) => (
-          <span key={monthDay} className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}>
+        {anniversaryBadges.map(({ id, label, distance }) => (
+          <span key={id} className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}>
             {distance === 0 ? t.entry.anniversaryOn(label)
              : distance > 0 ? t.entry.anniversaryBefore(label, distance)
              : t.entry.anniversaryAfter(label, Math.abs(distance))}
