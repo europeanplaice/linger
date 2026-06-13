@@ -1298,32 +1298,53 @@ test.describe('EntryEditor — editor meta info', () => {
     ])
   })
 
-  test('styles anniversary badges as borderless clickable controls', async ({ page }) => {
+  test('styles matching anniversary badges as contained and other dates as outlined', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
-      date: '2026-01-01',
+      date: '2020-05-10',
       anniversaries: [
         { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
+        { id: 'graduation', label: 'Graduation', date: '2020-05-11' },
       ],
     })
 
-    const anniversary = page.getByRole('button', { name: 'Open Birthday entry for 2020-05-10' })
-    const styles = await anniversary.evaluate(element => {
+    const contained = page.getByRole('button', { name: 'Open Birthday entry for 2020-05-10' })
+    const outlined = page.getByRole('button', { name: 'Open Graduation entry for 2020-05-11' })
+    const containedStyles = await contained.evaluate(element => {
       const computed = getComputedStyle(element)
       return {
+        backgroundColor: computed.backgroundColor,
+        borderColor: computed.borderColor,
+        borderWidth: computed.borderWidth,
+        color: computed.color,
+      }
+    })
+    const outlinedStyles = await outlined.evaluate(element => {
+      const computed = getComputedStyle(element)
+      return {
+        backgroundColor: computed.backgroundColor,
+        borderColor: computed.borderColor,
         borderWidth: computed.borderWidth,
         boxShadow: computed.boxShadow,
         cursor: computed.cursor,
       }
     })
-    expect(styles).toEqual({
-      borderWidth: '0px',
+    expect(containedStyles).toEqual({
+      backgroundColor: 'rgb(74, 106, 74)',
+      borderColor: 'rgb(74, 106, 74)',
+      borderWidth: '1px',
+      color: 'rgb(255, 255, 255)',
+    })
+    expect(outlinedStyles).toEqual({
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      borderColor: 'rgb(74, 106, 74)',
+      borderWidth: '1px',
       boxShadow: 'none',
       cursor: 'pointer',
     })
 
-    await anniversary.hover()
-    await expect.poll(() => anniversary.evaluate(element => getComputedStyle(element).transform))
+    await outlined.hover()
+    await expect.poll(() => outlined.evaluate(element => getComputedStyle(element).transform))
       .not.toBe('none')
   })
 
