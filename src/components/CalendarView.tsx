@@ -274,6 +274,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
     const map = new Map<number, Anniversary[]>()
     for (const a of anniversaries) {
       if (a.showBadge === false) continue
+      if (a.recurring === false && Number(a.date.slice(0, 4)) !== year) continue
       const parts = a.date.match(/^\d{4}-(\d{2})-(\d{2})$/)
       if (!parts) continue
       const aMonth = Number(parts[1]) - 1  // 0-indexed to match `month` state

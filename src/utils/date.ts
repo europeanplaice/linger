@@ -153,7 +153,7 @@ export function anniversaryProximity(
     // For recurring anniversaries, calculate how many years since the event.
     // anniversary.y === 2000 means legacy data where year was unknown.
     nthYear = entry.y - anniversary.y
-    if (nthYear < 0) nthYear = undefined
+    if (nthYear <= 0) nthYear = undefined
   }
 
   return { id, label, date: anniversaryDate, distance, emoji, recurring, nthYear }

@@ -143,7 +143,7 @@ export function useAnniversaries(
 
   const update = useCallback((id: string, label: string, date: string, emoji?: string, recurring?: boolean) => {
     const next = anniversariesRef.current.map(a =>
-      a.id === id ? { ...a, label, date, ...(emoji ? { emoji } : { emoji: undefined }), recurring } : a
+      a.id === id ? { ...a, label, date, ...(emoji ? { emoji } : {}), ...(recurring !== undefined ? { recurring } : {}) } : a
     )
     mutationVersionRef.current += 1
     anniversariesRef.current = next
