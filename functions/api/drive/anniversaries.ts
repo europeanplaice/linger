@@ -53,6 +53,11 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     if (!/^\d{2}-\d{2}$/.test(item.monthDay)) {
       return jsonResponse({ error: 'Invalid monthDay format' }, 400)
     }
+    const [mm, dd] = item.monthDay.split('-').map(Number)
+    const parsed = new Date(2000, mm - 1, dd)
+    if (parsed.getMonth() !== mm - 1 || parsed.getDate() !== dd) {
+      return jsonResponse({ error: 'Invalid date' }, 400)
+    }
   }
 
   try {

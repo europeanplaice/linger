@@ -1,3 +1,5 @@
+import type { AnniversaryProximity } from '../types'
+
 export const DEFAULT_DATE_LOCALE = 'ja-JP'
 
 export function todayYmd(): string {
@@ -128,12 +130,6 @@ export function nearestWithDistance(dates: string[], target: string, maxDistance
 
 export function nearestEntryWithin(dates: string[], target: string, maxDistanceDays: number): string | null {
   return nearestWithDistance(dates, target, maxDistanceDays)?.date ?? null
-}
-
-export interface AnniversaryProximity {
-  label: string
-  monthDay: string
-  distance: number
 }
 
 export function nearestAnniversaryOccurrence(

@@ -1,4 +1,4 @@
-import type { Anniversary } from '../types'
+import { isAnniversary, type Anniversary } from '../types'
 import { apiFetch, TokenExpiredError } from './driveEntries'
 
 export { TokenExpiredError }
@@ -6,12 +6,7 @@ export { TokenExpiredError }
 export async function loadAnniversaries(): Promise<Anniversary[]> {
   const { data } = await apiFetch<unknown>('/api/drive/anniversaries', undefined, [404])
   if (Array.isArray(data)) {
-    return data.filter((item): item is Anniversary =>
-      typeof item === 'object' && item !== null
-      && typeof (item as Anniversary).id === 'string'
-      && typeof (item as Anniversary).label === 'string'
-      && typeof (item as Anniversary).monthDay === 'string',
-    )
+    return data.filter(isAnniversary)
   }
   return []
 }

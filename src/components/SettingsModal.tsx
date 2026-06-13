@@ -399,6 +399,7 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
         onChange={e => setNewLabel(e.target.value)}
         placeholder={t.settings.anniversaryLabelPlaceholder}
         aria-label={t.settings.anniversaryLabelPlaceholder}
+        autoFocus
       />
       <input
         className="settings-anniversary-input settings-anniversary-date-input"

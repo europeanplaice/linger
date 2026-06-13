@@ -58,27 +58,28 @@ export function useAnniversaries(
   const driveSyncRef = useRef<Promise<void> | null>(null)
 
   const persist = useCallback((next: Anniversary[]) => {
-    setAnniversaries(next)
     saveLocal(next)
     driveSyncRef.current = saveAnniversaries(next).catch(e => {
       if (e instanceof TokenExpiredError) onTokenExpiredRef.current()
+      else console.error('Failed to sync anniversaries to Drive:', e)
     })
   }, [onTokenExpiredRef])
 
   const add = useCallback((label: string, monthDay: string) => {
-    const next = [...anniversaries, { id: generateId(), label, monthDay }]
-    persist(next)
-  }, [anniversaries, persist])
+    setAnniversaries(prev => {
+      const next = [...prev, { id: generateId(), label, monthDay }]
+      persist(next)
+      return next
+    })
+  }, [persist])
 
   const remove = useCallback((id: string) => {
-    const next = anniversaries.filter(a => a.id !== id)
-    persist(next)
-  }, [anniversaries, persist])
+    setAnniversaries(prev => {
+      const next = prev.filter(a => a.id !== id)
+      persist(next)
+      return next
+    })
+  }, [persist])
 
-  const update = useCallback((id: string, label: string, monthDay: string) => {
-    const next = anniversaries.map(a => a.id === id ? { ...a, label, monthDay } : a)
-    persist(next)
-  }, [anniversaries, persist])
-
-  return { anniversaries, add, remove, update }
+  return { anniversaries, add, remove }
 }
