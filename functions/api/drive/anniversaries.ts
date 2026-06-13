@@ -47,15 +47,15 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   }
 
   for (const item of body) {
-    if (!item || typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.monthDay !== 'string') {
+    if (!item || typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.date !== 'string') {
       return jsonResponse({ error: 'Invalid anniversary entry' }, 400)
     }
-    if (!/^\d{2}-\d{2}$/.test(item.monthDay)) {
-      return jsonResponse({ error: 'Invalid monthDay format' }, 400)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
+      return jsonResponse({ error: 'Invalid date format (expected YYYY-MM-DD)' }, 400)
     }
-    const [mm, dd] = item.monthDay.split('-').map(Number)
-    const parsed = new Date(2000, mm - 1, dd)
-    if (parsed.getMonth() !== mm - 1 || parsed.getDate() !== dd) {
+    const [y, m, d] = item.date.split('-').map(Number)
+    const parsed = new Date(y, m - 1, d)
+    if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) {
       return jsonResponse({ error: 'Invalid date' }, 400)
     }
   }

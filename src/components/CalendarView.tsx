@@ -358,7 +358,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const holiday = yearHolidays[dateStr]
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
               const mmDd = `${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-              const hasAnniversary = anniversaries?.some(a => a.monthDay === mmDd) ?? false
+              const hasAnniversary = anniversaries?.some(a => a.date.slice(5) === mmDd) ?? false
               return (
                 <motion.button
                   key={dateStr}

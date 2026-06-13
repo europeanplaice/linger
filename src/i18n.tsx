@@ -209,6 +209,10 @@ const dictionaries = {
       anniversarySave: 'Add',
       anniversaryCancel: 'Cancel',
       anniversaryRemove: (label: string) => `Remove ${label}`,
+      anniversaryBadgeLabel: 'Show badge',
+      anniversaryDeleteConfirm: (label: string) => `Delete anniversary "${label}"?`,
+      anniversaryDeleteYes: 'Delete',
+      anniversaryDeleteNo: 'Cancel',
     },
     export: {
       title: 'Export all diary entries as ZIP file',
@@ -429,6 +433,10 @@ const dictionaries = {
       anniversarySave: '追加',
       anniversaryCancel: 'キャンセル',
       anniversaryRemove: (label: string) => `${label}を削除`,
+      anniversaryBadgeLabel: 'バッジ表示',
+      anniversaryDeleteConfirm: (label: string) => `「${label}」を削除しますか？`,
+      anniversaryDeleteYes: '削除',
+      anniversaryDeleteNo: 'キャンセル',
     },
     export: {
       title: 'すべての日記を ZIP ファイルとしてエクスポート',

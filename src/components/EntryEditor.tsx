@@ -149,9 +149,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
+  const activeAnniversaries = useMemo(
+    () => (anniversaries ?? []).filter(a => a.showBadge !== false),
+    [anniversaries],
+  )
   const anniversaryBadges = useMemo(
-    () => anniversariesNearEntry(date, anniversaries ?? [], 7).slice(0, 3),
-    [date, anniversaries],
+    () => anniversariesNearEntry(date, activeAnniversaries, 7).slice(0, 3),
+    [date, activeAnniversaries],
   )
   const daysDiff = (() => {
     const today = todayYmd()

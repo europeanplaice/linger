@@ -28,12 +28,14 @@ interface SettingsModalProps {
   onSignOut: () => void
   email?: string
   anniversaries?: Anniversary[]
-  onAnniversaryAdd?: (label: string, monthDay: string) => void
+  onAnniversaryAdd?: (label: string, date: string) => void
   onAnniversaryRemove?: (id: string) => void
+  onAnniversaryToggleBadge?: (id: string) => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
+  const [pendingDelete, setPendingDelete] = useState<Anniversary | null>(null)
 
   // Localized country names come from Intl, so no hardcoded country dictionary.
   const holidayOptions = useMemo(() => {
@@ -151,13 +153,35 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 {anniversaries.map(a => (
                   <div key={a.id} className="settings-anniversary-row">
                     <span className="settings-anniversary-label">{a.label}</span>
-                    <span className="settings-anniversary-date">{a.monthDay}</span>
+                    <span className="settings-anniversary-date">{a.date}</span>
+                    {onAnniversaryToggleBadge && (
+                      <span className="settings-anniversary-badge-toggle-wrap">
+                        <button
+                          className={`settings-anniversary-badge-toggle ${a.showBadge !== false ? 'active' : ''}`}
+                          onClick={() => onAnniversaryToggleBadge(a.id)}
+                          role="switch"
+                          aria-checked={a.showBadge !== false}
+                          aria-label={t.settings.anniversaryBadgeLabel}
+                        >
+                          <span className="settings-anniversary-badge-toggle-thumb" />
+                        </button>
+                        <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
+                      </span>
+                    )}
                     {onAnniversaryRemove && (
-                      <button
-                        className="settings-anniversary-remove"
-                        onClick={() => onAnniversaryRemove(a.id)}
-                        aria-label={t.settings.anniversaryRemove(a.label)}
-                      >×</button>
+                      pendingDelete?.id === a.id ? (
+                        <span className="settings-anniversary-confirm">
+                          <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
+                          <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
+                          <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                        </span>
+                      ) : (
+                        <button
+                          className="settings-anniversary-remove"
+                          onClick={() => setPendingDelete(a)}
+                          aria-label={t.settings.anniversaryRemove(a.label)}
+                        >×</button>
+                      )
                     )}
                   </div>
                 ))}
@@ -354,20 +378,18 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   )
 }
 
-function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
+function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, date: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
   const [showForm, setShowForm] = useState(false)
   const [formKey, setFormKey] = useState(0)
   const [newLabel, setNewLabel] = useState('')
-  const [newMonthDay, setNewMonthDay] = useState('')
-  const [dateValue, setDateValue] = useState('')
+  const [newDate, setNewDate] = useState('')
   const [errors, setErrors] = useState<string[]>([])
 
   const openForm = () => {
     setFormKey(k => k + 1)
     setShowForm(true)
     setNewLabel('')
-    setNewMonthDay('')
-    setDateValue('')
+    setNewDate('')
     setErrors([])
   }
 
@@ -379,12 +401,14 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
   const validate = (): boolean => {
     const errs: string[] = []
     if (!newLabel.trim()) errs.push(t.settings.anniversaryEmptyLabel)
-    if (!/^\d{2}-\d{2}$/.test(newMonthDay)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
       errs.push(t.settings.anniversaryInvalidDate)
     } else {
-      const [mm, dd] = newMonthDay.split('-').map(Number)
-      const d = new Date(2000, mm - 1, dd)
-      if (d.getMonth() !== mm - 1 || d.getDate() !== dd) errs.push(t.settings.anniversaryInvalidDate)
+      const [y, m, d] = newDate.split('-').map(Number)
+      const dt = new Date(y, m - 1, d)
+      if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+        errs.push(t.settings.anniversaryInvalidDate)
+      }
     }
     setErrors(errs)
     return errs.length === 0
@@ -392,19 +416,8 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
 
   const handleAdd = () => {
     if (!validate()) return
-    onAdd(newLabel.trim(), newMonthDay)
+    onAdd(newLabel.trim(), newDate)
     closeForm()
-  }
-
-  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value
-    setDateValue(val)
-    if (val) {
-      const parts = val.split('-')
-      setNewMonthDay(`${parts[1]}-${parts[2]}`)
-    } else {
-      setNewMonthDay('')
-    }
   }
 
   if (!showForm) {
@@ -428,8 +441,8 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
       <input
         type="date"
         className="settings-anniversary-input settings-anniversary-date-input"
-        value={dateValue}
-        onChange={handleDateChange}
+        value={newDate}
+        onChange={e => setNewDate(e.target.value)}
         aria-label={t.settings.anniversaryDatePlaceholder}
       />
       {errors.length > 0 && (

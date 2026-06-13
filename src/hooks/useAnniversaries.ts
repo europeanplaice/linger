@@ -65,9 +65,9 @@ export function useAnniversaries(
     })
   }, [onTokenExpiredRef])
 
-  const add = useCallback((label: string, monthDay: string) => {
+  const add = useCallback((label: string, date: string) => {
     setAnniversaries(prev => {
-      const next = [...prev, { id: generateId(), label, monthDay }]
+      const next = [...prev, { id: generateId(), label, date }]
       persist(next)
       return next
     })
@@ -81,5 +81,13 @@ export function useAnniversaries(
     })
   }, [persist])
 
-  return { anniversaries, add, remove }
+  const toggleBadge = useCallback((id: string) => {
+    setAnniversaries(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a)
+      persist(next)
+      return next
+    })
+  }, [persist])
+
+  return { anniversaries, add, remove, toggleBadge }
 }

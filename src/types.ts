@@ -36,14 +36,17 @@ export interface DriveRevisionMeta {
 export interface Anniversary {
   id: string
   label: string
-  monthDay: string
+  date: string   // YYYY-MM-DD (year stored for reference; proximity uses MM-DD)
+  showBadge?: boolean
 }
 
 export function isAnniversary(v: unknown): v is Anniversary {
+  const a = v as Anniversary
   return typeof v === 'object' && v !== null
-    && typeof (v as Anniversary).id === 'string'
-    && typeof (v as Anniversary).label === 'string'
-    && /^\d{2}-\d{2}$/.test((v as Anniversary).monthDay)
+    && typeof a.id === 'string'
+    && typeof a.label === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(a.date)
+    && (a.showBadge === undefined || typeof a.showBadge === 'boolean')
 }
 
 export function isAnniversaryArray(v: unknown): v is Anniversary[] {

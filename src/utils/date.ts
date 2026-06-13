@@ -159,12 +159,13 @@ export function nearestAnniversaryOccurrence(
 
 export function anniversariesNearEntry(
   entryDate: string,
-  anniversaries: ReadonlyArray<{ label: string; monthDay: string }>,
+  anniversaries: ReadonlyArray<{ label: string; date: string }>,
   maxDistanceDays = 7,
 ): AnniversaryProximity[] {
   const results: AnniversaryProximity[] = []
   for (const a of anniversaries) {
-    const prox = nearestAnniversaryOccurrence(entryDate, a.monthDay, a.label)
+    const monthDay = a.date.slice(5)
+    const prox = nearestAnniversaryOccurrence(entryDate, monthDay, a.label)
     if (prox && Math.abs(prox.distance) <= maxDistanceDays) {
       results.push(prox)
     }

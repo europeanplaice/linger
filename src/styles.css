@@ -1542,6 +1542,47 @@ dialog.settings-dialog::backdrop {
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
 }
+.settings-anniversary-badge-toggle {
+  background: var(--border);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  height: 1rem;
+  padding: 0;
+  position: relative;
+  transition: background 0.15s;
+  width: 1.75rem;
+}
+.settings-anniversary-badge-toggle.active {
+  background: var(--accent);
+}
+.settings-anniversary-badge-toggle-thumb {
+  background: #fff;
+  border-radius: 50%;
+  display: block;
+  height: 0.75rem;
+  left: 0.125rem;
+  position: absolute;
+  top: 0.125rem;
+  transition: transform 0.15s;
+  width: 0.75rem;
+}
+.settings-anniversary-badge-toggle.active .settings-anniversary-badge-toggle-thumb {
+  transform: translateX(0.75rem);
+}
+.settings-anniversary-badge-toggle-wrap {
+  align-items: center;
+  display: flex;
+  gap: 0.25rem;
+}
+.settings-anniversary-badge-label {
+  color: var(--text-muted);
+  cursor: default;
+  font-size: 0.72rem;
+  user-select: none;
+  white-space: nowrap;
+}
 .settings-anniversary-remove {
   background: none;
   border: none;
@@ -1554,6 +1595,37 @@ dialog.settings-dialog::backdrop {
   transition: opacity 0.12s;
 }
 .settings-anniversary-remove:hover { opacity: 1; }
+.settings-anniversary-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+.settings-anniversary-confirm-text {
+  color: var(--danger);
+  white-space: nowrap;
+}
+.settings-anniversary-confirm-yes {
+  background: var(--danger);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.2rem 0.5rem;
+  font-family: inherit;
+}
+.settings-anniversary-confirm-no {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.5rem;
+  font-family: inherit;
+}
 .settings-anniversary-add-btn {
   background: var(--accent);
   border: none;
