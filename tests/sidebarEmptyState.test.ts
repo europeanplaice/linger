@@ -54,6 +54,9 @@ test.describe('sidebar empty state', () => {
         await route.fulfill({ status: 404, body: '' })
       }
     })
+    await page.route('/api/drive/anniversaries', route =>
+      route.fulfill({ json: [] }),
+    )
 
     await page.goto(baseUrl)
     await expect(page.locator('.sidebar-empty-hint')).toBeVisible()

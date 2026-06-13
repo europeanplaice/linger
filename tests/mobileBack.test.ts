@@ -25,6 +25,9 @@ test.beforeEach(async ({ page }) => {
   await page.route('/api/drive/entry/**', async route => {
     await route.fulfill({ status: 404, body: '' })
   })
+  await page.route('/api/drive/anniversaries', async route => {
+    await route.fulfill({ json: [] })
+  })
 })
 
 test('mobile back closes sidebar instead of leaving the app', async ({ page }) => {

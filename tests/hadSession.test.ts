@@ -42,6 +42,9 @@ test('app shell shown during auth check when prior session hint is set', async (
   await page.route('/api/drive/entry/**', async route => {
     await route.fulfill({ status: 404, body: '' })
   })
+  await page.route('/api/drive/anniversaries', async route => {
+    await route.fulfill({ json: [] })
+  })
 
   await page.goto(baseUrl)
 
@@ -61,6 +64,9 @@ test('sets linger_had_session to true after successful session check', async ({ 
   })
   await page.route('/api/drive/entry/**', async route => {
     await route.fulfill({ status: 404, body: '' })
+  })
+  await page.route('/api/drive/anniversaries', async route => {
+    await route.fulfill({ json: [] })
   })
 
   await page.goto(baseUrl)
@@ -95,6 +101,9 @@ test('clears linger_had_session on sign-out', async ({ page }) => {
   })
   await page.route('/api/drive/entry/**', async route => {
     await route.fulfill({ status: 404, body: '' })
+  })
+  await page.route('/api/drive/anniversaries', async route => {
+    await route.fulfill({ json: [] })
   })
   await page.route('/auth/logout', async route => {
     await route.fulfill({ status: 200, body: '' })
