@@ -1592,8 +1592,15 @@ dialog.settings-dialog::backdrop {
   border-color: var(--accent);
 }
 .settings-anniversary-date-input {
-  font-family: ui-monospace, monospace;
-  width: 6rem;
+  min-width: 10rem;
+}
+.settings-anniversary-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+.settings-anniversary-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 .settings-anniversary-errors {
   display: flex;

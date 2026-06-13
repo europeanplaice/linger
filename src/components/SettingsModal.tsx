@@ -356,9 +356,25 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
 
 function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: string) => void; t: ReturnType<typeof useI18n>['t'] }) {
   const [showForm, setShowForm] = useState(false)
+  const [formKey, setFormKey] = useState(0)
   const [newLabel, setNewLabel] = useState('')
   const [newMonthDay, setNewMonthDay] = useState('')
+  const [dateValue, setDateValue] = useState('')
   const [errors, setErrors] = useState<string[]>([])
+
+  const openForm = () => {
+    setFormKey(k => k + 1)
+    setShowForm(true)
+    setNewLabel('')
+    setNewMonthDay('')
+    setDateValue('')
+    setErrors([])
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setErrors([])
+  }
 
   const validate = (): boolean => {
     const errs: string[] = []
@@ -377,22 +393,30 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
   const handleAdd = () => {
     if (!validate()) return
     onAdd(newLabel.trim(), newMonthDay)
-    setNewLabel('')
-    setNewMonthDay('')
-    setErrors([])
-    setShowForm(false)
+    closeForm()
+  }
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    setDateValue(val)
+    if (val) {
+      const parts = val.split('-')
+      setNewMonthDay(`${parts[1]}-${parts[2]}`)
+    } else {
+      setNewMonthDay('')
+    }
   }
 
   if (!showForm) {
     return (
-      <button className="settings-anniversary-add-btn" onClick={() => setShowForm(true)}>
+      <button className="settings-anniversary-add-btn" onClick={openForm}>
         {t.settings.anniversaryAdd}
       </button>
     )
   }
 
   return (
-    <div className="settings-anniversary-form">
+    <div className="settings-anniversary-form" key={formKey}>
       <input
         className="settings-anniversary-input"
         value={newLabel}
@@ -402,10 +426,10 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
         autoFocus
       />
       <input
+        type="date"
         className="settings-anniversary-input settings-anniversary-date-input"
-        value={newMonthDay}
-        onChange={e => setNewMonthDay(e.target.value)}
-        placeholder={t.settings.anniversaryDatePlaceholder}
+        value={dateValue}
+        onChange={handleDateChange}
         aria-label={t.settings.anniversaryDatePlaceholder}
       />
       {errors.length > 0 && (
@@ -415,7 +439,7 @@ function AnniversaryAddForm({ onAdd, t }: { onAdd: (label: string, monthDay: str
       )}
       <div className="settings-anniversary-form-actions">
         <button className="settings-anniversary-save" onClick={handleAdd}>{t.settings.anniversarySave}</button>
-        <button className="settings-anniversary-cancel" onClick={() => { setShowForm(false); setErrors([]) }}>{t.settings.anniversaryCancel}</button>
+        <button className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
       </div>
     </div>
   )
