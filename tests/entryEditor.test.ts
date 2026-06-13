@@ -56,7 +56,7 @@ test.describe('EntryEditor — date header', () => {
       diaryListLoaded: true,
     })
 
-    await expect(page.locator('textarea.editor-textarea')).toHaveAttribute('placeholder', 'What would you like to remember about today?')
+    await expect(page.locator('textarea.editor-textarea')).toHaveAttribute('placeholder', 'What would you like to remember about this day?')
   })
 
   test('hides the character count until a new empty entry has text', async ({ page }) => {
