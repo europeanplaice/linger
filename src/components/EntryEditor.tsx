@@ -5,7 +5,7 @@ import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
-import type { Anniversary, LoadedDiaryEntry } from '../types'
+import { MAX_ANNIVERSARY_BADGES, type Anniversary, type LoadedDiaryEntry } from '../types'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, anniversariesNearEntry } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
@@ -155,7 +155,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     [anniversaries],
   )
   const anniversaryBadges = useMemo(
-    () => anniversariesNearEntry(date, activeAnniversaries),
+    () => anniversariesNearEntry(date, activeAnniversaries).slice(0, MAX_ANNIVERSARY_BADGES),
     [date, activeAnniversaries],
   )
   const daysDiff = (() => {
