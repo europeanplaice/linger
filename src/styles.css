@@ -1506,6 +1506,12 @@ dialog.settings-dialog::backdrop {
 }
 .settings-drive-link:hover { text-decoration: underline; }
 
+.settings-item-anniversaries {
+  align-items: flex-start;
+  min-height: unset;
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+}
 .settings-anniversary-section {
   display: flex;
   flex-direction: column;

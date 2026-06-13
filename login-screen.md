@@ -1,0 +1,106 @@
+- generic [ref=e3]:
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - heading "Linger" [level=1] [ref=e7]
+      - paragraph [ref=e8]: Your private diary, stored in your Google Drive.
+      - paragraph [ref=e9]: Only accesses diary files created by this app.
+      - button "Sign in with Google" [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+        - text: Sign in with Google
+      - paragraph [ref=e16]:
+        - link "About" [ref=e17] [cursor=pointer]:
+          - /url: /home
+        - text: ·
+        - link "Privacy Policy" [ref=e18] [cursor=pointer]:
+          - /url: /privacy
+        - text: ·
+        - link "Terms of Service" [ref=e19] [cursor=pointer]:
+          - /url: /terms-of-service
+      - generic [ref=e20]:
+        - button "EN" [pressed] [ref=e21] [cursor=pointer]
+        - generic [ref=e22]: ·
+        - button "日本語" [ref=e23] [cursor=pointer]
+  - generic [ref=e24]:
+    - region "Screenshots" [ref=e25]:
+      - figure "Write your day. Browse past entries on the calendar." [ref=e26]:
+        - img "Linger diary editor showing a dated entry alongside a monthly calendar in the sidebar" [ref=e27]
+        - generic [ref=e28]: Write your day. Browse past entries on the calendar.
+      - figure "Full-text search across everything you've written." [ref=e29]:
+        - img "Linger full-text search listing matching diary entries with highlighted keywords" [ref=e30]
+        - generic [ref=e31]: Full-text search across everything you've written.
+      - generic [ref=e32]:
+        - figure [ref=e33]:
+          - img "Linger diary editor on a phone screen" [ref=e34]
+        - figure [ref=e35]:
+          - img "Linger calendar drawer open on a phone screen" [ref=e36]
+      - paragraph [ref=e37]: Works just as well on your phone.
+    - generic [ref=e38]:
+      - heading "What is Linger?" [level=2] [ref=e39]
+      - paragraph [ref=e40]: Linger is a personal diary web app. Write daily entries and access them from any device. Your entries are saved as individual plain-text files inside your own Google Drive account — you retain full ownership and control of your data at all times.
+      - paragraph [ref=e41]:
+        - text: To store and retrieve your diary files, Linger requests the Google Drive
+        - code [ref=e42]: drive.file
+        - text: OAuth scope, along with the standard
+        - code [ref=e43]: openid
+        - text: and
+        - code [ref=e44]: email
+        - text: scopes used only to identify your account at sign-in. The
+        - code [ref=e45]: drive.file
+        - text: scope grants access
+        - strong [ref=e46]: exclusively to files that Linger itself creates
+        - text: — it cannot read, modify, or delete any other files in your Google Drive.
+    - generic [ref=e47]:
+      - heading "Features" [level=2] [ref=e48]
+      - list [ref=e49]:
+        - listitem [ref=e50]: Write and edit diary entries with a clean, distraction-free editor
+        - listitem [ref=e51]: Browse entries on a monthly calendar view
+        - listitem [ref=e52]: Full-text search across all your entries
+        - listitem [ref=e53]: View and restore previous versions of any entry
+        - listitem [ref=e54]: Export all entries as a ZIP file
+        - listitem [ref=e55]: Available in English and Japanese
+    - generic [ref=e56]:
+      - heading "Data & Privacy" [level=2] [ref=e57]
+      - paragraph [ref=e58]:
+        - text: Diary entries reside entirely in your own Google Drive folder (
+        - code [ref=e59]: linger_diary/
+        - text: ). No diary content is stored on Linger's servers. OAuth tokens are handled server-side and are never exposed to the browser.
+      - paragraph [ref=e60]:
+        - text: For full details, see the
+        - link "Privacy Policy" [ref=e61] [cursor=pointer]:
+          - /url: /privacy
+        - text: .
+    - generic [ref=e62]:
+      - heading "How to verify this app is safe" [level=2] [ref=e63]
+      - paragraph [ref=e64]: You don't have to take our word for it. Here are concrete steps you can take to verify that Linger cannot read, copy, or transmit your diary entries anywhere other than your own Google Drive.
+      - list [ref=e65]:
+        - listitem [ref=e66]:
+          - strong [ref=e67]: Check what Google permissions you granted
+          - text: — Go to
+          - link "Google Account → Apps & services" [ref=e68] [cursor=pointer]:
+            - /url: https://myaccount.google.com/permissions
+          - text: and find Linger. The only scope listed should be the
+          - code [ref=e69]: drive.file
+          - text: scope, which cannot access any other files in your Drive. You can revoke access there at any time.
+        - listitem [ref=e70]:
+          - strong [ref=e71]: Inspect network requests in your browser
+          - text: — Open DevTools → Network while using the app. Every request goes to
+          - code [ref=e72]: /api/drive/…
+          - text: (the Cloudflare proxy on this domain) or
+          - code [ref=e73]: accounts.google.com
+          - text: (OAuth). No requests are made to any third-party server.
+        - listitem [ref=e74]:
+          - strong [ref=e75]: Read the source code
+          - text: — The entire codebase is open source on
+          - link "GitHub" [ref=e76] [cursor=pointer]:
+            - /url: https://github.com/europeanplaice/linger
+          - text: . You can also self-host using your own Google Cloud and Cloudflare accounts.
+    - contentinfo [ref=e77]:
+      - link "Privacy Policy" [ref=e78] [cursor=pointer]:
+        - /url: /privacy
+      - text: ·
+      - link "Terms of Service" [ref=e79] [cursor=pointer]:
+        - /url: /terms-of-service
+      - text: ·
+      - link "GitHub" [ref=e80] [cursor=pointer]:
+        - /url: https://github.com/europeanplaice/linger

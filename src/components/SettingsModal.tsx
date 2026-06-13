@@ -141,7 +141,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           />
         </div>
         <div className="settings-divider" />
-        <div className="settings-item">
+        <div className="settings-item settings-item-anniversaries">
           <span className="settings-item-label">{t.settings.anniversaries}</span>
           <div className="settings-anniversary-section">
             {anniversaries.length === 0 ? (

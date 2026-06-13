@@ -20,7 +20,7 @@ function loadLocal(): Anniversary[] {
 function saveLocal(list: Anniversary[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 let nextId = 1
