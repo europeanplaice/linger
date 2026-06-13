@@ -139,6 +139,16 @@ export function useAnniversaries(
     persist(next)
   }, [persist])
 
+  const update = useCallback((id: string, label: string, date: string) => {
+    const next = anniversariesRef.current.map(a =>
+      a.id === id ? { ...a, label, date } : a
+    )
+    mutationVersionRef.current += 1
+    anniversariesRef.current = next
+    setAnniversaries(next)
+    persist(next)
+  }, [persist])
+
   const toggleBadge = useCallback((id: string) => {
     const target = anniversariesRef.current.find(a => a.id === id)
     if (!target) return
@@ -155,5 +165,5 @@ export function useAnniversaries(
     persist(next)
   }, [persist])
 
-  return { anniversaries, add, remove, toggleBadge }
+  return { anniversaries, add, update, remove, toggleBadge }
 }

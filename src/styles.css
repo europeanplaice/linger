@@ -1627,6 +1627,24 @@ dialog.settings-dialog::backdrop {
   user-select: none;
   white-space: nowrap;
 }
+.settings-anniversary-edit {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0.4rem;
+  opacity: 0.6;
+  transition: opacity 0.12s;
+}
+.settings-anniversary-edit:hover {
+  background: var(--border);
+  opacity: 1;
+}
 .settings-anniversary-remove {
   background: none;
   border: none;
@@ -1812,6 +1830,7 @@ dialog.settings-dialog::backdrop {
 .settings-anniversary-cancel:hover { background: var(--border); }
 
 .settings-anniversary-badge-toggle:focus-visible,
+.settings-anniversary-edit:focus-visible,
 .settings-anniversary-remove:focus-visible,
 .settings-anniversary-add-btn:focus-visible,
 .settings-anniversary-confirm-yes:focus-visible,

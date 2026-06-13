@@ -217,6 +217,9 @@ const dictionaries = {
       anniversaryDeleteConfirm: (label: string) => `Delete anniversary "${label}"?`,
       anniversaryDeleteYes: 'Delete',
       anniversaryDeleteNo: 'Cancel',
+      anniversaryEdit: (label: string) => `Edit ${label}`,
+      anniversaryEditSave: 'Save',
+      anniversaryLabelTooLong: (max: number) => `Name must be at most ${max} characters`,
     },
     export: {
       title: 'Export all diary entries as ZIP file',
@@ -445,6 +448,9 @@ const dictionaries = {
       anniversaryDeleteConfirm: (label: string) => `「${label}」を削除しますか？`,
       anniversaryDeleteYes: '削除',
       anniversaryDeleteNo: 'キャンセル',
+      anniversaryEdit: (label: string) => `${label}を編集`,
+      anniversaryEditSave: '保存',
+      anniversaryLabelTooLong: (max: number) => `名前は${max}文字以内で入力してください`,
     },
     export: {
       title: 'すべての日記を ZIP ファイルとしてエクスポート',

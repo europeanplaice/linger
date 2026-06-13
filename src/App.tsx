@@ -145,7 +145,7 @@ export default function App() {
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
-  const { anniversaries, add: addAnniversary, remove: removeAnniversary, toggleBadge: toggleAnniversaryBadge } = useAnniversaries(status, handleExpired)
+  const { anniversaries, add: addAnniversary, update: updateAnniversary, remove: removeAnniversary, toggleBadge: toggleAnniversaryBadge } = useAnniversaries(status, handleExpired)
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -603,6 +603,7 @@ export default function App() {
             email={email ?? undefined}
             anniversaries={anniversaries}
             onAnniversaryAdd={addAnniversary}
+            onAnniversaryUpdate={updateAnniversary}
             onAnniversaryRemove={removeAnniversary}
             onAnniversaryToggleBadge={toggleAnniversaryBadge}
           />

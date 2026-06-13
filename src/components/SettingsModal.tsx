@@ -14,6 +14,7 @@ import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 import {
   MAX_ANNIVERSARIES,
   MAX_ANNIVERSARY_BADGES,
+  MAX_ANNIVERSARY_LABEL_LENGTH,
   type Anniversary,
 } from '../types'
 
@@ -35,15 +36,17 @@ interface SettingsModalProps {
   email?: string
   anniversaries?: Anniversary[]
   onAnniversaryAdd?: (label: string, date: string) => void
+  onAnniversaryUpdate?: (id: string, label: string, date: string) => void
   onAnniversaryRemove?: (id: string) => void
   onAnniversaryToggleBadge?: (id: string) => void
 }
 
 const calendarAnchorSupported = typeof CSS !== 'undefined' && CSS.supports('anchor-name', '--x')
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryUpdate, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Anniversary | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const anniversaryLimitId = useId()
   const badgeLimitId = useId()
   const enabledBadgeCount = anniversaries.filter(a => a.showBadge !== false).length
@@ -178,6 +181,20 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 {anniversaries.map(a => {
                   const badgeEnabled = a.showBadge !== false
                   const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
+                  if (editingId === a.id && onAnniversaryUpdate) {
+                    return (
+                      <AnniversaryEditForm
+                        key={a.id}
+                        anniversary={a}
+                        onSave={(label, date) => {
+                          onAnniversaryUpdate(a.id, label, date)
+                          setEditingId(null)
+                        }}
+                        onCancel={() => setEditingId(null)}
+                        t={t}
+                      />
+                    )
+                  }
                   return (
                     <div key={a.id} className="settings-anniversary-row">
                       <div className="settings-anniversary-details">
@@ -204,19 +221,28 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                             <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
                           </span>
                         )}
+                        {onAnniversaryUpdate && (
+                          <button
+                            type="button"
+                            className="settings-anniversary-edit"
+                            onClick={() => { setPendingDelete(null); setEditingId(a.id) }}
+                            aria-label={t.settings.anniversaryEdit(a.label)}
+                          >✎</button>
+                        )}
                         {onAnniversaryRemove && (
                           pendingDelete?.id === a.id ? (
                             <span className="settings-anniversary-confirm">
                               <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
                               <span className="settings-anniversary-confirm-actions">
-                                <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
-                                <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                                <button type="button" className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
+                                <button type="button" className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
                               </span>
                             </span>
                           ) : (
                             <button
+                              type="button"
                               className="settings-anniversary-remove"
-                              onClick={() => setPendingDelete(a)}
+                              onClick={() => { setEditingId(null); setPendingDelete(a) }}
                               aria-label={t.settings.anniversaryRemove(a.label)}
                             >×</button>
                           )
@@ -539,6 +565,90 @@ function AnniversaryDatePicker({ id, value, onChange, label }: {
   )
 }
 
+function validateAnniversaryFields(
+  label: string,
+  date: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string[] {
+  const errs: string[] = []
+  if (!label.trim()) errs.push(t.settings.anniversaryEmptyLabel)
+  if (label.trim().length > MAX_ANNIVERSARY_LABEL_LENGTH) errs.push(t.settings.anniversaryLabelTooLong(MAX_ANNIVERSARY_LABEL_LENGTH))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    errs.push(t.settings.anniversaryInvalidDate)
+  } else {
+    const [y, m, d] = date.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+      errs.push(t.settings.anniversaryInvalidDate)
+    }
+  }
+  return errs
+}
+
+function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
+  anniversary: Anniversary
+  onSave: (label: string, date: string) => void
+  onCancel: () => void
+  t: ReturnType<typeof useI18n>['t']
+}) {
+  const labelId = useId()
+  const dateId = useId()
+  const [label, setLabel] = useState(anniversary.label)
+  const [date, setDate] = useState(anniversary.date)
+  const [errors, setErrors] = useState<string[]>([])
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    const errs = validateAnniversaryFields(label, date, t)
+    setErrors(errs)
+    if (errs.length > 0) return
+    onSave(label.trim(), date)
+  }
+
+  return (
+    <form
+      className="settings-anniversary-form settings-anniversary-edit-form"
+      onSubmit={handleSubmit}
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          onCancel()
+        }
+      }}
+    >
+      <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
+      <input
+        id={labelId}
+        name="anniversary-label"
+        className="settings-anniversary-input"
+        value={label}
+        onChange={e => setLabel(e.target.value)}
+        placeholder={t.settings.anniversaryLabelPlaceholder}
+        maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
+        required
+        autoFocus
+      />
+      <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
+      <AnniversaryDatePicker
+        id={dateId}
+        value={date}
+        onChange={setDate}
+        label={t.settings.anniversaryDatePlaceholder}
+      />
+      {errors.length > 0 && (
+        <div className="settings-anniversary-errors" role="alert">
+          {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
+        </div>
+      )}
+      <div className="settings-anniversary-form-actions">
+        <button type="submit" className="settings-anniversary-save">{t.settings.anniversaryEditSave}</button>
+        <button type="button" className="settings-anniversary-cancel" onClick={onCancel}>{t.settings.anniversaryCancel}</button>
+      </div>
+    </form>
+  )
+}
+
 function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
   onAdd: (label: string, date: string) => void
   t: ReturnType<typeof useI18n>['t']
@@ -566,25 +676,11 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
     setErrors([])
   }
 
-  const validate = (): boolean => {
-    const errs: string[] = []
-    if (!newLabel.trim()) errs.push(t.settings.anniversaryEmptyLabel)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
-      errs.push(t.settings.anniversaryInvalidDate)
-    } else {
-      const [y, m, d] = newDate.split('-').map(Number)
-      const dt = new Date(y, m - 1, d)
-      if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
-        errs.push(t.settings.anniversaryInvalidDate)
-      }
-    }
-    setErrors(errs)
-    return errs.length === 0
-  }
-
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault()
-    if (!validate()) return
+    const errs = validateAnniversaryFields(newLabel, newDate, t)
+    setErrors(errs)
+    if (errs.length > 0) return
     onAdd(newLabel.trim(), newDate)
     closeForm()
   }
@@ -613,6 +709,7 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
         value={newLabel}
         onChange={e => setNewLabel(e.target.value)}
         placeholder={t.settings.anniversaryLabelPlaceholder}
+        maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
         required
         autoFocus
       />

@@ -42,6 +42,7 @@ export interface Anniversary {
 
 export const MAX_ANNIVERSARIES = 10
 export const MAX_ANNIVERSARY_BADGES = 3
+export const MAX_ANNIVERSARY_LABEL_LENGTH = 100
 
 function hasValidAnniversaryFields(v: unknown): v is {
   id: string
