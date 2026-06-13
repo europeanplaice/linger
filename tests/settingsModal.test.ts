@@ -58,6 +58,22 @@ test.describe('SettingsModal — anniversaries', () => {
     await expect(page.getByRole('button', { name: 'Add' })).toBeDisabled()
   })
 
+  test('sizes the add button to its label', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const section = page.locator('.settings-anniversary-section')
+    const addButton = page.getByRole('button', { name: 'Add' })
+    const sectionBox = await section.boundingBox()
+    const buttonBox = await addButton.boundingBox()
+
+    expect(sectionBox).not.toBeNull()
+    expect(buttonBox).not.toBeNull()
+    if (sectionBox && buttonBox) {
+      expect(Math.abs((buttonBox.x + buttonBox.width) - (sectionBox.x + sectionBox.width))).toBeLessThan(2)
+    }
+  })
+
   test('allows at most three enabled anniversary badges', async ({ page }) => {
     await loadHarness(page)
     await render(page, {

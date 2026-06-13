@@ -1696,6 +1696,7 @@ dialog.settings-dialog::backdrop {
   font-family: inherit;
 }
 .settings-anniversary-add-btn {
+  align-self: flex-end;
   background: var(--accent);
   border: none;
   border-radius: 7px;
@@ -1849,6 +1850,7 @@ dialog.settings-dialog::backdrop {
     text-align: start;
   }
   .settings-anniversary-add-btn {
+    align-self: stretch;
     min-height: 2.75rem;
   }
   .settings-anniversary-form {
