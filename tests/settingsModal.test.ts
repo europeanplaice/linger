@@ -78,6 +78,53 @@ test.describe('SettingsModal — anniversaries', () => {
     await fourthSwitch.click()
     await expect(fourthSwitch).toHaveAttribute('aria-checked', 'true')
   })
+
+  test('keeps anniversary content within the modal on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await loadHarness(page)
+    await render(page, {
+      anniversaries: [
+        { id: 'one', label: 'Birthday', date: '2020-01-01' },
+        { id: 'two', label: 'Wedding anniversary with a very long label', date: '2021-02-14' },
+        { id: 'three', label: 'Project launch', date: '2022-03-20' },
+        { id: 'four', label: 'A fourth anniversary', date: '2023-04-30', showBadge: false },
+      ],
+    })
+
+    const item = page.locator('.settings-item-anniversaries')
+    const section = page.locator('.settings-anniversary-section')
+    const itemBox = await item.boundingBox()
+    const sectionBox = await section.boundingBox()
+
+    expect(itemBox).not.toBeNull()
+    expect(sectionBox).not.toBeNull()
+    if (itemBox && sectionBox) {
+      expect(sectionBox.x).toBeGreaterThanOrEqual(itemBox.x)
+      expect(sectionBox.x + sectionBox.width).toBeLessThanOrEqual(itemBox.x + itemBox.width)
+    }
+    expect(await item.evaluate(el => el.scrollWidth)).toBe(await item.evaluate(el => el.clientWidth))
+  })
+
+  test('keeps the add form and delete confirmation usable on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await loadHarness(page)
+    await render(page, {
+      anniversaries: [
+        { id: 'one', label: 'Wedding anniversary with a very long label', date: '2021-02-14' },
+      ],
+    })
+
+    await page.getByRole('button', { name: 'Add' }).click()
+    const form = page.locator('.settings-anniversary-form')
+    await expect(form).toBeVisible()
+    expect(await form.evaluate(el => el.scrollWidth)).toBe(await form.evaluate(el => el.clientWidth))
+
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await page.getByRole('button', { name: 'Remove Wedding anniversary with a very long label' }).click()
+    const confirmation = page.locator('.settings-anniversary-confirm')
+    await expect(confirmation).toBeVisible()
+    expect(await confirmation.evaluate(el => el.scrollWidth)).toBe(await confirmation.evaluate(el => el.clientWidth))
+  })
 })
 
 test.describe('SettingsModal — auto-save toggle', () => {

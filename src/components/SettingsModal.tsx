@@ -152,17 +152,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
         <div className="settings-divider" />
         <div className="settings-item settings-item-anniversaries">
-          <span className="settings-item-label">{t.settings.anniversaries}</span>
-          <div className="settings-anniversary-section">
+          <div className="settings-anniversary-heading">
+            <span className="settings-item-label">{t.settings.anniversaries}</span>
             <span className="settings-anniversary-usage">
               {t.settings.anniversaryUsage(anniversaries.length, MAX_ANNIVERSARIES)}
             </span>
-            <span id={anniversaryLimitId} className="settings-anniversary-limit">
-              {t.settings.anniversaryRegistrationLimit(MAX_ANNIVERSARIES)}
-            </span>
-            <span id={badgeLimitId} className="settings-anniversary-limit">
-              {t.settings.anniversaryBadgeLimit(MAX_ANNIVERSARY_BADGES)}
-            </span>
+          </div>
+          <div className="settings-anniversary-section">
+            <div className="settings-anniversary-help">
+              <span id={anniversaryLimitId} className="settings-anniversary-limit">
+                {t.settings.anniversaryRegistrationLimit(MAX_ANNIVERSARIES)}
+              </span>
+              <span id={badgeLimitId} className="settings-anniversary-limit">
+                {t.settings.anniversaryBadgeLimit(MAX_ANNIVERSARY_BADGES)}
+              </span>
+            </div>
             {anniversaries.length === 0 ? (
               <span className="settings-anniversary-none">{t.settings.anniversaryNone}</span>
             ) : (
@@ -172,42 +176,48 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                   const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
                   return (
                     <div key={a.id} className="settings-anniversary-row">
-                      <span className="settings-anniversary-label">{a.label}</span>
-                      <span className="settings-anniversary-date">{a.date}</span>
-                      {onAnniversaryToggleBadge && (
-                        <span className="settings-anniversary-badge-toggle-wrap">
-                          <button
-                            type="button"
-                            className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
-                            onClick={() => {
-                              if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
-                            }}
-                            role="switch"
-                            aria-checked={badgeEnabled}
-                            aria-disabled={badgeLimitReached || undefined}
-                            aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
-                            aria-label={t.settings.anniversaryBadgeLabel}
-                          >
-                            <span className="settings-anniversary-badge-toggle-thumb" />
-                          </button>
-                          <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
-                        </span>
-                      )}
-                      {onAnniversaryRemove && (
-                        pendingDelete?.id === a.id ? (
-                          <span className="settings-anniversary-confirm">
-                            <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
-                            <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
-                            <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                      <div className="settings-anniversary-details">
+                        <span className="settings-anniversary-label">{a.label}</span>
+                        <time className="settings-anniversary-date" dateTime={a.date}>{a.date}</time>
+                      </div>
+                      <div className="settings-anniversary-actions">
+                        {onAnniversaryToggleBadge && (
+                          <span className="settings-anniversary-badge-toggle-wrap">
+                            <button
+                              type="button"
+                              className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
+                              onClick={() => {
+                                if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
+                              }}
+                              role="switch"
+                              aria-checked={badgeEnabled}
+                              aria-disabled={badgeLimitReached || undefined}
+                              aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
+                              aria-label={t.settings.anniversaryBadgeLabel}
+                            >
+                              <span className="settings-anniversary-badge-toggle-thumb" />
+                            </button>
+                            <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
                           </span>
-                        ) : (
-                          <button
-                            className="settings-anniversary-remove"
-                            onClick={() => setPendingDelete(a)}
-                            aria-label={t.settings.anniversaryRemove(a.label)}
-                          >×</button>
-                        )
-                      )}
+                        )}
+                        {onAnniversaryRemove && (
+                          pendingDelete?.id === a.id ? (
+                            <span className="settings-anniversary-confirm">
+                              <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
+                              <span className="settings-anniversary-confirm-actions">
+                                <button className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
+                                <button className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                              </span>
+                            </span>
+                          ) : (
+                            <button
+                              className="settings-anniversary-remove"
+                              onClick={() => setPendingDelete(a)}
+                              aria-label={t.settings.anniversaryRemove(a.label)}
+                            >×</button>
+                          )
+                        )}
+                      </div>
                     </div>
                   )
                 })}
