@@ -13,7 +13,7 @@
     "test:unit": "vitest run",
     "preview": "wrangler pages dev dist",
     "lint": "eslint src tests",
-    "audit": "npm audit --omit=dev --audit-level=high",
+    "audit": "npm audit --audit-level=high",
     "cf:deploy": "wrangler pages deploy dist --project-name=linger"
   },
   "dependencies": {
@@ -48,5 +48,8 @@
     "vite": "^8.0.10",
     "vitest": "^4.1.5",
     "wrangler": "^4.90.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }
