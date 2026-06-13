@@ -396,8 +396,8 @@ describe('date utils', () => {
         { id: 'new-year', label: 'New Year', date: '2026-01-01' },
         { id: 'year-end', label: 'Year End', date: '2025-12-31' },
       ])).toEqual([
-        { id: 'new-year', label: 'New Year', date: '2026-01-01', distance: -1 },
         { id: 'year-end', label: 'Year End', date: '2025-12-31', distance: -2 },
+        { id: 'new-year', label: 'New Year', date: '2026-01-01', distance: -1 },
       ])
     })
 
@@ -406,8 +406,8 @@ describe('date utils', () => {
         { id: 'future', label: 'Future', date: '2026-05-12' },
         { id: 'past', label: 'Past', date: '2020-05-10' },
       ])).toEqual([
-        { id: 'future', label: 'Future', date: '2026-05-12', distance: 2 },
         { id: 'past', label: 'Past', date: '2020-05-10', distance: -2191 },
+        { id: 'future', label: 'Future', date: '2026-05-12', distance: 2 },
       ])
     })
 

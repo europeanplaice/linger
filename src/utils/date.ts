@@ -161,7 +161,7 @@ export function anniversariesNearEntry(
       results.push(prox)
     }
   }
-  results.sort((a, b) => Math.abs(a.distance) - Math.abs(b.distance))
+  results.sort((a, b) => a.date.localeCompare(b.date))
   return results
 }
 
