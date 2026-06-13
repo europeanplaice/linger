@@ -21,6 +21,10 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Data stays in your Google Drive (`linger_diary/` folder), one plain-text file per day
 - Warns before reload or date changes when there are unsaved edits, and retries offline saves when the connection returns
 - Works on mobile with a drawer sidebar, Android back-button support, and keyboard-aware layout
+- Anniversary management with badges on the calendar (up to 10 anniversaries, 3 with display badges)
+- Public holiday overlay on the calendar, customizable by country
+- Touch swipe navigation between days on mobile
+- Share individual entries or share the app URL
 - Installable as a Progressive Web App
 
 ## How it works
@@ -89,16 +93,19 @@ Diary metadata, recently opened entry content, and snippets are cached in Indexe
 No OAuth tokens are exposed to the browser or written to browser storage. Diary content is never written to `localStorage`.
 
 ### Components
-- `LoginScreen` — shown when not signed in
+- `Landing` — signed-out landing page with marketing content, privacy info, and the `LoginScreen` sign-in card
+- `LoginScreen` — sign-in card with Google auth button
 - `App` — sidebar + main panel layout
-- `CalendarView` — monthly grid built with native `Date` arithmetic; dots on dates with entries
-- `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution
+- `AppIcon` — app logo SVG used in the sidebar header
+- `CalendarView` — monthly grid built with native `Date` arithmetic; dots on dates with entries, anniversary and holiday badges
+- `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution; day navigation; swipe navigation; anniversary/holiday badges; revision history access; share entry
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
-- `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random older ones
-- `SettingsModal` — language, theme, font family/size, auto-save, export, app sharing, keyboard shortcuts, data-storage links, and legal links
+- `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random serendipity entries
+- `SettingsModal` — language, theme, font family/size, auto-save, holiday calendar, anniversary management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
-- `ExportButton` — triggers ZIP export of all entries
+- `ExportButton` — ZIP export UI used inside `SettingsModal`
+- `SettingsSelect` — reusable styled select used inside `SettingsModal`
 - `ErrorBoundary` — catches render errors and displays a fallback UI
 - `useServiceWorkerUpdate` — applies waiting PWA updates when the tab is hidden and the current entry is not dirty
 
@@ -165,11 +172,12 @@ npm run workers:dev       # Wrangler Pages dev server at http://localhost:8788
 
 Other commands:
 ```bash
-npm run ci:local # run the local merge-check suite (build + lint + unit + e2e)
-npm run build     # type-check + production build → dist/
-npm run preview   # serve the production build with Wrangler locally
-npm test          # run the Playwright e2e test suite
-npm run test:unit # run Vitest unit tests
+npm run ci:local     # run the local merge-check suite (build + lint + unit + e2e)
+npm run build        # type-check + production build → dist/
+npm run lint         # ESLint on src/ and tests/
+npm run preview      # serve the production build with Wrangler locally
+npm test             # run the Playwright e2e test suite
+npm run test:unit    # run Vitest unit tests
 ```
 
 #### UI preview params
