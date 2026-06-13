@@ -11,6 +11,11 @@ import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
+import { useEvent, useLatestRef } from '../hooks/useEvent'
+import { useAutoSave } from '../hooks/useAutoSave'
+import { useKeyboardInset } from '../hooks/useKeyboardInset'
+import { useScrollEdges } from '../hooks/useScrollEdges'
+import { useDismissOnOutside } from '../hooks/useDismissOnOutside'
 import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
@@ -81,11 +86,6 @@ const entryTransition = { duration: 0.24, ease: 'easeOut' as const }
 
 const SAVED_STATUS_VISIBLE_MS = 1600
 const SAVED_STATUS_EXIT_MS = 220
-const AUTO_SAVE_MS = 1500
-// Even while the user keeps typing (which resets the debounce), persist at least
-// this often so a long uninterrupted writing session is never left unsaved.
-const AUTO_SAVE_MAX_WAIT_MS = 10000
-const KEYBOARD_INSET_VAR = '--mobile-keyboard-inset-bottom'
 
 
 function SpinnerIcon() {
@@ -140,8 +140,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // Set when a save couldn't reach Drive because the device is offline; the
   // edits stay dirty and are retried automatically once connectivity returns.
   const [pendingOfflineSave, setPendingOfflineSave] = useState(false)
-  const pendingOfflineSaveRef = useRef(pendingOfflineSave)
-  useEffect(() => { pendingOfflineSaveRef.current = pendingOfflineSave }, [pendingOfflineSave])
+  const pendingOfflineSaveRef = useLatestRef(pendingOfflineSave)
   const tokenExpiredForDateRef = useRef<string | null>(null)
   const weekday = weekdayLabel(date, locale)
   const dateParts = diaryDateParts(date, locale, true)
@@ -157,40 +156,30 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     return Math.round(ms / 86400000)
   })()
 
-  // Use a ref to track the latest onSave without restarting debounce timers
-  const onSaveRef = useRef(onSave)
-  useEffect(() => { onSaveRef.current = onSave }, [onSave])
-  const getContentRef = useRef(getContent)
-  useEffect(() => { getContentRef.current = getContent }, [getContent])
-const textRef = useRef(text)
-const savedTextRef = useRef(savedText)
-const baseVersionRef = useRef(baseVersion)
-const savingRef = useRef(saving)
-const hasConflictRef = useRef(hasConflict)
-const loadingRef = useRef(loading)
-const loadFailedRef = useRef(loadFailed)
-const refreshingRef = useRef(refreshing)
+  // Latest-value mirrors so debounce timers, listeners, and async save flows can
+  // read current props/state without being torn down on every change.
+  const onSaveRef = useLatestRef(onSave)
+  const getContentRef = useLatestRef(getContent)
+  const textRef = useLatestRef(text)
+  const savedTextRef = useLatestRef(savedText)
+  const baseVersionRef = useLatestRef(baseVersion)
+  const savingRef = useLatestRef(saving)
+  const hasConflictRef = useLatestRef(hasConflict)
+  const loadingRef = useLatestRef(loading)
+  const loadFailedRef = useLatestRef(loadFailed)
+  const refreshingRef = useLatestRef(refreshing)
 
-const setSavedTextValue = useCallback((value: string) => {
-  savedTextRef.current = value
-  setSavedText(value)
-}, [])
+  // Write through to the ref so a synchronous read later in the same handler
+  // (before React commits the state update) sees the new value.
+  const setSavedTextValue = useCallback((value: string) => {
+    savedTextRef.current = value
+    setSavedText(value)
+  }, [savedTextRef])
 
-const setBaseVersionValue = useCallback((value: string | null) => {
-  baseVersionRef.current = value
-  setBaseVersion(value)
-}, [])
-
-useEffect(() => {
-  textRef.current = text
-  savedTextRef.current = savedText
-  baseVersionRef.current = baseVersion
-  savingRef.current = saving
-  hasConflictRef.current = hasConflict
-  loadingRef.current = loading
-  loadFailedRef.current = loadFailed
-  refreshingRef.current = refreshing
-}, [text, savedText, baseVersion, saving, hasConflict, loading, loadFailed])
+  const setBaseVersionValue = useCallback((value: string | null) => {
+    baseVersionRef.current = value
+    setBaseVersion(value)
+  }, [baseVersionRef])
 
   const applyLoadedEntry = useCallback((entry: LoadedDiaryEntry | null) => {
     const driveText = entry?.entry.content ?? ''
@@ -308,10 +297,8 @@ useEffect(() => {
     }
   }, [date, reauthSaveResult, savedStatus, setBaseVersionValue, setSavedTextValue])
 
-  const pendingNavDateRef = useRef(pendingNavDate)
-  useEffect(() => { pendingNavDateRef.current = pendingNavDate }, [pendingNavDate])
-  const onCancelNavigationRef = useRef(onCancelNavigation)
-  useEffect(() => { onCancelNavigationRef.current = onCancelNavigation }, [onCancelNavigation])
+  const pendingNavDateRef = useLatestRef(pendingNavDate)
+  const onCancelNavigationRef = useLatestRef(onCancelNavigation)
 
   const save = useCallback(async (explicit = true): Promise<boolean> => {
     if (savingRef.current) return false
@@ -527,58 +514,12 @@ useEffect(() => {
     }
   }
 
-  // Persist the pending edits now, bypassing the debounce. Used when the page is
-  // about to be hidden/unloaded, on blur, and when leaving the entry — so the
-  // ~1.5s idle window can't silently drop the latest keystrokes.
-  const flushPendingAutoSave = useCallback(() => {
-    if (!autoSave) return
-    if (savingRef.current || hasConflictRef.current || loadingRef.current || loadFailedRef.current) return
-    if (textRef.current === savedTextRef.current) return
-    void save(false)
-  }, [autoSave, save])
-
-  // Tracks when the current unsaved streak began. Unlike the debounce timer it is
-  // NOT reset by each keystroke, so it can cap the maximum time before a save.
-  const dirtyStreakStartRef = useRef<number | null>(null)
-
-  // Drive auto-save after a short idle period (only when auto-save is enabled),
-  // but never wait longer than AUTO_SAVE_MAX_WAIT_MS since edits first went dirty.
-  useEffect(() => {
-    if (!autoSave || !isDirty) {
-      dirtyStreakStartRef.current = null
-      return
-    }
-    if (dirtyStreakStartRef.current === null) dirtyStreakStartRef.current = Date.now()
-    const elapsed = Date.now() - dirtyStreakStartRef.current
-    const wait = Math.max(0, Math.min(AUTO_SAVE_MS, AUTO_SAVE_MAX_WAIT_MS - elapsed))
-    const id = window.setTimeout(() => {
-      if (savingRef.current || hasConflictRef.current || loadingRef.current) return
-      if (loadFailedRef.current) return
-      if (textRef.current === savedTextRef.current) return
-      // Open a fresh max-wait window from this save. Without this, once elapsed
-      // passes AUTO_SAVE_MAX_WAIT_MS an uninterrupted typing session that keeps
-      // overlapping in-flight saves would re-fire a save on nearly every
-      // keystroke instead of at most once per window.
-      dirtyStreakStartRef.current = Date.now()
-      save(false)
-    }, wait)
-    return () => window.clearTimeout(id)
-  }, [text, isDirty, save, autoSave])
-
-  // Flush a pending auto-save when the tab is being hidden or torn down. On mobile
-  // visibilitychange/pagehide are the only reliable "leaving" signals (beforeunload
-  // often doesn't fire), so these guard against losing edits made in the last moment.
-  useEffect(() => {
-    if (!autoSave) return
-    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingAutoSave() }
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('pagehide', flushPendingAutoSave)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('pagehide', flushPendingAutoSave)
-      flushPendingAutoSave()
-    }
-  }, [autoSave, flushPendingAutoSave])
+  // A silent save may run when nothing is in flight and there are unsaved edits.
+  const canAutoSave = useEvent(() =>
+    !savingRef.current && !hasConflictRef.current && !loadingRef.current && !loadFailedRef.current &&
+    textRef.current !== savedTextRef.current,
+  )
+  const flushPendingAutoSave = useAutoSave({ enabled: autoSave, isDirty, text, save, canSave: canAutoSave })
 
   // When connectivity returns, retry a save that failed while offline.
   useEffect(() => {
@@ -616,59 +557,16 @@ useEffect(() => {
     if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
   }, [])
 
-  useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
+  useKeyboardInset()
 
-    let frameId: number | null = null
-
-    const updateKeyboardInset = () => {
-      if (frameId !== null) window.cancelAnimationFrame(frameId)
-
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null
-        const keyboardInset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-        document.documentElement.style.setProperty(KEYBOARD_INSET_VAR, `${Math.round(keyboardInset)}px`)
-      })
-    }
-
-    updateKeyboardInset()
-    viewport.addEventListener('resize', updateKeyboardInset)
-    viewport.addEventListener('scroll', updateKeyboardInset)
-
-    return () => {
-      if (frameId !== null) window.cancelAnimationFrame(frameId)
-      viewport.removeEventListener('resize', updateKeyboardInset)
-      viewport.removeEventListener('scroll', updateKeyboardInset)
-      document.documentElement.style.removeProperty(KEYBOARD_INSET_VAR)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!showMoreMenu) return
-    const handleMouse = (e: MouseEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setShowMoreMenu(false)
-      }
-    }
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShowMoreMenu(false)
-    }
-    document.addEventListener('mousedown', handleMouse)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handleMouse)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [showMoreMenu])
+  const closeMoreMenu = useCallback(() => setShowMoreMenu(false), [])
+  useDismissOnOutside(moreMenuRef, showMoreMenu, closeMoreMenu)
 
   const [shareMsgVisible, setShareMsgVisible] = useState(false)
-  const [scrollAtTop, setScrollAtTop] = useState(true)
-  const [scrollAtBottom, setScrollAtBottom] = useState(true)
+  const { scrollAtTop, scrollAtBottom, attachScrollListeners } = useScrollEdges(textareaRef, { loading, text })
   const [dateTransitionMask, setDateTransitionMask] = useState(false)
   const [dateTransitionMaskSide, setDateTransitionMaskSide] = useState<'left' | 'right'>('right')
 
-  const scrollCleanupRef = useRef<(() => void) | undefined>(undefined)
   const dateTransitionMaskDateRef = useRef(date)
 
   useEffect(() => {
@@ -677,37 +575,6 @@ useEffect(() => {
     setDateTransitionMaskSide(directionRef.current < 0 ? 'left' : 'right')
     setDateTransitionMask(true)
   }, [date])
-
-  const attachScrollListeners = useCallback(() => {
-    scrollCleanupRef.current?.()
-    scrollCleanupRef.current = undefined
-    const el = textareaRef.current
-    if (!el) return
-    const update = () => {
-      setScrollAtTop(el.scrollTop < 2)
-      setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
-    }
-    update()
-    el.addEventListener('scroll', update, { passive: true })
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    scrollCleanupRef.current = () => {
-      el.removeEventListener('scroll', update)
-      ro.disconnect()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (loading) {
-      setScrollAtTop(true)
-      setScrollAtBottom(true)
-      scrollCleanupRef.current?.()
-      scrollCleanupRef.current = undefined
-      return
-    }
-    attachScrollListeners()
-    return () => { scrollCleanupRef.current?.(); scrollCleanupRef.current = undefined }
-  }, [loading, text, attachScrollListeners])
 
   // Horizontal swipe on the entry body navigates between days; goes through the
   // same onPrevDay/onNextDay path as the buttons, so the unsaved-changes guard

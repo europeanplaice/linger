@@ -5,6 +5,7 @@ import { getAllCached, putCached, deleteCached, clearCache, getAllDrafts, putDra
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import type { AuthStatus } from './useAuth'
 import { shiftDate } from '../utils/date'
+import { useLatestRef } from './useEvent'
 
 interface EntryCache {
   meta: DriveFileMeta
@@ -121,7 +122,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const [freshListLoaded, setFreshListLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
-  const cacheRef = useRef(cache)
+  const cacheRef = useLatestRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
   const inflightRef = useRef<Map<string, Promise<LoadedDiaryEntry | null>>>(new Map())
   // Low-priority fetch scheduler: queued background tasks, a promote handle per
@@ -131,11 +132,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const bgActiveRef = useRef(0)
   const fgActiveRef = useRef(0)
   const pendingSaveRef = useRef<PendingSave | null>(null)
-  const onExpiredRef = useRef(onExpired)
-  const onEvictedRef = useRef(onEntriesEvicted)
-  useEffect(() => { onExpiredRef.current = onExpired })
-  useEffect(() => { onEvictedRef.current = onEntriesEvicted })
-  useEffect(() => { cacheRef.current = cache }, [cache])
+  const onExpiredRef = useLatestRef(onExpired)
+  const onEvictedRef = useLatestRef(onEntriesEvicted)
 
   const updateCache = useCallback((updater: (prev: Map<string, EntryCache>) => Map<string, EntryCache>) => {
     setCache(prev => {
@@ -490,8 +488,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     return run
   }, [isSignedIn, email, updateCache])
 
-  const selectedDateRef = useRef(selectedDate)
-  useEffect(() => { selectedDateRef.current = selectedDate }, [selectedDate])
+  const selectedDateRef = useLatestRef(selectedDate)
 
   const replayingDraftsRef = useRef(false)
 
@@ -528,8 +525,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
   }, [isSignedIn, save])
 
-  const replayDraftsRef = useRef(replayDrafts)
-  useEffect(() => { replayDraftsRef.current = replayDrafts })
+  const replayDraftsRef = useLatestRef(replayDrafts)
 
   useEffect(() => {
     if (!freshListLoaded) return
@@ -677,8 +673,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     })
   }, [isSignedIn, getContent])
 
-  const getContentRef = useRef(getContent)
-  useEffect(() => { getContentRef.current = getContent }, [getContent])
+  const getContentRef = useLatestRef(getContent)
 
   // Warm the neighbours of the selected day so day-nav (±1) is instant and a
   // continued scrub in either direction (±2) stays a step ahead. Only dates
