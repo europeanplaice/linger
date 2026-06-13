@@ -89,6 +89,12 @@ export function useAnniversaries(
       if (pendingRetryStartedRef.current) return
       pendingRetryStartedRef.current = true
       persist(anniversariesRef.current)
+      // Re-arm the latch on settle so a transient failure retries next auth cycle.
+      // Intentional last-write-wins: local state is pushed without loading remote,
+      // so concurrent edits on another device are overwritten.
+      driveSyncRef.current?.finally(() => {
+        pendingRetryStartedRef.current = false
+      })
       return
     }
     let cancelled = false

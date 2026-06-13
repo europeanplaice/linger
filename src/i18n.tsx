@@ -249,9 +249,9 @@ const dictionaries = {
       yesterday: 'Yesterday',
     },
   },
-      ja: {
-      appTitle: 'Linger',
-      documentTitle: 'Linger',
+  ja: {
+    appTitle: 'Linger',
+    documentTitle: 'Linger',
     common: {
       cancel: 'キャンセル',
       delete: '削除',

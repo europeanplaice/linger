@@ -155,7 +155,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     [anniversaries],
   )
   const anniversaryBadges = useMemo(
-    () => anniversariesNearEntry(date, activeAnniversaries).slice(0, 3),
+    () => anniversariesNearEntry(date, activeAnniversaries),
     [date, activeAnniversaries],
   )
   const daysDiff = (() => {

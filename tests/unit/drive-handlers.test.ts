@@ -133,13 +133,12 @@ describe('anniversaries handler', () => {
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
 
-  it('updates the existing Drive file', async () => {
+  it('updates the existing Drive file with sanitized body', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
-    const body = [{ id: 'birthday', label: 'Birthday', date: '2020-05-10' }]
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/anniversaries', {
         method: 'PUT',
-        body: JSON.stringify(body),
+        body: JSON.stringify([{ id: 'birthday', label: 'Birthday', date: '2020-05-10' }]),
       }),
     })
 
@@ -150,9 +149,65 @@ describe('anniversaries handler', () => {
       'tok',
       'folder-1',
       'anniversaries.json',
-      body,
+      [{ id: 'birthday', label: 'Birthday', date: '2020-05-10' }],
       'anniversaries-file',
     )
+  })
+
+  it('rejects an empty label', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify([{ id: 'a', label: '   ', date: '2020-05-10' }]),
+      }),
+    })
+    const res = await onPutAnniversaries(ctx as any)
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a label exceeding 100 characters', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify([{ id: 'a', label: 'x'.repeat(101), date: '2020-05-10' }]),
+      }),
+    })
+    const res = await onPutAnniversaries(ctx as any)
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty id', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/anniversaries', {
+        method: 'PUT',
+        body: JSON.stringify([{ id: '  ', label: 'Birthday', date: '2020-05-10' }]),
+      }),
+    })
+    const res = await onPutAnniversaries(ctx as any)
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('returns [] when the stored file contains corrupted JSON', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
+    vi.mocked(drive.readJsonFile).mockRejectedValueOnce(new SyntaxError('Unexpected token'))
+
+    const res = await onGetAnniversaries(makeContext() as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([])
+  })
+
+  it('returns [] when the stored file contains valid JSON that is not an array', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('anniversaries-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValueOnce({ unexpected: true })
+
+    const res = await onGetAnniversaries(makeContext() as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([])
   })
 })
 

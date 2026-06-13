@@ -556,7 +556,7 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} anniversaries={anniversaries} />
+        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>

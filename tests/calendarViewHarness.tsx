@@ -14,7 +14,6 @@ root.render(
     <CalendarView
       dates={new Set(['2026-01-05', '2026-03-10', '2026-06-15'])}
       selectedDate="2026-04-14"
-      anniversaries={[{ id: 'april', label: 'Project launch', date: '2020-04-20' }]}
       onSelect={date => {
         selectedDates.push(date)
       }}

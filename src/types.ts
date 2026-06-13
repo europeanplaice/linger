@@ -36,7 +36,7 @@ export interface DriveRevisionMeta {
 export interface Anniversary {
   id: string
   label: string
-  date: string   // YYYY-MM-DD (year stored for reference; proximity uses MM-DD)
+  date: string   // YYYY-MM-DD
   showBadge?: boolean
 }
 
@@ -122,9 +122,6 @@ export function normalizeAnniversaries(v: unknown): Anniversary[] {
   return result
 }
 
-export function isAnniversaryArray(v: unknown): v is Anniversary[] {
-  return Array.isArray(v) && v.every(isAnniversary)
-}
 
 export interface AnniversaryProximity {
   id: string

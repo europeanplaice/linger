@@ -5,6 +5,7 @@ import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile } from '../../_
 const FILE_NAME = 'anniversaries.json'
 const MAX_ANNIVERSARIES = 10
 const MAX_ANNIVERSARY_BADGES = 3
+const MAX_LABEL_LENGTH = 100
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
@@ -14,7 +15,18 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
     const fileId = await findJsonFile(accessToken, folderId, FILE_NAME)
     if (!fileId) return jsonResponse([])
-    const data = await readJsonFile<unknown>(accessToken, fileId)
+
+    let data: unknown
+    try {
+      data = await readJsonFile<unknown>(accessToken, fileId)
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        console.warn('anniversaries.ts: corrupted JSON, returning [] so next PUT can heal', e)
+        return jsonResponse([])
+      }
+      throw e
+    }
+    if (!Array.isArray(data)) return jsonResponse([])
     return jsonResponse(data)
   } catch (e) {
     console.error('anniversaries.ts: GET failed', e)
@@ -41,6 +53,8 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   }
 
   let enabledBadges = 0
+  const sanitized: { id: string; label: string; date: string; showBadge?: boolean }[] = []
+
   for (const item of body) {
     if (!item || typeof item.id !== 'string' || typeof item.label !== 'string' || typeof item.date !== 'string') {
       return jsonResponse({ error: 'Invalid anniversary entry' }, 400)
@@ -48,7 +62,20 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     if (item.showBadge !== undefined && typeof item.showBadge !== 'boolean') {
       return jsonResponse({ error: 'Invalid showBadge value' }, 400)
     }
-    if (item.showBadge !== false) enabledBadges += 1
+
+    const id = item.id.trim()
+    if (!id) {
+      return jsonResponse({ error: 'Anniversary id must not be empty' }, 400)
+    }
+
+    const label = item.label.trim()
+    if (!label) {
+      return jsonResponse({ error: 'Anniversary label must not be empty' }, 400)
+    }
+    if (label.length > MAX_LABEL_LENGTH) {
+      return jsonResponse({ error: `Label must be at most ${MAX_LABEL_LENGTH} characters` }, 400)
+    }
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
       return jsonResponse({ error: 'Invalid date format (expected YYYY-MM-DD)' }, 400)
     }
@@ -57,6 +84,14 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) {
       return jsonResponse({ error: 'Invalid date' }, 400)
     }
+
+    if (item.showBadge !== false) enabledBadges += 1
+    sanitized.push({
+      id,
+      label,
+      date: item.date,
+      ...(item.showBadge === undefined ? {} : { showBadge: item.showBadge }),
+    })
   }
   if (enabledBadges > MAX_ANNIVERSARY_BADGES) {
     return jsonResponse({ error: `At most ${MAX_ANNIVERSARY_BADGES} anniversary badges can be enabled` }, 400)
@@ -65,7 +100,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   try {
     const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
     const existingFileId = await findJsonFile(accessToken, folderId, FILE_NAME) ?? undefined
-    const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, body, existingFileId)
+    const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, sanitized, existingFileId)
     return jsonResponse(meta)
   } catch (e) {
     console.error('anniversaries.ts: PUT failed', e)

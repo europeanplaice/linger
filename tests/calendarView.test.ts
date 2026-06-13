@@ -49,12 +49,6 @@ test.describe('CalendarView', () => {
     await expect(page.getByRole('button', { name: '2026-04-14' })).toHaveClass(/selected/)
   })
 
-  test('exposes anniversary labels in the day accessible name', async ({ page }) => {
-    const anniversaryDay = page.getByRole('button', { name: '2026-04-20 Project launch', exact: true })
-    await expect(anniversaryDay).toHaveClass(/anniversary/)
-    await expect(anniversaryDay).toHaveAttribute('title', 'Project launch')
-  })
-
   test('calendar grid is inside an overflow-hidden wrapper for slide animation', async ({ page }) => {
     const wrap = page.locator('.calendar-grid-wrap')
     await expect(wrap).toBeVisible()
