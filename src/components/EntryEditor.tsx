@@ -41,6 +41,7 @@ interface Props {
   autoSave: boolean
   onPrevDay: () => void
   onNextDay: () => void
+  onSelectDate: (date: string) => void
   pendingNavDate: string | null
   onPendingNavigate: () => void
   onCancelNavigation: () => void
@@ -108,7 +109,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', anniversaries = [] }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', anniversaries = [] }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -836,12 +837,18 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         {isToday && <span className="editor-meta-today">{t.common.today}</span>}
         {!isToday && !isFuture && t.entry.daysAgo(Math.abs(daysDiff))}
         {isFuture && t.entry.daysAhead(daysDiff)}
-        {anniversaryBadges.map(({ id, label, distance }) => (
-          <span key={id} className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}>
+        {anniversaryBadges.map(({ id, label, date: anniversaryDate, distance }) => (
+          <button
+            key={id}
+            type="button"
+            className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}
+            onClick={() => onSelectDate(anniversaryDate)}
+            aria-label={t.entry.anniversaryOpen(label, anniversaryDate)}
+          >
             {distance === 0 ? t.entry.anniversaryOn(label)
              : distance > 0 ? t.entry.anniversaryBefore(label, distance)
              : t.entry.anniversaryAfter(label, Math.abs(distance))}
-          </span>
+          </button>
         ))}
         <AnimatePresence initial={false}>
           {!isOnline && (

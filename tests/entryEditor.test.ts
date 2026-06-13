@@ -1278,6 +1278,55 @@ test.describe('EntryEditor — editor meta info', () => {
     await expect(anniversary).toHaveText('Birthday 9367d ago')
   })
 
+  test('opens the anniversary entry by click or keyboard', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-01-01',
+      anniversaries: [
+        { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
+      ],
+    })
+
+    const anniversary = page.getByRole('button', { name: 'Open Birthday entry for 2020-05-10' })
+    await anniversary.click()
+    await anniversary.focus()
+    await anniversary.press('Enter')
+
+    expect(await page.evaluate(() => window.editorHarness.selectedDateCalls())).toEqual([
+      '2020-05-10',
+      '2020-05-10',
+    ])
+  })
+
+  test('styles anniversary badges as borderless clickable controls', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-01-01',
+      anniversaries: [
+        { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
+      ],
+    })
+
+    const anniversary = page.getByRole('button', { name: 'Open Birthday entry for 2020-05-10' })
+    const styles = await anniversary.evaluate(element => {
+      const computed = getComputedStyle(element)
+      return {
+        borderWidth: computed.borderWidth,
+        boxShadow: computed.boxShadow,
+        cursor: computed.cursor,
+      }
+    })
+    expect(styles).toEqual({
+      borderWidth: '0px',
+      boxShadow: 'none',
+      cursor: 'pointer',
+    })
+
+    await anniversary.hover()
+    await expect.poll(() => anniversary.evaluate(element => getComputedStyle(element).transform))
+      .not.toBe('none')
+  })
+
   test('shows at most three anniversary badges at once', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {

@@ -105,6 +105,7 @@ interface Window {
     goToTodayCount: () => number
     prevDayCount: () => number
     nextDayCount: () => number
+    selectedDateCalls: () => string[]
     dirtyChanges: () => boolean[]
     clearCalls: () => void
     windowOpenCalls: () => { url: string; target: string }[]

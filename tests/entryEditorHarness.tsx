@@ -31,6 +31,7 @@ let menuClickCount = 0
 let goToTodayCount = 0
 let prevDayCount = 0
 let nextDayCount = 0
+let selectedDateCalls: string[] = []
 let dirtyChanges: boolean[] = []
 
 let currentSaveReject: 'conflict' | 'error' | undefined
@@ -181,6 +182,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       onDirtyChange={(isDirty) => { dirtyChanges.push(isDirty) }}
       onPrevDay={() => { prevDayCount++ }}
       onNextDay={() => { nextDayCount++ }}
+      onSelectDate={(selectedDate) => { selectedDateCalls.push(selectedDate) }}
       pendingNavDate={pendingNavDate}
       onPendingNavigate={() => {
         pendingNavigateCalls.push({ date: pendingNavDate })
@@ -228,6 +230,7 @@ window.editorHarness = {
     goToTodayCount = 0
     prevDayCount = 0
     nextDayCount = 0
+    selectedDateCalls = []
     dirtyChanges = []
     currentSaveReject = opts.saveReject
     currentGetContentReject = opts.getContentReject
@@ -266,6 +269,7 @@ window.editorHarness = {
   goToTodayCount: () => goToTodayCount,
   prevDayCount: () => prevDayCount,
   nextDayCount: () => nextDayCount,
+  selectedDateCalls: () => [...selectedDateCalls],
   dirtyChanges: () => [...dirtyChanges],
   clearCalls: () => {
     saveCalls = []
@@ -276,6 +280,7 @@ window.editorHarness = {
     windowOpenCalls = []
     getContentCalls = []
     menuClickCount = 0
+    selectedDateCalls = []
     dirtyChanges = []
   },
   windowOpenCalls: () => [...windowOpenCalls],

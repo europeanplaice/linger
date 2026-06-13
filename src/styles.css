@@ -2078,8 +2078,14 @@ dialog.signout-confirm-dialog::backdrop {
   opacity: 0.85;
 }
 .editor-meta-anniversary {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
+  font-family: inherit;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -2089,6 +2095,16 @@ dialog.signout-confirm-dialog::backdrop {
   padding: 0.1rem 0.5rem;
   line-height: 1.4;
   margin-left: 0.4rem;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.editor-meta-anniversary:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 20%, transparent);
+  transform: translateY(-1px);
+}
+.editor-meta-anniversary:active {
+  box-shadow: none;
+  transform: translateY(0);
 }
 .editor-meta-anniversary--on {
   background: color-mix(in srgb, var(--accent) 22%, transparent);

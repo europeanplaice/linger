@@ -638,6 +638,7 @@ export default function App() {
           autoSave={autoSave}
           onPrevDay={onPrevDay}
           onNextDay={onNextDay}
+          onSelectDate={selectDate}
           pendingNavDate={pendingDate}
           onPendingNavigate={handlePendingNavigate}
           onCancelNavigation={handleCancelNavigation}

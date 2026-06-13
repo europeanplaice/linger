@@ -154,6 +154,7 @@ const dictionaries = {
       anniversaryOn: (label: string) => label,
       anniversaryBefore: (label: string, n: number) => `${label} in ${n}d`,
       anniversaryAfter: (label: string, n: number) => `${label} ${n}d ago`,
+      anniversaryOpen: (label: string, date: string) => `Open ${label} entry for ${date}`,
     },
     settings: {
       title: 'Settings',
@@ -381,6 +382,7 @@ const dictionaries = {
       anniversaryOn: (label: string) => label,
       anniversaryBefore: (label: string, n: number) => `${label}まで${n}日`,
       anniversaryAfter: (label: string, n: number) => `${label}から${n}日`,
+      anniversaryOpen: (label: string, date: string) => `${date}の${label}の日記を開く`,
     },
     settings: {
       title: '設定',
