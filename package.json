@@ -13,6 +13,7 @@
     "test:unit": "vitest run",
     "preview": "wrangler pages dev dist",
     "lint": "eslint src tests",
+    "audit": "npm audit --omit=dev --audit-level=high",
     "cf:deploy": "wrangler pages deploy dist --project-name=linger"
   },
   "dependencies": {
