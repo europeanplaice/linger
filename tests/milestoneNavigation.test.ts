@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
 
 const currentDate = '2026-01-01'
-const anniversaryDate = '2020-05-10'
+const milestoneDate = '2020-05-10'
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -14,18 +14,18 @@ test.beforeEach(async ({ page }) => {
     json: {
       files: [
         { id: 'current-file', name: `diary-${currentDate}.txt`, version: '1' },
-        { id: 'anniversary-file', name: `diary-${anniversaryDate}.txt`, version: '1' },
+        { id: 'milestone-file', name: `diary-${milestoneDate}.txt`, version: '1' },
       ],
     },
   }))
-  await page.route('/api/drive/anniversaries', route => route.fulfill({
+  await page.route('/api/drive/milestones', route => route.fulfill({
     json: [
-      { id: 'birthday', label: 'Birthday', date: anniversaryDate },
+      { id: 'birthday', label: 'Birthday', date: milestoneDate },
     ],
   }))
   await page.route('/api/drive/entry/**', route => {
     const date = new URL(route.request().url()).pathname.split('/').pop()
-    const content = date === anniversaryDate ? 'Anniversary entry' : 'Current entry'
+    const content = date === milestoneDate ? 'Milestone entry' : 'Current entry'
     return route.fulfill({
       json: {
         entry: { date, content },
@@ -35,31 +35,31 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('clicking an anniversary badge opens its entry', async ({ page }) => {
+test('clicking a milestone badge opens its entry', async ({ page }) => {
   await page.goto(`${baseUrl}/#${currentDate}`)
   await expect(page.locator('.editor-textarea')).toHaveValue('Current entry')
 
-  await page.getByRole('button', { name: `Open Birthday entry for ${anniversaryDate}` }).click()
+  await page.getByRole('button', { name: `Open Birthday entry for ${milestoneDate}` }).click()
 
-  await expect(page).toHaveURL(new RegExp(`#${anniversaryDate}$`))
+  await expect(page).toHaveURL(new RegExp(`#${milestoneDate}$`))
   await expect.poll(() => page.locator('.editor-textarea').count()).toBe(1)
-  await expect(page.locator('.editor-textarea')).toHaveValue('Anniversary entry')
+  await expect(page.locator('.editor-textarea')).toHaveValue('Milestone entry')
 })
 
-test('anniversary navigation uses the unsaved-changes guard', async ({ page }) => {
+test('milestone navigation uses the unsaved-changes guard', async ({ page }) => {
   await page.goto(`${baseUrl}/#${currentDate}`)
   const editor = page.locator('.editor-textarea')
   await expect(editor).toHaveValue('Current entry')
   await editor.fill('Unsaved current entry')
 
-  await page.getByRole('button', { name: `Open Birthday entry for ${anniversaryDate}` }).click()
+  await page.getByRole('button', { name: `Open Birthday entry for ${milestoneDate}` }).click()
 
   await expect(page).toHaveURL(new RegExp(`#${currentDate}$`))
   const banner = page.locator('.unsaved-nav-banner')
   await expect(banner).toBeVisible()
   await banner.getByRole('button', { name: 'Discard' }).click()
 
-  await expect(page).toHaveURL(new RegExp(`#${anniversaryDate}$`))
+  await expect(page).toHaveURL(new RegExp(`#${milestoneDate}$`))
   await expect.poll(() => page.locator('.editor-textarea').count()).toBe(1)
-  await expect(page.locator('.editor-textarea')).toHaveValue('Anniversary entry')
+  await expect(page.locator('.editor-textarea')).toHaveValue('Milestone entry')
 })

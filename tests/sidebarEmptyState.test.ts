@@ -54,7 +54,7 @@ test.describe('sidebar empty state', () => {
         await route.fulfill({ status: 404, body: '' })
       }
     })
-    await page.route('/api/drive/anniversaries', route =>
+    await page.route('/api/drive/milestones', route =>
       route.fulfill({ json: [] }),
     )
 

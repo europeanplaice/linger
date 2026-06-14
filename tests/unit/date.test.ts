@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak, anniversariesNearEntry } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak, milestonesNearEntry } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -390,9 +390,9 @@ describe('date utils', () => {
     })
   })
 
-  describe('anniversariesNearEntry', () => {
+  describe('milestonesNearEntry', () => {
     it('calculates the difference between full calendar dates', () => {
-      expect(anniversariesNearEntry('2026-01-02', [
+      expect(milestonesNearEntry('2026-01-02', [
         { id: 'new-year', label: 'New Year', date: '2026-01-01' },
         { id: 'year-end', label: 'Year End', date: '2025-12-31' },
       ])).toEqual([
@@ -402,7 +402,7 @@ describe('date utils', () => {
     })
 
     it('includes the year when dates share the same month and day', () => {
-      expect(anniversariesNearEntry('2026-05-10', [
+      expect(milestonesNearEntry('2026-05-10', [
         { id: 'future', label: 'Future', date: '2026-05-12' },
         { id: 'past', label: 'Past', date: '2020-05-10' },
       ])).toEqual([
@@ -411,25 +411,25 @@ describe('date utils', () => {
       ])
     })
 
-    it('includes distant anniversaries unless a maximum distance is provided', () => {
-      const anniversaries = [
+    it('includes distant milestones unless a maximum distance is provided', () => {
+      const milestones = [
         { id: 'birthday', label: 'Birthday', date: '2000-05-10' },
       ]
 
-      expect(anniversariesNearEntry('2026-01-01', anniversaries)).toEqual([
+      expect(milestonesNearEntry('2026-01-01', milestones)).toEqual([
         { id: 'birthday', label: 'Birthday', date: '2000-05-10', distance: -9367 },
       ])
-      expect(anniversariesNearEntry('2026-01-01', anniversaries, 7)).toEqual([])
+      expect(milestonesNearEntry('2026-01-01', milestones, 7)).toEqual([])
     })
 
-    it('propagates emoji and computes nthYear correctly for recurring anniversaries', () => {
-      const anniversaries = [
+    it('propagates emoji and computes nthYear correctly for recurring milestones', () => {
+      const milestones = [
         { id: 'anniv1', label: 'Anniversary 1', date: '2024-05-10', emoji: '🎂', recurring: true },
         { id: 'anniv2', label: 'Anniversary 2', date: '2020-05-10', emoji: '💍', recurring: false },
         { id: 'legacy', label: 'Legacy', date: '2000-05-10', emoji: '🕯️', recurring: true },
       ]
 
-      expect(anniversariesNearEntry('2026-05-10', anniversaries)).toEqual([
+      expect(milestonesNearEntry('2026-05-10', milestones)).toEqual([
         { id: 'legacy', label: 'Legacy', date: '2000-05-10', distance: -9496, emoji: '🕯️', recurring: true, nthYear: undefined },
         { id: 'anniv2', label: 'Anniversary 2', date: '2020-05-10', distance: -2191, emoji: '💍', recurring: false, nthYear: undefined },
         { id: 'anniv1', label: 'Anniversary 1', date: '2024-05-10', distance: -730, emoji: '🎂', recurring: true, nthYear: 2 },

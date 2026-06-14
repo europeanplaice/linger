@@ -7,29 +7,29 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { autoSave?: boolean; modalOpen?: boolean; anniversaries?: import('../src/types').Anniversary[] } = {},
+  opts: { autoSave?: boolean; modalOpen?: boolean; milestones?: import('../src/types').Milestone[] } = {},
 ) {
-  await page.evaluate(({ autoSave, modalOpen, anniversaries }) => {
-    window.settingsHarness.render({ autoSave, modalOpen, anniversaries })
-  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen, anniversaries: opts.anniversaries })
+  await page.evaluate(({ autoSave, modalOpen, milestones }) => {
+    window.settingsHarness.render({ autoSave, modalOpen, milestones })
+  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen, milestones: opts.milestones })
   await page.waitForSelector('.settings-dialog')
 }
 
-test.describe('SettingsModal — anniversaries', () => {
-  test('adds, toggles, and confirms deletion of an anniversary', async ({ page }) => {
+test.describe('SettingsModal — milestones', () => {
+  test('adds, toggles, and confirms deletion of a milestone', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
     await page.getByRole('button', { name: 'Add' }).click()
     await page.getByLabel('Name (e.g. Birthday)').fill('Birthday')
     await page.getByRole('button', { name: 'Date' }).click()
-    const datePicker = page.locator('.settings-anniversary-date-popover')
+    const datePicker = page.locator('.settings-milestone-date-popover')
     await datePicker.locator('select').nth(1).selectOption('2020')
     await datePicker.locator('select').nth(0).selectOption('4')
     await datePicker.getByRole('button', { name: '2020-05-10' }).click()
     await page.getByRole('button', { name: 'Add' }).click()
 
-    const row = page.locator('.settings-anniversary-row', { hasText: 'Birthday' })
+    const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
     await expect(row).toContainText('2020-05-10')
 
     const badgeSwitch = row.getByRole('switch', { name: 'Show badge' })
@@ -38,17 +38,17 @@ test.describe('SettingsModal — anniversaries', () => {
     await expect(badgeSwitch).toHaveAttribute('aria-checked', 'false')
 
     await row.getByRole('button', { name: 'Remove Birthday' }).click()
-    await expect(row).toContainText('Delete anniversary "Birthday"?')
+    await expect(row).toContainText('Delete milestone "Birthday"?')
     await row.getByRole('button', { name: 'Delete' }).click()
     await expect(row).toHaveCount(0)
   })
 
-  test('allows at most ten anniversaries', async ({ page }) => {
+  test('allows at most ten milestones', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
-      anniversaries: Array.from({ length: 10 }, (_, i) => ({
-        id: `anniversary-${i + 1}`,
-        label: `Anniversary ${i + 1}`,
+      milestones: Array.from({ length: 10 }, (_, i) => ({
+        id: `milestone-${i + 1}`,
+        label: `Milestone ${i + 1}`,
         date: `2020-${String(i + 1).padStart(2, '0')}-01`,
         showBadge: i < 3 ? undefined : false,
       })),
@@ -62,7 +62,7 @@ test.describe('SettingsModal — anniversaries', () => {
     await loadHarness(page)
     await render(page)
 
-    const section = page.locator('.settings-anniversary-section')
+    const section = page.locator('.settings-milestone-section')
     const addButton = page.getByRole('button', { name: 'Add' })
     const sectionBox = await section.boundingBox()
     const buttonBox = await addButton.boundingBox()
@@ -80,7 +80,7 @@ test.describe('SettingsModal — anniversaries', () => {
 
     await page.getByRole('button', { name: 'Add' }).click()
 
-    const form = page.locator('.settings-anniversary-form')
+    const form = page.locator('.settings-milestone-form')
     const nameInput = page.getByLabel('Name (e.g. Birthday)')
     const dateInput = page.getByRole('button', { name: 'Date' })
     const formBox = await form.boundingBox()
@@ -96,10 +96,10 @@ test.describe('SettingsModal — anniversaries', () => {
     }
   })
 
-  test('allows at most three enabled anniversary badges', async ({ page }) => {
+  test('allows at most three enabled milestone badges', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
-      anniversaries: [
+      milestones: [
         { id: 'one', label: 'One', date: '2020-01-01' },
         { id: 'two', label: 'Two', date: '2020-02-01' },
         { id: 'three', label: 'Three', date: '2020-03-01' },
@@ -107,9 +107,9 @@ test.describe('SettingsModal — anniversaries', () => {
       ],
     })
 
-    const firstSwitch = page.locator('.settings-anniversary-row', { hasText: 'One' })
+    const firstSwitch = page.locator('.settings-milestone-row', { hasText: 'One' })
       .getByRole('switch', { name: 'Show badge' })
-    const fourthSwitch = page.locator('.settings-anniversary-row', { hasText: 'Four' })
+    const fourthSwitch = page.locator('.settings-milestone-row', { hasText: 'Four' })
       .getByRole('switch', { name: 'Show badge' })
 
     await expect(fourthSwitch).toHaveAttribute('aria-disabled', 'true')
@@ -121,20 +121,20 @@ test.describe('SettingsModal — anniversaries', () => {
     await expect(fourthSwitch).toHaveAttribute('aria-checked', 'true')
   })
 
-  test('keeps anniversary content within the modal on narrow screens', async ({ page }) => {
+  test('keeps milestone content within the modal on narrow screens', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await loadHarness(page)
     await render(page, {
-      anniversaries: [
+      milestones: [
         { id: 'one', label: 'Birthday', date: '2020-01-01' },
         { id: 'two', label: 'Wedding anniversary with a very long label', date: '2021-02-14' },
         { id: 'three', label: 'Project launch', date: '2022-03-20' },
-        { id: 'four', label: 'A fourth anniversary', date: '2023-04-30', showBadge: false },
+        { id: 'four', label: 'A fourth milestone', date: '2023-04-30', showBadge: false },
       ],
     })
 
-    const item = page.locator('.settings-item-anniversaries')
-    const section = page.locator('.settings-anniversary-section')
+    const item = page.locator('.settings-item-milestones')
+    const section = page.locator('.settings-milestone-section')
     const itemBox = await item.boundingBox()
     const sectionBox = await section.boundingBox()
 
@@ -151,18 +151,18 @@ test.describe('SettingsModal — anniversaries', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await loadHarness(page)
     await render(page, {
-      anniversaries: [
+      milestones: [
         { id: 'one', label: 'Wedding anniversary with a very long label', date: '2021-02-14' },
       ],
     })
 
     await page.getByRole('button', { name: 'Add' }).click()
-    const form = page.locator('.settings-anniversary-form')
+    const form = page.locator('.settings-milestone-form')
     await expect(form).toBeVisible()
     expect(await form.evaluate(el => el.scrollWidth)).toBe(await form.evaluate(el => el.clientWidth))
 
     await page.getByRole('button', { name: 'Date' }).click()
-    const datePicker = page.locator('.settings-anniversary-date-popover')
+    const datePicker = page.locator('.settings-milestone-date-popover')
     await expect(datePicker).toBeVisible()
     const pickerBox = await datePicker.boundingBox()
     expect(pickerBox).not.toBeNull()
@@ -176,7 +176,7 @@ test.describe('SettingsModal — anniversaries', () => {
 
     await page.getByRole('button', { name: 'Cancel' }).click()
     await page.getByRole('button', { name: 'Remove Wedding anniversary with a very long label' }).click()
-    const confirmation = page.locator('.settings-anniversary-confirm')
+    const confirmation = page.locator('.settings-milestone-confirm')
     await expect(confirmation).toBeVisible()
     expect(await confirmation.evaluate(el => el.scrollWidth)).toBe(await confirmation.evaluate(el => el.clientWidth))
   })

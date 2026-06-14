@@ -1,27 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  MAX_ANNIVERSARIES,
-  MAX_ANNIVERSARY_BADGES,
-  normalizeAnniversaries,
-  type Anniversary,
+  MAX_MILESTONES,
+  MAX_MILESTONE_BADGES,
+  normalizeMilestones,
+  type Milestone,
 } from '../types'
-import { loadAnniversaries, saveAnniversaries, TokenExpiredError } from '../api/driveAnniversaries'
+import { loadMilestones, saveMilestones, TokenExpiredError } from '../api/driveMilestones'
 import { useLatestRef } from './useEvent'
 
-const STORAGE_KEY = 'linger_anniversaries'
-const PENDING_STORAGE_KEY = 'linger_anniversaries_pending'
+const STORAGE_KEY = 'linger_milestones'
+const PENDING_STORAGE_KEY = 'linger_milestones_pending'
 
-function loadLocal(): Anniversary[] {
+function loadLocal(): Milestone[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
-    return normalizeAnniversaries(JSON.parse(raw))
+    return normalizeMilestones(JSON.parse(raw))
   } catch {
     return []
   }
 }
 
-function saveLocal(list: Anniversary[]): void {
+function saveLocal(list: Milestone[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
   } catch { /* ignore */ }
@@ -51,32 +51,32 @@ function generateId(): string {
   }
 }
 
-export function useAnniversaries(
+export function useMilestones(
   authStatus: string,
   onTokenExpired: () => void,
 ) {
-  const [anniversaries, setAnniversaries] = useState<Anniversary[]>(loadLocal)
-  const anniversariesRef = useRef(anniversaries)
+  const [milestones, setMilestones] = useState<Milestone[]>(loadLocal)
+  const milestonesRef = useRef(milestones)
   const mutationVersionRef = useRef(0)
   const syncVersionRef = useRef(0)
   const driveSyncRef = useRef<Promise<void> | null>(null)
   const pendingRetryStartedRef = useRef(false)
   const onTokenExpiredRef = useLatestRef(onTokenExpired)
 
-  const persist = useCallback((next: Anniversary[]) => {
+  const persist = useCallback((next: Milestone[]) => {
     saveLocal(next)
     setPendingLocal(true)
     const syncVersion = ++syncVersionRef.current
     const previous = driveSyncRef.current ?? Promise.resolve()
     driveSyncRef.current = previous
       .catch(() => undefined)
-      .then(() => saveAnniversaries(next))
+      .then(() => saveMilestones(next))
       .then(() => {
         if (syncVersionRef.current === syncVersion) setPendingLocal(false)
       })
       .catch(e => {
         if (e instanceof TokenExpiredError) onTokenExpiredRef.current()
-        else console.error('Failed to sync anniversaries to Drive:', e)
+        else console.error('Failed to sync milestones to Drive:', e)
       })
   }, [onTokenExpiredRef])
 
@@ -88,7 +88,7 @@ export function useAnniversaries(
     if (hasPendingLocal()) {
       if (pendingRetryStartedRef.current) return
       pendingRetryStartedRef.current = true
-      persist(anniversariesRef.current)
+      persist(milestonesRef.current)
       // Re-arm the latch on settle so a transient failure retries next auth cycle.
       // Intentional last-write-wins: local state is pushed without loading remote,
       // so concurrent edits on another device are overwritten.
@@ -99,11 +99,11 @@ export function useAnniversaries(
     }
     let cancelled = false
     const loadVersion = mutationVersionRef.current
-    loadAnniversaries()
+    loadMilestones()
       .then(list => {
         if (!cancelled && mutationVersionRef.current === loadVersion) {
-          anniversariesRef.current = list
-          setAnniversaries(list)
+          milestonesRef.current = list
+          setMilestones(list)
           saveLocal(list)
         }
       })
@@ -114,58 +114,58 @@ export function useAnniversaries(
   }, [authStatus, onTokenExpiredRef, persist])
 
   const add = useCallback((label: string, date: string, emoji?: string, recurring?: boolean) => {
-    if (anniversariesRef.current.length >= MAX_ANNIVERSARIES) return
-    const enabledBadges = anniversariesRef.current.filter(a => a.showBadge !== false).length
+    if (milestonesRef.current.length >= MAX_MILESTONES) return
+    const enabledBadges = milestonesRef.current.filter(a => a.showBadge !== false).length
     const next = [
-      ...anniversariesRef.current,
+      ...milestonesRef.current,
       {
         id: generateId(),
         label,
         date,
-        ...(enabledBadges >= MAX_ANNIVERSARY_BADGES ? { showBadge: false } : {}),
+        ...(enabledBadges >= MAX_MILESTONE_BADGES ? { showBadge: false } : {}),
         ...(emoji ? { emoji } : {}),
         ...(recurring !== undefined ? { recurring } : {}),
       },
     ]
     mutationVersionRef.current += 1
-    anniversariesRef.current = next
-    setAnniversaries(next)
+    milestonesRef.current = next
+    setMilestones(next)
     persist(next)
   }, [persist])
 
   const remove = useCallback((id: string) => {
-    const next = anniversariesRef.current.filter(a => a.id !== id)
+    const next = milestonesRef.current.filter(a => a.id !== id)
     mutationVersionRef.current += 1
-    anniversariesRef.current = next
-    setAnniversaries(next)
+    milestonesRef.current = next
+    setMilestones(next)
     persist(next)
   }, [persist])
 
   const update = useCallback((id: string, label: string, date: string, emoji?: string, recurring?: boolean) => {
-    const next = anniversariesRef.current.map(a =>
+    const next = milestonesRef.current.map(a =>
       a.id === id ? { ...a, label, date, ...(emoji ? { emoji } : {}), ...(recurring !== undefined ? { recurring } : {}) } : a
     )
     mutationVersionRef.current += 1
-    anniversariesRef.current = next
-    setAnniversaries(next)
+    milestonesRef.current = next
+    setMilestones(next)
     persist(next)
   }, [persist])
 
   const toggleBadge = useCallback((id: string) => {
-    const target = anniversariesRef.current.find(a => a.id === id)
+    const target = milestonesRef.current.find(a => a.id === id)
     if (!target) return
     if (
       target.showBadge === false
-      && anniversariesRef.current.filter(a => a.showBadge !== false).length >= MAX_ANNIVERSARY_BADGES
+      && milestonesRef.current.filter(a => a.showBadge !== false).length >= MAX_MILESTONE_BADGES
     ) {
       return
     }
-    const next = anniversariesRef.current.map(a => a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a)
+    const next = milestonesRef.current.map(a => a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a)
     mutationVersionRef.current += 1
-    anniversariesRef.current = next
-    setAnniversaries(next)
+    milestonesRef.current = next
+    setMilestones(next)
     persist(next)
   }, [persist])
 
-  return { anniversaries, add, update, remove, toggleBadge }
+  return { milestones, add, update, remove, toggleBadge }
 }

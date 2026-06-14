@@ -33,7 +33,7 @@ export interface DriveRevisionMeta {
   size?: string
 }
 
-export interface Anniversary {
+export interface Milestone {
   id: string
   label: string
   date: string   // YYYY-MM-DD
@@ -42,18 +42,18 @@ export interface Anniversary {
   recurring?: boolean  // true = yearly (shows Nth year), false/undefined = one-time
 }
 
-export const MAX_ANNIVERSARIES = 10
-export const MAX_ANNIVERSARY_BADGES = 3
-export const MAX_ANNIVERSARY_LABEL_LENGTH = 100
+export const MAX_MILESTONES = 10
+export const MAX_MILESTONE_BADGES = 3
+export const MAX_MILESTONE_LABEL_LENGTH = 100
 
-function hasValidAnniversaryFields(v: unknown): v is {
+function hasValidMilestoneFields(v: unknown): v is {
   id: string
   label: string
   showBadge?: boolean
   emoji?: string
   recurring?: boolean
 } {
-  const a = v as Anniversary
+  const a = v as Milestone
   return typeof v === 'object' && v !== null
     && typeof a.id === 'string'
     && typeof a.label === 'string'
@@ -62,7 +62,7 @@ function hasValidAnniversaryFields(v: unknown): v is {
     && (a.recurring === undefined || typeof a.recurring === 'boolean')
 }
 
-function isValidAnniversaryDate(date: unknown): date is string {
+function isValidMilestoneDate(date: unknown): date is string {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
   const [year, month, day] = date.split('-').map(Number)
   const parsed = new Date(year, month - 1, day)
@@ -71,13 +71,13 @@ function isValidAnniversaryDate(date: unknown): date is string {
     && parsed.getDate() === day
 }
 
-export function isAnniversary(v: unknown): v is Anniversary {
-  return hasValidAnniversaryFields(v)
-    && isValidAnniversaryDate((v as { date?: unknown }).date)
+export function isMilestone(v: unknown): v is Milestone {
+  return hasValidMilestoneFields(v)
+    && isValidMilestoneDate((v as { date?: unknown }).date)
 }
 
-export function normalizeAnniversary(v: unknown): Anniversary | null {
-  if (!hasValidAnniversaryFields(v)) return null
+export function normalizeMilestone(v: unknown): Milestone | null {
+  if (!hasValidMilestoneFields(v)) return null
   const candidate = v as {
     id: string
     label: string
@@ -87,7 +87,7 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
     emoji?: string
     recurring?: boolean
   }
-  if (isValidAnniversaryDate(candidate.date)) {
+  if (isValidMilestoneDate(candidate.date)) {
     return {
       id: candidate.id,
       label: candidate.label,
@@ -102,7 +102,7 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
   }
   // Legacy records did not retain a year. Use a leap year so 02-29 remains valid.
   const legacyDate = `2000-${candidate.monthDay}`
-  if (!isValidAnniversaryDate(legacyDate)) return null
+  if (!isValidMilestoneDate(legacyDate)) return null
   return {
     id: candidate.id,
     label: candidate.label,
@@ -113,35 +113,35 @@ export function normalizeAnniversary(v: unknown): Anniversary | null {
   }
 }
 
-export function normalizeAnniversaries(v: unknown): Anniversary[] {
+export function normalizeMilestones(v: unknown): Milestone[] {
   if (!Array.isArray(v)) return []
-  const result: Anniversary[] = []
+  const result: Milestone[] = []
   let enabledBadges = 0
 
   for (const value of v) {
-    if (result.length >= MAX_ANNIVERSARIES) break
-    const anniversary = normalizeAnniversary(value)
-    if (!anniversary) continue
-    if (anniversary.showBadge !== false) {
-      if (enabledBadges >= MAX_ANNIVERSARY_BADGES) {
-        result.push({ ...anniversary, showBadge: false })
+    if (result.length >= MAX_MILESTONES) break
+    const milestone = normalizeMilestone(value)
+    if (!milestone) continue
+    if (milestone.showBadge !== false) {
+      if (enabledBadges >= MAX_MILESTONE_BADGES) {
+        result.push({ ...milestone, showBadge: false })
         continue
       }
       enabledBadges += 1
     }
-    result.push(anniversary)
+    result.push(milestone)
   }
 
   return result
 }
 
 
-export interface AnniversaryProximity {
+export interface MilestoneProximity {
   id: string
   label: string
   date: string
   distance: number
   emoji?: string
   recurring?: boolean
-  nthYear?: number  // computed: how many years since the anniversary date (only for recurring)
+  nthYear?: number  // computed: how many years since the milestone date (only for recurring)
 }

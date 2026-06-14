@@ -4,9 +4,9 @@ import { SettingsModal } from '../src/components/SettingsModal'
 import type { FontSize } from '../src/hooks/useFontSize'
 import type { HolidayCountry } from '../src/utils/holidays'
 import {
-  MAX_ANNIVERSARIES,
-  MAX_ANNIVERSARY_BADGES,
-  type Anniversary,
+  MAX_MILESTONES,
+  MAX_MILESTONE_BADGES,
+  type Milestone,
 } from '../src/types'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
@@ -26,17 +26,17 @@ interface AppProps {
   themeMode: 'light' | 'dark' | 'system'
   fontSize: FontSize
   email?: string
-  anniversaries?: Anniversary[]
+  milestones?: Milestone[]
 }
 
-function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, anniversaries: initialAnniversaries = [] }: AppProps) {
+function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, milestones: initialMilestones = [] }: AppProps) {
   const [autoSave, setAutoSave] = useState(initialAutoSave)
   const [open, setOpen] = useState(initialOpen)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(initialTheme)
   const [font, setFont] = useState<'serif' | 'sans'>('serif')
   const [fontSize, setFontSize] = useState<FontSize>(initialFontSize)
   const [holidayCountry, setHolidayCountry] = useState<HolidayCountry>('off')
-  const [anniversaries, setAnniversaries] = useState(initialAnniversaries)
+  const [milestones, setMilestones] = useState(initialMilestones)
 
   const handleAutoSaveToggle = useCallback(() => {
     setAutoSave(prev => {
@@ -72,28 +72,28 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onClose={() => setOpen(false)}
           onSignOut={() => { signOutCount++ }}
           email={email}
-          anniversaries={anniversaries}
-          onAnniversaryAdd={(label, date) => {
-            setAnniversaries(prev => {
-              if (prev.length >= MAX_ANNIVERSARIES) return prev
+          milestones={milestones}
+          onMilestoneAdd={(label, date) => {
+            setMilestones(prev => {
+              if (prev.length >= MAX_MILESTONES) return prev
               const enabledBadges = prev.filter(a => a.showBadge !== false).length
               return [
                 ...prev,
                 {
-                  id: `anniversary-${prev.length + 1}`,
+                  id: `milestone-${prev.length + 1}`,
                   label,
                   date,
-                  ...(enabledBadges >= MAX_ANNIVERSARY_BADGES ? { showBadge: false } : {}),
+                  ...(enabledBadges >= MAX_MILESTONE_BADGES ? { showBadge: false } : {}),
                 },
               ]
             })
           }}
-          onAnniversaryRemove={id => setAnniversaries(prev => prev.filter(a => a.id !== id))}
-          onAnniversaryToggleBadge={id => setAnniversaries(prev => {
+          onMilestoneRemove={id => setMilestones(prev => prev.filter(a => a.id !== id))}
+          onMilestoneToggleBadge={id => setMilestones(prev => {
             const target = prev.find(a => a.id === id)
             if (
               target?.showBadge === false
-              && prev.filter(a => a.showBadge !== false).length >= MAX_ANNIVERSARY_BADGES
+              && prev.filter(a => a.showBadge !== false).length >= MAX_MILESTONE_BADGES
             ) {
               return prev
             }
@@ -108,7 +108,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
 }
 
 window.settingsHarness = {
-  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, anniversaries }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string; anniversaries?: Anniversary[] } = {}) => {
+  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, milestones }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string; milestones?: Milestone[] } = {}) => {
     exportCalls.splice(0)
     exportReject = false
     signOutCount = 0
@@ -120,7 +120,7 @@ window.settingsHarness = {
           themeMode={initialTheme ?? 'light'}
           fontSize={initialFontSize ?? 'md'}
           email={email}
-          anniversaries={anniversaries}
+          milestones={milestones}
           key={++renderCount}
         />
       </I18nProvider>

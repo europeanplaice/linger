@@ -12,13 +12,13 @@ import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 
 import {
-  MAX_ANNIVERSARIES,
-  MAX_ANNIVERSARY_BADGES,
-  MAX_ANNIVERSARY_LABEL_LENGTH,
-  type Anniversary,
+  MAX_MILESTONES,
+  MAX_MILESTONE_BADGES,
+  MAX_MILESTONE_LABEL_LENGTH,
+  type Milestone,
 } from '../types'
 
-const ANNIVERSARY_EMOJI_PRESETS = ['🎀', '🎂', '💍', '🕯️', '💫', '🎓', '🏠', '❤️']
+const MILESTONE_EMOJI_PRESETS = ['🎀', '🎂', '💍', '🕯️', '💫', '🎓', '🏠', '❤️']
 
 function getFirstGrapheme(str: string): string {
   if (!str) return ''
@@ -46,23 +46,23 @@ interface SettingsModalProps {
   onClose: () => void
   onSignOut: () => void
   email?: string
-  anniversaries?: Anniversary[]
-  onAnniversaryAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
-  onAnniversaryUpdate?: (id: string, label: string, date: string, emoji?: string, recurring?: boolean) => void
-  onAnniversaryRemove?: (id: string) => void
-  onAnniversaryToggleBadge?: (id: string) => void
+  milestones?: Milestone[]
+  onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
+  onMilestoneUpdate?: (id: string, label: string, date: string, emoji?: string, recurring?: boolean) => void
+  onMilestoneRemove?: (id: string) => void
+  onMilestoneToggleBadge?: (id: string) => void
 }
 
 const calendarAnchorSupported = typeof CSS !== 'undefined' && CSS.supports('anchor-name', '--x')
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, anniversaries = [], onAnniversaryAdd, onAnniversaryUpdate, onAnniversaryRemove, onAnniversaryToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
-  const [pendingDelete, setPendingDelete] = useState<Anniversary | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const anniversaryLimitId = useId()
+  const milestoneLimitId = useId()
   const badgeLimitId = useId()
-  const enabledBadgeCount = anniversaries.filter(a => a.showBadge !== false).length
-  const anniversaryLimitReached = anniversaries.length >= MAX_ANNIVERSARIES
+  const enabledBadgeCount = milestones.filter(a => a.showBadge !== false).length
+  const milestoneLimitReached = milestones.length >= MAX_MILESTONES
 
   // Localized country names come from Intl, so no hardcoded country dictionary.
   const holidayOptions = useMemo(() => {
@@ -170,30 +170,30 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           />
         </div>
         <div className="settings-divider" />
-        <div className="settings-item settings-item-anniversaries">
-          <div className="settings-anniversary-heading">
-            <span className="settings-item-label">{t.settings.anniversaries}</span>
-            <span className="settings-anniversary-usage">
-              {t.settings.anniversaryUsage(anniversaries.length, MAX_ANNIVERSARIES)}
+        <div className="settings-item settings-item-milestones">
+          <div className="settings-milestone-heading">
+            <span className="settings-item-label">{t.settings.milestones}</span>
+            <span className="settings-milestone-usage">
+              {t.settings.milestoneUsage(milestones.length, MAX_MILESTONES)}
             </span>
           </div>
-          <div className="settings-anniversary-section">
-            <div className="settings-anniversary-help">
-              <span id={anniversaryLimitId} className="settings-anniversary-limit">
-                {t.settings.anniversaryRegistrationLimit(MAX_ANNIVERSARIES)}
+          <div className="settings-milestone-section">
+            <div className="settings-milestone-help">
+              <span id={milestoneLimitId} className="settings-milestone-limit">
+                {t.settings.milestoneRegistrationLimit(MAX_MILESTONES)}
               </span>
-              <span id={badgeLimitId} className="settings-anniversary-limit">
-                {t.settings.anniversaryBadgeLimit(MAX_ANNIVERSARY_BADGES)}
+              <span id={badgeLimitId} className="settings-milestone-limit">
+                {t.settings.milestoneBadgeLimit(MAX_MILESTONE_BADGES)}
               </span>
             </div>
-            {anniversaries.length === 0 ? (
-              <span className="settings-anniversary-none">{t.settings.anniversaryNone}</span>
+            {milestones.length === 0 ? (
+              <span className="settings-milestone-none">{t.settings.milestoneNone}</span>
             ) : (
-              <div className="settings-anniversary-list">
+              <div className="settings-milestone-list">
                 <AnimatePresence initial={false} mode="popLayout">
-                  {anniversaries.map(a => {
+                  {milestones.map(a => {
                     const badgeEnabled = a.showBadge !== false
-                    const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_ANNIVERSARY_BADGES
+                    const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_MILESTONE_BADGES
                     return (
                       <motion.div
                         key={a.id}
@@ -204,7 +204,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                         transition={{ duration: 0.18 }}
                       >
                         <AnimatePresence mode="wait" initial={false}>
-                          {editingId === a.id && onAnniversaryUpdate ? (
+                          {editingId === a.id && onMilestoneUpdate ? (
                             <motion.div
                               key="edit"
                               initial={{ opacity: 0 }}
@@ -212,10 +212,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                               exit={{ opacity: 0 }}
                               transition={{ duration: 0.12 }}
                             >
-                              <AnniversaryEditForm
-                                anniversary={a}
+                              <MilestoneEditForm
+                                milestone={a}
                                 onSave={(label, date, emoji, recurring) => {
-                                  onAnniversaryUpdate(a.id, label, date, emoji, recurring)
+                                  onMilestoneUpdate(a.id, label, date, emoji, recurring)
                                   setEditingId(null)
                                 }}
                                 onCancel={() => setEditingId(null)}
@@ -230,67 +230,67 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                               exit={{ opacity: 0 }}
                               transition={{ duration: 0.12 }}
                             >
-                              <div className="settings-anniversary-row">
-                                <div className="settings-anniversary-details">
-                                  <span className="settings-anniversary-label">
-                                    <span className="settings-anniversary-emoji">{a.emoji || '🎀'}</span>
+                              <div className="settings-milestone-row">
+                                <div className="settings-milestone-details">
+                                  <span className="settings-milestone-label">
+                                    <span className="settings-milestone-emoji">{a.emoji || '🎀'}</span>
                                     {a.label}
-                                    {a.recurring !== false && <span className="settings-anniversary-recurring-tag">{t.settings.anniversaryRecurring}</span>}
+                                    {a.recurring !== false && <span className="settings-milestone-recurring-tag">{t.settings.milestoneRecurring}</span>}
                                   </span>
-                                  <time className="settings-anniversary-date" dateTime={a.date}>{a.date}</time>
+                                  <time className="settings-milestone-date" dateTime={a.date}>{a.date}</time>
                                 </div>
-                                <div className="settings-anniversary-actions">
-                                  {onAnniversaryToggleBadge && (
-                                    <span className="settings-anniversary-badge-toggle-wrap">
+                                <div className="settings-milestone-actions">
+                                  {onMilestoneToggleBadge && (
+                                    <span className="settings-milestone-badge-toggle-wrap">
                                       <button
                                         type="button"
-                                        className={`settings-anniversary-badge-toggle${badgeEnabled ? ' active' : ''}`}
+                                        className={`settings-milestone-badge-toggle${badgeEnabled ? ' active' : ''}`}
                                         onClick={() => {
-                                          if (!badgeLimitReached) onAnniversaryToggleBadge(a.id)
+                                          if (!badgeLimitReached) onMilestoneToggleBadge(a.id)
                                         }}
                                         role="switch"
                                         aria-checked={badgeEnabled}
                                         aria-disabled={badgeLimitReached || undefined}
                                         aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
-                                        aria-label={t.settings.anniversaryBadgeLabel}
+                                        aria-label={t.settings.milestoneBadgeLabel}
                                       >
-                                        <span className="settings-anniversary-badge-toggle-thumb" />
+                                        <span className="settings-milestone-badge-toggle-thumb" />
                                       </button>
-                                      <span className="settings-anniversary-badge-label">{t.settings.anniversaryBadgeLabel}</span>
+                                      <span className="settings-milestone-badge-label">{t.settings.milestoneBadgeLabel}</span>
                                     </span>
                                   )}
-                                  {onAnniversaryUpdate && (
+                                  {onMilestoneUpdate && (
                                     <button
                                       type="button"
-                                      className="settings-anniversary-edit"
+                                      className="settings-milestone-edit"
                                       onClick={() => { setPendingDelete(null); setEditingId(a.id) }}
-                                      aria-label={t.settings.anniversaryEdit(a.label)}
+                                      aria-label={t.settings.milestoneEdit(a.label)}
                                     >✎</button>
                                   )}
-                                  {onAnniversaryRemove && (
+                                  {onMilestoneRemove && (
                                     <AnimatePresence mode="wait" initial={false}>
                                       {pendingDelete?.id === a.id ? (
                                         <motion.span
                                           key="confirm"
-                                          className="settings-anniversary-confirm"
+                                          className="settings-milestone-confirm"
                                           initial={{ opacity: 0, x: 8 }}
                                           animate={{ opacity: 1, x: 0 }}
                                           exit={{ opacity: 0, x: 8 }}
                                           transition={{ duration: 0.15 }}
                                         >
-                                          <span className="settings-anniversary-confirm-text">{t.settings.anniversaryDeleteConfirm(a.label)}</span>
-                                          <span className="settings-anniversary-confirm-actions">
-                                            <button type="button" className="settings-anniversary-confirm-yes" onClick={() => { onAnniversaryRemove(a.id); setPendingDelete(null) }}>{t.settings.anniversaryDeleteYes}</button>
-                                            <button type="button" className="settings-anniversary-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.anniversaryDeleteNo}</button>
+                                          <span className="settings-milestone-confirm-text">{t.settings.milestoneDeleteConfirm(a.label)}</span>
+                                          <span className="settings-milestone-confirm-actions">
+                                            <button type="button" className="settings-milestone-confirm-yes" onClick={() => { onMilestoneRemove(a.id); setPendingDelete(null) }}>{t.settings.milestoneDeleteYes}</button>
+                                            <button type="button" className="settings-milestone-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.milestoneDeleteNo}</button>
                                           </span>
                                         </motion.span>
                                       ) : (
                                         <motion.button
                                           key="remove"
                                           type="button"
-                                          className="settings-anniversary-remove"
+                                          className="settings-milestone-remove"
                                           onClick={() => { setEditingId(null); setPendingDelete(a) }}
-                                          aria-label={t.settings.anniversaryRemove(a.label)}
+                                          aria-label={t.settings.milestoneRemove(a.label)}
                                           initial={{ opacity: 0 }}
                                           animate={{ opacity: 1 }}
                                           exit={{ opacity: 0 }}
@@ -310,12 +310,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 </AnimatePresence>
               </div>
             )}
-            {onAnniversaryAdd && (
-              <AnniversaryAddForm
-                onAdd={onAnniversaryAdd}
+            {onMilestoneAdd && (
+              <MilestoneAddForm
+                onAdd={onMilestoneAdd}
                 t={t}
-                limitReached={anniversaryLimitReached}
-                limitDescriptionId={anniversaryLimitId}
+                limitReached={milestoneLimitReached}
+                limitDescriptionId={milestoneLimitId}
               />
             )}
           </div>
@@ -508,7 +508,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   )
 }
 
-function AnniversaryDatePicker({ id, value, onChange, label }: {
+function MilestoneDatePicker({ id, value, onChange, label }: {
   id: string
   value: string
   onChange: (value: string) => void
@@ -546,7 +546,7 @@ function AnniversaryDatePicker({ id, value, onChange, label }: {
 
   useEffect(() => {
     if (!calendarAnchorSupported) return
-    const name = `--anniversary-calendar-${uid}`
+    const name = `--milestone-calendar-${uid}`
     triggerRef.current?.style.setProperty('anchor-name', name)
     popoverRef.current?.style.setProperty('position-anchor', name)
   }, [uid])
@@ -571,12 +571,12 @@ function AnniversaryDatePicker({ id, value, onChange, label }: {
   }
 
   return (
-    <div className="settings-anniversary-date-picker">
+    <div className="settings-milestone-date-picker">
       <button
         ref={triggerRef}
         id={id}
         type="button"
-        className={`settings-anniversary-input settings-anniversary-date-input${open ? ' open' : ''}`}
+        className={`settings-milestone-input settings-milestone-date-input${open ? ' open' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-required="true"
@@ -589,16 +589,16 @@ function AnniversaryDatePicker({ id, value, onChange, label }: {
           }
         }}
       >
-        <span className={value ? '' : 'settings-anniversary-date-placeholder'}>
+        <span className={value ? '' : 'settings-milestone-date-placeholder'}>
           {value || label}
         </span>
         <CalendarDays size={16} aria-hidden="true" />
       </button>
-      <input type="hidden" name="anniversary-date" value={value} />
+      <input type="hidden" name="milestone-date" value={value} />
       <div
         ref={popoverRef}
         popover="manual"
-        className="settings-anniversary-date-popover"
+        className="settings-milestone-date-popover"
         role="dialog"
         aria-label={label}
         onKeyDown={event => {
@@ -622,43 +622,43 @@ function AnniversaryDatePicker({ id, value, onChange, label }: {
   )
 }
 
-function validateAnniversaryFields(
+function validateMilestoneFields(
   label: string,
   date: string,
   t: ReturnType<typeof useI18n>['t'],
 ): string[] {
   const errs: string[] = []
-  if (!label.trim()) errs.push(t.settings.anniversaryEmptyLabel)
-  if (label.trim().length > MAX_ANNIVERSARY_LABEL_LENGTH) errs.push(t.settings.anniversaryLabelTooLong(MAX_ANNIVERSARY_LABEL_LENGTH))
+  if (!label.trim()) errs.push(t.settings.milestoneEmptyLabel)
+  if (label.trim().length > MAX_MILESTONE_LABEL_LENGTH) errs.push(t.settings.milestoneLabelTooLong(MAX_MILESTONE_LABEL_LENGTH))
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    errs.push(t.settings.anniversaryInvalidDate)
+    errs.push(t.settings.milestoneInvalidDate)
   } else {
     const [y, m, d] = date.split('-').map(Number)
     const dt = new Date(y, m - 1, d)
     if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
-      errs.push(t.settings.anniversaryInvalidDate)
+      errs.push(t.settings.milestoneInvalidDate)
     }
   }
   return errs
 }
 
-function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
-  anniversary: Anniversary
+function MilestoneEditForm({ milestone, onSave, onCancel, t }: {
+  milestone: Milestone
   onSave: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   onCancel: () => void
   t: ReturnType<typeof useI18n>['t']
 }) {
   const labelId = useId()
   const dateId = useId()
-  const [label, setLabel] = useState(anniversary.label)
-  const [date, setDate] = useState(anniversary.date)
-  const [emoji, setEmoji] = useState(anniversary.emoji ?? '')
-  const [recurring, setRecurring] = useState(anniversary.recurring ?? true)
+  const [label, setLabel] = useState(milestone.label)
+  const [date, setDate] = useState(milestone.date)
+  const [emoji, setEmoji] = useState(milestone.emoji ?? '')
+  const [recurring, setRecurring] = useState(milestone.recurring ?? true)
   const [errors, setErrors] = useState<string[]>([])
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    const errs = validateAnniversaryFields(label, date, t)
+    const errs = validateMilestoneFields(label, date, t)
     setErrors(errs)
     if (errs.length > 0) return
     onSave(label.trim(), date, emoji || undefined, recurring)
@@ -666,7 +666,7 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
 
   return (
     <form
-      className="settings-anniversary-form settings-anniversary-edit-form"
+      className="settings-milestone-form settings-milestone-edit-form"
       onSubmit={handleSubmit}
       onKeyDown={event => {
         if (event.key === 'Escape') {
@@ -676,78 +676,78 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
         }
       }}
     >
-      <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
+      <label className="sr-only" htmlFor={labelId}>{t.settings.milestoneLabelPlaceholder}</label>
       <input
         id={labelId}
-        name="anniversary-label"
-        className="settings-anniversary-input"
+        name="milestone-label"
+        className="settings-milestone-input"
         value={label}
         onChange={e => setLabel(e.target.value)}
-        placeholder={t.settings.anniversaryLabelPlaceholder}
-        maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
+        placeholder={t.settings.milestoneLabelPlaceholder}
+        maxLength={MAX_MILESTONE_LABEL_LENGTH}
         required
         autoFocus
       />
-      <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
-      <AnniversaryDatePicker
+      <label className="sr-only" htmlFor={dateId}>{t.settings.milestoneDatePlaceholder}</label>
+      <MilestoneDatePicker
         id={dateId}
         value={date}
         onChange={setDate}
-        label={t.settings.anniversaryDatePlaceholder}
+        label={t.settings.milestoneDatePlaceholder}
       />
-      <div className="settings-anniversary-extras">
-        <div className="settings-anniversary-emoji-picker">
-          <span className="settings-anniversary-emoji-label">{t.settings.anniversaryEmoji}</span>
-          <div className="settings-anniversary-emoji-options">
-            {ANNIVERSARY_EMOJI_PRESETS.map(e => (
+      <div className="settings-milestone-extras">
+        <div className="settings-milestone-emoji-picker">
+          <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
+          <div className="settings-milestone-emoji-options">
+            {MILESTONE_EMOJI_PRESETS.map(e => (
               <button
                 key={e}
                 type="button"
-                className={`settings-anniversary-emoji-btn${emoji === e ? ' active' : ''}`}
+                className={`settings-milestone-emoji-btn${emoji === e ? ' active' : ''}`}
                 onClick={() => setEmoji(prev => prev === e ? '' : e)}
                 aria-pressed={emoji === e}
               >{e}</button>
             ))}
             <input
               type="text"
-              className={`settings-anniversary-emoji-custom${emoji && !ANNIVERSARY_EMOJI_PRESETS.includes(emoji) ? ' active' : ''}`}
-              value={emoji && !ANNIVERSARY_EMOJI_PRESETS.includes(emoji) ? emoji : ''}
+              className={`settings-milestone-emoji-custom${emoji && !MILESTONE_EMOJI_PRESETS.includes(emoji) ? ' active' : ''}`}
+              value={emoji && !MILESTONE_EMOJI_PRESETS.includes(emoji) ? emoji : ''}
               onChange={ev => setEmoji(getFirstGrapheme(ev.target.value))}
               placeholder="+"
-              aria-label={t.settings.anniversaryEmojiCustom}
+              aria-label={t.settings.milestoneEmojiCustom}
               maxLength={8}
             />
           </div>
         </div>
-        <div className="settings-anniversary-recurring-toggle">
+        <div className="settings-milestone-recurring-toggle">
           <button
             type="button"
-            className={`settings-anniversary-type-btn${recurring ? ' active' : ''}`}
+            className={`settings-milestone-type-btn${recurring ? ' active' : ''}`}
             onClick={() => setRecurring(true)}
             aria-pressed={recurring}
-          >{t.settings.anniversaryRecurring}</button>
+          >{t.settings.milestoneRecurring}</button>
           <button
             type="button"
-            className={`settings-anniversary-type-btn${!recurring ? ' active' : ''}`}
+            className={`settings-milestone-type-btn${!recurring ? ' active' : ''}`}
             onClick={() => setRecurring(false)}
             aria-pressed={!recurring}
-          >{t.settings.anniversaryOneTime}</button>
+          >{t.settings.milestoneOneTime}</button>
         </div>
       </div>
       {errors.length > 0 && (
-        <div className="settings-anniversary-errors" role="alert">
-          {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
+        <div className="settings-milestone-errors" role="alert">
+          {errors.map((e, i) => <span key={i} className="settings-milestone-error">{e}</span>)}
         </div>
       )}
-      <div className="settings-anniversary-form-actions">
-        <button type="submit" className="settings-anniversary-save">{t.settings.anniversaryEditSave}</button>
-        <button type="button" className="settings-anniversary-cancel" onClick={onCancel}>{t.settings.anniversaryCancel}</button>
+      <div className="settings-milestone-form-actions">
+        <button type="submit" className="settings-milestone-save">{t.settings.milestoneEditSave}</button>
+        <button type="button" className="settings-milestone-cancel" onClick={onCancel}>{t.settings.milestoneCancel}</button>
       </div>
     </form>
   )
 }
 
-function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
+function MilestoneAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
   onAdd: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   t: ReturnType<typeof useI18n>['t']
   limitReached: boolean
@@ -778,7 +778,7 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
 
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault()
-    const errs = validateAnniversaryFields(newLabel, newDate, t)
+    const errs = validateMilestoneFields(newLabel, newDate, t)
     setErrors(errs)
     if (errs.length > 0) return
     onAdd(newLabel.trim(), newDate, newEmoji || undefined, newRecurring)
@@ -791,7 +791,7 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
         <motion.button
           key="add-btn"
           type="button"
-          className="settings-anniversary-add-btn"
+          className="settings-milestone-add-btn"
           onClick={openForm}
           disabled={limitReached}
           aria-describedby={limitReached ? limitDescriptionId : undefined}
@@ -800,84 +800,84 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.12 }}
         >
-          {t.settings.anniversaryAdd}
+          {t.settings.milestoneAdd}
         </motion.button>
       ) : (
         <motion.form
           key="add-form"
-          className="settings-anniversary-form"
+          className="settings-milestone-form"
           onSubmit={handleAdd}
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.15 }}
         >
-          <label className="sr-only" htmlFor={labelId}>{t.settings.anniversaryLabelPlaceholder}</label>
+          <label className="sr-only" htmlFor={labelId}>{t.settings.milestoneLabelPlaceholder}</label>
           <input
             id={labelId}
-            name="anniversary-label"
-            className="settings-anniversary-input"
+            name="milestone-label"
+            className="settings-milestone-input"
             value={newLabel}
             onChange={e => setNewLabel(e.target.value)}
-            placeholder={t.settings.anniversaryLabelPlaceholder}
-            maxLength={MAX_ANNIVERSARY_LABEL_LENGTH}
+            placeholder={t.settings.milestoneLabelPlaceholder}
+            maxLength={MAX_MILESTONE_LABEL_LENGTH}
             required
             autoFocus
           />
-          <label className="sr-only" htmlFor={dateId}>{t.settings.anniversaryDatePlaceholder}</label>
-          <AnniversaryDatePicker
+          <label className="sr-only" htmlFor={dateId}>{t.settings.milestoneDatePlaceholder}</label>
+          <MilestoneDatePicker
             id={dateId}
             value={newDate}
             onChange={setNewDate}
-            label={t.settings.anniversaryDatePlaceholder}
+            label={t.settings.milestoneDatePlaceholder}
           />
-          <div className="settings-anniversary-extras">
-            <div className="settings-anniversary-emoji-picker">
-              <span className="settings-anniversary-emoji-label">{t.settings.anniversaryEmoji}</span>
-              <div className="settings-anniversary-emoji-options">
-                {ANNIVERSARY_EMOJI_PRESETS.map(e => (
+          <div className="settings-milestone-extras">
+            <div className="settings-milestone-emoji-picker">
+              <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
+              <div className="settings-milestone-emoji-options">
+                {MILESTONE_EMOJI_PRESETS.map(e => (
                   <button
                     key={e}
                     type="button"
-                    className={`settings-anniversary-emoji-btn${newEmoji === e ? ' active' : ''}`}
+                    className={`settings-milestone-emoji-btn${newEmoji === e ? ' active' : ''}`}
                     onClick={() => setNewEmoji(prev => prev === e ? '' : e)}
                     aria-pressed={newEmoji === e}
                   >{e}</button>
                 ))}
                 <input
                   type="text"
-                  className={`settings-anniversary-emoji-custom${newEmoji && !ANNIVERSARY_EMOJI_PRESETS.includes(newEmoji) ? ' active' : ''}`}
-                  value={newEmoji && !ANNIVERSARY_EMOJI_PRESETS.includes(newEmoji) ? newEmoji : ''}
+                  className={`settings-milestone-emoji-custom${newEmoji && !MILESTONE_EMOJI_PRESETS.includes(newEmoji) ? ' active' : ''}`}
+                  value={newEmoji && !MILESTONE_EMOJI_PRESETS.includes(newEmoji) ? newEmoji : ''}
                   onChange={ev => setNewEmoji(getFirstGrapheme(ev.target.value))}
                   placeholder="+"
-                  aria-label={t.settings.anniversaryEmojiCustom}
+                  aria-label={t.settings.milestoneEmojiCustom}
                   maxLength={8}
                 />
               </div>
             </div>
-            <div className="settings-anniversary-recurring-toggle">
+            <div className="settings-milestone-recurring-toggle">
               <button
                 type="button"
-                className={`settings-anniversary-type-btn${newRecurring ? ' active' : ''}`}
+                className={`settings-milestone-type-btn${newRecurring ? ' active' : ''}`}
                 onClick={() => setNewRecurring(true)}
                 aria-pressed={newRecurring}
-              >{t.settings.anniversaryRecurring}</button>
+              >{t.settings.milestoneRecurring}</button>
               <button
                 type="button"
-                className={`settings-anniversary-type-btn${!newRecurring ? ' active' : ''}`}
+                className={`settings-milestone-type-btn${!newRecurring ? ' active' : ''}`}
                 onClick={() => setNewRecurring(false)}
                 aria-pressed={!newRecurring}
-              >{t.settings.anniversaryOneTime}</button>
+              >{t.settings.milestoneOneTime}</button>
             </div>
           </div>
           {errors.length > 0 && (
-            <div className="settings-anniversary-errors" role="alert">
-              {errors.map((e, i) => <span key={i} className="settings-anniversary-error">{e}</span>)}
+            <div className="settings-milestone-errors" role="alert">
+              {errors.map((e, i) => <span key={i} className="settings-milestone-error">{e}</span>)}
             </div>
           )}
-          <div className="settings-anniversary-form-actions">
-            <button type="submit" className="settings-anniversary-save">{t.settings.anniversarySave}</button>
-            <button type="button" className="settings-anniversary-cancel" onClick={closeForm}>{t.settings.anniversaryCancel}</button>
+          <div className="settings-milestone-form-actions">
+            <button type="submit" className="settings-milestone-save">{t.settings.milestoneSave}</button>
+            <button type="button" className="settings-milestone-cancel" onClick={closeForm}>{t.settings.milestoneCancel}</button>
           </div>
         </motion.form>
       )}

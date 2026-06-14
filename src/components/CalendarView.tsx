@@ -6,7 +6,7 @@ import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../util
 import { useI18n } from '../i18n'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
-import type { Anniversary } from '../types'
+import type { Milestone } from '../types'
 
 interface Props {
   dates: Set<string>
@@ -15,7 +15,7 @@ interface Props {
   onPrefetch?: (date: string) => void
   onMonthChange?: (year: number, month: number) => void
   holidayCountry?: HolidayCountry
-  anniversaries?: Anniversary[]
+  milestones?: Milestone[]
 }
 
 interface MonthYearPickerProps {
@@ -217,7 +217,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', anniversaries = [] }: Props) {
+export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', milestones = [] }: Props) {
   const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -268,11 +268,11 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
 
   const yearHolidays = useHolidays(holidayCountry, year)
 
-  // Anniversaries that fall on a day in the current month. We match by month+day,
-  // ignoring the anniversary's year, so a yearly anniversary appears every year.
-  const monthAnniversaries = useMemo(() => {
-    const map = new Map<number, Anniversary[]>()
-    for (const a of anniversaries) {
+  // Milestones that fall on a day in the current month. We match by month+day,
+  // ignoring the milestone's year, so a yearly milestone appears every year.
+  const monthMilestones = useMemo(() => {
+    const map = new Map<number, Milestone[]>()
+    for (const a of milestones) {
       if (a.showBadge === false) continue
       if (a.recurring === false && Number(a.date.slice(0, 4)) !== year) continue
       const parts = a.date.match(/^\d{4}-(\d{2})-(\d{2})$/)
@@ -286,7 +286,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
       }
     }
     return map
-  }, [anniversaries, month, year])
+  }, [milestones, month, year])
 
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = daysInMonthUtil(year, month + 1)
@@ -378,17 +378,17 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               const isToday = dateStr === todayStr
               const holiday = yearHolidays[dateStr]
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
-              const dayAnniversaries = day !== null ? (monthAnniversaries.get(day) ?? []) : []
-              const hasAnniversary = dayAnniversaries.length > 0
-              const anniversaryTitle = dayAnniversaries.map(a => `${a.emoji ?? '🎀'} ${a.label}`).join(', ')
-              const accessibleDetails = [holidayName, anniversaryTitle].filter(Boolean).join('; ') || undefined
+              const dayMilestones = day !== null ? (monthMilestones.get(day) ?? []) : []
+              const hasMilestone = dayMilestones.length > 0
+              const milestoneTitle = dayMilestones.map(a => `${a.emoji ?? '🎀'} ${a.label}`).join(', ')
+              const accessibleDetails = [holidayName, milestoneTitle].filter(Boolean).join('; ') || undefined
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
                   aria-label={accessibleDetails ? `${dateStr} ${accessibleDetails}` : dateStr}
                   title={accessibleDetails || undefined}
-                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasAnniversary ? 'anniversary' : ''].filter(Boolean).join(' ')}
+                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasMilestone ? 'milestone' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
@@ -397,9 +397,9 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
                 >
                   {day}
                   <span className="dot" aria-hidden="true" />
-                  {hasAnniversary && (
-                    <span className="cal-day-anniversary" aria-hidden="true">
-                      {dayAnniversaries[0].emoji ?? '🎀'}
+                  {hasMilestone && (
+                    <span className="cal-day-milestone" aria-hidden="true">
+                      {dayMilestones[0].emoji ?? '🎀'}
                     </span>
                   )}
                 </motion.button>

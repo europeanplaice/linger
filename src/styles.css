@@ -1051,13 +1051,13 @@ html.session-restoring .landing {
   transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .cal-day.has-entry .dot { opacity: 1; transform: scale(1); }
-.cal-day.anniversary {
-  --anniversary-glow: color-mix(in srgb, var(--accent) 15%, transparent);
+.cal-day.milestone {
+  --milestone-glow: color-mix(in srgb, var(--accent) 15%, transparent);
 }
-.cal-day.anniversary:not(:hover):not(.selected) {
-  background-color: var(--anniversary-glow);
+.cal-day.milestone:not(:hover):not(.selected) {
+  background-color: var(--milestone-glow);
 }
-.cal-day-anniversary {
+.cal-day-milestone {
   font-size: 0.55rem;
   line-height: 1;
   margin-top: -1px;
@@ -1508,7 +1508,7 @@ dialog.settings-dialog::backdrop {
 }
 .settings-drive-link:hover { text-decoration: underline; }
 
-.settings-item-anniversaries {
+.settings-item-milestones {
   align-items: stretch;
   flex-direction: column;
   gap: 0.65rem;
@@ -1516,41 +1516,41 @@ dialog.settings-dialog::backdrop {
   padding-top: 0.85rem;
   padding-bottom: 0.85rem;
 }
-.settings-anniversary-heading {
+.settings-milestone-heading {
   align-items: baseline;
   display: flex;
   gap: 0.75rem;
   justify-content: space-between;
   min-width: 0;
 }
-.settings-anniversary-section {
+.settings-milestone-section {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
   min-width: 0;
   width: 100%;
 }
-.settings-anniversary-help {
+.settings-milestone-help {
   display: flex;
   flex-wrap: wrap;
   gap: 0.2rem 0.75rem;
 }
-.settings-anniversary-none {
+.settings-milestone-none {
   font-size: 0.78rem;
   color: var(--text-muted);
 }
-.settings-anniversary-usage,
-.settings-anniversary-limit {
+.settings-milestone-usage,
+.settings-milestone-limit {
   color: var(--text-muted);
   font-size: 0.72rem;
 }
-.settings-anniversary-list {
+.settings-milestone-list {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   min-width: 0;
 }
-.settings-anniversary-row {
+.settings-milestone-row {
   align-items: center;
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -1561,31 +1561,31 @@ dialog.settings-dialog::backdrop {
   min-width: 0;
   padding: 0.55rem 0.65rem;
 }
-.settings-anniversary-details {
+.settings-milestone-details {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
 }
-.settings-anniversary-actions {
+.settings-milestone-actions {
   align-items: center;
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
   min-width: 0;
 }
-.settings-anniversary-label {
+.settings-milestone-label {
   font-weight: 500;
   color: var(--text);
   font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
-.settings-anniversary-date {
+.settings-milestone-date {
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
 }
-.settings-anniversary-badge-toggle {
+.settings-milestone-badge-toggle {
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -1596,7 +1596,7 @@ dialog.settings-dialog::backdrop {
   position: relative;
   width: 2.75rem;
 }
-.settings-anniversary-badge-toggle::before {
+.settings-milestone-badge-toggle::before {
   background: var(--border);
   border-radius: 999px;
   content: '';
@@ -1607,14 +1607,14 @@ dialog.settings-dialog::backdrop {
   transition: background 0.15s;
   width: 1.75rem;
 }
-.settings-anniversary-badge-toggle.active::before {
+.settings-milestone-badge-toggle.active::before {
   background: var(--accent);
 }
-.settings-anniversary-badge-toggle[aria-disabled="true"] {
+.settings-milestone-badge-toggle[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.45;
 }
-.settings-anniversary-badge-toggle-thumb {
+.settings-milestone-badge-toggle-thumb {
   background: #fff;
   border-radius: 50%;
   display: block;
@@ -1625,22 +1625,22 @@ dialog.settings-dialog::backdrop {
   transition: transform 0.15s;
   width: 0.75rem;
 }
-.settings-anniversary-badge-toggle.active .settings-anniversary-badge-toggle-thumb {
+.settings-milestone-badge-toggle.active .settings-milestone-badge-toggle-thumb {
   transform: translateX(0.75rem);
 }
-.settings-anniversary-badge-toggle-wrap {
+.settings-milestone-badge-toggle-wrap {
   align-items: center;
   display: flex;
   gap: 0.25rem;
 }
-.settings-anniversary-badge-label {
+.settings-milestone-badge-label {
   color: var(--text-muted);
   cursor: default;
   font-size: 0.72rem;
   user-select: none;
   white-space: nowrap;
 }
-.settings-anniversary-edit {
+.settings-milestone-edit {
   background: none;
   border: none;
   border-radius: 6px;
@@ -1654,11 +1654,11 @@ dialog.settings-dialog::backdrop {
   opacity: 0.6;
   transition: opacity 0.12s;
 }
-.settings-anniversary-edit:hover {
+.settings-milestone-edit:hover {
   background: var(--border);
   opacity: 1;
 }
-.settings-anniversary-remove {
+.settings-milestone-remove {
   background: none;
   border: none;
   border-radius: 6px;
@@ -1672,11 +1672,11 @@ dialog.settings-dialog::backdrop {
   opacity: 0.6;
   transition: opacity 0.12s;
 }
-.settings-anniversary-remove:hover {
+.settings-milestone-remove:hover {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
   opacity: 1;
 }
-.settings-anniversary-confirm {
+.settings-milestone-confirm {
   align-items: flex-end;
   display: flex;
   flex-direction: column;
@@ -1685,16 +1685,16 @@ dialog.settings-dialog::backdrop {
   max-width: 16rem;
   min-width: 0;
 }
-.settings-anniversary-confirm-text {
+.settings-milestone-confirm-text {
   color: var(--danger);
   overflow-wrap: anywhere;
   text-align: end;
 }
-.settings-anniversary-confirm-actions {
+.settings-milestone-confirm-actions {
   display: flex;
   gap: 0.35rem;
 }
-.settings-anniversary-confirm-yes {
+.settings-milestone-confirm-yes {
   background: var(--danger);
   border: none;
   border-radius: 4px;
@@ -1705,7 +1705,7 @@ dialog.settings-dialog::backdrop {
   padding: 0.2rem 0.5rem;
   font-family: inherit;
 }
-.settings-anniversary-confirm-no {
+.settings-milestone-confirm-no {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1715,7 +1715,7 @@ dialog.settings-dialog::backdrop {
   padding: 0.2rem 0.5rem;
   font-family: inherit;
 }
-.settings-anniversary-add-btn {
+.settings-milestone-add-btn {
   align-self: flex-end;
   background: var(--accent);
   border: none;
@@ -1728,24 +1728,24 @@ dialog.settings-dialog::backdrop {
   font-family: inherit;
   transition: filter 0.15s, box-shadow 0.15s;
 }
-.settings-anniversary-add-btn:hover {
+.settings-milestone-add-btn:hover {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
-.settings-anniversary-add-btn:disabled {
+.settings-milestone-add-btn:disabled {
   box-shadow: none;
   cursor: not-allowed;
   filter: none;
   opacity: 0.45;
 }
-.settings-anniversary-form {
+.settings-milestone-form {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.5rem 0;
   min-width: 14rem;
 }
-.settings-anniversary-input {
+.settings-milestone-input {
   border: 1.5px solid var(--border);
   border-radius: 8px;
   padding: 0.35rem 0.65rem;
@@ -1757,14 +1757,14 @@ dialog.settings-dialog::backdrop {
   width: 100%;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.settings-anniversary-input:hover {
+.settings-milestone-input:hover {
   border-color: var(--text-muted);
 }
-.settings-anniversary-input:focus {
+.settings-milestone-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--save-glow);
 }
-.settings-anniversary-date-input {
+.settings-milestone-date-input {
   align-self: flex-end;
   align-items: center;
   cursor: pointer;
@@ -1774,22 +1774,22 @@ dialog.settings-dialog::backdrop {
   text-align: start;
   width: fit-content;
 }
-.settings-anniversary-date-input:hover {
+.settings-milestone-date-input:hover {
   border-color: var(--text-muted);
 }
-.settings-anniversary-date-input.open {
+.settings-milestone-date-input.open {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--save-glow);
 }
-.settings-anniversary-date-placeholder {
+.settings-milestone-date-placeholder {
   color: var(--text-muted);
 }
-.settings-anniversary-date-picker {
+.settings-milestone-date-picker {
   align-self: flex-end;
   position: relative;
   width: fit-content;
 }
-.settings-anniversary-date-popover {
+.settings-milestone-date-popover {
   inset: unset;
   margin: 0;
   padding: 0.35rem 0.25rem 0.55rem;
@@ -1803,13 +1803,13 @@ dialog.settings-dialog::backdrop {
   box-shadow: 0 8px 28px var(--shadow-heavy);
   color: var(--text);
 }
-.settings-anniversary-date-popover .calendar {
+.settings-milestone-date-popover .calendar {
   padding-inline: 0.55rem;
 }
-.settings-anniversary-date-popover .calendar-title {
+.settings-milestone-date-popover .calendar-title {
   min-width: 9rem;
 }
-.settings-anniversary-errors {
+.settings-milestone-errors {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -1819,18 +1819,18 @@ dialog.settings-dialog::backdrop {
   border-radius: 6px;
   margin-top: 0.15rem;
 }
-.settings-anniversary-error {
+.settings-milestone-error {
   font-size: 0.75rem;
   color: var(--danger);
   font-weight: 500;
 }
-.settings-anniversary-form-actions {
+.settings-milestone-form-actions {
   display: flex;
   gap: 0.45rem;
   justify-content: flex-end;
   margin-top: 0.2rem;
 }
-.settings-anniversary-save {
+.settings-milestone-save {
   background: var(--accent);
   border: none;
   border-radius: 8px;
@@ -1842,11 +1842,11 @@ dialog.settings-dialog::backdrop {
   font-weight: 500;
   transition: background-color 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
 }
-.settings-anniversary-save:hover {
+.settings-milestone-save:hover {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
-.settings-anniversary-cancel {
+.settings-milestone-cancel {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1857,35 +1857,35 @@ dialog.settings-dialog::backdrop {
   font-family: inherit;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
-.settings-anniversary-cancel:hover {
+.settings-milestone-cancel:hover {
   background: var(--border);
 }
 
-/* Anniversary custom emoji & recurring features */
-.settings-anniversary-extras {
+/* Milestone custom emoji & recurring features */
+.settings-milestone-extras {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   padding: 0.25rem 0;
 }
-.settings-anniversary-emoji-picker {
+.settings-milestone-emoji-picker {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
-.settings-anniversary-emoji-label {
+.settings-milestone-emoji-label {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.settings-anniversary-emoji-options {
+.settings-milestone-emoji-options {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
-.settings-anniversary-emoji-btn {
+.settings-milestone-emoji-btn {
   font-size: 1.1rem;
   background: var(--input-bg);
   border: 1.5px solid var(--border);
@@ -1899,17 +1899,17 @@ dialog.settings-dialog::backdrop {
   transition: all 0.15s ease;
   padding: 0;
 }
-.settings-anniversary-emoji-btn:hover {
+.settings-milestone-emoji-btn:hover {
   background: var(--hover-bg);
   border-color: var(--text-muted);
   transform: translateY(-1px);
 }
-.settings-anniversary-emoji-btn.active {
+.settings-milestone-emoji-btn.active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--save-glow);
 }
-.settings-anniversary-emoji-custom {
+.settings-milestone-emoji-custom {
   font-size: 1.1rem;
   background: var(--input-bg);
   border: 1.5px dashed var(--border);
@@ -1924,26 +1924,26 @@ dialog.settings-dialog::backdrop {
   color: var(--text);
   flex-shrink: 0;
 }
-.settings-anniversary-emoji-custom::placeholder {
+.settings-milestone-emoji-custom::placeholder {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
-.settings-anniversary-emoji-custom:hover {
+.settings-milestone-emoji-custom:hover {
   border-color: var(--text-muted);
   border-style: solid;
 }
-.settings-anniversary-emoji-custom:focus {
+.settings-milestone-emoji-custom:focus {
   outline: none;
   border-color: var(--accent);
   border-style: solid;
 }
-.settings-anniversary-emoji-custom.active {
+.settings-milestone-emoji-custom.active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
   border-style: solid;
   box-shadow: 0 0 0 2px var(--save-glow);
 }
-.settings-anniversary-recurring-toggle {
+.settings-milestone-recurring-toggle {
   display: flex;
   border: 1.5px solid var(--border);
   border-radius: 8px;
@@ -1951,7 +1951,7 @@ dialog.settings-dialog::backdrop {
   background: var(--input-bg);
   margin-top: 0.1rem;
 }
-.settings-anniversary-type-btn {
+.settings-milestone-type-btn {
   flex: 1;
   border: none;
   background: transparent;
@@ -1964,20 +1964,20 @@ dialog.settings-dialog::backdrop {
   text-align: center;
   font-family: inherit;
 }
-.settings-anniversary-type-btn:hover {
+.settings-milestone-type-btn:hover {
   background: var(--hover-bg);
   color: var(--text);
 }
-.settings-anniversary-type-btn.active {
+.settings-milestone-type-btn.active {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
 }
-.settings-anniversary-emoji {
+.settings-milestone-emoji {
   margin-right: 0.35rem;
   display: inline-block;
 }
-.settings-anniversary-recurring-tag {
+.settings-milestone-recurring-tag {
   font-size: 0.62rem;
   font-weight: 600;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -1990,56 +1990,56 @@ dialog.settings-dialog::backdrop {
   line-height: 1.4;
 }
 
-.settings-anniversary-badge-toggle:focus-visible,
-.settings-anniversary-edit:focus-visible,
-.settings-anniversary-remove:focus-visible,
-.settings-anniversary-add-btn:focus-visible,
-.settings-anniversary-confirm-yes:focus-visible,
-.settings-anniversary-confirm-no:focus-visible,
-.settings-anniversary-save:focus-visible,
-.settings-anniversary-cancel:focus-visible,
-.settings-anniversary-input:focus-visible {
+.settings-milestone-badge-toggle:focus-visible,
+.settings-milestone-edit:focus-visible,
+.settings-milestone-remove:focus-visible,
+.settings-milestone-add-btn:focus-visible,
+.settings-milestone-confirm-yes:focus-visible,
+.settings-milestone-confirm-no:focus-visible,
+.settings-milestone-save:focus-visible,
+.settings-milestone-cancel:focus-visible,
+.settings-milestone-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 @media (max-width: 480px) {
-  .settings-item-anniversaries {
+  .settings-item-milestones {
     padding-inline: 1rem;
   }
-  .settings-anniversary-row {
+  .settings-milestone-row {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr);
     row-gap: 0.45rem;
   }
-  .settings-anniversary-actions {
+  .settings-milestone-actions {
     justify-content: space-between;
   }
-  .settings-anniversary-confirm {
+  .settings-milestone-confirm {
     align-items: flex-start;
     max-width: none;
   }
-  .settings-anniversary-confirm-text {
+  .settings-milestone-confirm-text {
     text-align: start;
   }
-  .settings-anniversary-add-btn {
+  .settings-milestone-add-btn {
     align-self: stretch;
     min-height: 2.75rem;
   }
-  .settings-anniversary-form {
+  .settings-milestone-form {
     min-width: 0;
     width: 100%;
   }
-  .settings-anniversary-input {
+  .settings-milestone-input {
     font-size: 1rem;
     min-height: 2.75rem;
   }
-  .settings-anniversary-date-popover {
+  .settings-milestone-date-popover {
     left: 0.5rem;
     right: 0.5rem;
     width: auto;
   }
-  .settings-anniversary-form-actions button {
+  .settings-milestone-form-actions button {
     min-height: 2.75rem;
   }
 }
@@ -2398,7 +2398,7 @@ dialog.signout-confirm-dialog::backdrop {
   background: currentColor;
   opacity: 0.85;
 }
-.editor-meta-anniversary {
+.editor-meta-milestone {
   -webkit-appearance: none;
   appearance: none;
   border: 1px solid var(--accent);
@@ -2418,26 +2418,26 @@ dialog.signout-confirm-dialog::backdrop {
   position: relative;
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s, transform 0.15s;
 }
-.editor-meta-anniversary::after {
+.editor-meta-milestone::after {
   content: '';
   position: absolute;
   inset: -6px -4px;
 }
-.editor-meta-anniversary:hover {
+.editor-meta-milestone:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 20%, transparent);
   transform: translateY(-1px);
 }
-.editor-meta-anniversary:active {
+.editor-meta-milestone:active {
   box-shadow: none;
   transform: translateY(0);
 }
-.editor-meta-anniversary--on {
+.editor-meta-milestone--on {
   color: var(--on-accent);
   background: var(--accent);
   font-weight: 700;
 }
-.editor-meta-anniversary--on:hover {
+.editor-meta-milestone--on:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }

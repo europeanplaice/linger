@@ -4,7 +4,7 @@ import { EntryEditor } from '../src/components/EntryEditor'
 import { useOnline } from '../src/hooks/useOnline'
 import { EntryConflictError } from '../src/hooks/useDiary'
 import { TokenExpiredError } from '../src/api/driveEntries'
-import type { Anniversary, LoadedDiaryEntry } from '../src/types'
+import type { Milestone, LoadedDiaryEntry } from '../src/types'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
@@ -52,7 +52,7 @@ let lastRenderPendingNavDate: string | null = null
 let appSetPendingNavDate: ((d: string | null) => void) | null = null
 let lastRenderKnownDates: string[] | undefined
 let lastRenderDiaryListLoaded: boolean | undefined
-let lastRenderAnniversaries: Anniversary[] = []
+let lastRenderMilestones: Milestone[] = []
 
 let currentRefreshSignal = 0
 const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
@@ -83,13 +83,13 @@ function doRender() {
         refreshSignal={currentRefreshSignal}
         knownDates={lastRenderKnownDates}
         diaryListLoaded={lastRenderDiaryListLoaded}
-        anniversaries={lastRenderAnniversaries}
+        milestones={lastRenderMilestones}
       />
     </I18nProvider>
   )
 }
 
-function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal, knownDates, diaryListLoaded, anniversaries }: {
+function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal, knownDates, diaryListLoaded, milestones }: {
   date: string
   autoSave: boolean
   getContentDelayMs: number
@@ -98,7 +98,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
   refreshSignal: number
   knownDates?: string[]
   diaryListLoaded?: boolean
-  anniversaries: Anniversary[]
+  milestones: Milestone[]
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
   appSetPendingNavDate = setPendingNavDate
@@ -196,7 +196,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       isSignedIn={token !== null}
       isOnline={isOnline}
       onExpired={onExpired}
-      anniversaries={anniversaries}
+      milestones={milestones}
     />
   )
 }
@@ -217,7 +217,7 @@ window.editorHarness = {
     saveDelayMs?: number
     knownDates?: string[]
     diaryListLoaded?: boolean
-    anniversaries?: Anniversary[]
+    milestones?: Milestone[]
   }) => {
     saveCalls = []
     fullSaveCalls = []
@@ -248,7 +248,7 @@ window.editorHarness = {
     lastRenderPendingNavDate = opts.pendingNavDate ?? null
     lastRenderKnownDates = opts.knownDates
     lastRenderDiaryListLoaded = opts.diaryListLoaded
-    lastRenderAnniversaries = opts.anniversaries ?? []
+    lastRenderMilestones = opts.milestones ?? []
     currentRefreshSignal = 0
     contentByDate.clear()
     getContentBlockedForDate = null

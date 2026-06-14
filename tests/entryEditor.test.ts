@@ -19,7 +19,7 @@ async function renderEditor(
     autoSave?: boolean
     knownDates?: string[]
     diaryListLoaded?: boolean
-    anniversaries?: import('../src/types').Anniversary[]
+    milestones?: import('../src/types').Milestone[]
   } = {},
 ) {
   const date = opts.date ?? '2026-05-01'
@@ -28,10 +28,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, anniversaries }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, anniversaries })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, anniversaries: opts.anniversaries },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, milestones: opts.milestones },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -1263,26 +1263,26 @@ test.describe('EntryEditor — date switch cancellation', () => {
 })
 
 test.describe('EntryEditor — editor meta info', () => {
-  test('shows enabled anniversaries regardless of distance from the selected date', async ({ page }) => {
+  test('shows enabled milestones regardless of distance from the selected date', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2026-01-01',
-      anniversaries: [
+      milestones: [
         { id: 'birthday', label: 'Birthday', date: '2000-05-10' },
         { id: 'hidden', label: 'Hidden', date: '2000-05-11', showBadge: false },
       ],
     })
 
-    const anniversary = page.locator('.editor-meta-anniversary')
-    await expect(anniversary).toHaveCount(1)
-    await expect(anniversary).toHaveText('🎀 Birthday 9367d ago')
+    const milestone = page.locator('.editor-meta-milestone')
+    await expect(milestone).toHaveCount(1)
+    await expect(milestone).toHaveText('🎀 Birthday 9367d ago')
   })
 
-  test('opens the anniversary entry by click or keyboard', async ({ page }) => {
+  test('opens the milestone entry by click or keyboard', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2026-01-01',
-      anniversaries: [
+      milestones: [
         { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
       ],
     })
@@ -1298,11 +1298,11 @@ test.describe('EntryEditor — editor meta info', () => {
     ])
   })
 
-  test('styles matching anniversary badges as contained and other dates as outlined', async ({ page }) => {
+  test('styles matching milestone badges as contained and other dates as outlined', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2020-05-10',
-      anniversaries: [
+      milestones: [
         { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
         { id: 'graduation', label: 'Graduation', date: '2020-05-11' },
       ],
@@ -1348,11 +1348,11 @@ test.describe('EntryEditor — editor meta info', () => {
       .not.toBe('none')
   })
 
-  test('shows at most three anniversary badges at once', async ({ page }) => {
+  test('shows at most three milestone badges at once', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2026-01-01',
-      anniversaries: [
+      milestones: [
         { id: 'one', label: 'One', date: '2025-12-31' },
         { id: 'two', label: 'Two', date: '2026-01-01' },
         { id: 'three', label: 'Three', date: '2026-01-02' },
@@ -1360,7 +1360,7 @@ test.describe('EntryEditor — editor meta info', () => {
       ],
     })
 
-    await expect(page.locator('.editor-meta-anniversary')).toHaveCount(3)
+    await expect(page.locator('.editor-meta-milestone')).toHaveCount(3)
     await expect(page.locator('.editor-meta')).not.toContainText('Four')
   })
 

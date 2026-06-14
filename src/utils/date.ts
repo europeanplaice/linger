@@ -1,4 +1,4 @@
-import type { AnniversaryProximity } from '../types'
+import type { MilestoneProximity } from '../types'
 
 export const DEFAULT_DATE_LOCALE = 'ja-JP'
 
@@ -132,41 +132,41 @@ export function nearestEntryWithin(dates: string[], target: string, maxDistanceD
   return nearestWithDistance(dates, target, maxDistanceDays)?.date ?? null
 }
 
-export function anniversaryProximity(
+export function milestoneProximity(
   entryDate: string,
-  anniversaryDate: string,
+  milestoneDate: string,
   id: string,
   label: string,
   emoji?: string,
   recurring?: boolean,
-): AnniversaryProximity | null {
+): MilestoneProximity | null {
   const entry = parseYmd(entryDate)
-  const anniversary = parseYmd(anniversaryDate)
-  if (!entry || !anniversary) return null
+  const milestone = parseYmd(milestoneDate)
+  if (!entry || !milestone) return null
 
   const entryDay = Date.UTC(entry.y, entry.m - 1, entry.d)
-  const anniversaryDay = Date.UTC(anniversary.y, anniversary.m - 1, anniversary.d)
-  const distance = Math.round((anniversaryDay - entryDay) / 86_400_000)
+  const milestoneDay = Date.UTC(milestone.y, milestone.m - 1, milestone.d)
+  const distance = Math.round((milestoneDay - entryDay) / 86_400_000)
 
   let nthYear: number | undefined
-  if (recurring && anniversary.y > 0 && anniversary.y !== 2000) {
-    // For recurring anniversaries, calculate how many years since the event.
-    // anniversary.y === 2000 means legacy data where year was unknown.
-    nthYear = entry.y - anniversary.y
+  if (recurring && milestone.y > 0 && milestone.y !== 2000) {
+    // For recurring milestones, calculate how many years since the event.
+    // milestone.y === 2000 means legacy data where year was unknown.
+    nthYear = entry.y - milestone.y
     if (nthYear <= 0) nthYear = undefined
   }
 
-  return { id, label, date: anniversaryDate, distance, emoji, recurring, nthYear }
+  return { id, label, date: milestoneDate, distance, emoji, recurring, nthYear }
 }
 
-export function anniversariesNearEntry(
+export function milestonesNearEntry(
   entryDate: string,
-  anniversaries: ReadonlyArray<{ id: string; label: string; date: string; emoji?: string; recurring?: boolean }>,
+  milestones: ReadonlyArray<{ id: string; label: string; date: string; emoji?: string; recurring?: boolean }>,
   maxDistanceDays?: number,
-): AnniversaryProximity[] {
-  const results: AnniversaryProximity[] = []
-  for (const a of anniversaries) {
-    const prox = anniversaryProximity(entryDate, a.date, a.id, a.label, a.emoji, a.recurring)
+): MilestoneProximity[] {
+  const results: MilestoneProximity[] = []
+  for (const a of milestones) {
+    const prox = milestoneProximity(entryDate, a.date, a.id, a.label, a.emoji, a.recurring)
     if (prox && (maxDistanceDays === undefined || Math.abs(prox.distance) <= maxDistanceDays)) {
       results.push(prox)
     }

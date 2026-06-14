@@ -20,7 +20,7 @@ interface Window {
     progressCalls: () => { done: number; total: number }[]
   }
   settingsHarness: {
-    render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; anniversaries?: import('../src/types').Anniversary[] }) => void
+    render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; milestones?: import('../src/types').Milestone[] }) => void
     getStoredAutoSave: () => string | null
     getStoredTheme: () => string | null
     exportCalls: () => { hasProgress: boolean }[]
@@ -86,7 +86,7 @@ interface Window {
       saveDelayMs?: number
       knownDates?: string[]
       diaryListLoaded?: boolean
-      anniversaries?: import('../src/types').Anniversary[]
+      milestones?: import('../src/types').Milestone[]
     }) => void
     saveCalls: () => { date: string; content: string; baseVersion: string | null; force?: boolean }[]
     saveCallsWithBaseContent: () => {

@@ -5,8 +5,8 @@ import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
-import { MAX_ANNIVERSARY_BADGES, type Anniversary, type LoadedDiaryEntry } from '../types'
-import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, anniversariesNearEntry } from '../utils/date'
+import { MAX_MILESTONE_BADGES, type Milestone, type LoadedDiaryEntry } from '../types'
+import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
@@ -54,7 +54,7 @@ interface Props {
   knownDates?: Set<string>
   diaryListLoaded?: boolean
   holidayCountry?: HolidayCountry
-  anniversaries?: Anniversary[]
+  milestones?: Milestone[]
 }
 
 function SaveIcon() {
@@ -109,7 +109,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', anniversaries = [] }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [] }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -150,13 +150,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
-  const activeAnniversaries = useMemo(
-    () => (anniversaries ?? []).filter(a => a.showBadge !== false),
-    [anniversaries],
+  const activeMilestones = useMemo(
+    () => (milestones ?? []).filter(a => a.showBadge !== false),
+    [milestones],
   )
-  const anniversaryBadges = useMemo(
-    () => anniversariesNearEntry(date, activeAnniversaries).slice(0, MAX_ANNIVERSARY_BADGES),
-    [date, activeAnniversaries],
+  const milestoneBadges = useMemo(
+    () => milestonesNearEntry(date, activeMilestones).slice(0, MAX_MILESTONE_BADGES),
+    [date, activeMilestones],
   )
   const daysDiff = (() => {
     const today = todayYmd()
@@ -841,18 +841,18 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             {isFuture && t.entry.daysAhead(daysDiff)}
           </span>
         )}
-        {anniversaryBadges.map(({ id, label, date: anniversaryDate, distance, emoji, nthYear }) => (
+        {milestoneBadges.map(({ id, label, date: milestoneDate, distance, emoji, nthYear }) => (
           <button
             key={id}
             type="button"
-            className={`editor-meta-anniversary${distance === 0 ? ' editor-meta-anniversary--on' : ''}`}
-            onClick={() => onSelectDate(anniversaryDate)}
-            aria-label={t.entry.anniversaryOpen(label, anniversaryDate)}
+            className={`editor-meta-milestone${distance === 0 ? ' editor-meta-milestone--on' : ''}`}
+            onClick={() => onSelectDate(milestoneDate)}
+            aria-label={t.entry.milestoneOpen(label, milestoneDate)}
           >
             {emoji ?? '🎀'}{' '}
-            {distance === 0 ? t.entry.anniversaryOn(label, nthYear)
-             : distance > 0 ? t.entry.anniversaryBefore(label, distance, nthYear)
-             : t.entry.anniversaryAfter(label, Math.abs(distance), nthYear)}
+            {distance === 0 ? t.entry.milestoneOn(label, nthYear)
+             : distance > 0 ? t.entry.milestoneBefore(label, distance, nthYear)
+             : t.entry.milestoneAfter(label, Math.abs(distance), nthYear)}
           </button>
         ))}
         <AnimatePresence initial={false}>
