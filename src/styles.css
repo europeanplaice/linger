@@ -1853,7 +1853,7 @@ dialog.settings-dialog::backdrop {
   justify-content: flex-end;
   margin-top: 0.2rem;
 }
-.settings-milestone-save {
+.settings-milestone-form-actions .settings-milestone-save {
   background: var(--accent);
   border: none;
   border-radius: 8px;
@@ -1865,11 +1865,11 @@ dialog.settings-dialog::backdrop {
   font-weight: 500;
   transition: background-color 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
 }
-.settings-milestone-save:hover {
+.settings-milestone-form-actions .settings-milestone-save:hover {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
-.settings-milestone-cancel {
+.settings-milestone-form-actions .settings-milestone-cancel {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1880,7 +1880,7 @@ dialog.settings-dialog::backdrop {
   font-family: inherit;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
-.settings-milestone-cancel:hover {
+.settings-milestone-form-actions .settings-milestone-cancel:hover {
   background: var(--border);
 }
 
