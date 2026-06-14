@@ -20,6 +20,7 @@ async function renderEditor(
     knownDates?: string[]
     diaryListLoaded?: boolean
     milestones?: import('../src/types').Milestone[]
+    enableMilestoneAdd?: boolean
   } = {},
 ) {
   const date = opts.date ?? '2026-05-01'
@@ -28,10 +29,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, milestones: opts.milestones },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, milestones: opts.milestones, enableMilestoneAdd: opts.enableMilestoneAdd },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -1831,5 +1832,133 @@ test.describe('EntryEditor — swipe day navigation', () => {
     ])
 
     expect(await page.evaluate(() => window.editorHarness.nextDayCount())).toBe(0)
+  })
+})
+
+test.describe('EntryEditor — Add as Milestone', () => {
+  test('shows "Add as Milestone" in more menu when onMilestoneAdd is provided', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await expect(page.getByText('Add as Milestone')).toBeVisible()
+  })
+
+  test('hides "Add as Milestone" when onMilestoneAdd is not provided', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01' })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await expect(page.getByText('Add as Milestone')).toHaveCount(0)
+  })
+
+  test('clicking "Add as Milestone" switches menu to inline form', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-06-14', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+
+    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+    await expect(page.locator('.more-menu-milestone-date')).toContainText('2026-06-14')
+    await expect(page.locator('input[placeholder*="Name"]')).toBeVisible()
+  })
+
+  test('shows yearly/one-time toggle in the inline form', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+
+    await expect(page.getByRole('button', { name: 'Yearly' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'One-time' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Yearly' })).toHaveClass(/active/)
+  })
+
+  test('shows error when label is empty and Add is clicked', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+    await page.locator('.settings-milestone-save').click()
+
+    await expect(page.locator('.more-menu-milestone-error')).toBeVisible()
+    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+  })
+
+  test('calls onMilestoneAdd with label, date, and recurring=true by default', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-06-14', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+    await page.locator('.more-menu-milestone-form input').fill('Wedding Anniversary')
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const calls = await page.evaluate(() => window.editorHarness.milestoneAddCalls())
+    expect(calls).toHaveLength(1)
+    expect(calls[0].label).toBe('Wedding Anniversary')
+    expect(calls[0].date).toBe('2026-06-14')
+    expect(calls[0].recurring).toBe(true)
+  })
+
+  test('calls onMilestoneAdd with recurring=false when One-time is selected', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+    await page.locator('.more-menu-milestone-form input').fill('Concert')
+    await page.getByRole('button', { name: 'One-time' }).click()
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const calls = await page.evaluate(() => window.editorHarness.milestoneAddCalls())
+    expect(calls[0].recurring).toBe(false)
+  })
+
+  test('closes menu after successful add', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+    await page.locator('.more-menu-milestone-form input').fill('Birthday')
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    await expect(page.locator('.more-menu')).toHaveCount(0)
+  })
+
+  test('cancel button returns to menu items (not close)', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.getByText('Add as Milestone').click()
+    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Cancel' }).click()
+
+    await expect(page.locator('.more-menu-milestone-form')).toHaveCount(0)
+    await expect(page.locator('.more-menu')).toBeVisible()
+    await expect(page.getByText('Add as Milestone')).toBeVisible()
+  })
+
+  test('"Add as Milestone" is disabled when at 50-milestone limit', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      enableMilestoneAdd: true,
+      milestones: Array.from({ length: 50 }, (_, i) => ({
+        id: `m${i}`,
+        label: `Milestone ${i}`,
+        date: `2020-${String((i % 12) + 1).padStart(2, '0')}-01`,
+      })),
+    })
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await expect(page.getByText('Add as Milestone')).toBeDisabled()
   })
 })

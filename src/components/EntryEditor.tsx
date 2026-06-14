@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
-import { MAX_MILESTONE_BADGES, type Milestone, type LoadedDiaryEntry } from '../types'
+import { MAX_MILESTONE_BADGES, MAX_MILESTONES, MAX_MILESTONE_LABEL_LENGTH, type Milestone, type LoadedDiaryEntry } from '../types'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry } from '../utils/date'
 import { HistoryModal } from './HistoryModal'
 import { shareEntry } from '../utils/share'
@@ -20,7 +20,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, CloudUpload, ExternalLink, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
+import { Clock3, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -55,6 +55,7 @@ interface Props {
   diaryListLoaded?: boolean
   holidayCountry?: HolidayCountry
   milestones?: Milestone[]
+  onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
 }
 
 function SaveIcon() {
@@ -109,7 +110,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [] }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -130,6 +131,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // suppresses the "unsaved — leave?" banner so it doesn't flash in auto-save mode.
   const [autoNavSaving, setAutoNavSaving] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false)
+  const [milestoneLabel, setMilestoneLabel] = useState('')
+  const [milestoneRecurring, setMilestoneRecurring] = useState(true)
+  const [milestoneLabelError, setMilestoneLabelError] = useState('')
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -158,6 +163,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     () => milestonesNearEntry(date, activeMilestones).slice(0, MAX_MILESTONE_BADGES),
     [date, activeMilestones],
   )
+  const atMilestoneLimit = milestones.length >= MAX_MILESTONES
   const daysDiff = (() => {
     const today = todayYmd()
     const [ty, tm, td] = today.split('-').map(Number)
@@ -569,7 +575,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   useKeyboardInset()
 
-  const closeMoreMenu = useCallback(() => setShowMoreMenu(false), [])
+  const closeMoreMenu = useCallback(() => {
+    setShowMoreMenu(false)
+    setShowMilestoneForm(false)
+    setMilestoneLabel('')
+    setMilestoneRecurring(true)
+    setMilestoneLabelError('')
+  }, [])
   useDismissOnOutside(moreMenuRef, showMoreMenu, closeMoreMenu)
 
   const [shareMsgVisible, setShareMsgVisible] = useState(false)
@@ -590,6 +602,17 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // same onPrevDay/onNextDay path as the buttons, so the unsaved-changes guard
   // and the directional slide animation apply unchanged.
   useSwipeNav(scrollWrapRef, { onSwipeLeft: onNextDay, onSwipeRight: onPrevDay })
+
+  function handleMilestoneAdd(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = milestoneLabel.trim()
+    if (!trimmed) { setMilestoneLabelError(t.settings.milestoneEmptyLabel); return }
+    if (trimmed.length > MAX_MILESTONE_LABEL_LENGTH) {
+      setMilestoneLabelError(t.settings.milestoneLabelTooLong(MAX_MILESTONE_LABEL_LENGTH)); return
+    }
+    onMilestoneAdd!(trimmed, date, undefined, milestoneRecurring)
+    closeMoreMenu()
+  }
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -788,45 +811,114 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                 >
-                  {isDirty && !loading && !saving && !autoSave && (
-                    <button type="button" className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
-                      <DiscardIcon />
-                      {t.common.discard}
-                    </button>
-                  )}
-                  {isSignedIn && fileIdRef.current && (
-                    <button type="button" className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
-                      <Clock3 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
-                      {t.entry.history}
-                    </button>
-                  )}
-                  {isSignedIn && fileIdRef.current && (
-                    <button type="button" className="more-menu-item" onClick={() => {
-                      setShowMoreMenu(false)
-                      window.open(`https://drive.google.com/file/d/${fileIdRef.current}/view`, '_blank')
-                    }}>
-                      <ExternalLink className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
-                      {t.entry.openInDrive}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
-                    onClick={fileIdRef.current ? handleShareEntry : undefined}
-                    disabled={!fileIdRef.current}
-                  >
-                    <Share2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
-                    {t.entry.shareEntry}
-                  </button>
-                  <button
-                    type="button"
-                    className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
-                    onClick={fileIdRef.current ? del : undefined}
-                    disabled={!fileIdRef.current}
-                  >
-                    <Trash2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
-                    {t.common.delete}
-                  </button>
+                  <AnimatePresence mode="wait" initial={false}>
+                    {!showMilestoneForm ? (
+                      <motion.div key="menu-items"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        transition={{ duration: 0.1 }}
+                      >
+                        {isDirty && !loading && !saving && !autoSave && (
+                          <button type="button" className="more-menu-item more-menu-discard" onClick={() => { setShowMoreMenu(false); handleDiscardClick() }}>
+                            <DiscardIcon />
+                            {t.common.discard}
+                          </button>
+                        )}
+                        {isSignedIn && fileIdRef.current && (
+                          <button type="button" className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
+                            <Clock3 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
+                            {t.entry.history}
+                          </button>
+                        )}
+                        {isSignedIn && fileIdRef.current && (
+                          <button type="button" className="more-menu-item" onClick={() => {
+                            setShowMoreMenu(false)
+                            window.open(`https://drive.google.com/file/d/${fileIdRef.current}/view`, '_blank')
+                          }}>
+                            <ExternalLink className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
+                            {t.entry.openInDrive}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={`more-menu-item${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                          onClick={fileIdRef.current ? handleShareEntry : undefined}
+                          disabled={!fileIdRef.current}
+                        >
+                          <Share2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
+                          {t.entry.shareEntry}
+                        </button>
+                        {onMilestoneAdd && (
+                          <button
+                            type="button"
+                            className={`more-menu-item${atMilestoneLimit ? ' more-menu-item-disabled' : ''}`}
+                            disabled={atMilestoneLimit}
+                            title={atMilestoneLimit ? t.entry.milestoneAtLimit : undefined}
+                            onClick={() => { if (!atMilestoneLimit) setShowMilestoneForm(true) }}
+                          >
+                            <Flag className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
+                            {t.entry.addAsMilestone}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={`more-menu-item more-menu-delete${!fileIdRef.current ? ' more-menu-item-disabled' : ''}`}
+                          onClick={fileIdRef.current ? del : undefined}
+                          disabled={!fileIdRef.current}
+                        >
+                          <Trash2 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
+                          {t.common.delete}
+                        </button>
+                      </motion.div>
+                    ) : (
+                      <motion.form key="milestone-form"
+                        className="more-menu-milestone-form"
+                        onSubmit={handleMilestoneAdd}
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        transition={{ duration: 0.1 }}
+                      >
+                        <span className="more-menu-milestone-date">{t.entry.milestoneDate(date)}</span>
+                        <input
+                          className="settings-milestone-input"
+                          value={milestoneLabel}
+                          onChange={e => { setMilestoneLabel(e.target.value); setMilestoneLabelError('') }}
+                          placeholder={t.settings.milestoneLabelPlaceholder}
+                          maxLength={MAX_MILESTONE_LABEL_LENGTH}
+                          autoFocus
+                          autoComplete="off"
+                          aria-label={t.settings.milestoneLabelPlaceholder}
+                        />
+                        {milestoneLabelError && (
+                          <span className="more-menu-milestone-error" role="alert">{milestoneLabelError}</span>
+                        )}
+                        <div className="settings-milestone-recurring-toggle">
+                          <button type="button"
+                            className={`settings-milestone-type-btn${milestoneRecurring ? ' active' : ''}`}
+                            onClick={() => setMilestoneRecurring(true)}
+                            aria-pressed={milestoneRecurring}
+                          >
+                            {t.settings.milestoneRecurring}
+                          </button>
+                          <button type="button"
+                            className={`settings-milestone-type-btn${!milestoneRecurring ? ' active' : ''}`}
+                            onClick={() => setMilestoneRecurring(false)}
+                            aria-pressed={!milestoneRecurring}
+                          >
+                            {t.settings.milestoneOneTime}
+                          </button>
+                        </div>
+                        <div className="settings-milestone-form-actions">
+                          <button type="submit" className="settings-milestone-save">
+                            {t.settings.milestoneSave}
+                          </button>
+                          <button type="button" className="settings-milestone-cancel"
+                            onClick={() => setShowMilestoneForm(false)}
+                          >
+                            {t.settings.milestoneCancel}
+                          </button>
+                        </div>
+                      </motion.form>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               )}
             </AnimatePresence>

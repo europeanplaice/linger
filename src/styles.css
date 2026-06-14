@@ -2851,6 +2851,23 @@ dialog.signout-confirm-dialog::backdrop {
 .editor-actions .more-menu .more-menu-delete:not(:disabled):active .btn-icon {
   color: currentColor;
 }
+.more-menu-milestone-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.4rem 0.3rem;
+  min-width: 13rem;
+}
+.more-menu-milestone-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 0 0.35rem 0.1rem;
+}
+.more-menu-milestone-error {
+  font-size: 0.75rem;
+  color: var(--danger);
+  padding: 0 0.35rem;
+}
 .editor-share-toast {
   font-size: 0.75rem;
   color: var(--text-muted);

@@ -654,6 +654,7 @@ export default function App() {
           diaryListLoaded={diary.freshListLoaded}
           holidayCountry={holidayCountry}
           milestones={milestones}
+          onMilestoneAdd={addMilestone}
         />
       </main>
     </div>

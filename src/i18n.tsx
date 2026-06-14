@@ -155,6 +155,9 @@ const dictionaries = {
       milestoneBefore: (label: string, n: number, nthYear?: number) => nthYear ? `${label} (Year ${nthYear}) in ${n}d` : `${label} in ${n}d`,
       milestoneAfter: (label: string, n: number, nthYear?: number) => nthYear ? `${label} (Year ${nthYear}) ${n}d ago` : `${label} ${n}d ago`,
       milestoneOpen: (label: string, date: string) => `Open ${label} entry for ${date}`,
+      addAsMilestone: 'Add as Milestone',
+      milestoneAtLimit: 'Milestone limit reached',
+      milestoneDate: (date: string) => `Date: ${date}`,
     },
     settings: {
       title: 'Settings',
@@ -397,6 +400,9 @@ const dictionaries = {
       milestoneBefore: (label: string, n: number, nthYear?: number) => nthYear ? `${label}（${nthYear}年目）まで${n}日` : `${label}まで${n}日`,
       milestoneAfter: (label: string, n: number, nthYear?: number) => nthYear ? `${label}（${nthYear}年目）から${n}日` : `${label}から${n}日`,
       milestoneOpen: (label: string, date: string) => `${date}の${label}の日記を開く`,
+      addAsMilestone: 'マイルストーンに追加',
+      milestoneAtLimit: 'マイルストーンの上限に達しました',
+      milestoneDate: (date: string) => `日付: ${date}`,
     },
     settings: {
       title: '設定',

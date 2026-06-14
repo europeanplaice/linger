@@ -53,6 +53,9 @@ let appSetPendingNavDate: ((d: string | null) => void) | null = null
 let lastRenderKnownDates: string[] | undefined
 let lastRenderDiaryListLoaded: boolean | undefined
 let lastRenderMilestones: Milestone[] = []
+let lastRenderEnableMilestoneAdd = false
+type MilestoneAddCall = { label: string; date: string; emoji?: string; recurring?: boolean }
+let milestoneAddCalls: MilestoneAddCall[] = []
 
 let currentRefreshSignal = 0
 const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
@@ -84,12 +87,13 @@ function doRender() {
         knownDates={lastRenderKnownDates}
         diaryListLoaded={lastRenderDiaryListLoaded}
         milestones={lastRenderMilestones}
+        enableMilestoneAdd={lastRenderEnableMilestoneAdd}
       />
     </I18nProvider>
   )
 }
 
-function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal, knownDates, diaryListLoaded, milestones }: {
+function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPendingNavDate, token, refreshSignal, knownDates, diaryListLoaded, milestones, enableMilestoneAdd }: {
   date: string
   autoSave: boolean
   getContentDelayMs: number
@@ -98,6 +102,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
   refreshSignal: number
   knownDates?: string[]
   diaryListLoaded?: boolean
+  enableMilestoneAdd: boolean
   milestones: Milestone[]
 }) {
   const [pendingNavDate, setPendingNavDate] = useState<string | null>(initialPendingNavDate)
@@ -197,6 +202,9 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       isOnline={isOnline}
       onExpired={onExpired}
       milestones={milestones}
+      onMilestoneAdd={enableMilestoneAdd ? (label, date, emoji, recurring) => {
+        milestoneAddCalls.push({ label, date, emoji, recurring })
+      } : undefined}
     />
   )
 }
@@ -218,6 +226,7 @@ window.editorHarness = {
     knownDates?: string[]
     diaryListLoaded?: boolean
     milestones?: Milestone[]
+    enableMilestoneAdd?: boolean
   }) => {
     saveCalls = []
     fullSaveCalls = []
@@ -226,6 +235,7 @@ window.editorHarness = {
     cancelNavigationCalls = []
     windowOpenCalls = []
     getContentCalls = []
+    milestoneAddCalls = []
     menuClickCount = 0
     goToTodayCount = 0
     prevDayCount = 0
@@ -249,6 +259,7 @@ window.editorHarness = {
     lastRenderKnownDates = opts.knownDates
     lastRenderDiaryListLoaded = opts.diaryListLoaded
     lastRenderMilestones = opts.milestones ?? []
+    lastRenderEnableMilestoneAdd = opts.enableMilestoneAdd ?? false
     currentRefreshSignal = 0
     contentByDate.clear()
     getContentBlockedForDate = null
@@ -331,4 +342,5 @@ window.editorHarness = {
     window.dispatchEvent(new Event(online ? 'online' : 'offline'))
   },
   expiredCalls: () => expiredCount,
+  milestoneAddCalls: () => [...milestoneAddCalls],
 }
