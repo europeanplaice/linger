@@ -1054,13 +1054,13 @@ html.session-restoring .landing {
 .cal-day.milestone {
   --milestone-glow: color-mix(in srgb, var(--accent) 15%, transparent);
 }
-.cal-day.milestone:not(:hover):not(.selected) {
+/* .cal-day.milestone:not(:hover):not(.selected) {
   background-color: var(--milestone-glow);
-}
+} */
 .cal-day-milestone {
   font-size: 0.55rem;
   line-height: 1;
-  margin-top: -1px;
+  margin-top: 1px;
   display: block;
   pointer-events: none;
 }

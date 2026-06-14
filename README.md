@@ -21,7 +21,7 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Data stays in your Google Drive (`linger_diary/` folder), one plain-text file per day
 - Warns before reload or date changes when there are unsaved edits, and retries offline saves when the connection returns
 - Works on mobile with a drawer sidebar, Android back-button support, and keyboard-aware layout
-- Anniversary management with badges on the calendar (up to 10 anniversaries, 3 with display badges)
+- Milestone management with badges on the calendar (up to 10 milestones, 3 with display badges, fully customizable emoji)
 - Public holiday overlay on the calendar, customizable by country
 - Touch swipe navigation between days on mobile
 - Share individual entries or share the app URL
@@ -97,11 +97,12 @@ No OAuth tokens are exposed to the browser or written to browser storage. Diary 
 - `LoginScreen` — sign-in card with Google auth button
 - `App` — sidebar + main panel layout
 - `AppIcon` — app logo SVG used in the sidebar header
-- `CalendarView` — monthly grid built with native `Date` arithmetic; dots on dates with entries, anniversary and holiday badges
-- `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution; day navigation; swipe navigation; anniversary/holiday badges; revision history access; share entry
+- `CalendarView` — monthly grid built with native `Date` arithmetic; dots on dates with entries, milestone and holiday badges
+- `EntryEditor` — `<textarea>`, save/delete; Ctrl+S triggers save; handles conflict resolution; day navigation; swipe navigation; milestone/holiday badges; revision history access; share entry
+- `EmojiPicker` — full Unicode emoji picker (grouped by category) used in milestone settings
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
 - `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random serendipity entries
-- `SettingsModal` — language, theme, font family/size, auto-save, holiday calendar, anniversary management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
+- `SettingsModal` — language, theme, font family/size, auto-save, holiday calendar, milestone management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
 - `ExportButton` — ZIP export UI used inside `SettingsModal`
