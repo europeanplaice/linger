@@ -73,7 +73,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onSignOut={() => { signOutCount++ }}
           email={email}
           milestones={milestones}
-          onMilestoneAdd={(label, date) => {
+          onMilestoneAdd={(label, date, emoji) => {
             setMilestones(prev => {
               if (prev.length >= MAX_MILESTONES) return prev
               const enabledBadges = prev.filter(a => a.showBadge !== false).length
@@ -83,11 +83,15 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
                   id: `milestone-${prev.length + 1}`,
                   label,
                   date,
+                  ...(emoji ? { emoji } : {}),
                   ...(enabledBadges >= MAX_MILESTONE_BADGES ? { showBadge: false } : {}),
                 },
               ]
             })
           }}
+          onMilestoneUpdate={(id, label, date, emoji) => setMilestones(prev => prev.map(a =>
+            a.id === id ? { ...a, label, date, ...(emoji ? { emoji } : { emoji: undefined }) } : a
+          ))}
           onMilestoneRemove={id => setMilestones(prev => prev.filter(a => a.id !== id))}
           onMilestoneToggleBadge={id => setMilestones(prev => {
             const target = prev.find(a => a.id === id)

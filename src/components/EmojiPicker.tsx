@@ -105,7 +105,7 @@ export function EmojiPicker({ value, onChange, searchPlaceholder = 'Search…', 
       closePicker()
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); closePicker() }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker() }
     }
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('keydown', onKeyDown, true)

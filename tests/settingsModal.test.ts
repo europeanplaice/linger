@@ -182,6 +182,108 @@ test.describe('SettingsModal — milestones', () => {
   })
 })
 
+test.describe('SettingsModal — EmojiPicker', () => {
+  test('Escape closes the picker without dismissing the settings modal', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    await page.getByRole('button', { name: 'Emoji' }).click()
+    await expect(page.getByRole('dialog', { name: 'Emoji' })).toBeVisible()
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'Emoji' })).toBeHidden()
+    await expect(page.locator('.settings-dialog')).toBeVisible()
+  })
+
+  test('selected emoji is saved with the new milestone', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+    await page.getByLabel('Name (e.g. Birthday)').fill('Anniversary')
+
+    await page.getByRole('button', { name: 'Date' }).click()
+    const datePicker = page.locator('.settings-milestone-date-popover')
+    await datePicker.locator('select').nth(1).selectOption('2020')
+    await datePicker.locator('select').nth(0).selectOption('0')
+    await datePicker.getByRole('button', { name: '2020-01-01' }).click()
+
+    await page.getByRole('button', { name: 'Emoji' }).click()
+    const popover = page.getByRole('dialog', { name: 'Emoji' })
+    const firstOption = popover.getByRole('option').first()
+    await firstOption.waitFor({ state: 'visible' })
+    const selectedEmoji = await firstOption.textContent()
+    await firstOption.click()
+    await expect(popover).toBeHidden()
+
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const row = page.locator('.settings-milestone-row', { hasText: 'Anniversary' })
+    await expect(row.locator('.settings-milestone-emoji')).toHaveText(selectedEmoji!)
+  })
+
+  test('clicking the active emoji again clears the selection', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const trigger = page.getByRole('button', { name: 'Emoji' })
+    const popover = page.getByRole('dialog', { name: 'Emoji' })
+
+    await trigger.click()
+    const firstOption = popover.getByRole('option').first()
+    await firstOption.waitFor({ state: 'visible' })
+    const emoji = await firstOption.textContent()
+    await firstOption.click()
+    await expect(trigger.locator('.emoji-picker-trigger-icon')).toHaveText(emoji!)
+
+    await trigger.click()
+    await popover.getByRole('option', { selected: true }).click()
+    await expect(trigger.locator('.emoji-picker-trigger-icon')).toHaveText('🙂')
+  })
+
+  test('searching filters results and hides category tabs', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+    await page.getByRole('button', { name: 'Emoji' }).click()
+
+    const popover = page.getByRole('dialog', { name: 'Emoji' })
+    await popover.getByRole('option').first().waitFor({ state: 'visible' })
+
+    await popover.locator('input[type="search"]').fill('birthday')
+
+    await expect(popover.getByRole('tablist')).toHaveCount(0)
+    await expect(popover.getByRole('option').first()).toBeVisible()
+  })
+
+  test('searching with no match shows a no-results message', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+    await page.getByRole('button', { name: 'Emoji' }).click()
+
+    const popover = page.getByRole('dialog', { name: 'Emoji' })
+    await popover.getByRole('option').first().waitFor({ state: 'visible' })
+
+    await popover.locator('input[type="search"]').fill('zzznoresult')
+    await expect(popover.locator('.emoji-picker-empty')).toHaveText('No results')
+  })
+
+  test('edit form initializes the picker with the milestone\'s existing emoji', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      milestones: [{ id: 'one', label: 'Birthday', date: '2020-05-10', emoji: '🎂' }],
+    })
+
+    const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
+    await row.getByRole('button', { name: 'Edit Birthday' }).click()
+
+    const trigger = page.locator('.settings-milestone-edit-form').getByRole('button', { name: 'Emoji' })
+    await expect(trigger.locator('.emoji-picker-trigger-icon')).toHaveText('🎂')
+  })
+})
+
 test.describe('SettingsModal — auto-save toggle', () => {
   test('is checked by default when localStorage has no value', async ({ page }) => {
     await loadHarness(page)
