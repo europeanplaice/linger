@@ -1909,6 +1909,40 @@ dialog.settings-dialog::backdrop {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--save-glow);
 }
+.settings-anniversary-emoji-custom {
+  font-size: 1.1rem;
+  background: var(--input-bg);
+  border: 1.5px dashed var(--border);
+  border-radius: 8px;
+  width: 2.2rem;
+  height: 2.2rem;
+  text-align: center;
+  cursor: text;
+  transition: all 0.15s ease;
+  padding: 0;
+  font-family: inherit;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.settings-anniversary-emoji-custom::placeholder {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.settings-anniversary-emoji-custom:hover {
+  border-color: var(--text-muted);
+  border-style: solid;
+}
+.settings-anniversary-emoji-custom:focus {
+  outline: none;
+  border-color: var(--accent);
+  border-style: solid;
+}
+.settings-anniversary-emoji-custom.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  border-style: solid;
+  box-shadow: 0 0 0 2px var(--save-glow);
+}
 .settings-anniversary-recurring-toggle {
   display: flex;
   border: 1.5px solid var(--border);

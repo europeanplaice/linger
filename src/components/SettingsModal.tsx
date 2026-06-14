@@ -20,6 +20,16 @@ import {
 
 const ANNIVERSARY_EMOJI_PRESETS = ['🎀', '🎂', '💍', '🕯️', '💫', '🎓', '🏠', '❤️']
 
+function getFirstGrapheme(str: string): string {
+  if (!str) return ''
+  try {
+    const segments = [...new Intl.Segmenter().segment(str)]
+    return segments[0]?.segment ?? ''
+  } catch {
+    return [...str][0] ?? ''
+  }
+}
+
 interface SettingsModalProps {
   autoSave: boolean
   onAutoSaveToggle: () => void
@@ -698,6 +708,15 @@ function AnniversaryEditForm({ anniversary, onSave, onCancel, t }: {
                 aria-pressed={emoji === e}
               >{e}</button>
             ))}
+            <input
+              type="text"
+              className={`settings-anniversary-emoji-custom${emoji && !ANNIVERSARY_EMOJI_PRESETS.includes(emoji) ? ' active' : ''}`}
+              value={emoji && !ANNIVERSARY_EMOJI_PRESETS.includes(emoji) ? emoji : ''}
+              onChange={ev => setEmoji(getFirstGrapheme(ev.target.value))}
+              placeholder="+"
+              aria-label={t.settings.anniversaryEmojiCustom}
+              maxLength={8}
+            />
           </div>
         </div>
         <div className="settings-anniversary-recurring-toggle">
@@ -825,6 +844,15 @@ function AnniversaryAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
                     aria-pressed={newEmoji === e}
                   >{e}</button>
                 ))}
+                <input
+                  type="text"
+                  className={`settings-anniversary-emoji-custom${newEmoji && !ANNIVERSARY_EMOJI_PRESETS.includes(newEmoji) ? ' active' : ''}`}
+                  value={newEmoji && !ANNIVERSARY_EMOJI_PRESETS.includes(newEmoji) ? newEmoji : ''}
+                  onChange={ev => setNewEmoji(getFirstGrapheme(ev.target.value))}
+                  placeholder="+"
+                  aria-label={t.settings.anniversaryEmojiCustom}
+                  maxLength={8}
+                />
               </div>
             </div>
             <div className="settings-anniversary-recurring-toggle">
