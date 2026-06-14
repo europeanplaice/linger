@@ -2069,7 +2069,7 @@ dialog.settings-dialog::backdrop {
   background: var(--input-bg);
   margin-top: 0.1rem;
 }
-.settings-milestone-type-btn {
+.settings-milestone-recurring-toggle .settings-milestone-type-btn {
   flex: 1;
   border: none;
   background: transparent;
@@ -2082,11 +2082,11 @@ dialog.settings-dialog::backdrop {
   text-align: center;
   font-family: inherit;
 }
-.settings-milestone-type-btn:hover {
-  background: var(--hover-bg);
+.settings-milestone-recurring-toggle .settings-milestone-type-btn:hover {
+  background: var(--selected-bg);
   color: var(--text);
 }
-.settings-milestone-type-btn.active {
+.settings-milestone-recurring-toggle .settings-milestone-type-btn.active {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
