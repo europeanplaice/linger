@@ -42,7 +42,7 @@ export interface Milestone {
   recurring?: boolean  // true = yearly (shows Nth year), false/undefined = one-time
 }
 
-export const MAX_MILESTONES = 10
+export const MAX_MILESTONES = 50
 export const MAX_MILESTONE_BADGES = 5
 export const MAX_MILESTONE_LABEL_LENGTH = 100
 

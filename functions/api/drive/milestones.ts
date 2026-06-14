@@ -4,8 +4,8 @@ import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, deleteEntry } 
 
 const FILE_NAME = 'milestones.json'
 const LEGACY_FILE_NAME = 'anniversaries.json'
-const MAX_MILESTONES = 10
-const MAX_MILESTONE_BADGES = 3
+const MAX_MILESTONES = 50
+const MAX_MILESTONE_BADGES = 5
 const MAX_LABEL_LENGTH = 100
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {

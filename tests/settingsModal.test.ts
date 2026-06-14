@@ -15,6 +15,11 @@ async function render(
   await page.waitForSelector('.settings-dialog')
 }
 
+async function expandMilestoneList(page: import('@playwright/test').Page) {
+  const toggle = page.getByRole('button', { name: /show milestones/i })
+  if (await toggle.count() > 0) await toggle.click()
+}
+
 test.describe('SettingsModal — milestones', () => {
   test('adds, toggles, and confirms deletion of a milestone', async ({ page }) => {
     await loadHarness(page)
@@ -29,6 +34,7 @@ test.describe('SettingsModal — milestones', () => {
     await datePicker.getByRole('button', { name: '2020-05-10' }).click()
     await page.getByRole('button', { name: 'Add' }).click()
 
+    await expandMilestoneList(page)
     const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
     await expect(row).toContainText('2020-05-10')
 
@@ -43,19 +49,57 @@ test.describe('SettingsModal — milestones', () => {
     await expect(row).toHaveCount(0)
   })
 
-  test('allows at most ten milestones', async ({ page }) => {
+  test('allows at most fifty milestones', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
-      milestones: Array.from({ length: 10 }, (_, i) => ({
+      milestones: Array.from({ length: 50 }, (_, i) => ({
         id: `milestone-${i + 1}`,
         label: `Milestone ${i + 1}`,
-        date: `2020-${String(i + 1).padStart(2, '0')}-01`,
+        date: `2020-${String((i % 12) + 1).padStart(2, '0')}-01`,
         showBadge: i < 3 ? undefined : false,
       })),
     })
 
-    await expect(page.getByText('10 / 10 registered')).toBeVisible()
+    await expect(page.getByText('50 / 50 registered')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Add' })).toBeDisabled()
+  })
+
+  test('milestone list is collapsed by default when milestones exist', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      milestones: [
+        { id: 'one', label: 'Birthday', date: '2020-01-01' },
+        { id: 'two', label: 'Anniversary', date: '2021-02-14' },
+      ],
+    })
+
+    await expect(page.locator('.settings-milestone-list')).toBeHidden()
+    await expect(page.getByRole('button', { name: /show milestones/i })).toBeVisible()
+  })
+
+  test('clicking the toggle expands and collapses the milestone list', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      milestones: [
+        { id: 'one', label: 'Birthday', date: '2020-01-01' },
+      ],
+    })
+
+    const toggle = page.getByRole('button', { name: /show milestones/i })
+    await toggle.click()
+    await expect(page.locator('.settings-milestone-list')).toBeVisible()
+    await expect(page.getByRole('button', { name: /hide milestones/i })).toBeVisible()
+
+    await page.getByRole('button', { name: /hide milestones/i }).click()
+    await expect(page.locator('.settings-milestone-list')).toBeHidden()
+  })
+
+  test('milestone list is visible by default when no milestones exist', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await expect(page.locator('.settings-milestone-none')).toBeVisible()
+    await expect(page.getByRole('button', { name: /show milestones/i })).toHaveCount(0)
   })
 
   test('sizes the add button to its label', async ({ page }) => {
@@ -109,6 +153,7 @@ test.describe('SettingsModal — milestones', () => {
       ],
     })
 
+    await expandMilestoneList(page)
     const firstSwitch = page.locator('.settings-milestone-row', { hasText: 'One' })
       .getByRole('switch', { name: 'Show badge' })
     const sixthSwitch = page.locator('.settings-milestone-row', { hasText: 'Six' })
@@ -177,6 +222,7 @@ test.describe('SettingsModal — milestones', () => {
     await expect(page.locator('.settings-dialog')).toBeVisible()
 
     await page.getByRole('button', { name: 'Cancel' }).click()
+    await expandMilestoneList(page)
     await page.getByRole('button', { name: 'Remove Wedding anniversary with a very long label' }).click()
     const confirmation = page.locator('.settings-milestone-confirm')
     await expect(confirmation).toBeVisible()
@@ -220,6 +266,7 @@ test.describe('SettingsModal — EmojiPicker', () => {
 
     await page.getByRole('button', { name: 'Add' }).click()
 
+    await expandMilestoneList(page)
     const row = page.locator('.settings-milestone-row', { hasText: 'Anniversary' })
     await expect(row.locator('.settings-milestone-emoji')).toHaveText(selectedEmoji!)
   })
@@ -278,6 +325,7 @@ test.describe('SettingsModal — EmojiPicker', () => {
       milestones: [{ id: 'one', label: 'Birthday', date: '2020-05-10', emoji: '🎂' }],
     })
 
+    await expandMilestoneList(page)
     const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
     await row.getByRole('button', { name: 'Edit Birthday' }).click()
 

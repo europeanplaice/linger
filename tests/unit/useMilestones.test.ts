@@ -55,16 +55,16 @@ test('migrates legacy month-day entries from the local cache', () => {
   ])
 })
 
-test('limits registrations to ten and enables at most five badges', async () => {
+test('limits registrations to fifty and enables at most five badges', async () => {
   const { result } = renderHook(() => useMilestones('signedOut', vi.fn()))
 
   act(() => {
-    for (let i = 1; i <= 11; i++) {
-      result.current.add(`Milestone ${i}`, `2020-${String(i).padStart(2, '0')}-01`)
+    for (let i = 1; i <= 51; i++) {
+      result.current.add(`Milestone ${i}`, `2020-${String((i % 12) + 1).padStart(2, '0')}-01`)
     }
   })
 
-  expect(result.current.milestones).toHaveLength(10)
+  expect(result.current.milestones).toHaveLength(50)
   expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(5)
   expect(result.current.milestones[5].showBadge).toBe(false)
 
@@ -78,7 +78,7 @@ test('limits registrations to ten and enables at most five badges', async () => 
   expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(5)
   expect(result.current.milestones[5].showBadge).toBeUndefined()
 
-  await waitFor(() => expect(saveMilestones).toHaveBeenCalledTimes(12))
+  await waitFor(() => expect(saveMilestones).toHaveBeenCalledTimes(52))
 })
 
 test('serializes saves so an older request cannot finish after a newer one', async () => {

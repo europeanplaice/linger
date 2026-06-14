@@ -49,6 +49,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [listExpanded, setListExpanded] = useState(false)
   const milestoneLimitId = useId()
   const badgeLimitId = useId()
   const enabledBadgeCount = milestones.filter(a => a.showBadge !== false).length
@@ -179,7 +180,27 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             {milestones.length === 0 ? (
               <span className="settings-milestone-none">{t.settings.milestoneNone}</span>
             ) : (
-              <div className="settings-milestone-list">
+              <>
+                <button
+                  type="button"
+                  className="settings-milestone-toggle"
+                  onClick={() => setListExpanded(v => !v)}
+                  aria-expanded={listExpanded}
+                >
+                  <span className={`settings-milestone-toggle-chevron${listExpanded ? ' open' : ''}`} aria-hidden="true">▸</span>
+                  {listExpanded ? t.settings.milestonHideList : t.settings.milestoneShowList}
+                </button>
+              <AnimatePresence initial={false}>
+              {listExpanded && (
+                <motion.div
+                  key="list"
+                  className="settings-milestone-list"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ overflow: 'hidden' }}
+                >
                 <AnimatePresence initial={false} mode="popLayout">
                   {milestones.map(a => {
                     const badgeEnabled = a.showBadge !== false
@@ -298,7 +319,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                     )
                   })}
                 </AnimatePresence>
-              </div>
+                </motion.div>
+              )}
+              </AnimatePresence>
+              </>
             )}
             {onMilestoneAdd && (
               <MilestoneAddForm

@@ -1539,6 +1539,29 @@ dialog.settings-dialog::backdrop {
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+.settings-milestone-toggle {
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.78rem;
+  gap: 0.35rem;
+  padding: 0;
+  text-align: left;
+}
+.settings-milestone-toggle:hover {
+  color: var(--text);
+}
+.settings-milestone-toggle-chevron {
+  display: inline-block;
+  font-size: 0.7rem;
+  transition: transform 0.18s ease;
+}
+.settings-milestone-toggle-chevron.open {
+  transform: rotate(90deg);
+}
 .settings-milestone-usage,
 .settings-milestone-limit {
   color: var(--text-muted);

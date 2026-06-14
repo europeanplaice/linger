@@ -112,8 +112,8 @@ describe('milestones handler', () => {
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
 
-  it('rejects more than ten milestones', async () => {
-    const body = Array.from({ length: 11 }, (_, i) => ({
+  it('rejects more than fifty milestones', async () => {
+    const body = Array.from({ length: 51 }, (_, i) => ({
       id: `milestone-${i}`,
       label: `Milestone ${i}`,
       date: '2020-05-10',
@@ -132,8 +132,8 @@ describe('milestones handler', () => {
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
 
-  it('rejects more than three enabled badges', async () => {
-    const body = Array.from({ length: 4 }, (_, i) => ({
+  it('rejects more than five enabled badges', async () => {
+    const body = Array.from({ length: 6 }, (_, i) => ({
       id: `milestone-${i}`,
       label: `Milestone ${i}`,
       date: '2020-05-10',
