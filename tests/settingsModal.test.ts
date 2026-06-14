@@ -96,29 +96,31 @@ test.describe('SettingsModal — milestones', () => {
     }
   })
 
-  test('allows at most three enabled milestone badges', async ({ page }) => {
+  test('allows at most five enabled milestone badges', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
       milestones: [
         { id: 'one', label: 'One', date: '2020-01-01' },
         { id: 'two', label: 'Two', date: '2020-02-01' },
         { id: 'three', label: 'Three', date: '2020-03-01' },
-        { id: 'four', label: 'Four', date: '2020-04-01', showBadge: false },
+        { id: 'four', label: 'Four', date: '2020-04-01' },
+        { id: 'five', label: 'Five', date: '2020-05-01' },
+        { id: 'six', label: 'Six', date: '2020-06-01', showBadge: false },
       ],
     })
 
     const firstSwitch = page.locator('.settings-milestone-row', { hasText: 'One' })
       .getByRole('switch', { name: 'Show badge' })
-    const fourthSwitch = page.locator('.settings-milestone-row', { hasText: 'Four' })
+    const sixthSwitch = page.locator('.settings-milestone-row', { hasText: 'Six' })
       .getByRole('switch', { name: 'Show badge' })
 
-    await expect(fourthSwitch).toHaveAttribute('aria-disabled', 'true')
-    await expect(fourthSwitch).toHaveAttribute('aria-checked', 'false')
+    await expect(sixthSwitch).toHaveAttribute('aria-disabled', 'true')
+    await expect(sixthSwitch).toHaveAttribute('aria-checked', 'false')
 
     await firstSwitch.click()
-    await expect(fourthSwitch).not.toHaveAttribute('aria-disabled', 'true')
-    await fourthSwitch.click()
-    await expect(fourthSwitch).toHaveAttribute('aria-checked', 'true')
+    await expect(sixthSwitch).not.toHaveAttribute('aria-disabled', 'true')
+    await sixthSwitch.click()
+    await expect(sixthSwitch).toHaveAttribute('aria-checked', 'true')
   })
 
   test('keeps milestone content within the modal on narrow screens', async ({ page }) => {

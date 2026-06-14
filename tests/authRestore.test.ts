@@ -66,7 +66,10 @@ test('keeps editor header typography stable between skeleton and loaded states',
 
   releaseEntry()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+  // Wait for the skeleton exit animation (180ms) to fully complete before measuring.
+  await expect(page.locator('.entry-skeleton')).toHaveCount(0)
   await page.evaluate(() => document.fonts.ready)
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
 
   const loadedMetrics = await page.locator('.editor-header h2').evaluate(el => {
     const styles = getComputedStyle(el)

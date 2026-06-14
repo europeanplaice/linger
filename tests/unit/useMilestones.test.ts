@@ -55,7 +55,7 @@ test('migrates legacy month-day entries from the local cache', () => {
   ])
 })
 
-test('limits registrations to ten and enables at most three badges', async () => {
+test('limits registrations to ten and enables at most five badges', async () => {
   const { result } = renderHook(() => useMilestones('signedOut', vi.fn()))
 
   act(() => {
@@ -65,18 +65,18 @@ test('limits registrations to ten and enables at most three badges', async () =>
   })
 
   expect(result.current.milestones).toHaveLength(10)
-  expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(3)
-  expect(result.current.milestones[3].showBadge).toBe(false)
+  expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(5)
+  expect(result.current.milestones[5].showBadge).toBe(false)
 
-  act(() => result.current.toggleBadge(result.current.milestones[3].id))
-  expect(result.current.milestones[3].showBadge).toBe(false)
+  act(() => result.current.toggleBadge(result.current.milestones[5].id))
+  expect(result.current.milestones[5].showBadge).toBe(false)
 
   act(() => {
     result.current.toggleBadge(result.current.milestones[0].id)
-    result.current.toggleBadge(result.current.milestones[3].id)
+    result.current.toggleBadge(result.current.milestones[5].id)
   })
-  expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(3)
-  expect(result.current.milestones[3].showBadge).toBeUndefined()
+  expect(result.current.milestones.filter(a => a.showBadge !== false)).toHaveLength(5)
+  expect(result.current.milestones[5].showBadge).toBeUndefined()
 
   await waitFor(() => expect(saveMilestones).toHaveBeenCalledTimes(12))
 })

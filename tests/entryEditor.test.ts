@@ -1348,7 +1348,7 @@ test.describe('EntryEditor — editor meta info', () => {
       .not.toBe('none')
   })
 
-  test('shows at most three milestone badges at once', async ({ page }) => {
+  test('shows at most five milestone badges at once', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2026-01-01',
@@ -1357,11 +1357,13 @@ test.describe('EntryEditor — editor meta info', () => {
         { id: 'two', label: 'Two', date: '2026-01-01' },
         { id: 'three', label: 'Three', date: '2026-01-02' },
         { id: 'four', label: 'Four', date: '2026-02-01' },
+        { id: 'five', label: 'Five', date: '2026-03-01' },
+        { id: 'six', label: 'Six', date: '2026-04-01' },
       ],
     })
 
-    await expect(page.locator('.editor-meta-milestone')).toHaveCount(3)
-    await expect(page.locator('.editor-meta')).not.toContainText('Four')
+    await expect(page.locator('.editor-meta-milestone')).toHaveCount(5)
+    await expect(page.locator('.editor-meta')).not.toContainText('Six')
   })
 
   test('shows days ago for saved past entries', async ({ page }) => {
