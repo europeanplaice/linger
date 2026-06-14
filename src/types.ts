@@ -43,7 +43,7 @@ export interface Milestone {
 }
 
 export const MAX_MILESTONES = 10
-export const MAX_MILESTONE_BADGES = 3
+export const MAX_MILESTONE_BADGES = 5
 export const MAX_MILESTONE_LABEL_LENGTH = 100
 
 function hasValidMilestoneFields(v: unknown): v is {
