@@ -5,9 +5,10 @@ interface Props {
   onSignIn: () => void
   onRetry?: () => void
   tokenExpired?: boolean
+  authResolved?: boolean
 }
 
-export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
+export function LoginScreen({ onSignIn, onRetry, tokenExpired, authResolved }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
@@ -72,7 +73,7 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired }: Props) {
   )
 
   return (
-    <main className="login-screen">
+    <main className="login-screen" {...(authResolved ? { 'data-auth-resolved': '' } : {})}>
       {/* Plain (non-animated) card so the build-time prerendered HTML stays put
           when React mounts over it — no flash before hydration. */}
       <div className="login-card">{cardBody}</div>

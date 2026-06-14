@@ -4,19 +4,21 @@ interface Props {
   onSignIn: () => void
   onRetry?: () => void
   tokenExpired?: boolean
+  authResolved?: boolean
 }
 
 // The signed-out view at `/`. The hero is the existing sign-in card; the
 // long-form marketing content below makes `/` the canonical, crawlable landing
 // page (it is rendered into the initial HTML by the build-time prerender). The
 // copy here is intentionally English — it is the canonical content for `/`.
-export function Landing({ onSignIn, onRetry, tokenExpired }: Props) {
+export function Landing({ onSignIn, onRetry, tokenExpired, authResolved }: Props) {
   return (
     <div className="landing">
       <LoginScreen
         onSignIn={onSignIn}
         onRetry={onRetry}
         tokenExpired={tokenExpired}
+        authResolved={authResolved}
       />
 
       <div className="landing-content">

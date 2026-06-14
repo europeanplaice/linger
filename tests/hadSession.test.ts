@@ -82,7 +82,7 @@ test('sets linger_had_session to false after failed session check', async ({ pag
   })
 
   await page.goto(baseUrl)
-  await expect(page.locator('.login-screen')).toBeVisible()
+  await expect(page.locator('.login-screen[data-auth-resolved]')).toBeVisible()
 
   const value = await page.evaluate(() => localStorage.getItem('linger_had_session'))
   expect(value).toBe('false')

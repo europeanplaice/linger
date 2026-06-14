@@ -527,6 +527,7 @@ export default function App() {
         onSignIn={signIn}
         onRetry={retryAfterExpired}
         tokenExpired={tokenExpired}
+        authResolved
       />
     )
   }
