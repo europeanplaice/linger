@@ -4,6 +4,7 @@ import { CalendarDays } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { CalendarView } from './CalendarView'
+import { EmojiPicker } from './EmojiPicker'
 import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -18,17 +19,6 @@ import {
   type Milestone,
 } from '../types'
 
-const MILESTONE_EMOJI_PRESETS = ['🎀', '🎂', '💍', '🕯️', '💫', '🎓', '🏠', '❤️']
-
-function getFirstGrapheme(str: string): string {
-  if (!str) return ''
-  try {
-    const segments = [...new Intl.Segmenter().segment(str)]
-    return segments[0]?.segment ?? ''
-  } catch {
-    return [...str][0] ?? ''
-  }
-}
 
 interface SettingsModalProps {
   autoSave: boolean
@@ -698,26 +688,12 @@ function MilestoneEditForm({ milestone, onSave, onCancel, t }: {
       <div className="settings-milestone-extras">
         <div className="settings-milestone-emoji-picker">
           <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
-          <div className="settings-milestone-emoji-options">
-            {MILESTONE_EMOJI_PRESETS.map(e => (
-              <button
-                key={e}
-                type="button"
-                className={`settings-milestone-emoji-btn${emoji === e ? ' active' : ''}`}
-                onClick={() => setEmoji(prev => prev === e ? '' : e)}
-                aria-pressed={emoji === e}
-              >{e}</button>
-            ))}
-            <input
-              type="text"
-              className={`settings-milestone-emoji-custom${emoji && !MILESTONE_EMOJI_PRESETS.includes(emoji) ? ' active' : ''}`}
-              value={emoji && !MILESTONE_EMOJI_PRESETS.includes(emoji) ? emoji : ''}
-              onChange={ev => setEmoji(getFirstGrapheme(ev.target.value))}
-              placeholder="+"
-              aria-label={t.settings.milestoneEmojiCustom}
-              maxLength={8}
-            />
-          </div>
+          <EmojiPicker
+            value={emoji}
+            onChange={setEmoji}
+            searchPlaceholder={t.settings.milestoneEmojiSearch}
+            triggerLabel={t.settings.milestoneEmoji}
+          />
         </div>
         <div className="settings-milestone-recurring-toggle">
           <button
@@ -834,26 +810,12 @@ function MilestoneAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
           <div className="settings-milestone-extras">
             <div className="settings-milestone-emoji-picker">
               <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
-              <div className="settings-milestone-emoji-options">
-                {MILESTONE_EMOJI_PRESETS.map(e => (
-                  <button
-                    key={e}
-                    type="button"
-                    className={`settings-milestone-emoji-btn${newEmoji === e ? ' active' : ''}`}
-                    onClick={() => setNewEmoji(prev => prev === e ? '' : e)}
-                    aria-pressed={newEmoji === e}
-                  >{e}</button>
-                ))}
-                <input
-                  type="text"
-                  className={`settings-milestone-emoji-custom${newEmoji && !MILESTONE_EMOJI_PRESETS.includes(newEmoji) ? ' active' : ''}`}
-                  value={newEmoji && !MILESTONE_EMOJI_PRESETS.includes(newEmoji) ? newEmoji : ''}
-                  onChange={ev => setNewEmoji(getFirstGrapheme(ev.target.value))}
-                  placeholder="+"
-                  aria-label={t.settings.milestoneEmojiCustom}
-                  maxLength={8}
-                />
-              </div>
+              <EmojiPicker
+                value={newEmoji}
+                onChange={setNewEmoji}
+                searchPlaceholder={t.settings.milestoneEmojiSearch}
+                triggerLabel={t.settings.milestoneEmoji}
+              />
             </div>
             <div className="settings-milestone-recurring-toggle">
               <button
