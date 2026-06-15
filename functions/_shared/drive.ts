@@ -405,7 +405,7 @@ export async function readJsonFile<T>(token: string, fileId: string): Promise<T>
 }
 
 export async function findJsonFile(token: string, folderId: string, fileName: string): Promise<string | null> {
-  const escapedName = fileName.replace(/'/g, "\\'")
+  const escapedName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   const q = encodeURIComponent(`name='${escapedName}' and '${folderId}' in parents and trashed=false`)
   const fields = encodeURIComponent('files(id)')
   const res = await driveWithRetry(

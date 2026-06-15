@@ -48,6 +48,28 @@ describe('findJsonFile', () => {
     await expect(findJsonFile('token', 'folder-1', 'anniversaries.json'))
       .rejects.toMatchObject({ name: 'DriveError', status: 403 })
   })
+
+  it('escapes single quotes in fileName', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(driveJsonResponse({ files: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await findJsonFile('token', 'folder-1', "it's.json")
+
+    const url: string = fetchMock.mock.calls[0][0]
+    const q = new URL(url).searchParams.get('q') ?? ''
+    expect(q).toContain("name='it\\'s.json'")
+  })
+
+  it('escapes backslashes in fileName', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(driveJsonResponse({ files: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await findJsonFile('token', 'folder-1', 'back\\slash.json')
+
+    const url: string = fetchMock.mock.calls[0][0]
+    const q = new URL(url).searchParams.get('q') ?? ''
+    expect(q).toContain("name='back\\\\slash.json'")
+  })
 })
 
 describe('ensureFolder', () => {
