@@ -1,5 +1,5 @@
 import type { Env, SessionData } from '../_shared/session'
-import { saveSession, addEmailSessionIndex, makeSessionCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { saveSession, addEmailSessionIndex, getRefreshTokenForEmail, makeSessionCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
@@ -44,10 +44,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     id_token?: string
   }
 
-  if (!tokens.refresh_token) {
-    return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 502)
-  }
-
   let email: string | undefined
   if (tokens.id_token) {
     try {
@@ -58,9 +54,19 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     }
   }
 
+  // Google only returns a refresh_token on the first authorization. On repeat
+  // sign-ins (no prompt=consent), reuse the one stored from a previous session.
+  let refreshToken = tokens.refresh_token
+  if (!refreshToken && email) {
+    refreshToken = (await getRefreshTokenForEmail(email, env)) ?? undefined
+  }
+  if (!refreshToken) {
+    return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 502)
+  }
+
   const sessionId = crypto.randomUUID()
   const session: SessionData = {
-    refresh_token: tokens.refresh_token,
+    refresh_token: refreshToken,
     access_token: tokens.access_token,
     expires_at: Date.now() + tokens.expires_in * 1000,
     ...(email ? { email } : {}),

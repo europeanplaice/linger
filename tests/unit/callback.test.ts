@@ -98,6 +98,30 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(body.error).toContain('No refresh token')
   })
 
+  it('reuses stored refresh_token when Google omits it on repeat sign-in', async () => {
+    const idToken = `header.${btoa(JSON.stringify({ email: 'user@example.com' }))}.sig`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'at', expires_in: 3600, id_token: idToken }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+    const put = vi.fn()
+    const get = vi.fn().mockImplementation((key: string) => {
+      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['old-session']))
+      if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0 }))
+      return Promise.resolve('verifier')
+    })
+    const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put } })
+    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+
+    const response = await onRequestGet({ request, env } as any)
+
+    expect(response.status).toBe(302)
+    const savedSession = JSON.parse(put.mock.calls[0][1] as string)
+    expect(savedSession.refresh_token).toBe('stored-rt')
+  })
+
   it('returns 302 on success with session cookie', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), {

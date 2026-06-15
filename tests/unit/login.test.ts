@@ -49,7 +49,7 @@ describe('onRequestGet (login redirect)', () => {
     expect(url.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/drive.file')
     expect(url.searchParams.get('scope')).toContain('email')
     expect(url.searchParams.get('access_type')).toBe('offline')
-    expect(url.searchParams.get('prompt')).toBe('consent')
+    expect(url.searchParams.get('prompt')).toBeNull()
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBeTruthy()
   })

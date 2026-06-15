@@ -110,6 +110,18 @@ export async function addEmailSessionIndex(email: string, sessionId: string, env
   }
 }
 
+export async function getRefreshTokenForEmail(email: string, env: Env): Promise<string | null> {
+  const key = `email_sessions:${normalizeEmail(email)}`
+  const raw = await env.SESSIONS.get(key)
+  if (!raw) return null
+  const ids = JSON.parse(raw) as string[]
+  for (const id of ids) {
+    const session = await getSession(id, env)
+    if (session?.refresh_token) return session.refresh_token
+  }
+  return null
+}
+
 export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
   const key = `email_sessions:${normalizeEmail(email)}`
   const raw = await env.SESSIONS.get(key)

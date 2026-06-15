@@ -33,7 +33,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     scope: SCOPE,
     state: `${state}:${encodeURIComponent(returnPath)}`,
     access_type: 'offline',
-    prompt: 'consent',
     include_granted_scopes: 'true',
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
