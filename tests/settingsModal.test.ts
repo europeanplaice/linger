@@ -475,17 +475,18 @@ test.describe('SettingsModal — about data storage', () => {
     await loadHarness(page)
     await render(page, { modalOpen: true })
 
-    const aboutStorage = page.locator('.settings-about').filter({ hasText: 'About data storage' })
-    await expect(aboutStorage).toBeVisible()
-    await expect(aboutStorage.locator('.settings-about-title')).toHaveText('About data storage')
-    await expect(aboutStorage.locator('.settings-about-text')).toContainText('Your diary entries are stored in your Google Drive:')
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
+    await expect(aboutSection).toBeVisible()
+    await expect(aboutSection.locator('h4')).toHaveText('About data storage')
+    await expect(aboutSection.locator('.settings-about-text')).toContainText('Your diary entries are stored in your Google Drive:')
   })
 
   test('lists correct storage details', async ({ page }) => {
     await loadHarness(page)
     await render(page, { modalOpen: true })
 
-    const listItems = page.locator('.settings-about').filter({ hasText: 'About data storage' }).locator('.settings-about-list li')
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
+    const listItems = aboutSection.locator('.settings-about-list li')
     await expect(listItems).toHaveCount(4)
     await expect(listItems.nth(0)).toContainText('linger_diary')
     await expect(listItems.nth(1)).toContainText('diary-YYYY-MM-DD.txt')
@@ -498,7 +499,7 @@ test.describe('SettingsModal — about data storage', () => {
     await render(page, { modalOpen: true })
 
     const exportSection = page.locator('.settings-item').filter({ hasText: 'Export all entries' })
-    const aboutSection = page.locator('.settings-about').filter({ hasText: 'About data storage' })
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
     await expect(exportSection).toBeVisible()
     await expect(aboutSection).toBeVisible()
 
@@ -738,23 +739,22 @@ test.describe('SettingsModal — font size select', () => {
 })
 
 test.describe('SettingsModal — sign out button', () => {
-  test('matches the other action buttons at rest and on hover', async ({ page }) => {
+  test('is in the account section and has transparent background at rest', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const signOut = page.locator('.settings-signout-btn')
-    const share = page.locator('.settings-action-btn:not(.settings-signout-btn)').first()
+    const signOut = page.locator('.settings-account-row .settings-signout-btn')
+    await expect(signOut).toBeVisible()
+
     const bg = (loc: import('@playwright/test').Locator) =>
       loc.evaluate(el => getComputedStyle(el).backgroundColor)
 
-    // At rest, sign out uses the same accent background as other action buttons.
-    const restSignOut = await bg(signOut)
-    const restShare = await bg(share)
-    expect(restSignOut).toBe(restShare)
+    // At rest the button is transparent (not an accent-filled action button).
+    expect(await bg(signOut)).toBe('rgba(0, 0, 0, 0)')
 
-    // On hover the background must not change (no light/white flip — regression guard).
+    // On hover the background must change (danger tint applied — regression guard).
     await signOut.hover()
-    expect(await bg(signOut)).toBe(restSignOut)
+    expect(await bg(signOut)).not.toBe('rgba(0, 0, 0, 0)')
   })
 
   test('does not sign out immediately — shows a confirmation dialog first', async ({ page }) => {
