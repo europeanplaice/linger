@@ -1,16 +1,16 @@
 :root {
   color-scheme: light;
-  --bg: #faf9f6;
-  --sidebar-bg: #f0ede8;
-  --border: #ddd8d0;
-  --accent: #4a6a4a;
-  --accent-hover: #3b5a3b;
+  --bg: #f7f6fc;
+  --sidebar-bg: #efecf5;
+  --border: #d8d5e8;
+  --accent: #5c5fa8;
+  --accent-hover: #484c9e;
   --text: #33312e;
   --text-muted: #666;
-  --dot: #4a6a4a;
+  --dot: #5c5fa8;
   --today-ring: #a07a30;
   --today-text: #6f4a00;
-  --selected-bg: #dff0df;
+  --selected-bg: #e8e7f8;
   --danger: #c0392b;
   --sidebar-w: 280px;
   --mobile-save-action-space: 0px;
@@ -51,9 +51,9 @@
   --expired-bg: #fdf0ee;
   --expired-border: #f5c6c0;
   --danger-hover: #a93226;
-  --save-success-flash: #5fad77;
+  --save-success-flash: #7172c8;
   --save-progress: #c58f22;
-  --save-glow: rgba(74,106,74,0.25);
+  --save-glow: rgba(92,95,168,0.22);
   --save-btn-shadow: rgba(44,44,44,0.18);
   --spinner-border: rgba(255,255,255,0.42);
   --sidebar-box-shadow: rgba(0,0,0,0.12);
@@ -74,14 +74,14 @@
   --bg: #282c34;
   --sidebar-bg: #21252b;
   --border: #3e4451;
-  --accent: #98c379;
-  --accent-hover: #7dbd5f;
+  --accent: #a5a8d8;
+  --accent-hover: #9092ce;
   --text: #abb2bf;
   --text-muted: #969ba5;
-  --dot: #98c379;
+  --dot: #a5a8d8;
   --today-ring: #e5c07b;
   --today-text: #d19a66;
-  --selected-bg: #323842;
+  --selected-bg: #2d3058;
   --danger: #e06c75;
   --card-bg: #2c313c;
   --input-bg: #21252b;
@@ -117,9 +117,9 @@
   --expired-bg: #3a2020;
   --expired-border: #be5046;
   --danger-hover: #be5046;
-  --save-success-flash: #98c379;
+  --save-success-flash: #a5a8d8;
   --save-progress: #d19a66;
-  --save-glow: rgba(152,195,121,0.5);
+  --save-glow: rgba(165,168,216,0.4);
   --save-btn-shadow: rgba(200,200,200,0.15);
   --spinner-border: rgba(255,255,255,0.25);
   --sidebar-box-shadow: rgba(0,0,0,0.4);
@@ -257,8 +257,9 @@ body {
   width: 4.75rem;
   height: 4.75rem;
   margin: 0 auto 1rem;
+  color: var(--accent);
 }
-.login-card h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+.login-card h1 { font-size: 1.8rem; margin-bottom: 0.5rem; letter-spacing: -0.025em; }
 .login-card > p { color: var(--text-muted); margin-bottom: 1.5rem; }
 .session-expired-msg {
   color: var(--danger);
@@ -425,7 +426,7 @@ html.session-restoring .landing {
   border-radius: 3px;
 }
 .landing-content a {
-  color: var(--accent, #5a7a5a);
+  color: var(--accent, #5c5fa8);
 }
 .landing-shots {
   margin: 0;
@@ -552,6 +553,7 @@ html.session-restoring .landing {
   width: 1.65rem;
   height: 1.65rem;
   flex: 0 0 auto;
+  color: var(--accent);
 }
 .sidebar-actions {
   display: inline-flex;
@@ -3623,9 +3625,7 @@ dialog.history-dialog::backdrop {
   padding: 0;
   margin: 0;
 }
-/* Diff highlights derive from the accent (green) and danger (red) tokens via
-   color-mix, so they sit in the same warm/sage family as the rest of the UI
-   instead of clashing bootstrap green/red. */
+/* Diff highlights derive from the accent and danger tokens via color-mix. */
 .diff-add {
   background: color-mix(in srgb, var(--accent) 22%, var(--card-bg));
   color: var(--accent-hover);

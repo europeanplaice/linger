@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Linger">
   <rect width="64" height="64" rx="14" fill="none"/>
-  <path d="M 14 14 L 14 42 C 14 46.4 17.6 50 22 50 L 48 50" fill="none" stroke="#2c3e50" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="48" cy="14" r="4" fill="#2c3e50"/>
+  <path d="M 14 14 L 14 42 C 14 46.4 17.6 50 22 50 L 48 50" fill="none" stroke="#5c5fa8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="48" cy="14" r="4" fill="#5c5fa8"/>
 </svg>
