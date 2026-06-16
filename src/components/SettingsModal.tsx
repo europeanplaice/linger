@@ -235,6 +235,18 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             />
           </div>
           <div className="settings-item">
+            <span className="settings-item-label">{t.common.language}</span>
+            <SettingsSelect
+              aria-label={t.common.language}
+              value={language}
+              onChange={val => setLanguage(val === 'en' ? 'en' : 'ja')}
+              options={[
+                { value: 'ja', label: t.common.japanese },
+                { value: 'en', label: t.common.english },
+              ]}
+            />
+          </div>
+          <div className="settings-item">
             <span className="settings-item-label">{t.settings.autoSave}</span>
             <button
               className={`settings-switch ${autoSave ? 'active' : ''}`}
@@ -250,18 +262,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* Calendar */}
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionCalendar}</h4>
-          <div className="settings-item">
-            <span className="settings-item-label">{t.common.language}</span>
-            <SettingsSelect
-              aria-label={t.common.language}
-              value={language}
-              onChange={val => setLanguage(val === 'en' ? 'en' : 'ja')}
-              options={[
-                { value: 'ja', label: t.common.japanese },
-                { value: 'en', label: t.common.english },
-              ]}
-            />
-          </div>
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.holidayCountry}</span>
             <SettingsSelect
