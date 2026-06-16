@@ -1169,7 +1169,7 @@ dialog.settings-dialog::backdrop {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  padding: 0.4rem 0 0.5rem;
+  padding: 0;
 }
 .settings-item {
   display: flex;
@@ -1198,7 +1198,25 @@ dialog.settings-dialog::backdrop {
   white-space: nowrap;
 }
 .settings-signout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-family: inherit;
+  padding: 0.35rem 0.75rem;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
   flex-shrink: 0;
+}
+.settings-signout-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 .settings-switch {
   position: relative;
@@ -1421,6 +1439,9 @@ dialog.settings-dialog::backdrop {
 .settings-about {
   padding: 1rem 1.35rem 0.5rem;
 }
+.settings-about-body {
+  padding-top: 0.3rem;
+}
 .settings-about-title {
   font-size: 0.7rem;
   font-weight: 700;
@@ -1513,7 +1534,7 @@ dialog.settings-dialog::backdrop {
   flex-direction: column;
   gap: 0.65rem;
   min-height: unset;
-  padding-top: 0.85rem;
+  padding-top: 0.3rem;
   padding-bottom: 0.85rem;
 }
 .settings-milestone-heading {
@@ -2160,6 +2181,69 @@ dialog.settings-dialog::backdrop {
   .settings-milestone-form-actions button {
     min-height: 2.75rem;
   }
+}
+
+/* Settings sections — group related rows with a shared top border */
+.settings-section {
+  padding-bottom: 0.5rem;
+}
+.settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+}
+
+/* Section header: signature left accent bar evokes a journal margin line */
+.settings-section-title {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 0.65rem 1.35rem 0.3rem calc(1.35rem - 3px);
+  border-left: 3px solid var(--accent);
+}
+
+/* Title row for sections needing an inline badge (e.g. milestone count) */
+.settings-section-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 1.35rem 0.3rem calc(1.35rem - 3px);
+  border-left: 3px solid var(--accent);
+}
+.settings-section-title-row .settings-section-title {
+  display: inline;
+  padding: 0;
+  border: none;
+}
+
+/* Account row with avatar */
+.settings-account-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1.35rem;
+}
+.settings-account-avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--selected-bg);
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  letter-spacing: 0;
+}
+.settings-account-row .settings-account-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .settings-legal {
