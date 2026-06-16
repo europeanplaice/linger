@@ -1562,18 +1562,22 @@ dialog.settings-dialog::backdrop {
 }
 .settings-milestone-toggle {
   align-items: center;
-  background: none;
-  border: none;
-  color: var(--text-muted);
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
   cursor: pointer;
   display: flex;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   gap: 0.35rem;
-  padding: 0;
+  padding: 0.3rem 0.6rem;
   text-align: left;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .settings-milestone-toggle:hover {
-  color: var(--text);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected-bg);
 }
 .settings-milestone-toggle-chevron {
   display: inline-block;
