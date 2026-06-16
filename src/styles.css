@@ -2162,8 +2162,7 @@ dialog.settings-dialog::backdrop {
     text-align: start;
   }
   .settings-milestone-add-btn {
-    align-self: stretch;
-    min-height: 2.75rem;
+    align-self: flex-end;
   }
   .settings-milestone-form {
     min-width: 0;
