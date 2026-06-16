@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SettingsModal } from '../src/components/SettingsModal'
+import type { AccentColor } from '../src/hooks/useAccentColor'
 import type { FontSize } from '../src/hooks/useFontSize'
 import type { HolidayCountry } from '../src/utils/holidays'
 import {
@@ -24,15 +25,17 @@ interface AppProps {
   autoSave: boolean
   modalOpen: boolean
   themeMode: 'light' | 'dark' | 'system'
+  accentColor: AccentColor
   fontSize: FontSize
   email?: string
   milestones?: Milestone[]
 }
 
-function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, milestones: initialMilestones = [] }: AppProps) {
+function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, accentColor: initialAccent, fontSize: initialFontSize, email, milestones: initialMilestones = [] }: AppProps) {
   const [autoSave, setAutoSave] = useState(initialAutoSave)
   const [open, setOpen] = useState(initialOpen)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(initialTheme)
+  const [accent, setAccent] = useState<AccentColor>(initialAccent)
   const [font, setFont] = useState<'serif' | 'sans'>('serif')
   const [fontSize, setFontSize] = useState<FontSize>(initialFontSize)
   const [holidayCountry, setHolidayCountry] = useState<HolidayCountry>('off')
@@ -61,6 +64,11 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onAutoSaveToggle={handleAutoSaveToggle}
           themeMode={theme}
           onThemeModeChange={setTheme}
+          accentColor={accent}
+          onAccentChange={(c) => {
+            localStorage.setItem('linger_accent', c)
+            setAccent(c)
+          }}
           fontMode={font}
           onFontToggle={() => setFont(f => f === 'serif' ? 'sans' : 'serif')}
           fontSize={fontSize}
@@ -112,7 +120,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
 }
 
 window.settingsHarness = {
-  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, fontSize: initialFontSize, email, milestones }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: FontSize; email?: string; milestones?: Milestone[] } = {}) => {
+  render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, accentColor: initialAccent, fontSize: initialFontSize, email, milestones }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; accentColor?: AccentColor; fontSize?: FontSize; email?: string; milestones?: Milestone[] } = {}) => {
     exportCalls.splice(0)
     exportReject = false
     signOutCount = 0
@@ -122,6 +130,7 @@ window.settingsHarness = {
           autoSave={initialAutoSave ?? true}
           modalOpen={initialOpen ?? true}
           themeMode={initialTheme ?? 'light'}
+          accentColor={initialAccent ?? 'indigo'}
           fontSize={initialFontSize ?? 'md'}
           email={email}
           milestones={milestones}

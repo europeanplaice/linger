@@ -133,6 +133,30 @@
   --selection-color: #1c1f24;
 }
 
+[data-accent="sage"] {
+  --accent: #4a6a4a;
+  --accent-hover: #3b5a3b;
+  --dot: #4a6a4a;
+  --selected-bg: #dff0df;
+  --save-glow: rgba(74,106,74,0.25);
+  --save-success-flash: #5fad77;
+}
+
+[data-accent="sage"][data-theme="light"] {
+  --bg: #faf9f6;
+  --sidebar-bg: #f0ede8;
+  --border: #ddd8d0;
+}
+
+[data-accent="sage"][data-theme="dark"] {
+  --accent: #98c379;
+  --accent-hover: #7dbd5f;
+  --dot: #98c379;
+  --selected-bg: #323842;
+  --save-glow: rgba(152,195,121,0.5);
+  --save-success-flash: #98c379;
+}
+
 [data-font="serif"] {
   --font-body: 'Source Serif 4', 'Noto Serif JP', serif;
   --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
@@ -1315,6 +1339,43 @@ dialog.settings-dialog::backdrop {
   color: var(--text);
 }
 .settings-theme-label {
+  font-size: 0.62rem;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+.settings-color-picker {
+  display: flex;
+  gap: 0.5rem;
+}
+.settings-color-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.55rem 0.8rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.settings-color-option.active {
+  border-color: var(--accent);
+  background: var(--selected-bg);
+  color: var(--accent);
+}
+.settings-color-option:hover:not(.active) {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.settings-color-swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0,0,0,0.12);
+}
+.settings-color-label {
   font-size: 0.62rem;
   font-family: ui-monospace, monospace;
   letter-spacing: 0.04em;

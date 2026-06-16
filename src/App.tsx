@@ -3,6 +3,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
 import { useTheme } from './hooks/useTheme'
+import { useAccentColor } from './hooks/useAccentColor'
 import { useFont } from './hooks/useFont'
 import { useFontSize } from './hooks/useFontSize'
 import { useHolidayCountry } from './hooks/useHolidayCountry'
@@ -142,6 +143,7 @@ export default function App() {
     retryAfterExpired,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
+  const { accent: accentColor, setAccent } = useAccentColor()
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
@@ -591,6 +593,8 @@ export default function App() {
             onAutoSaveToggle={handleAutoSaveToggle}
             themeMode={themeMode}
             onThemeModeChange={setThemeMode}
+            accentColor={accentColor}
+            onAccentChange={setAccent}
             fontMode={fontMode}
             onFontToggle={toggleFont}
             fontSize={fontSize}

@@ -7,11 +7,11 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { autoSave?: boolean; modalOpen?: boolean; milestones?: import('../src/types').Milestone[] } = {},
+  opts: { autoSave?: boolean; modalOpen?: boolean; milestones?: import('../src/types').Milestone[]; accentColor?: import('../src/hooks/useAccentColor').AccentColor } = {},
 ) {
-  await page.evaluate(({ autoSave, modalOpen, milestones }) => {
-    window.settingsHarness.render({ autoSave, modalOpen, milestones })
-  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen, milestones: opts.milestones })
+  await page.evaluate(({ autoSave, modalOpen, milestones, accentColor }) => {
+    window.settingsHarness.render({ autoSave, modalOpen, milestones, accentColor })
+  }, { autoSave: opts.autoSave, modalOpen: opts.modalOpen, milestones: opts.milestones, accentColor: opts.accentColor })
   await page.waitForSelector('.settings-dialog')
 }
 
@@ -792,5 +792,55 @@ test.describe('SettingsModal — sign out button', () => {
 
     await page.waitForFunction(() => window.settingsHarness.signOutCount() === 1)
     expect(await page.evaluate(() => window.settingsHarness.signOutCount())).toBe(1)
+  })
+})
+
+test.describe('SettingsModal — accent color', () => {
+  test('shows an accent color picker in the Appearance section', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const picker = page.locator('.settings-color-picker')
+    await expect(picker).toBeVisible()
+    await expect(picker.getByRole('button', { name: /indigo/i })).toBeVisible()
+    await expect(picker.getByRole('button', { name: /sage/i })).toBeVisible()
+  })
+
+  test('indigo button is active by default', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const indigoBtn = page.locator('.settings-color-picker').getByRole('button', { name: /indigo/i })
+    await expect(indigoBtn).toHaveAttribute('aria-pressed', 'true')
+    const sageBtn = page.locator('.settings-color-picker').getByRole('button', { name: /sage/i })
+    await expect(sageBtn).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('clicking sage switches active state and persists to localStorage', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.locator('.settings-color-picker').getByRole('button', { name: /sage/i }).click()
+
+    const sageBtn = page.locator('.settings-color-picker').getByRole('button', { name: /sage/i })
+    await expect(sageBtn).toHaveAttribute('aria-pressed', 'true')
+    const indigoBtn = page.locator('.settings-color-picker').getByRole('button', { name: /indigo/i })
+    await expect(indigoBtn).toHaveAttribute('aria-pressed', 'false')
+
+    const stored = await page.evaluate(() => localStorage.getItem('linger_accent'))
+    expect(stored).toBe('sage')
+  })
+
+  test('clicking indigo after sage switches back', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { accentColor: 'sage' })
+
+    await page.locator('.settings-color-picker').getByRole('button', { name: /indigo/i }).click()
+
+    const indigoBtn = page.locator('.settings-color-picker').getByRole('button', { name: /indigo/i })
+    await expect(indigoBtn).toHaveAttribute('aria-pressed', 'true')
+
+    const stored = await page.evaluate(() => localStorage.getItem('linger_accent'))
+    expect(stored).toBe('indigo')
   })
 })

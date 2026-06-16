@@ -20,7 +20,7 @@ interface Window {
     progressCalls: () => { done: number; total: number }[]
   }
   settingsHarness: {
-    render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; milestones?: import('../src/types').Milestone[] }) => void
+    render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; accentColor?: import('../src/hooks/useAccentColor').AccentColor; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; milestones?: import('../src/types').Milestone[] }) => void
     getStoredAutoSave: () => string | null
     getStoredTheme: () => string | null
     exportCalls: () => { hasProgress: boolean }[]

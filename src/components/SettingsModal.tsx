@@ -8,6 +8,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
+import type { AccentColor } from '../hooks/useAccentColor'
 import type { FontSize } from '../hooks/useFontSize'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
@@ -25,6 +26,8 @@ interface SettingsModalProps {
   onAutoSaveToggle: () => void
   themeMode: ThemeMode
   onThemeModeChange: (mode: ThemeMode) => void
+  accentColor: AccentColor
+  onAccentChange: (color: AccentColor) => void
   fontMode: 'serif' | 'sans'
   onFontToggle: () => void
   fontSize: FontSize
@@ -45,7 +48,7 @@ interface SettingsModalProps {
 
 const calendarAnchorSupported = typeof CSS !== 'undefined' && CSS.supports('anchor-name', '--x')
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -192,6 +195,31 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                   <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
                 </svg>
                 <span className="settings-theme-label">{t.settings.themeAuto}</span>
+              </button>
+            </div>
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.accentColor}</span>
+            <div className="settings-color-picker">
+              <button
+                type="button"
+                className={`settings-color-option ${accentColor === 'indigo' ? 'active' : ''}`}
+                onClick={() => onAccentChange('indigo')}
+                aria-label={t.settings.accentIndigo}
+                aria-pressed={accentColor === 'indigo'}
+              >
+                <span className="settings-color-swatch" style={{ background: '#5c5fa8' }} />
+                <span className="settings-color-label">{t.settings.accentIndigo}</span>
+              </button>
+              <button
+                type="button"
+                className={`settings-color-option ${accentColor === 'sage' ? 'active' : ''}`}
+                onClick={() => onAccentChange('sage')}
+                aria-label={t.settings.accentSage}
+                aria-pressed={accentColor === 'sage'}
+              >
+                <span className="settings-color-swatch" style={{ background: '#4a6a4a' }} />
+                <span className="settings-color-label">{t.settings.accentSage}</span>
               </button>
             </div>
           </div>
