@@ -259,6 +259,34 @@ test.describe('HistoryModal — restore button', () => {
 
     await expect(page.locator('.history-restore-error')).toBeVisible()
   })
+
+  test('restore button is disabled when the selected version failed to load', async ({ page }) => {
+    await loadHarness(page)
+
+    // rev-2 loads fine; rev-1 (oldest) fails. We select rev-2 first to ensure
+    // previewContent is set from a prior successful load, then switch to rev-1
+    // to verify the button becomes disabled even with stale content in state.
+    await page.evaluate(({ revList, c3, c2 }) => {
+      window.historyHarness.list({ status: 200, body: revList })
+      window.historyHarness.content({
+        'rev-3': { status: 200, body: c3 },
+        'rev-2': { status: 200, body: c2 },
+        'rev-1': { status: 500, body: { error: 'Server error' } },
+      })
+      window.historyHarness.render()
+    }, { revList: REV_LIST, c3: CONTENT_V3, c2: CONTENT_V2 })
+
+    // Select rev-2 first so previewContent is populated with stale content
+    await page.locator('.history-revision-item').nth(1).click()
+    await page.waitForSelector('.history-preview-diff')
+    await expect(page.locator('.btn-restore')).toBeEnabled()
+
+    // Now select rev-1 which fails to load
+    await page.locator('.history-revision-item').nth(2).click()
+    await page.waitForSelector('.history-preview-error')
+
+    await expect(page.locator('.btn-restore')).toBeDisabled()
+  })
 })
 
 test.describe('HistoryModal — close behaviour', () => {
