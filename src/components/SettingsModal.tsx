@@ -313,7 +313,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.2 }}
-                    style={{ overflow: 'hidden' }}
+                    style={{ overflowY: 'clip', overflowX: 'visible' }}
                   >
                   <AnimatePresence initial={false} mode="popLayout">
                     {milestones.map(a => {
