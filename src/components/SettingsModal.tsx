@@ -17,6 +17,66 @@ import {
   type Milestone,
 } from '../types'
 
+function InfoTip({ text }: { text: string }) {
+  const { t } = useI18n()
+  const popId = useId()
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  const close = useCallback(() => {
+    popRef.current?.hidePopover()
+    setOpen(false)
+    btnRef.current?.focus()
+  }, [])
+
+  const toggle = useCallback(() => {
+    if (open) { close(); return }
+    const btn = btnRef.current!
+    const pop = popRef.current!
+    const rect = btn.getBoundingClientRect()
+    pop.style.top = `${rect.bottom + 6}px`
+    pop.style.left = `${Math.max(8, Math.min(rect.left - 8, window.innerWidth - 240))}px`
+    if ('showPopover' in HTMLElement.prototype) pop.showPopover()
+    setOpen(true)
+  }, [open, close])
+
+  useEffect(() => {
+    if (!open) return
+    const handle = (e: MouseEvent | TouchEvent) => {
+      const target = (e.target ?? (e as TouchEvent).touches?.[0]?.target) as Node | null
+      if (!btnRef.current?.contains(target) && !popRef.current?.contains(target)) close()
+    }
+    document.addEventListener('mousedown', handle)
+    document.addEventListener('touchstart', handle)
+    return () => {
+      document.removeEventListener('mousedown', handle)
+      document.removeEventListener('touchstart', handle)
+    }
+  }, [open, close])
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`infotip-btn${open ? ' open' : ''}`}
+        aria-label={t.settings.infoTipLabel}
+        aria-expanded={open}
+        aria-describedby={open ? popId : undefined}
+        onClick={toggle}
+        onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); close() } }}
+      >ⓘ</button>
+      <div
+        ref={popRef}
+        id={popId}
+        popover="manual"
+        className="infotip-popover"
+        onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); close() } }}
+      >{text}</div>
+    </>
+  )
+}
 
 interface SettingsModalProps {
   autoSave: boolean
@@ -270,7 +330,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             />
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.autoSave}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.autoSave}</span>
+              <InfoTip text={t.settings.autoSaveHelp} />
+            </span>
             <button
               className={`settings-switch ${autoSave ? 'active' : ''}`}
               onClick={onAutoSaveToggle}
@@ -286,7 +349,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionCalendar}</h4>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.holidayCountry}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.holidayCountry}</span>
+              <InfoTip text={t.settings.holidaysHelp} />
+            </span>
             <SettingsSelect
               aria-label={t.settings.holidayCountry}
               value={holidayCountry}
@@ -377,7 +443,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                                   >
                                     <span className="settings-milestone-badge-toggle-thumb" />
                                   </button>
-                                  <span className="settings-milestone-badge-label">{t.settings.milestoneBadgeLabel}</span>
+                                  <span className="settings-milestone-badge-label">
+                                    {t.settings.milestoneBadgeLabel}
+                                    <InfoTip text={t.settings.milestoneBadgeHelp} />
+                                  </span>
                                 </span>
                               )}
                               {onMilestoneUpdate && (
@@ -450,7 +519,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionData}</h4>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.exportAllEntries}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.exportAllEntries}</span>
+              <InfoTip text={t.settings.exportHelp} />
+            </span>
             <ExportButton dates={dates} onExport={onExport} />
           </div>
           <div className="settings-item">

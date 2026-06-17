@@ -228,6 +228,9 @@ export function MilestoneFormModal({ mode, milestone, initialDate, onSave, onClo
               aria-pressed={!recurring}
             >{t.settings.milestoneOneTime}</button>
           </div>
+          <p className="settings-milestone-type-help">
+            {recurring ? t.settings.milestoneRecurringHelp : t.settings.milestoneOneTimeHelp}
+          </p>
         </div>
         {errors.length > 0 && (
           <div className="settings-milestone-errors" role="alert">

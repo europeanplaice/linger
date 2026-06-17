@@ -1277,6 +1277,78 @@ dialog.settings-dialog::backdrop {
 .settings-switch.active .settings-switch-thumb {
   transform: translateX(18px);
 }
+
+/* ── InfoTip ── */
+.settings-item-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.infotip-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  transition: color 0.12s;
+  flex-shrink: 0;
+}
+.infotip-btn:hover,
+.infotip-btn.open {
+  color: var(--accent);
+}
+.infotip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.infotip-popover {
+  position: fixed;
+  inset: unset;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: 0 4px 16px var(--shadow-heavy);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  max-width: 220px;
+  padding: 0.55rem 0.75rem;
+  width: 220px;
+  opacity: 0;
+  translate: 0 -4px;
+  transition: opacity 0.12s ease, translate 0.12s ease,
+              display 0.12s allow-discrete,
+              overlay 0.12s allow-discrete;
+}
+.infotip-popover:popover-open {
+  opacity: 1;
+  translate: 0 0;
+}
+@starting-style {
+  .infotip-popover:popover-open {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .infotip-popover { transition: none; }
+}
+.settings-milestone-type-help {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  margin: 0.2rem 0 0;
+}
+
 .settings-font-picker {
   display: flex;
   gap: 0.5rem;
@@ -1752,6 +1824,9 @@ dialog.settings-dialog::backdrop {
   font-size: 0.72rem;
   user-select: none;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
 }
 .settings-milestone-edit {
   background: none;
