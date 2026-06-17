@@ -20,6 +20,12 @@ async function expandMilestoneList(page: import('@playwright/test').Page) {
   if (await toggle.count() > 0) await toggle.click()
 }
 
+function milestoneRow(page: import('@playwright/test').Page, label: string) {
+  return page.locator('.settings-milestone-row', {
+    has: page.getByRole('button', { name: `Remove ${label}` }),
+  })
+}
+
 test.describe('SettingsModal — milestones', () => {
   test('adds, toggles, and confirms deletion of a milestone', async ({ page }) => {
     await loadHarness(page)
@@ -156,10 +162,8 @@ test.describe('SettingsModal — milestones', () => {
     })
 
     await expandMilestoneList(page)
-    const firstSwitch = page.locator('.settings-milestone-row', { hasText: 'One' })
-      .getByRole('switch', { name: 'Show badge' })
-    const sixthSwitch = page.locator('.settings-milestone-row', { hasText: 'Six' })
-      .getByRole('switch', { name: 'Show badge' })
+    const firstSwitch = milestoneRow(page, 'One').getByRole('switch', { name: 'Show badge' })
+    const sixthSwitch = milestoneRow(page, 'Six').getByRole('switch', { name: 'Show badge' })
 
     await expect(sixthSwitch).toHaveAttribute('aria-disabled', 'true')
     await expect(sixthSwitch).toHaveAttribute('aria-checked', 'false')

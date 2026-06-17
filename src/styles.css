@@ -1878,7 +1878,9 @@ dialog.settings-dialog::backdrop {
 }
 .settings-milestone-confirm-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
+  max-width: 100%;
 }
 .settings-milestone-confirm-yes {
   background: var(--danger);
