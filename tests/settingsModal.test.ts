@@ -869,6 +869,95 @@ test.describe('SettingsModal — accent color', () => {
   })
 })
 
+test.describe('SettingsModal — InfoTip', () => {
+  test('clicking the Auto-save info button shows help text', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
+    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
+
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
+    await expect(popover).toBeVisible()
+  })
+
+  test('clicking outside the popover closes it', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
+    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
+    await expect(popover).toBeVisible()
+
+    await page.mouse.click(5, 5)
+    await expect(popover).toBeHidden()
+  })
+
+  test('Escape key closes the popover', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
+    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
+    await expect(popover).toBeVisible()
+
+    await page.keyboard.press('Escape')
+    await expect(popover).toBeHidden()
+  })
+
+  test('info button tracks open state via aria-expanded', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
+    const infoBtn = autoSaveItem.getByRole('button', { name: 'More information' })
+
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
+    await infoBtn.click()
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'true')
+    await infoBtn.click()
+    await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
+  })
+})
+
+test.describe('SettingsModal — milestone form help text', () => {
+  test('shows recurring help text by default in the add form', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
+
+    await expect(dialog.locator('.settings-milestone-type-help')).toContainText('Repeats every year')
+  })
+
+  test('switches help text when toggling to one-time', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await dialog.getByRole('button', { name: 'One-time' }).click()
+
+    await expect(dialog.locator('.settings-milestone-type-help')).toContainText('does not repeat')
+  })
+
+  test('switches back to recurring help text when toggling back', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await dialog.getByRole('button', { name: 'One-time' }).click()
+    await dialog.getByRole('button', { name: 'Yearly' }).click()
+
+    await expect(dialog.locator('.settings-milestone-type-help')).toContainText('Repeats every year')
+  })
+})
+
 test.describe('SettingsModal — font picker', () => {
   test('shows Sans and Serif buttons', async ({ page }) => {
     await loadHarness(page)
