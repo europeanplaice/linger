@@ -1852,16 +1852,19 @@ test.describe('EntryEditor — Add as Milestone', () => {
     await expect(page.getByText('Add as Milestone')).toHaveCount(0)
   })
 
-  test('clicking "Add as Milestone" switches menu to inline form', async ({ page }) => {
+  test('clicking "Add as Milestone" opens a modal dialog with the entry date pre-filled', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-06-14', enableMilestoneAdd: true })
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
 
-    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
-    await expect(page.locator('.more-menu-milestone-date')).toContainText('2026-06-14')
-    await expect(page.locator('input[placeholder*="Name"]')).toBeVisible()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
+    await expect(page.locator('.more-menu')).toHaveCount(0)
+    // Date picker button has accessible name "Date" (from label) but shows the pre-filled date as text
+    await expect(dialog.getByRole('button', { name: 'Date' })).toContainText('2026-06-14')
+    await expect(dialog.getByLabel('Name (e.g. Birthday)')).toBeVisible()
   })
 
   test('shows yearly/one-time toggle in the inline form', async ({ page }) => {
@@ -1876,17 +1879,20 @@ test.describe('EntryEditor — Add as Milestone', () => {
     await expect(page.getByRole('button', { name: 'Yearly' })).toHaveClass(/active/)
   })
 
-  test('shows error when label is empty and Add is clicked', async ({ page }) => {
+  test('keeps dialog visible and prevents save when label is empty', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
-    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
-    await page.locator('.settings-milestone-save').click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
+    // Click Add without filling label — native or custom validation keeps dialog open
+    await dialog.getByRole('button', { name: 'Add' }).click()
 
-    await expect(page.locator('.more-menu-milestone-error')).toBeVisible()
-    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+    await expect(dialog).toBeVisible()
+    const calls = await page.evaluate(() => window.editorHarness.milestoneAddCalls())
+    expect(calls).toHaveLength(0)
   })
 
   test('calls onMilestoneAdd with label, date, and recurring=true by default', async ({ page }) => {
@@ -1895,8 +1901,9 @@ test.describe('EntryEditor — Add as Milestone', () => {
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
-    await page.locator('.more-menu-milestone-form input').fill('Wedding Anniversary')
-    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await dialog.getByLabel('Name (e.g. Birthday)').fill('Wedding Anniversary')
+    await dialog.getByRole('button', { name: 'Add' }).click()
 
     const calls = await page.evaluate(() => window.editorHarness.milestoneAddCalls())
     expect(calls).toHaveLength(1)
@@ -1911,39 +1918,43 @@ test.describe('EntryEditor — Add as Milestone', () => {
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
-    await page.locator('.more-menu-milestone-form input').fill('Concert')
-    await page.getByRole('button', { name: 'One-time' }).click()
-    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await dialog.getByLabel('Name (e.g. Birthday)').fill('Concert')
+    await dialog.getByRole('button', { name: 'One-time' }).click()
+    await dialog.getByRole('button', { name: 'Add' }).click()
 
     const calls = await page.evaluate(() => window.editorHarness.milestoneAddCalls())
     expect(calls[0].recurring).toBe(false)
   })
 
-  test('closes menu after successful add', async ({ page }) => {
+  test('closes modal after successful add', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
-    await page.locator('.more-menu-milestone-form input').fill('Birthday')
-    await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await dialog.getByLabel('Name (e.g. Birthday)').fill('Birthday')
+    await dialog.getByRole('button', { name: 'Add' }).click()
 
+    await expect(dialog).toBeHidden()
     await expect(page.locator('.more-menu')).toHaveCount(0)
   })
 
-  test('cancel button returns to menu items (not close)', async ({ page }) => {
+  test('cancel button closes the modal', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', enableMilestoneAdd: true })
 
     await page.getByRole('button', { name: 'More options' }).click()
     await page.getByText('Add as Milestone').click()
-    await expect(page.locator('.more-menu-milestone-form')).toBeVisible()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
+    await expect(page.locator('.more-menu')).toHaveCount(0)
 
-    await page.getByRole('button', { name: 'Cancel' }).click()
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
 
-    await expect(page.locator('.more-menu-milestone-form')).toHaveCount(0)
-    await expect(page.locator('.more-menu')).toBeVisible()
-    await expect(page.getByText('Add as Milestone')).toBeVisible()
+    await expect(dialog).toBeHidden()
+    await expect(page.locator('.more-menu')).toHaveCount(0)
   })
 
   test('"Add as Milestone" is disabled when at 50-milestone limit', async ({ page }) => {

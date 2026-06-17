@@ -26,13 +26,16 @@ test.describe('SettingsModal — milestones', () => {
     await render(page)
 
     await page.getByRole('button', { name: 'Add' }).click()
-    await page.getByLabel('Name (e.g. Birthday)').fill('Birthday')
-    await page.getByRole('button', { name: 'Date' }).click()
+    const milestoneDialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(milestoneDialog).toBeVisible()
+    await milestoneDialog.getByLabel('Name (e.g. Birthday)').fill('Birthday')
+    await milestoneDialog.getByRole('button', { name: 'Date' }).click()
     const datePicker = page.locator('.settings-milestone-date-popover')
     await datePicker.locator('select').nth(1).selectOption('2020')
     await datePicker.locator('select').nth(0).selectOption('4')
     await datePicker.getByRole('button', { name: '2020-05-10' }).click()
-    await page.getByRole('button', { name: 'Add' }).click()
+    await milestoneDialog.getByRole('button', { name: 'Add' }).click()
+    await expect(milestoneDialog).toBeHidden()
 
     await expandMilestoneList(page)
     const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
@@ -123,18 +126,17 @@ test.describe('SettingsModal — milestones', () => {
     await render(page)
 
     await page.getByRole('button', { name: 'Add' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
 
-    const form = page.locator('.settings-milestone-form')
-    const nameInput = page.getByLabel('Name (e.g. Birthday)')
-    const dateInput = page.getByRole('button', { name: 'Date' })
+    const form = dialog.locator('.milestone-form-dialog-form')
+    const dateInput = dialog.getByRole('button', { name: 'Date' })
     const formBox = await form.boundingBox()
-    const nameBox = await nameInput.boundingBox()
     const dateBox = await dateInput.boundingBox()
 
     expect(formBox).not.toBeNull()
-    expect(nameBox).not.toBeNull()
     expect(dateBox).not.toBeNull()
-    if (nameBox && dateBox && formBox) {
+    if (dateBox && formBox) {
       expect(dateBox.width).toBeLessThanOrEqual(140)
       expect(Math.abs((dateBox.x + dateBox.width) - (formBox.x + formBox.width))).toBeLessThan(4)
     }
@@ -204,11 +206,11 @@ test.describe('SettingsModal — milestones', () => {
     })
 
     await page.getByRole('button', { name: 'Add' }).click()
-    const form = page.locator('.settings-milestone-form')
-    await expect(form).toBeVisible()
-    expect(await form.evaluate(el => el.scrollWidth)).toBe(await form.evaluate(el => el.clientWidth))
+    const dialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(dialog).toBeVisible()
+    expect(await dialog.evaluate(el => el.scrollWidth)).toBe(await dialog.evaluate(el => el.clientWidth))
 
-    await page.getByRole('button', { name: 'Date' }).click()
+    await dialog.getByRole('button', { name: 'Date' }).click()
     const datePicker = page.locator('.settings-milestone-date-popover')
     await expect(datePicker).toBeVisible()
     const pickerBox = await datePicker.boundingBox()
@@ -219,9 +221,10 @@ test.describe('SettingsModal — milestones', () => {
     }
     await page.keyboard.press('Escape')
     await expect(datePicker).toBeHidden()
-    await expect(page.locator('.settings-dialog')).toBeVisible()
+    await expect(dialog).toBeVisible()
 
-    await page.getByRole('button', { name: 'Cancel' }).click()
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
     await expandMilestoneList(page)
     await page.getByRole('button', { name: 'Remove Wedding anniversary with a very long label' }).click()
     const confirmation = page.locator('.settings-milestone-confirm')
@@ -248,15 +251,17 @@ test.describe('SettingsModal — EmojiPicker', () => {
     await loadHarness(page)
     await render(page)
     await page.getByRole('button', { name: 'Add' }).click()
-    await page.getByLabel('Name (e.g. Birthday)').fill('Anniversary')
+    const milestoneDialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await expect(milestoneDialog).toBeVisible()
+    await milestoneDialog.getByLabel('Name (e.g. Birthday)').fill('Anniversary')
 
-    await page.getByRole('button', { name: 'Date' }).click()
+    await milestoneDialog.getByRole('button', { name: 'Date' }).click()
     const datePicker = page.locator('.settings-milestone-date-popover')
     await datePicker.locator('select').nth(1).selectOption('2020')
     await datePicker.locator('select').nth(0).selectOption('0')
     await datePicker.getByRole('button', { name: '2020-01-01' }).click()
 
-    await page.getByRole('button', { name: 'Emoji' }).click()
+    await milestoneDialog.getByRole('button', { name: 'Emoji' }).click()
     const popover = page.getByRole('dialog', { name: 'Emoji' })
     const firstOption = popover.getByRole('option').first()
     await firstOption.waitFor({ state: 'visible' })
@@ -264,7 +269,8 @@ test.describe('SettingsModal — EmojiPicker', () => {
     await firstOption.click()
     await expect(popover).toBeHidden()
 
-    await page.getByRole('button', { name: 'Add' }).click()
+    await milestoneDialog.getByRole('button', { name: 'Add' }).click()
+    await expect(milestoneDialog).toBeHidden()
 
     await expandMilestoneList(page)
     const row = page.locator('.settings-milestone-row', { hasText: 'Anniversary' })
@@ -329,7 +335,9 @@ test.describe('SettingsModal — EmojiPicker', () => {
     const row = page.locator('.settings-milestone-row', { hasText: 'Birthday' })
     await row.getByRole('button', { name: 'Edit Birthday' }).click()
 
-    const trigger = page.locator('.settings-milestone-edit-form').getByRole('button', { name: 'Emoji' })
+    const editDialog = page.locator('dialog.milestone-form-dialog')
+    await expect(editDialog).toBeVisible()
+    const trigger = editDialog.getByRole('button', { name: 'Emoji' })
     await expect(trigger.locator('.emoji-picker-trigger-icon')).toHaveText('🎂')
   })
 })

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CalendarDays } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
-import { CalendarView } from './CalendarView'
-import { EmojiPicker } from './EmojiPicker'
+import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -16,7 +14,6 @@ import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 import {
   MAX_MILESTONES,
   MAX_MILESTONE_BADGES,
-  MAX_MILESTONE_LABEL_LENGTH,
   type Milestone,
 } from '../types'
 
@@ -46,12 +43,10 @@ interface SettingsModalProps {
   onMilestoneToggleBadge?: (id: string) => void
 }
 
-const calendarAnchorSupported = typeof CSS !== 'undefined' && CSS.supports('anchor-name', '--x')
-
 export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
   const [listExpanded, setListExpanded] = useState(false)
   const milestoneLimitId = useId()
   const badgeLimitId = useId()
@@ -356,107 +351,77 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                           exit={{ opacity: 0, y: -6 }}
                           transition={{ duration: 0.18 }}
                         >
-                          <AnimatePresence mode="wait" initial={false}>
-                            {editingId === a.id && onMilestoneUpdate ? (
-                              <motion.div
-                                key="edit"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.12 }}
-                              >
-                                <MilestoneEditForm
-                                  milestone={a}
-                                  onSave={(label, date, emoji, recurring) => {
-                                    onMilestoneUpdate(a.id, label, date, emoji, recurring)
-                                    setEditingId(null)
-                                  }}
-                                  onCancel={() => setEditingId(null)}
-                                  t={t}
-                                />
-                              </motion.div>
-                            ) : (
-                              <motion.div
-                                key="display"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.12 }}
-                              >
-                                <div className="settings-milestone-row">
-                                  <div className="settings-milestone-details">
-                                    <span className="settings-milestone-label">
-                                      <span className="settings-milestone-emoji">{a.emoji || '🎀'}</span>
-                                      {a.label}
-                                      {a.recurring !== false && <span className="settings-milestone-recurring-tag">{t.settings.milestoneRecurring}</span>}
-                                    </span>
-                                    <time className="settings-milestone-date" dateTime={a.date}>{a.date}</time>
-                                  </div>
-                                  <div className="settings-milestone-actions">
-                                    {onMilestoneToggleBadge && (
-                                      <span className="settings-milestone-badge-toggle-wrap">
-                                        <button
-                                          type="button"
-                                          className={`settings-milestone-badge-toggle${badgeEnabled ? ' active' : ''}`}
-                                          onClick={() => {
-                                            if (!badgeLimitReached) onMilestoneToggleBadge(a.id)
-                                          }}
-                                          role="switch"
-                                          aria-checked={badgeEnabled}
-                                          aria-disabled={badgeLimitReached || undefined}
-                                          aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
-                                          aria-label={t.settings.milestoneBadgeLabel}
-                                        >
-                                          <span className="settings-milestone-badge-toggle-thumb" />
-                                        </button>
-                                        <span className="settings-milestone-badge-label">{t.settings.milestoneBadgeLabel}</span>
+                          <div className="settings-milestone-row">
+                            <div className="settings-milestone-details">
+                              <span className="settings-milestone-label">
+                                <span className="settings-milestone-emoji">{a.emoji || '🎀'}</span>
+                                {a.label}
+                                {a.recurring !== false && <span className="settings-milestone-recurring-tag">{t.settings.milestoneRecurring}</span>}
+                              </span>
+                              <time className="settings-milestone-date" dateTime={a.date}>{a.date}</time>
+                            </div>
+                            <div className="settings-milestone-actions">
+                              {onMilestoneToggleBadge && (
+                                <span className="settings-milestone-badge-toggle-wrap">
+                                  <button
+                                    type="button"
+                                    className={`settings-milestone-badge-toggle${badgeEnabled ? ' active' : ''}`}
+                                    onClick={() => {
+                                      if (!badgeLimitReached) onMilestoneToggleBadge(a.id)
+                                    }}
+                                    role="switch"
+                                    aria-checked={badgeEnabled}
+                                    aria-disabled={badgeLimitReached || undefined}
+                                    aria-describedby={badgeLimitReached ? badgeLimitId : undefined}
+                                    aria-label={t.settings.milestoneBadgeLabel}
+                                  >
+                                    <span className="settings-milestone-badge-toggle-thumb" />
+                                  </button>
+                                  <span className="settings-milestone-badge-label">{t.settings.milestoneBadgeLabel}</span>
+                                </span>
+                              )}
+                              {onMilestoneUpdate && (
+                                <button
+                                  type="button"
+                                  className="settings-milestone-edit"
+                                  onClick={() => { setPendingDelete(null); setMilestoneModal({ mode: 'edit', milestone: a }) }}
+                                  aria-label={t.settings.milestoneEdit(a.label)}
+                                >✎</button>
+                              )}
+                              {onMilestoneRemove && (
+                                <AnimatePresence mode="wait" initial={false}>
+                                  {pendingDelete?.id === a.id ? (
+                                    <motion.span
+                                      key="confirm"
+                                      className="settings-milestone-confirm"
+                                      initial={{ opacity: 0, x: 8 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      exit={{ opacity: 0, x: 8 }}
+                                      transition={{ duration: 0.15 }}
+                                    >
+                                      <span className="settings-milestone-confirm-text">{t.settings.milestoneDeleteConfirm(a.label)}</span>
+                                      <span className="settings-milestone-confirm-actions">
+                                        <button type="button" className="settings-milestone-confirm-yes" onClick={() => { onMilestoneRemove(a.id); setPendingDelete(null) }}>{t.settings.milestoneDeleteYes}</button>
+                                        <button type="button" className="settings-milestone-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.milestoneDeleteNo}</button>
                                       </span>
-                                    )}
-                                    {onMilestoneUpdate && (
-                                      <button
-                                        type="button"
-                                        className="settings-milestone-edit"
-                                        onClick={() => { setPendingDelete(null); setEditingId(a.id) }}
-                                        aria-label={t.settings.milestoneEdit(a.label)}
-                                      >✎</button>
-                                    )}
-                                    {onMilestoneRemove && (
-                                      <AnimatePresence mode="wait" initial={false}>
-                                        {pendingDelete?.id === a.id ? (
-                                          <motion.span
-                                            key="confirm"
-                                            className="settings-milestone-confirm"
-                                            initial={{ opacity: 0, x: 8 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            exit={{ opacity: 0, x: 8 }}
-                                            transition={{ duration: 0.15 }}
-                                          >
-                                            <span className="settings-milestone-confirm-text">{t.settings.milestoneDeleteConfirm(a.label)}</span>
-                                            <span className="settings-milestone-confirm-actions">
-                                              <button type="button" className="settings-milestone-confirm-yes" onClick={() => { onMilestoneRemove(a.id); setPendingDelete(null) }}>{t.settings.milestoneDeleteYes}</button>
-                                              <button type="button" className="settings-milestone-confirm-no" onClick={() => setPendingDelete(null)}>{t.settings.milestoneDeleteNo}</button>
-                                            </span>
-                                          </motion.span>
-                                        ) : (
-                                          <motion.button
-                                            key="remove"
-                                            type="button"
-                                            className="settings-milestone-remove"
-                                            onClick={() => { setEditingId(null); setPendingDelete(a) }}
-                                            aria-label={t.settings.milestoneRemove(a.label)}
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            exit={{ opacity: 0 }}
-                                            transition={{ duration: 0.12 }}
-                                          >×</motion.button>
-                                        )}
-                                      </AnimatePresence>
-                                    )}
-                                  </div>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                                    </motion.span>
+                                  ) : (
+                                    <motion.button
+                                      key="remove"
+                                      type="button"
+                                      className="settings-milestone-remove"
+                                      onClick={() => { setPendingDelete(a) }}
+                                      aria-label={t.settings.milestoneRemove(a.label)}
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{ duration: 0.12 }}
+                                    >×</motion.button>
+                                  )}
+                                </AnimatePresence>
+                              )}
+                            </div>
+                          </div>
                         </motion.div>
                       )
                     })}
@@ -467,12 +432,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 </>
               )}
               {onMilestoneAdd && (
-                <MilestoneAddForm
-                  onAdd={onMilestoneAdd}
-                  t={t}
-                  limitReached={milestoneLimitReached}
-                  limitDescriptionId={milestoneLimitId}
-                />
+                <button
+                  type="button"
+                  className="settings-milestone-add-btn"
+                  onClick={() => setMilestoneModal({ mode: 'add' })}
+                  disabled={milestoneLimitReached}
+                  aria-describedby={milestoneLimitReached ? milestoneLimitId : undefined}
+                >
+                  {t.settings.milestoneAdd}
+                </button>
               )}
             </div>
           </div>
@@ -557,6 +525,23 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
       </div>
 
+      {milestoneModal && (
+        <MilestoneFormModal
+          mode={milestoneModal.mode}
+          milestone={milestoneModal.milestone}
+          onSave={(label, date, emoji, recurring) => {
+            if (milestoneModal.mode === 'add') {
+              onMilestoneAdd?.(label, date, emoji, recurring)
+            } else {
+              onMilestoneUpdate?.(milestoneModal.milestone!.id, label, date, emoji, recurring)
+            }
+            setMilestoneModal(null)
+          }}
+          onClose={() => setMilestoneModal(null)}
+          t={t}
+        />
+      )}
+
       <dialog
         ref={signOutDialogRef}
         className="signout-confirm-dialog"
@@ -575,351 +560,4 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   )
 }
 
-function MilestoneDatePicker({ id, value, onChange, label }: {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  label: string
-}) {
-  const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const popoverRef = useRef<HTMLDivElement>(null)
-  const uid = useId().replace(/[^a-z0-9]/gi, '-').replace(/^-|-$/g, '')
 
-  const close = useCallback((restoreFocus = true) => {
-    if ('hidePopover' in HTMLElement.prototype) popoverRef.current?.hidePopover()
-    setOpen(false)
-    if (restoreFocus) triggerRef.current?.focus()
-  }, [])
-
-  const show = useCallback(() => {
-    const popover = popoverRef.current
-    const trigger = triggerRef.current
-    if (!popover) return
-
-    if (!calendarAnchorSupported && trigger) {
-      const rect = trigger.getBoundingClientRect()
-      popover.style.top = `${rect.bottom + 6}px`
-      popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 328))}px`
-    }
-    if ('showPopover' in HTMLElement.prototype) popover.showPopover()
-    setOpen(true)
-    requestAnimationFrame(() => {
-      const selected = popover.querySelector<HTMLButtonElement>('.cal-day.selected')
-      const today = popover.querySelector<HTMLButtonElement>('.cal-day.today')
-      ;(selected ?? today)?.focus()
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!calendarAnchorSupported) return
-    const name = `--milestone-calendar-${uid}`
-    triggerRef.current?.style.setProperty('anchor-name', name)
-    popoverRef.current?.style.setProperty('position-anchor', name)
-  }, [uid])
-
-  useEffect(() => {
-    if (!open) return
-    const handlePointer = (event: MouseEvent) => {
-      if (
-        !triggerRef.current?.contains(event.target as Node)
-        && !popoverRef.current?.contains(event.target as Node)
-      ) {
-        close(false)
-      }
-    }
-    document.addEventListener('mousedown', handlePointer)
-    return () => document.removeEventListener('mousedown', handlePointer)
-  }, [close, open])
-
-  const toggle = () => {
-    if (open) close()
-    else show()
-  }
-
-  return (
-    <div className="settings-milestone-date-picker">
-      <button
-        ref={triggerRef}
-        id={id}
-        type="button"
-        className={`settings-milestone-input settings-milestone-date-input${open ? ' open' : ''}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-required="true"
-        onClick={toggle}
-        onKeyDown={event => {
-          if (event.key === 'Escape' && open) {
-            event.preventDefault()
-            event.stopPropagation()
-            close()
-          }
-        }}
-      >
-        <span className={value ? '' : 'settings-milestone-date-placeholder'}>
-          {value || label}
-        </span>
-        <CalendarDays size={16} aria-hidden="true" />
-      </button>
-      <input type="hidden" name="milestone-date" value={value} />
-      <div
-        ref={popoverRef}
-        popover="manual"
-        className="settings-milestone-date-popover"
-        role="dialog"
-        aria-label={label}
-        onKeyDown={event => {
-          if (event.key === 'Escape') {
-            event.preventDefault()
-            event.stopPropagation()
-            close()
-          }
-        }}
-      >
-        <CalendarView
-          dates={new Set()}
-          selectedDate={value}
-          onSelect={date => {
-            onChange(date)
-            close()
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function validateMilestoneFields(
-  label: string,
-  date: string,
-  t: ReturnType<typeof useI18n>['t'],
-): string[] {
-  const errs: string[] = []
-  if (!label.trim()) errs.push(t.settings.milestoneEmptyLabel)
-  if (label.trim().length > MAX_MILESTONE_LABEL_LENGTH) errs.push(t.settings.milestoneLabelTooLong(MAX_MILESTONE_LABEL_LENGTH))
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    errs.push(t.settings.milestoneInvalidDate)
-  } else {
-    const [y, m, d] = date.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
-      errs.push(t.settings.milestoneInvalidDate)
-    }
-  }
-  return errs
-}
-
-function MilestoneEditForm({ milestone, onSave, onCancel, t }: {
-  milestone: Milestone
-  onSave: (label: string, date: string, emoji?: string, recurring?: boolean) => void
-  onCancel: () => void
-  t: ReturnType<typeof useI18n>['t']
-}) {
-  const labelId = useId()
-  const dateId = useId()
-  const [label, setLabel] = useState(milestone.label)
-  const [date, setDate] = useState(milestone.date)
-  const [emoji, setEmoji] = useState(milestone.emoji ?? '')
-  const [recurring, setRecurring] = useState(milestone.recurring ?? true)
-  const [errors, setErrors] = useState<string[]>([])
-
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault()
-    const errs = validateMilestoneFields(label, date, t)
-    setErrors(errs)
-    if (errs.length > 0) return
-    onSave(label.trim(), date, emoji || undefined, recurring)
-  }
-
-  return (
-    <form
-      className="settings-milestone-form settings-milestone-edit-form"
-      onSubmit={handleSubmit}
-      onKeyDown={event => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          onCancel()
-        }
-      }}
-    >
-      <label className="sr-only" htmlFor={labelId}>{t.settings.milestoneLabelPlaceholder}</label>
-      <input
-        id={labelId}
-        name="milestone-label"
-        className="settings-milestone-input"
-        value={label}
-        onChange={e => setLabel(e.target.value)}
-        placeholder={t.settings.milestoneLabelPlaceholder}
-        maxLength={MAX_MILESTONE_LABEL_LENGTH}
-        required
-        autoFocus
-      />
-      <label className="sr-only" htmlFor={dateId}>{t.settings.milestoneDatePlaceholder}</label>
-      <MilestoneDatePicker
-        id={dateId}
-        value={date}
-        onChange={setDate}
-        label={t.settings.milestoneDatePlaceholder}
-      />
-      <div className="settings-milestone-extras">
-        <div className="settings-milestone-emoji-picker">
-          <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
-          <EmojiPicker
-            value={emoji}
-            onChange={setEmoji}
-            searchPlaceholder={t.settings.milestoneEmojiSearch}
-            triggerLabel={t.settings.milestoneEmoji}
-          />
-        </div>
-        <div className="settings-milestone-recurring-toggle">
-          <button
-            type="button"
-            className={`settings-milestone-type-btn${recurring ? ' active' : ''}`}
-            onClick={() => setRecurring(true)}
-            aria-pressed={recurring}
-          >{t.settings.milestoneRecurring}</button>
-          <button
-            type="button"
-            className={`settings-milestone-type-btn${!recurring ? ' active' : ''}`}
-            onClick={() => setRecurring(false)}
-            aria-pressed={!recurring}
-          >{t.settings.milestoneOneTime}</button>
-        </div>
-      </div>
-      {errors.length > 0 && (
-        <div className="settings-milestone-errors" role="alert">
-          {errors.map((e, i) => <span key={i} className="settings-milestone-error">{e}</span>)}
-        </div>
-      )}
-      <div className="settings-milestone-form-actions">
-        <button type="submit" className="settings-milestone-save">{t.settings.milestoneEditSave}</button>
-        <button type="button" className="settings-milestone-cancel" onClick={onCancel}>{t.settings.milestoneCancel}</button>
-      </div>
-    </form>
-  )
-}
-
-function MilestoneAddForm({ onAdd, t, limitReached, limitDescriptionId }: {
-  onAdd: (label: string, date: string, emoji?: string, recurring?: boolean) => void
-  t: ReturnType<typeof useI18n>['t']
-  limitReached: boolean
-  limitDescriptionId: string
-}) {
-  const labelId = useId()
-  const dateId = useId()
-  const [showForm, setShowForm] = useState(false)
-  const [newLabel, setNewLabel] = useState('')
-  const [newDate, setNewDate] = useState('')
-  const [newEmoji, setNewEmoji] = useState('')
-  const [newRecurring, setNewRecurring] = useState(true)
-  const [errors, setErrors] = useState<string[]>([])
-
-  const openForm = () => {
-    setShowForm(true)
-    setNewLabel('')
-    setNewDate('')
-    setNewEmoji('')
-    setNewRecurring(true)
-    setErrors([])
-  }
-
-  const closeForm = () => {
-    setShowForm(false)
-    setErrors([])
-  }
-
-  const handleAdd = (event: React.FormEvent) => {
-    event.preventDefault()
-    const errs = validateMilestoneFields(newLabel, newDate, t)
-    setErrors(errs)
-    if (errs.length > 0) return
-    onAdd(newLabel.trim(), newDate, newEmoji || undefined, newRecurring)
-    closeForm()
-  }
-
-  return (
-    <AnimatePresence mode="wait">
-      {!showForm ? (
-        <motion.button
-          key="add-btn"
-          type="button"
-          className="settings-milestone-add-btn"
-          onClick={openForm}
-          disabled={limitReached}
-          aria-describedby={limitReached ? limitDescriptionId : undefined}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.12 }}
-        >
-          {t.settings.milestoneAdd}
-        </motion.button>
-      ) : (
-        <motion.form
-          key="add-form"
-          className="settings-milestone-form"
-          onSubmit={handleAdd}
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.15 }}
-        >
-          <label className="sr-only" htmlFor={labelId}>{t.settings.milestoneLabelPlaceholder}</label>
-          <input
-            id={labelId}
-            name="milestone-label"
-            className="settings-milestone-input"
-            value={newLabel}
-            onChange={e => setNewLabel(e.target.value)}
-            placeholder={t.settings.milestoneLabelPlaceholder}
-            maxLength={MAX_MILESTONE_LABEL_LENGTH}
-            required
-            autoFocus
-          />
-          <label className="sr-only" htmlFor={dateId}>{t.settings.milestoneDatePlaceholder}</label>
-          <MilestoneDatePicker
-            id={dateId}
-            value={newDate}
-            onChange={setNewDate}
-            label={t.settings.milestoneDatePlaceholder}
-          />
-          <div className="settings-milestone-extras">
-            <div className="settings-milestone-emoji-picker">
-              <span className="settings-milestone-emoji-label">{t.settings.milestoneEmoji}</span>
-              <EmojiPicker
-                value={newEmoji}
-                onChange={setNewEmoji}
-                searchPlaceholder={t.settings.milestoneEmojiSearch}
-                triggerLabel={t.settings.milestoneEmoji}
-              />
-            </div>
-            <div className="settings-milestone-recurring-toggle">
-              <button
-                type="button"
-                className={`settings-milestone-type-btn${newRecurring ? ' active' : ''}`}
-                onClick={() => setNewRecurring(true)}
-                aria-pressed={newRecurring}
-              >{t.settings.milestoneRecurring}</button>
-              <button
-                type="button"
-                className={`settings-milestone-type-btn${!newRecurring ? ' active' : ''}`}
-                onClick={() => setNewRecurring(false)}
-                aria-pressed={!newRecurring}
-              >{t.settings.milestoneOneTime}</button>
-            </div>
-          </div>
-          {errors.length > 0 && (
-            <div className="settings-milestone-errors" role="alert">
-              {errors.map((e, i) => <span key={i} className="settings-milestone-error">{e}</span>)}
-            </div>
-          )}
-          <div className="settings-milestone-form-actions">
-            <button type="submit" className="settings-milestone-save">{t.settings.milestoneSave}</button>
-            <button type="button" className="settings-milestone-cancel" onClick={closeForm}>{t.settings.milestoneCancel}</button>
-          </div>
-        </motion.form>
-      )}
-    </AnimatePresence>
-  )
-}
