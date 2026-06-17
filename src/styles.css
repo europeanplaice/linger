@@ -1289,9 +1289,7 @@ dialog.settings-dialog::backdrop {
   border: none;
   padding: 0;
   cursor: pointer;
-  font-size: 0.8rem;
   color: var(--text-muted);
-  line-height: 1;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;

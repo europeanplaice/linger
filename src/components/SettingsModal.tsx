@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Info } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { SettingsSelect } from './SettingsSelect'
@@ -66,7 +67,7 @@ function InfoTip({ text }: { text: string }) {
         aria-describedby={open ? popId : undefined}
         onClick={toggle}
         onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); close() } }}
-      >ⓘ</button>
+      ><Info size={13} strokeWidth={2} aria-hidden="true" /></button>
       <div
         ref={popRef}
         id={popId}
