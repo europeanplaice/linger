@@ -366,7 +366,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* Milestones */}
         <div className="settings-section">
           <div className="settings-section-title-row">
-            <h4 className="settings-section-title">{t.settings.milestones}</h4>
+            <span className="settings-item-label-group">
+              <h4 className="settings-section-title">{t.settings.milestones}</h4>
+              <InfoTip text={t.settings.milestonesHelp} />
+            </span>
             <span className="settings-milestone-usage">
               {t.settings.milestoneUsage(milestones.length, MAX_MILESTONES)}
             </span>
