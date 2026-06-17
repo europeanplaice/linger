@@ -212,7 +212,7 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
             <button
               className="btn-restore"
               onClick={restore}
-              disabled={isCurrentRevision || isUnsavedRevision || restoring || !previewContent || !!previewError}
+              disabled={listLoading || previewLoading || isCurrentRevision || isUnsavedRevision || restoring || !previewContent || !!previewError}
             >
               {restoring ? t.history.restoring : t.history.restoreThisVersion}
             </button>
