@@ -843,4 +843,47 @@ test.describe('SettingsModal — accent color', () => {
     const stored = await page.evaluate(() => localStorage.getItem('linger_accent'))
     expect(stored).toBe('indigo')
   })
+
+  test('Indigo and Sage buttons have equal width regardless of label length', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const options = page.locator('.settings-color-picker .settings-color-option')
+    const indigoBox = await options.nth(0).boundingBox()
+    const sageBox = await options.nth(1).boundingBox()
+
+    expect(indigoBox).not.toBeNull()
+    expect(sageBox).not.toBeNull()
+    if (indigoBox && sageBox) {
+      expect(Math.abs(indigoBox.width - sageBox.width)).toBeLessThan(1)
+      expect(Math.abs(indigoBox.height - sageBox.height)).toBeLessThan(1)
+    }
+  })
+})
+
+test.describe('SettingsModal — font picker', () => {
+  test('shows Sans and Serif buttons', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const picker = page.locator('.settings-font-picker')
+    await expect(picker.getByRole('button', { name: /sans/i })).toBeVisible()
+    await expect(picker.getByRole('button', { name: /serif/i })).toBeVisible()
+  })
+
+  test('Sans and Serif buttons have equal width regardless of label length', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const options = page.locator('.settings-font-picker .settings-font-option')
+    const sansBox = await options.nth(0).boundingBox()
+    const serifBox = await options.nth(1).boundingBox()
+
+    expect(sansBox).not.toBeNull()
+    expect(serifBox).not.toBeNull()
+    if (sansBox && serifBox) {
+      expect(Math.abs(sansBox.width - serifBox.width)).toBeLessThan(1)
+      expect(Math.abs(sansBox.height - serifBox.height)).toBeLessThan(1)
+    }
+  })
 })
