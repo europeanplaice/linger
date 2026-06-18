@@ -194,6 +194,7 @@ export function MilestoneFormModal({ mode, milestone, initialDate, onSave, onClo
           onChange={e => setLabel(e.target.value)}
           placeholder={t.settings.milestoneLabelPlaceholder}
           maxLength={MAX_MILESTONE_LABEL_LENGTH}
+          autoComplete="off"
           required
           autoFocus
         />
