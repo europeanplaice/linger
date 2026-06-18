@@ -1908,17 +1908,18 @@ dialog.settings-dialog::backdrop {
   font-family: inherit;
 }
 .settings-milestone-add-btn {
-  align-self: flex-end;
   background: var(--accent);
   border: none;
   border-radius: 7px;
   color: var(--on-accent);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  padding: 0.3rem 0.7rem;
+  padding: 0.25rem 0.65rem;
   font-family: inherit;
   transition: filter 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .settings-milestone-add-btn:hover {
   filter: brightness(1.06);
@@ -2354,11 +2355,16 @@ dialog.settings-dialog::backdrop {
 /* Title row for sections needing an inline badge (e.g. milestone count) */
 .settings-section-title-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.65rem 1.35rem 0.3rem calc(1.35rem - 3px);
   border-left: 3px solid var(--accent);
+}
+.settings-milestone-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 .settings-section-title-row .settings-section-title {
   display: inline;

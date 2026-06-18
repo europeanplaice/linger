@@ -370,8 +370,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <h4 className="settings-section-title">{t.settings.milestones}</h4>
               <InfoTip text={t.settings.milestonesHelp} />
             </span>
-            <span className="settings-milestone-usage">
-              {t.settings.milestoneUsage(milestones.length, MAX_MILESTONES)}
+            <span className="settings-milestone-title-actions">
+              <span className="settings-milestone-usage">
+                {t.settings.milestoneUsage(milestones.length, MAX_MILESTONES)}
+              </span>
+              {onMilestoneAdd && (
+                <button
+                  type="button"
+                  className="settings-milestone-add-btn"
+                  onClick={() => setMilestoneModal({ mode: 'add' })}
+                  disabled={milestoneLimitReached}
+                  aria-describedby={milestoneLimitReached ? milestoneLimitId : undefined}
+                >
+                  {t.settings.milestoneAdd}
+                </button>
+              )}
             </span>
           </div>
           <div className="settings-item settings-item-milestones">
@@ -503,17 +516,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 )}
                 </AnimatePresence>
                 </>
-              )}
-              {onMilestoneAdd && (
-                <button
-                  type="button"
-                  className="settings-milestone-add-btn"
-                  onClick={() => setMilestoneModal({ mode: 'add' })}
-                  disabled={milestoneLimitReached}
-                  aria-describedby={milestoneLimitReached ? milestoneLimitId : undefined}
-                >
-                  {t.settings.milestoneAdd}
-                </button>
               )}
             </div>
           </div>
