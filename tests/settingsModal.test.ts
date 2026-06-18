@@ -111,20 +111,40 @@ test.describe('SettingsModal — milestones', () => {
     await expect(page.getByRole('button', { name: /show milestones/i })).toHaveCount(0)
   })
 
+  test('Add button appears in the title row alongside the usage count', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const titleActions = page.locator('.settings-milestone-title-actions')
+    await expect(titleActions.getByRole('button', { name: 'Add' })).toBeVisible()
+    await expect(titleActions.locator('.settings-milestone-usage')).toBeVisible()
+  })
+
   test('sizes the add button to its label', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const section = page.locator('.settings-milestone-section')
+    const titleActions = page.locator('.settings-milestone-title-actions')
     const addButton = page.getByRole('button', { name: 'Add' })
-    const sectionBox = await section.boundingBox()
+    const actionsBox = await titleActions.boundingBox()
     const buttonBox = await addButton.boundingBox()
 
-    expect(sectionBox).not.toBeNull()
+    expect(actionsBox).not.toBeNull()
     expect(buttonBox).not.toBeNull()
-    if (sectionBox && buttonBox) {
-      expect(Math.abs((buttonBox.x + buttonBox.width) - (sectionBox.x + sectionBox.width))).toBeLessThan(4)
+    if (actionsBox && buttonBox) {
+      expect(Math.abs((buttonBox.x + buttonBox.width) - (actionsBox.x + actionsBox.width))).toBeLessThan(4)
     }
+  })
+
+  test('title row with add button does not overflow on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await loadHarness(page)
+    await render(page)
+
+    const titleRow = page.locator('.settings-section-title-row').filter({
+      has: page.locator('.settings-milestone-title-actions'),
+    })
+    expect(await titleRow.evaluate(el => el.scrollWidth)).toBe(await titleRow.evaluate(el => el.clientWidth))
   })
 
   test('keeps the date input compact and right-aligned when the form opens', async ({ page }) => {
@@ -923,6 +943,30 @@ test.describe('SettingsModal — InfoTip', () => {
     await expect(infoBtn).toHaveAttribute('aria-expanded', 'true')
     await infoBtn.click()
     await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('clicking the Share info button shows help text', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    const shareItem = page.locator('.settings-item', { hasText: 'Share this app' })
+    await shareItem.getByRole('button', { name: 'More information' }).click()
+
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'friends' })
+    await expect(popover).toBeVisible()
+  })
+
+  test('Share info popover closes on outside click', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    const shareItem = page.locator('.settings-item', { hasText: 'Share this app' })
+    await shareItem.getByRole('button', { name: 'More information' }).click()
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'friends' })
+    await expect(popover).toBeVisible()
+
+    await page.mouse.click(5, 5)
+    await expect(popover).toBeHidden()
   })
 })
 
