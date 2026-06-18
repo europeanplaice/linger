@@ -1825,7 +1825,6 @@ dialog.settings-dialog::backdrop {
   cursor: default;
   font-size: 0.72rem;
   user-select: none;
-  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
