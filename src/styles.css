@@ -1202,9 +1202,9 @@ dialog.settings-dialog::backdrop {
   padding: 0;
 }
 .settings-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  justify-content: space-between;
   min-height: 3rem;
   padding: 0.7rem 1.35rem;
   gap: 1rem;
@@ -1213,6 +1213,7 @@ dialog.settings-dialog::backdrop {
   font-size: 0.9rem;
   font-weight: 500;
   color: var(--text);
+  min-width: 0;
 }
 .settings-account-info {
   display: flex;
@@ -1287,6 +1288,7 @@ dialog.settings-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  min-width: 0;
 }
 .infotip-btn {
   background: none;
@@ -1361,7 +1363,7 @@ dialog.settings-dialog::backdrop {
   align-items: center;
   gap: 0.3rem;
   padding: 0.5rem 0.75rem;
-  min-width: 4rem;
+  min-width: 4.5rem;
   border: 1.5px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
@@ -1397,6 +1399,7 @@ dialog.settings-dialog::backdrop {
   align-items: center;
   gap: 0.3rem;
   padding: 0.5rem 0.75rem;
+  min-width: 4.5rem;
   border: 1.5px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
@@ -1462,6 +1465,7 @@ dialog.settings-dialog::backdrop {
 .settings-select-trigger {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.45rem;
   background: var(--bg);
   border: 1.5px solid var(--border);
@@ -1470,6 +1474,7 @@ dialog.settings-dialog::backdrop {
   cursor: pointer;
   font-family: inherit;
   font-size: 0.82rem;
+  min-width: 6rem;
   padding: 0.35rem 0.65rem;
   transition: border-color 0.15s;
   white-space: nowrap;
@@ -1669,6 +1674,7 @@ dialog.settings-dialog::backdrop {
 .settings-drive-link:hover { text-decoration: underline; }
 
 .settings-item-milestones {
+  display: flex;
   align-items: stretch;
   flex-direction: column;
   gap: 0.65rem;
@@ -1912,9 +1918,9 @@ dialog.settings-dialog::backdrop {
   border-radius: 7px;
   color: var(--on-accent);
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 500;
-  padding: 0.25rem 0.65rem;
+  padding: 0.42rem 0.85rem;
   font-family: inherit;
   transition: filter 0.15s, box-shadow 0.15s;
   white-space: nowrap;
@@ -2413,29 +2419,7 @@ dialog.settings-dialog::backdrop {
   text-decoration: none;
 }
 .settings-legal a:hover { text-decoration: underline; }
-.settings-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: var(--accent);
-  border: none;
-  border-radius: 7px;
-  color: var(--on-accent);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 500;
-  padding: 0.42rem 0.85rem;
-  font-family: inherit;
-  white-space: nowrap;
-  transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
-}
-.settings-action-btn:hover {
-  filter: brightness(1.06);
-  box-shadow: 0 2px 8px var(--save-glow);
-}
-.settings-action-btn:active {
-  transform: scale(0.97);
-}
+.settings-action-btn,
 .settings-export .btn-export-modern {
   display: inline-flex;
   align-items: center;
@@ -2447,15 +2431,19 @@ dialog.settings-dialog::backdrop {
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 500;
+  min-width: 8rem;
+  justify-content: center;
   padding: 0.42rem 0.85rem;
   font-family: inherit;
   white-space: nowrap;
   transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
 }
+.settings-action-btn:hover,
 .settings-export .btn-export-modern:hover:not(:disabled) {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
+.settings-action-btn:active,
 .settings-export .btn-export-modern:active:not(:disabled) {
   transform: scale(0.97);
 }

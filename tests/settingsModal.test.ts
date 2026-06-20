@@ -1006,6 +1006,62 @@ test.describe('SettingsModal — milestone form help text', () => {
   })
 })
 
+test.describe('SettingsModal — settings-item layout', () => {
+  test('select trigger chevron sits at the right edge of the trigger', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const trigger = page.getByRole('button', { name: 'Font size' })
+    const chevron = trigger.locator('.settings-select-chevron')
+    const triggerBox = await trigger.boundingBox()
+    const chevronBox = await chevron.boundingBox()
+
+    expect(triggerBox).not.toBeNull()
+    expect(chevronBox).not.toBeNull()
+    if (triggerBox && chevronBox) {
+      const chevronRight = chevronBox.x + chevronBox.width
+      const triggerRight = triggerBox.x + triggerBox.width
+      expect(triggerRight - chevronRight).toBeLessThan(12)
+    }
+  })
+
+  test('Export all and Share buttons have equal width', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    const exportBtn = page.locator('.btn-export-modern')
+    const shareBtn = page.locator('.settings-action-btn')
+    const exportBox = await exportBtn.boundingBox()
+    const shareBox = await shareBtn.boundingBox()
+
+    expect(exportBox).not.toBeNull()
+    expect(shareBox).not.toBeNull()
+    if (exportBox && shareBox) {
+      expect(Math.abs(exportBox.width - shareBox.width)).toBeLessThan(2)
+    }
+  })
+})
+
+test.describe('SettingsModal — theme picker', () => {
+  test('Light, Dark and Auto buttons have equal width', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const options = page.locator('.settings-theme-picker .settings-theme-option')
+    const lightBox = await options.nth(0).boundingBox()
+    const darkBox = await options.nth(1).boundingBox()
+    const autoBox = await options.nth(2).boundingBox()
+
+    expect(lightBox).not.toBeNull()
+    expect(darkBox).not.toBeNull()
+    expect(autoBox).not.toBeNull()
+    if (lightBox && darkBox && autoBox) {
+      expect(Math.abs(lightBox.width - darkBox.width)).toBeLessThan(1)
+      expect(Math.abs(lightBox.width - autoBox.width)).toBeLessThan(1)
+    }
+  })
+})
+
 test.describe('SettingsModal — font picker', () => {
   test('shows Sans and Serif buttons', async ({ page }) => {
     await loadHarness(page)
