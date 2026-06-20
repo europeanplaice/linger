@@ -7,6 +7,7 @@ export interface Env {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   SESSION_DOMAIN: string
+  CF_PAGES_COMMIT_SHA?: string
 }
 
 export interface SessionData {

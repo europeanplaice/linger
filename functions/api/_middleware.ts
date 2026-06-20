@@ -10,9 +10,6 @@ import {
   validateMutationOrigin,
 } from '../_shared/session'
 
-// Injected at deploy time via wrangler pages deploy --var; absent in local dev.
-declare const DEPLOY_VERSION: string | undefined
-
 // KV writes are capped at 1000/day on the free tier. Writing on every request
 // would exhaust the quota quickly, so we throttle TTL renewal to once per day.
 // Only bypass this when the token itself changed (tokenRefreshed).
@@ -49,8 +46,8 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   const secure = !context.env.SESSION_DOMAIN.startsWith('http://')
   const newHeaders = new Headers(response.headers)
   newHeaders.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
-  if (typeof DEPLOY_VERSION !== 'undefined' && DEPLOY_VERSION) {
-    newHeaders.set('X-Deploy-Version', DEPLOY_VERSION)
+  if (context.env.CF_PAGES_COMMIT_SHA) {
+    newHeaders.set('X-Deploy-Version', context.env.CF_PAGES_COMMIT_SHA)
   }
   return new Response(response.body, {
     status: response.status,

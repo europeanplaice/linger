@@ -151,15 +151,16 @@ describe('API auth middleware', () => {
     expect(put).toHaveBeenCalledOnce()
   })
 
-  it('sets X-Deploy-Version header when DEPLOY_VERSION is defined', async () => {
+  it('sets X-Deploy-Version header when CF_PAGES_COMMIT_SHA is present in env', async () => {
     const session = makeSession()
-    // Simulate DEPLOY_VERSION being defined at the module level (injected by wrangler)
-    vi.stubGlobal('DEPLOY_VERSION', 'abc1234')
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
         headers: { Cookie: 'linger_session=sid123' },
       }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() } },
+      env: {
+        SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() },
+        CF_PAGES_COMMIT_SHA: 'abc1234',
+      },
     })
 
     const response = await onRequest(ctx as any)
@@ -167,7 +168,7 @@ describe('API auth middleware', () => {
     expect(response.headers.get('X-Deploy-Version')).toBe('abc1234')
   })
 
-  it('omits X-Deploy-Version header when DEPLOY_VERSION is not defined', async () => {
+  it('omits X-Deploy-Version header when CF_PAGES_COMMIT_SHA is absent', async () => {
     const session = makeSession()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
