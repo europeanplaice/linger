@@ -38,6 +38,7 @@ const dictionaries = {
       loadError: 'Failed to load entries. Check your connection and try again.',
       noEntriesHint: 'No entries yet. Start by writing today\'s diary.',
       loading: 'Loading…',
+      updateAvailable: 'An update is available. Save your work and the app will refresh automatically.',
     },
     recollection: {
       open: 'Looking back',
@@ -310,6 +311,7 @@ const dictionaries = {
       loadError: '日記の読み込みに失敗しました。接続を確認して、もう一度お試しください。',
       noEntriesHint: 'まだ日記がありません。今日から書き始めましょう！',
       loading: '読み込み中...',
+      updateAvailable: 'アップデートがあります。作業内容を保存すると、アプリが自動的に更新されます。',
     },
     recollection: {
       open: 'ふりかえり',

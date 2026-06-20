@@ -1,9 +1,27 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-export function useServiceWorkerUpdate(editorDirty: boolean): void {
+const BANNER_DELAY = 30 * 60 * 1000
+
+export interface ServiceWorkerUpdateHandle {
+  triggerUpdateCheck: () => void
+  updatePending: boolean
+  dismissUpdate: () => void
+}
+
+export function useServiceWorkerUpdate(editorDirty: boolean): ServiceWorkerUpdateHandle {
   const regRef = useRef<ServiceWorkerRegistration | null>(null)
   const dirtyRef = useRef(editorDirty)
   const reloadingRef = useRef(false)
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelledRef = useRef(false)
+  const [updatePending, setUpdatePending] = useState(false)
+
+  function scheduleBanner() {
+    if (bannerTimerRef.current) return
+    bannerTimerRef.current = setTimeout(() => {
+      if (!cancelledRef.current && regRef.current?.waiting) setUpdatePending(true)
+    }, BANNER_DELAY)
+  }
 
   function maybeApply() {
     if (reloadingRef.current || dirtyRef.current) return
@@ -34,13 +52,20 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
     if (!sw) return
 
     function watchRegistration(reg: ServiceWorkerRegistration) {
+      if (cancelledRef.current) return
       regRef.current = reg
-      if (reg.waiting) maybeApply()
+      if (reg.waiting) {
+        scheduleBanner()
+        maybeApply()
+      }
       reg.addEventListener('updatefound', () => {
         const installing = reg.installing
         if (!installing) return
         installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && sw.controller) maybeApply()
+          if (installing.state === 'installed' && sw.controller) {
+            scheduleBanner()
+            maybeApply()
+          }
         })
       })
     }
@@ -55,7 +80,17 @@ export function useServiceWorkerUpdate(editorDirty: boolean): void {
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
+    return () => {
+      cancelledRef.current = true
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  return {
+    triggerUpdateCheck: () => regRef.current?.update(),
+    updatePending,
+    dismissUpdate: () => setUpdatePending(false),
+  }
 }

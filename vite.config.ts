@@ -45,6 +45,9 @@ function hashDistFiles(dir: string, root = dir): string {
 
 export default defineConfig({
   base: '/',
+  define: {
+    __DEPLOY_VERSION__: JSON.stringify(process.env.DEPLOY_VERSION ?? 'dev'),
+  },
   server: {
     proxy: {
       '/api': 'http://localhost:8788',

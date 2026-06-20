@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useServiceWorkerUpdate } from '../../src/hooks/useServiceWorkerUpdate'
 
+const UPDATE_BANNER_DELAY = 30 * 60 * 1000 // 30 minutes
+
 class MockServiceWorker extends EventTarget {
   state = 'installing'
   postMessage = vi.fn()
@@ -222,6 +224,154 @@ describe('useServiceWorkerUpdate', () => {
 
       expect(installing.postMessage).not.toHaveBeenCalled()
       expect(window.location.reload).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('triggerUpdateCheck', () => {
+    it('calls reg.update() immediately when invoked', async () => {
+      const reg = new MockRegistration()
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      act(() => { result.current.triggerUpdateCheck() })
+
+      expect(reg.update).toHaveBeenCalledTimes(1)
+    })
+
+    it('does nothing if registration is not yet available', () => {
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: undefined,
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      expect(() => result.current.triggerUpdateCheck()).not.toThrow()
+    })
+  })
+
+  describe('updatePending banner', () => {
+    it('returns updatePending=false initially', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      expect(result.current.updatePending).toBe(false)
+    })
+
+    it('sets updatePending=true after 30 minutes when a waiting SW is present', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+
+      expect(result.current.updatePending).toBe(true)
+    })
+
+    it('does not set updatePending when no waiting SW after 30 minutes', async () => {
+      const reg = new MockRegistration()
+      // No waiting SW
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+
+      expect(result.current.updatePending).toBe(false)
+    })
+
+    it('sets updatePending=true when a new SW arrives and 30 minutes pass', async () => {
+      const reg = new MockRegistration()
+      const installing = new MockServiceWorker()
+      const container = makeMockContainer(reg, true)
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+      const { result } = renderHook(() => useServiceWorkerUpdate(true))
+      await act(async () => {})
+
+      // New SW arrives while user is editing
+      act(() => {
+        reg.installing = installing
+        reg.dispatchEvent(new Event('updatefound'))
+      })
+      act(() => {
+        installing.state = 'installed'
+        reg.waiting = installing
+        installing.dispatchEvent(new Event('statechange'))
+      })
+
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+
+      expect(result.current.updatePending).toBe(true)
+    })
+
+    it('clears the banner timer on unmount', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result, unmount } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      unmount()
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+
+      expect(result.current.updatePending).toBe(false)
+    })
+
+    it('ignores sw.ready resolution after unmount (cancelled flag)', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      let resolveReady!: (r: MockRegistration) => void
+      const readyPromise = new Promise<MockRegistration>((res) => { resolveReady = res })
+      const container = Object.assign(new EventTarget(), {
+        controller: {},
+        ready: readyPromise,
+      })
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+
+      const { result, unmount } = renderHook(() => useServiceWorkerUpdate(false))
+      unmount()
+
+      // sw.ready resolves after unmount
+      await act(async () => { resolveReady(reg) })
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+
+      expect(result.current.updatePending).toBe(false)
+    })
+
+    it('dismissUpdate resets updatePending to false', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      Object.defineProperty(navigator, 'serviceWorker', {
+        configurable: true,
+        value: makeMockContainer(reg),
+      })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false))
+      await act(async () => {})
+
+      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+      expect(result.current.updatePending).toBe(true)
+
+      act(() => { result.current.dismissUpdate() })
+      expect(result.current.updatePending).toBe(false)
     })
   })
 

@@ -8,6 +8,7 @@ import { useFont } from './hooks/useFont'
 import { useFontSize } from './hooks/useFontSize'
 import { useHolidayCountry } from './hooks/useHolidayCountry'
 import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
+import { useDeployVersionCheck } from './hooks/useDeployVersionCheck'
 import { useOnline } from './hooks/useOnline'
 import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
@@ -154,7 +155,8 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(todayYmd)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
-  useServiceWorkerUpdate(editorDirty)
+  const { triggerUpdateCheck, updatePending, dismissUpdate } = useServiceWorkerUpdate(editorDirty)
+  useDeployVersionCheck(triggerUpdateCheck)
 
   // The `session-restoring` class (set by an inline script in index.html when a
   // prior session exists) hides the prerendered landing before React mounts. Once
@@ -543,6 +545,12 @@ export default function App() {
       <AnimatePresence>
         {tokenExpired && <SessionExpiredModal onReauth={handleReauth} />}
       </AnimatePresence>
+      {updatePending && (
+        <div className="update-banner" role="status">
+          <span>{t.app.updateAvailable}</span>
+          <button className="update-banner-dismiss" onClick={dismissUpdate} aria-label="Dismiss">✕</button>
+        </div>
+      )}
       <div
         className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
         onClick={closeSidebar}
