@@ -1,23 +1,28 @@
+// Punctuation characters to skip when forming bigrams.
+// Hoisted to module level so it's compiled once, not per-character.
+const PUNCT = /[.,!?;:"'()\[\]{}\-_/\\|@#$%^&*+=~`<>。、！？；：「」『』【】（）]/
+
 export function tokenize(text: string): string[] {
   const normalized = text.normalize('NFKC').toLowerCase()
-  const tokens = new Set<string>()
+  const tokens: string[] = []
 
-  // Word tokens for Latin/ASCII text (min 2 chars)
+  // Word tokens for Latin/ASCII text (min 2 chars) — duplicates kept for TF
   for (const word of normalized.match(/[a-zÀ-ɏ0-9]{2,}/g) ?? []) {
-    tokens.add(word)
+    tokens.push(word)
   }
 
-  // Character bigrams for all text — handles CJK/Japanese natively without a tokenizer
-  for (let i = 0; i < normalized.length - 1; i++) {
-    const a = normalized[i]
-    const b = normalized[i + 1]
+  // Character bigrams for all text — handles CJK/Japanese natively without a tokenizer.
+  // Iterate by Unicode code point (not UTF-16 code unit) to handle emoji/astral chars.
+  const chars = [...normalized]
+  for (let i = 0; i < chars.length - 1; i++) {
+    const a = chars[i]
+    const b = chars[i + 1]
     if (a.trim() === '' || b.trim() === '') continue
-    if (/[.,!?;:"'()\[\]{}\-_/\\|@#$%^&*+=~`<>。、！？；：「」『』【】（）]/.test(a)) continue
-    if (/[.,!?;:"'()\[\]{}\-_/\\|@#$%^&*+=~`<>。、！？；：「」『』【】（）]/.test(b)) continue
-    tokens.add(a + b)
+    if (PUNCT.test(a) || PUNCT.test(b)) continue
+    tokens.push(a + b)
   }
 
-  return [...tokens]
+  return tokens
 }
 
 export interface TfIdfDoc {
@@ -35,8 +40,7 @@ export function buildIndex(docs: TfIdfDoc[]): TfIdfIndex {
   if (N === 0) return { vectors: new Map(), contents: new Map() }
 
   // Step 1: tokenize each doc and count term frequencies
-  // Store both the raw token count (with duplicates) for TF normalization
-  // and a Map of counts per unique token.
+  // tokenize() returns all occurrences (not deduplicated) so counts reflect real TF.
   const docTermCounts = docs.map(doc => {
     const tokens = tokenize(doc.content)
     const counts = new Map<string, number>()

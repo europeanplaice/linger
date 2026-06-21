@@ -232,11 +232,13 @@ export default function App() {
     options?: { forceNetwork?: boolean; background?: boolean },
   ) => {
     const result = await diary.getContent(date, options)
-    if (result?.entry.content) {
+    // Only rebuild the index if this entry isn't indexed yet (first load from Drive).
+    // Saves rebuild cost on every getContent call for already-indexed entries.
+    if (result?.entry.content && !tfIdf.hasEntry(date)) {
       tfIdf.updateEntry(date, result.entry.content)
     }
     return result
-  }, [diary.getContent, tfIdf.updateEntry])
+  }, [diary.getContent, tfIdf.updateEntry, tfIdf.hasEntry])
 
   const diaryGetContentRef = useRef(handleGetContent)
   useEffect(() => { diaryGetContentRef.current = handleGetContent }, [handleGetContent])

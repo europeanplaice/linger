@@ -70,5 +70,9 @@ export function useTfIdfSearch() {
     return findSimilar(idx, date, limit)
   }, [])
 
-  return { ready, indexVersion, searchLocal, getSimilar, updateEntry }
+  const hasEntry = useCallback((date: string): boolean => {
+    return indexRef.current?.vectors.has(date) ?? false
+  }, [])
+
+  return { ready, indexVersion, searchLocal, getSimilar, updateEntry, hasEntry }
 }
