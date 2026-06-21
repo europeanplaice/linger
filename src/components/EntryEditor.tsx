@@ -57,6 +57,10 @@ interface Props {
   holidayCountry?: HolidayCountry
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
+  relatedDates?: string[]
+  onSelectRelated?: (date: string) => void
+  backDate?: string
+  onGoBack?: () => void
 }
 
 function SaveIcon() {
@@ -111,7 +115,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, backDate, onGoBack }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -134,6 +138,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [previewDate, setPreviewDate] = useState<string | null>(null)
+  const [previewContent, setPreviewContent] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const previewDialogRef = useRef<HTMLDialogElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollWrapRef = useRef<HTMLDivElement>(null)
@@ -597,6 +605,37 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // and the directional slide animation apply unchanged.
   useSwipeNav(scrollWrapRef, { onSwipeLeft: onNextDay, onSwipeRight: onPrevDay })
 
+  useEffect(() => {
+    if (!previewDate) return
+    setPreviewContent(null)
+    setPreviewLoading(true)
+    let cancelled = false
+    getContent(previewDate)
+      .then(result => {
+        if (!cancelled) {
+          setPreviewContent(result?.entry.content ?? '')
+          setPreviewLoading(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewContent('')
+          setPreviewLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [previewDate, getContent])
+
+  useEffect(() => {
+    const dialog = previewDialogRef.current
+    if (!dialog) return
+    if (previewDate) {
+      if (!dialog.open) dialog.showModal()
+    } else {
+      if (dialog.open) dialog.close()
+    }
+  }, [previewDate])
+
   async function handleShareEntry() {
     setShowMoreMenu(false)
     const label = diaryDateLabel(date, true, 'long', locale)
@@ -973,6 +1012,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      {backDate && (
+        <button className="editor-back-bar" onClick={onGoBack} onPointerDown={preventFocusSteal}>
+          {t.entry.backTo(diaryDateLabel(backDate, true, 'short', locale))}
+        </button>
+      )}
       <div ref={scrollWrapRef} className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}${dateTransitionMask ? ` date-transition-mask date-transition-mask-${dateTransitionMaskSide}` : ''}`}>
       <AnimatePresence initial={false} custom={directionRef.current}>
         <motion.div
@@ -1054,6 +1098,64 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           {t.entry.charCount(charCount)}
         </div>
       )}
+      {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
+        <div className="editor-related">
+          <span className="editor-related-label">{t.entry.relatedEntries}</span>
+          <div className="editor-related-list">
+            {relatedDates.map(d => (
+              <button
+                key={d}
+                className="editor-related-item"
+                onClick={() => setPreviewDate(d)}
+                onPointerDown={preventFocusSteal}
+              >
+                {diaryDateLabel(d, true, 'short', locale)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <dialog
+        ref={previewDialogRef}
+        className="related-preview-dialog"
+        onCancel={e => { e.preventDefault(); setPreviewDate(null) }}
+        onClick={e => { if (e.target === previewDialogRef.current) setPreviewDate(null) }}
+      >
+        <div className="related-preview-header">
+          <span className="related-preview-date">
+            {previewDate && diaryDateLabel(previewDate, true, 'long', locale)}
+          </span>
+          <button
+            className="related-preview-close"
+            onClick={() => setPreviewDate(null)}
+            aria-label={t.common.close}
+          >×</button>
+        </div>
+        <div className="related-preview-body">
+          {previewLoading ? (
+            <div className="entry-skeleton" aria-label={t.entry.loadingEntry} aria-live="polite">
+              <div className="entry-skeleton-row short" />
+              <div className="entry-skeleton-row" />
+              <div className="entry-skeleton-row medium" />
+            </div>
+          ) : previewContent ? (
+            <p className="related-preview-content">{previewContent}</p>
+          ) : previewDate ? (
+            <p className="related-preview-empty">{t.entry.placeholder}</p>
+          ) : null}
+        </div>
+        <div className="related-preview-actions">
+          <button
+            className="related-preview-open"
+            onClick={() => {
+              if (previewDate) (onSelectRelated ?? onSelectDate)(previewDate)
+              setPreviewDate(null)
+            }}
+          >
+            {t.entry.openThisEntry}
+          </button>
+        </div>
+      </dialog>
     </div>
     </>
   )

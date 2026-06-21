@@ -15,6 +15,7 @@ interface RecollectionJourneyProps {
   serendipityPrefetch?: readonly string[]
   onSelect: (date: string) => void
   onClose: () => void
+  getSimilar?: (date: string, limit?: number) => string[]
 }
 
 interface Preview {
@@ -42,7 +43,7 @@ const cardItemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.22, 0.61, 0.36, 1] as [number, number, number, number] } },
 }
 
-export function RecollectionJourney({ dates, getContent, serendipityPrefetch, onSelect, onClose }: RecollectionJourneyProps) {
+export function RecollectionJourney({ dates, getContent, serendipityPrefetch, onSelect, onClose, getSimilar }: RecollectionJourneyProps) {
   const { t, locale } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
   const today = todayYmd()
@@ -103,6 +104,17 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
   const nextDate2 = randomQueue[randomIdx + 2] ?? null
   const nextDate3 = randomQueue[randomIdx + 3] ?? null
 
+  const shownDates = useMemo(() => {
+    const s = new Set([today, ...onThisDay, ...periodic.map(p => p.date)])
+    if (randomDate) s.add(randomDate)
+    return s
+  }, [today, onThisDay, periodic, randomDate])
+
+  const similarDates = useMemo(() => {
+    if (!randomDate || !getSimilar) return []
+    return getSimilar(randomDate, 3).filter(d => !shownDates.has(d))
+  }, [randomDate, getSimilar, shownDates])
+
   // Remember which serendipity day was surfaced so reopening avoids an immediate repeat.
   useEffect(() => {
     if (randomDate) recordSeen(randomDate)
@@ -119,6 +131,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
       ...periodic.map(p => p.date),
       ...(randomDate ? [randomDate] : []),
       ...[nextDate1, nextDate2, nextDate3].filter(Boolean) as string[],
+      ...similarDates,
     ]
     const toLoad = targets.filter(d => !previewsRef.current.has(d) && !loadingRef.current.has(d))
     if (toLoad.length === 0) return
@@ -139,7 +152,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     })
 
     return () => { cancelled = true }
-  }, [onThisDay, periodic, randomDate, nextDate1, nextDate2, nextDate3, getContent])
+  }, [onThisDay, periodic, randomDate, nextDate1, nextDate2, nextDate3, similarDates, getContent])
 
   useEffect(() => {
     const dialog = dialogRef.current!
@@ -251,6 +264,30 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                     {t.recollection.another}
                   </button>
                 )}
+              </section>
+            )}
+
+            {similarDates.length > 0 && (
+              <section className="recollection-section">
+                <h3 className="recollection-section-heading">
+                  <span className="recollection-section-glyph" aria-hidden="true">≈</span>
+                  {t.recollection.similarDays}
+                </h3>
+                <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
+                  {similarDates.map(date => {
+                    const p = parseYmd(date)
+                    const r = parseYmd(today)
+                    const eyebrow = p && r
+                      ? (() => {
+                          const days = Math.round((new Date(r.y, r.m - 1, r.d).getTime() - new Date(p.y, p.m - 1, p.d).getTime()) / 86400000)
+                          if (days >= 365) return t.recollection.yearsAgo(Math.round(days / 365))
+                          if (days >= 30) return t.recollection.monthsAgo(Math.round(days / 30))
+                          return days > 0 ? t.recollection.daysAgo(days) : ''
+                        })()
+                      : ''
+                    return renderCard(date, eyebrow)
+                  })}
+                </motion.div>
               </section>
             )}
           </div>

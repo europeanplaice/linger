@@ -25,6 +25,7 @@ import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import { useMilestones } from './hooks/useMilestones'
+import { useTfIdfSearch } from './hooks/useTfIdfSearch'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
 
@@ -149,6 +150,7 @@ export default function App() {
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
   const { milestones, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired)
+  const tfIdf = useTfIdfSearch()
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -224,8 +226,22 @@ export default function App() {
 
   const diaryDatesRef = useRef(diary.dates)
   useEffect(() => { diaryDatesRef.current = diary.dates }, [diary.dates])
-  const diaryGetContentRef = useRef(diary.getContent)
-  useEffect(() => { diaryGetContentRef.current = diary.getContent }, [diary.getContent])
+
+  const handleGetContent = useCallback(async (
+    date: string,
+    options?: { forceNetwork?: boolean; background?: boolean },
+  ) => {
+    const result = await diary.getContent(date, options)
+    // Only rebuild the index if this entry isn't indexed yet (first load from Drive).
+    // Saves rebuild cost on every getContent call for already-indexed entries.
+    if (result?.entry.content && !tfIdf.hasEntry(date)) {
+      tfIdf.updateEntry(date, result.entry.content)
+    }
+    return result
+  }, [diary.getContent, tfIdf.updateEntry, tfIdf.hasEntry])
+
+  const diaryGetContentRef = useRef(handleGetContent)
+  useEffect(() => { diaryGetContentRef.current = handleGetContent }, [handleGetContent])
 
   // One-time migration of legacy `.md` diary files to `.txt`. Runs once per
   // device when any `.md` entry is detected; renamed files are picked up by the
@@ -320,12 +336,15 @@ export default function App() {
     }
   }, [sidebarOpen])
 
-  const doNavigateToDate = useCallback((d: string) => {
+  const [previousDate, setPreviousDate] = useState<string | null>(null)
+
+  const doNavigateToDate = useCallback((d: string, keepBack = false) => {
     history.pushState(null, '', '#' + d)
     setSelectedDate(d)
     selectedDateRef.current = d
     setSidebarOpen(false)
     setPendingDate(null)
+    if (!keepBack) setPreviousDate(null)
   }, [])
 
   const selectDate = useCallback((d: string) => {
@@ -335,6 +354,15 @@ export default function App() {
     }
     doNavigateToDate(d)
   }, [doNavigateToDate])
+
+  const handleSelectRelated = useCallback((targetDate: string) => {
+    setPreviousDate(selectedDateRef.current)
+    doNavigateToDate(targetDate, true)
+  }, [doNavigateToDate])
+
+  const handleGoBack = useCallback(() => {
+    if (previousDate) doNavigateToDate(previousDate)
+  }, [previousDate, doNavigateToDate])
 
 
   const handlePendingNavigate = useCallback(() => {
@@ -454,6 +482,32 @@ export default function App() {
 
   const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
 
+  const handleSave = useCallback(async (
+    date: string,
+    content: string,
+    baseVersion: string | null,
+    force?: boolean,
+    baseContent?: string | null,
+  ) => {
+    const result = await diary.save(date, content, baseVersion, force, baseContent)
+    tfIdf.updateEntry(date, content)
+    return result
+  }, [diary.save, tfIdf.updateEntry])
+
+  const handleSearch = useCallback(async (query: string) => {
+    try {
+      return await diary.search(query)
+    } catch {
+      const localResults = tfIdf.searchLocal(query, 30)
+      return { results: localResults, unindexedCount: 0, totalCount: localResults.length }
+    }
+  }, [diary.search, tfIdf.searchLocal])
+
+  const relatedDates = useMemo(
+    () => tfIdf.getSimilar(selectedDate, 3),
+    [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
+  )
+
   const handleReauth = useCallback(() => {
     retryAfterExpired()
     setRetrySaveAfterReauth(true)
@@ -566,7 +620,7 @@ export default function App() {
             <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
           </div>
         </div>
-        <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
+        <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
         <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
@@ -626,13 +680,14 @@ export default function App() {
         {recollectionOpen && (
           <RecollectionJourney
             dates={diary.dates}
-            getContent={diary.getContent}
+            getContent={handleGetContent}
             serendipityPrefetch={serendipityPrefetch}
             onSelect={(d) => {
               setRecollectionOpen(false)
               selectDate(d)
             }}
             onClose={() => setRecollectionOpen(false)}
+            getSimilar={tfIdf.getSimilar}
           />
         )}
       </AnimatePresence>
@@ -640,7 +695,7 @@ export default function App() {
         <EntryEditor
           date={selectedDate}
           getContent={diary.getContent}
-          onSave={diary.save}
+          onSave={handleSave}
           onDelete={diary.remove}
           onMenuClick={() => {
             if (isMobileLayout()) {
@@ -667,6 +722,10 @@ export default function App() {
           holidayCountry={holidayCountry}
           milestones={milestones}
           onMilestoneAdd={addMilestone}
+          relatedDates={relatedDates}
+          onSelectRelated={handleSelectRelated}
+          backDate={previousDate ?? undefined}
+          onGoBack={handleGoBack}
         />
       </main>
     </div>

@@ -155,7 +155,7 @@ export function MilestoneFormModal({ mode, milestone, initialDate, onSave, onClo
   const dateId = useId()
   const [label, setLabel] = useState(milestone?.label ?? '')
   const [date, setDate] = useState(milestone?.date ?? initialDate ?? '')
-  const [emoji, setEmoji] = useState(milestone?.emoji ?? '')
+  const [emoji, setEmoji] = useState(milestone?.emoji ?? '🎀')
   const [recurring, setRecurring] = useState(milestone?.recurring ?? true)
   const [errors, setErrors] = useState<string[]>([])
 
