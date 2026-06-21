@@ -226,8 +226,20 @@ export default function App() {
 
   const diaryDatesRef = useRef(diary.dates)
   useEffect(() => { diaryDatesRef.current = diary.dates }, [diary.dates])
-  const diaryGetContentRef = useRef(diary.getContent)
-  useEffect(() => { diaryGetContentRef.current = diary.getContent }, [diary.getContent])
+
+  const handleGetContent = useCallback(async (
+    date: string,
+    options?: { forceNetwork?: boolean; background?: boolean },
+  ) => {
+    const result = await diary.getContent(date, options)
+    if (result?.entry.content) {
+      tfIdf.updateEntry(date, result.entry.content)
+    }
+    return result
+  }, [diary.getContent, tfIdf.updateEntry])
+
+  const diaryGetContentRef = useRef(handleGetContent)
+  useEffect(() => { diaryGetContentRef.current = handleGetContent }, [handleGetContent])
 
   // One-time migration of legacy `.md` diary files to `.txt`. Runs once per
   // device when any `.md` entry is detected; renamed files are picked up by the
@@ -654,7 +666,7 @@ export default function App() {
         {recollectionOpen && (
           <RecollectionJourney
             dates={diary.dates}
-            getContent={diary.getContent}
+            getContent={handleGetContent}
             serendipityPrefetch={serendipityPrefetch}
             onSelect={(d) => {
               setRecollectionOpen(false)
