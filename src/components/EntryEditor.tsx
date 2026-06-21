@@ -135,6 +135,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [previewDate, setPreviewDate] = useState<string | null>(null)
+  const [previewContent, setPreviewContent] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const previewDialogRef = useRef<HTMLDialogElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollWrapRef = useRef<HTMLDivElement>(null)
@@ -597,6 +601,37 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // same onPrevDay/onNextDay path as the buttons, so the unsaved-changes guard
   // and the directional slide animation apply unchanged.
   useSwipeNav(scrollWrapRef, { onSwipeLeft: onNextDay, onSwipeRight: onPrevDay })
+
+  useEffect(() => {
+    if (!previewDate) return
+    setPreviewContent(null)
+    setPreviewLoading(true)
+    let cancelled = false
+    getContent(previewDate)
+      .then(result => {
+        if (!cancelled) {
+          setPreviewContent(result?.entry.content ?? '')
+          setPreviewLoading(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewContent('')
+          setPreviewLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [previewDate, getContent])
+
+  useEffect(() => {
+    const dialog = previewDialogRef.current
+    if (!dialog) return
+    if (previewDate) {
+      if (!dialog.open) dialog.showModal()
+    } else {
+      if (dialog.open) dialog.close()
+    }
+  }, [previewDate])
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -1063,7 +1098,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               <button
                 key={d}
                 className="editor-related-item"
-                onClick={() => onSelectDate(d)}
+                onClick={() => setPreviewDate(d)}
                 onPointerDown={preventFocusSteal}
               >
                 {diaryDateLabel(d, true, 'short', locale)}
@@ -1072,6 +1107,47 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      <dialog
+        ref={previewDialogRef}
+        className="related-preview-dialog"
+        onCancel={e => { e.preventDefault(); setPreviewDate(null) }}
+        onClick={e => { if (e.target === previewDialogRef.current) setPreviewDate(null) }}
+      >
+        <div className="related-preview-header">
+          <span className="related-preview-date">
+            {previewDate && diaryDateLabel(previewDate, true, 'long', locale)}
+          </span>
+          <button
+            className="related-preview-close"
+            onClick={() => setPreviewDate(null)}
+            aria-label={t.common.close}
+          >×</button>
+        </div>
+        <div className="related-preview-body">
+          {previewLoading ? (
+            <div className="entry-skeleton" aria-label={t.entry.loadingEntry} aria-live="polite">
+              <div className="entry-skeleton-row short" />
+              <div className="entry-skeleton-row" />
+              <div className="entry-skeleton-row medium" />
+            </div>
+          ) : previewContent ? (
+            <p className="related-preview-content">{previewContent}</p>
+          ) : (
+            <p className="related-preview-empty">{t.entry.placeholder}</p>
+          )}
+        </div>
+        <div className="related-preview-actions">
+          <button
+            className="related-preview-open"
+            onClick={() => {
+              if (previewDate) onSelectDate(previewDate)
+              setPreviewDate(null)
+            }}
+          >
+            {t.entry.openThisEntry}
+          </button>
+        </div>
+      </dialog>
     </div>
     </>
   )
