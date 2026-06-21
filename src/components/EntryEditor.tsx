@@ -57,6 +57,7 @@ interface Props {
   holidayCountry?: HolidayCountry
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
+  relatedDates?: string[]
 }
 
 function SaveIcon() {
@@ -111,7 +112,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -1052,6 +1053,23 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       {!loading && !loadFailed && !isNewEmptyEntry && (
         <div className="editor-charcount" aria-hidden="true">
           {t.entry.charCount(charCount)}
+        </div>
+      )}
+      {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
+        <div className="editor-related">
+          <span className="editor-related-label">{t.entry.relatedEntries}</span>
+          <div className="editor-related-list">
+            {relatedDates.map(d => (
+              <button
+                key={d}
+                className="editor-related-item"
+                onClick={() => onSelectDate(d)}
+                onPointerDown={preventFocusSteal}
+              >
+                {diaryDateLabel(d, true, 'short', locale)}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

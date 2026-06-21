@@ -3548,6 +3548,39 @@ dialog.session-expired-dialog::backdrop {
   position: relative;
   z-index: 2;
 }
+.editor-related {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0 0.1rem;
+  flex-wrap: wrap;
+}
+.editor-related-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
+}
+.editor-related-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.editor-related-item {
+  font-size: 0.72rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.editor-related-item:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: var(--accent);
+}
 
 @property --entry-date-mask-start {
   syntax: "<percentage>";

@@ -25,6 +25,7 @@ import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import { useMilestones } from './hooks/useMilestones'
+import { useTfIdfSearch } from './hooks/useTfIdfSearch'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
 
@@ -149,6 +150,7 @@ export default function App() {
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
   const { milestones, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired)
+  const tfIdf = useTfIdfSearch()
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -454,6 +456,32 @@ export default function App() {
 
   const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
 
+  const handleSave = useCallback(async (
+    date: string,
+    content: string,
+    baseVersion: string | null,
+    force?: boolean,
+    baseContent?: string | null,
+  ) => {
+    const result = await diary.save(date, content, baseVersion, force, baseContent)
+    tfIdf.updateEntry(date, content)
+    return result
+  }, [diary.save, tfIdf.updateEntry])
+
+  const handleSearch = useCallback(async (query: string) => {
+    try {
+      return await diary.search(query)
+    } catch {
+      const localResults = tfIdf.searchLocal(query, 30)
+      return { results: localResults, unindexedCount: 0, totalCount: localResults.length }
+    }
+  }, [diary.search, tfIdf.searchLocal])
+
+  const relatedDates = useMemo(
+    () => tfIdf.getSimilar(selectedDate, 3),
+    [tfIdf.getSimilar, selectedDate, tfIdf.ready],
+  )
+
   const handleReauth = useCallback(() => {
     retryAfterExpired()
     setRetrySaveAfterReauth(true)
@@ -566,7 +594,7 @@ export default function App() {
             <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
           </div>
         </div>
-        <SearchBar ref={searchBarRef} onSearch={diary.search} onSelect={selectDate} entriesLoading={diary.loading} />
+        <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
         <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
@@ -633,6 +661,7 @@ export default function App() {
               selectDate(d)
             }}
             onClose={() => setRecollectionOpen(false)}
+            getSimilar={tfIdf.getSimilar}
           />
         )}
       </AnimatePresence>
@@ -640,7 +669,7 @@ export default function App() {
         <EntryEditor
           date={selectedDate}
           getContent={diary.getContent}
-          onSave={diary.save}
+          onSave={handleSave}
           onDelete={diary.remove}
           onMenuClick={() => {
             if (isMobileLayout()) {
@@ -667,6 +696,7 @@ export default function App() {
           holidayCountry={holidayCountry}
           milestones={milestones}
           onMilestoneAdd={addMilestone}
+          relatedDates={relatedDates}
         />
       </main>
     </div>

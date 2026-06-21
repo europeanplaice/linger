@@ -54,6 +54,7 @@ const dictionaries = {
       another: 'Meet another day',
       empty: 'Nothing to look back on yet. Keep writing, and your past self will be here.',
       noText: 'No text on this day.',
+      similarDays: 'Similar days',
     },
     calendar: {
       days: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
@@ -156,6 +157,7 @@ const dictionaries = {
       milestoneBefore: (label: string, n: number, nthYear?: number) => nthYear ? `${label} (Year ${nthYear}) in ${n}d` : `${label} in ${n}d`,
       milestoneAfter: (label: string, n: number, nthYear?: number) => nthYear ? `${label} (Year ${nthYear}) ${n}d ago` : `${label} ${n}d ago`,
       milestoneOpen: (label: string, date: string) => `Open ${label} entry for ${date}`,
+      relatedEntries: 'Related entries',
       addAsMilestone: 'Add as Milestone',
       milestoneAtLimit: 'Milestone limit reached',
       milestoneDate: (date: string) => `Date: ${date}`,
@@ -327,6 +329,7 @@ const dictionaries = {
       another: '別の日を見る',
       empty: 'まだ振り返れる日記がありません。書き続ければ、いつかの自分がここで待っています。',
       noText: 'この日には本文がありません。',
+      similarDays: '似た気持ちの日',
     },
     calendar: {
       days: ['日', '月', '火', '水', '木', '金', '土'],
@@ -411,6 +414,7 @@ const dictionaries = {
       placeholder: 'ここに記入してください...',
       newPlaceholder: 'この日のことを、少しだけ書いてみませんか？',
       charCount: (n: number) => `${n}文字`,
+      relatedEntries: '関連する日記',
       discardedUndo: '変更を破棄しました。',
       milestoneOn: (label: string, nthYear?: number) => nthYear ? `${label}（${nthYear}年目）` : label,
       milestoneBefore: (label: string, n: number, nthYear?: number) => nthYear ? `${label}（${nthYear}年目）まで${n}日` : `${label}まで${n}日`,
