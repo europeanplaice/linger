@@ -1062,6 +1062,64 @@ test.describe('SettingsModal — theme picker', () => {
   })
 })
 
+test.describe('SettingsModal — mobile layout (≤480px)', () => {
+  test('picker items do not overflow the dialog on 360px screen', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 812 })
+    await loadHarness(page)
+    await render(page)
+
+    for (const selector of [
+      '.settings-item:has(.settings-theme-picker)',
+      '.settings-item:has(.settings-font-picker)',
+      '.settings-item:has(.settings-color-picker)',
+    ]) {
+      const item = page.locator(selector)
+      expect(await item.evaluate(el => el.scrollWidth)).toBe(await item.evaluate(el => el.clientWidth))
+    }
+  })
+
+  test('theme picker stacks below its label on 360px screen', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 812 })
+    await loadHarness(page)
+    await render(page)
+
+    const label = page.locator('.settings-item:has(.settings-theme-picker) .settings-item-label')
+    const picker = page.locator('.settings-theme-picker')
+    const labelBox = await label.boundingBox()
+    const pickerBox = await picker.boundingBox()
+
+    expect(labelBox).not.toBeNull()
+    expect(pickerBox).not.toBeNull()
+    if (labelBox && pickerBox) {
+      expect(pickerBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 2)
+    }
+  })
+
+  test('account email wraps instead of truncating on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 812 })
+    await loadHarness(page)
+    await page.evaluate(() => window.settingsHarness.render({ email: 'a.very.long.email.address@example.com' }))
+    await page.waitForSelector('.settings-dialog')
+
+    const email = page.locator('.settings-account-email')
+    const whiteSpace = await email.evaluate(el => getComputedStyle(el).whiteSpace)
+    expect(whiteSpace).toBe('normal')
+    expect(await email.evaluate(el => el.scrollWidth)).toBeLessThanOrEqual(await email.evaluate(el => el.clientWidth) + 1)
+  })
+
+  test('export and share items do not overflow on 360px screen', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 812 })
+    await loadHarness(page)
+    await render(page, { modalOpen: true })
+
+    const exportItem = page.locator('.settings-item:has(.settings-export)')
+    expect(await exportItem.evaluate(el => el.scrollWidth)).toBe(await exportItem.evaluate(el => el.clientWidth))
+
+    const shareItem = page.locator('.settings-item:has(.settings-action-btn)')
+    expect(await shareItem.evaluate(el => el.scrollWidth)).toBe(await shareItem.evaluate(el => el.clientWidth))
+  })
+})
+
 test.describe('SettingsModal — font picker', () => {
   test('shows Sans and Serif buttons', async ({ page }) => {
     await loadHarness(page)
