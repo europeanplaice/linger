@@ -9,6 +9,7 @@ export interface LocalSearchResult {
 
 export function useTfIdfSearch() {
   const [ready, setReady] = useState(false)
+  const [indexVersion, setIndexVersion] = useState(0)
   const indexRef = useRef<TfIdfIndex | null>(null)
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export function useTfIdfSearch() {
           .map(e => ({ date: e.date, content: e.content!.content }))
         indexRef.current = buildIndex(docs)
         setReady(true)
+        setIndexVersion(v => v + 1)
       })
       .catch(() => {
         // IndexedDB unavailable — feature silently disabled
@@ -47,6 +49,7 @@ export function useTfIdfSearch() {
           if (!docs.find(d => d.date === date)) docs.push({ date, content })
         }
         indexRef.current = buildIndex(docs)
+        setIndexVersion(v => v + 1)
       })
       .catch(() => {})
   }, [])
@@ -67,5 +70,5 @@ export function useTfIdfSearch() {
     return findSimilar(idx, date, limit)
   }, [])
 
-  return { ready, searchLocal, getSimilar, updateEntry }
+  return { ready, indexVersion, searchLocal, getSimilar, updateEntry }
 }

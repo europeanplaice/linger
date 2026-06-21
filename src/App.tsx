@@ -503,7 +503,7 @@ export default function App() {
 
   const relatedDates = useMemo(
     () => tfIdf.getSimilar(selectedDate, 3),
-    [tfIdf.getSimilar, selectedDate, tfIdf.ready],
+    [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
   )
 
   const handleReauth = useCallback(() => {
