@@ -2336,8 +2336,14 @@ dialog.settings-dialog::backdrop {
 }
 
 @media (max-width: 480px) {
-  .settings-item {
+  .settings-item,
+  .settings-account-row {
     padding-inline: 1rem;
+  }
+
+  .settings-account-email {
+    white-space: normal;
+    word-break: break-all;
   }
 
   /* Stack label above picker on narrow screens to prevent label wrapping */
