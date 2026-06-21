@@ -58,6 +58,9 @@ interface Props {
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   relatedDates?: string[]
+  onSelectRelated?: (date: string) => void
+  backDate?: string
+  onGoBack?: () => void
 }
 
 function SaveIcon() {
@@ -112,7 +115,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, backDate, onGoBack }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -1009,6 +1012,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      {backDate && (
+        <button className="editor-back-bar" onClick={onGoBack} onPointerDown={preventFocusSteal}>
+          {t.entry.backTo(diaryDateLabel(backDate, true, 'short', locale))}
+        </button>
+      )}
       <div ref={scrollWrapRef} className={`editor-scroll-wrap${scrollAtTop ? ' scroll-at-top' : ''}${scrollAtBottom ? ' scroll-at-bottom' : ''}${dateTransitionMask ? ` date-transition-mask date-transition-mask-${dateTransitionMaskSide}` : ''}`}>
       <AnimatePresence initial={false} custom={directionRef.current}>
         <motion.div
@@ -1140,7 +1148,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           <button
             className="related-preview-open"
             onClick={() => {
-              if (previewDate) onSelectDate(previewDate)
+              if (previewDate) (onSelectRelated ?? onSelectDate)(previewDate)
               setPreviewDate(null)
             }}
           >

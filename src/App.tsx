@@ -334,12 +334,15 @@ export default function App() {
     }
   }, [sidebarOpen])
 
-  const doNavigateToDate = useCallback((d: string) => {
+  const [previousDate, setPreviousDate] = useState<string | null>(null)
+
+  const doNavigateToDate = useCallback((d: string, keepBack = false) => {
     history.pushState(null, '', '#' + d)
     setSelectedDate(d)
     selectedDateRef.current = d
     setSidebarOpen(false)
     setPendingDate(null)
+    if (!keepBack) setPreviousDate(null)
   }, [])
 
   const selectDate = useCallback((d: string) => {
@@ -349,6 +352,15 @@ export default function App() {
     }
     doNavigateToDate(d)
   }, [doNavigateToDate])
+
+  const handleSelectRelated = useCallback((targetDate: string) => {
+    setPreviousDate(selectedDateRef.current)
+    doNavigateToDate(targetDate, true)
+  }, [doNavigateToDate])
+
+  const handleGoBack = useCallback(() => {
+    if (previousDate) doNavigateToDate(previousDate)
+  }, [previousDate, doNavigateToDate])
 
 
   const handlePendingNavigate = useCallback(() => {
@@ -709,6 +721,9 @@ export default function App() {
           milestones={milestones}
           onMilestoneAdd={addMilestone}
           relatedDates={relatedDates}
+          onSelectRelated={handleSelectRelated}
+          backDate={previousDate ?? undefined}
+          onGoBack={handleGoBack}
         />
       </main>
     </div>

@@ -3632,6 +3632,23 @@ dialog.session-expired-dialog::backdrop {
   position: relative;
   z-index: 2;
 }
+.editor-back-bar {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.3rem 0 0.3rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: opacity 0.12s;
+}
+.editor-back-bar:hover { opacity: 0.75; }
+
 .editor-related {
   display: flex;
   align-items: center;
