@@ -349,6 +349,36 @@ test.describe('SettingsModal — EmojiPicker', () => {
     await expect(popover.locator('.emoji-picker-empty')).toHaveText('No results')
   })
 
+  test('new milestone form shows 🎀 as the default emoji', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+
+    const trigger = page.getByRole('dialog', { name: 'Add Milestone' }).getByRole('button', { name: 'Emoji' })
+    await expect(trigger.locator('.emoji-picker-trigger-icon')).toHaveText('🎀')
+  })
+
+  test('saving without changing the emoji shows 🎀 in the milestone list', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.getByRole('button', { name: 'Add' }).click()
+    const milestoneDialog = page.getByRole('dialog', { name: 'Add Milestone' })
+    await milestoneDialog.getByLabel('Name (e.g. Birthday)').fill('Work anniversary')
+
+    await milestoneDialog.getByRole('button', { name: 'Date' }).click()
+    const datePicker = page.locator('.settings-milestone-date-popover')
+    await datePicker.locator('select').nth(1).selectOption('2020')
+    await datePicker.locator('select').nth(0).selectOption('2')
+    await datePicker.getByRole('button', { name: '2020-03-01' }).click()
+
+    await milestoneDialog.getByRole('button', { name: 'Add' }).click()
+    await expect(milestoneDialog).toBeHidden()
+
+    await expandMilestoneList(page)
+    const row = page.locator('.settings-milestone-row', { hasText: 'Work anniversary' })
+    await expect(row.locator('.settings-milestone-emoji')).toHaveText('🎀')
+  })
+
   test('edit form initializes the picker with the milestone\'s existing emoji', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
