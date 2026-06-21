@@ -1185,7 +1185,7 @@ html.session-restoring .landing {
 dialog.settings-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
-  width: min(520px, 90vw);
+  width: min(520px, calc(100vw - 24px));
   max-height: min(90dvh, 90vh);
   box-shadow: 0 8px 32px var(--shadow-heavy);
   overflow: hidden;
@@ -2336,6 +2336,40 @@ dialog.settings-dialog::backdrop {
 }
 
 @media (max-width: 480px) {
+  .settings-item {
+    padding-inline: 1rem;
+  }
+
+  /* Stack label above picker on narrow screens to prevent label wrapping */
+  .settings-item:has(.settings-theme-picker),
+  .settings-item:has(.settings-font-picker),
+  .settings-item:has(.settings-color-picker),
+  .settings-item:has(.settings-export),
+  .settings-item:has(.settings-action-btn) {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    min-height: unset;
+    padding-block: 0.6rem;
+  }
+
+  .settings-theme-picker,
+  .settings-font-picker,
+  .settings-color-picker {
+    width: 100%;
+  }
+
+  .settings-theme-option,
+  .settings-font-option,
+  .settings-color-option {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-item:has(.settings-export) .settings-export,
+  .settings-item:has(.settings-action-btn) .settings-action-btn {
+    justify-self: end;
+  }
+
   .settings-item-milestones {
     padding-inline: 1rem;
   }
