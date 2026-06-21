@@ -1,6 +1,6 @@
 // Punctuation characters to skip when forming bigrams.
 // Hoisted to module level so it's compiled once, not per-character.
-const PUNCT = /[.,!?;:"'()\[\]{}\-_/\\|@#$%^&*+=~`<>。、！？；：「」『』【】（）]/
+const PUNCT = /[.,!?;:"'()[\]{}\-_/\\|@#$%^&*+=~`<>。、！？；：「」『』【】（）]/
 
 export function tokenize(text: string): string[] {
   const normalized = text.normalize('NFKC').toLowerCase()

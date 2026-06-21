@@ -1140,9 +1140,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             </div>
           ) : previewContent ? (
             <p className="related-preview-content">{previewContent}</p>
-          ) : (
+          ) : previewDate ? (
             <p className="related-preview-empty">{t.entry.placeholder}</p>
-          )}
+          ) : null}
         </div>
         <div className="related-preview-actions">
           <button
