@@ -1123,7 +1123,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       >
         <div className="related-preview-header">
           <span className="related-preview-date">
-            {previewDate && diaryDateLabel(previewDate, true, 'long', locale)}
+            {previewDate && diaryDateLabel(previewDate, true, 'long', locale, false, true)}
           </span>
           <button
             className="related-preview-close"

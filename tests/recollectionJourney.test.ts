@@ -33,7 +33,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] },
+  opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[]; getSimilar?: (date: string, limit?: number) => string[] },
 ) {
   await page.evaluate(o => window.recollectionHarness.render(o), opts)
   await page.waitForSelector('.recollection-dialog')
@@ -234,6 +234,50 @@ test.describe('RecollectionJourney', () => {
     await expect.poll(() => readSeen().then(s => s.length)).toBeGreaterThanOrEqual(2)
     const after = await readSeen()
     expect(after[0].date).not.toBe(first[0].date)
+  })
+
+  test('"Similar days" heading names the serendipity date and updates when advancing', async ({ page }) => {
+    await loadHarness(page)
+
+    // Inject getSimilar into the browser before calling render —
+    // page.evaluate cannot serialize functions as arguments.
+    await page.evaluate(([r1, r2, r3, r4]: string[]) => {
+      ;(window as Window & { __testGetSimilar__?: (date: string) => string[] }).__testGetSimilar__ =
+        (date: string) => date === r1 ? [r3] : date === r2 ? [r4] : []
+    }, [rand1, rand2, rand3, rand4])
+
+    await page.evaluate(
+      ([dates, contents, prefetch]: [string[], Record<string, string>, string[]]) => {
+        const w = window as Window & { __testGetSimilar__?: (date: string) => string[] }
+        window.recollectionHarness.render({ dates, contents, serendipityPrefetch: prefetch, getSimilar: w.__testGetSimilar__ })
+      },
+      [
+        [rand1, rand2, rand3, rand4],
+        { [rand1]: 'Entry alpha.', [rand2]: 'Entry beta.', [rand3]: 'Entry gamma.', [rand4]: 'Entry delta.' },
+        [rand1, rand2],
+      ] as [string[], Record<string, string>, string[]],
+    )
+    await page.waitForSelector('.recollection-dialog')
+
+    // Compute expected labels using local-date parsing (same as the component's dateFromYmd).
+    // omitCurrentYear=true: rand1/rand2 are 500/800 days old — always a different year from now.
+    function localDateLabel(ymdStr: string): string {
+      const [y, m, d] = ymdStr.split('-').map(Number)
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    }
+
+    // The heading is now dynamic ("Days like <date>"), so locate by the glyph ≈
+    const similarSection = page.locator('.recollection-section', { hasText: '≈' })
+    await expect(similarSection).toBeVisible()
+
+    // Heading should reference the current serendipity date (rand1)
+    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Similar to ${localDateLabel(rand1)}`)
+
+    // Advancing serendipity should update the heading to reference rand2
+    const serendipitySection = page.locator('.recollection-section', { hasText: 'A day, by chance' })
+    await serendipitySection.locator('.recollection-another').click()
+
+    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Similar to ${localDateLabel(rand2)}`)
   })
 
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {

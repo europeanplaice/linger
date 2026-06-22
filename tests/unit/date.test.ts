@@ -177,6 +177,35 @@ describe('date utils', () => {
       expect(diaryDateLabel('invalid')).toBe('invalid')
     })
 
+    describe('includeWeekday', () => {
+      it('appends the weekday abbreviation in Japanese when includeWeekday=true', () => {
+        // 2026-05-15 is Friday (金)
+        const result = diaryDateLabel('2026-05-15', true, 'long', 'ja-JP', false, true)
+        expect(result).toContain('金')
+      })
+
+      it('appends the weekday abbreviation in English when includeWeekday=true', () => {
+        // 2026-05-15 is Friday
+        const result = diaryDateLabel('2026-05-15', true, 'long', 'en-US', false, true)
+        expect(result).toMatch(/Fri/)
+      })
+
+      it('does not include weekday when includeWeekday=false (default)', () => {
+        const result = diaryDateLabel('2026-05-15', true, 'long', 'ja-JP', false, false)
+        // default behavior unchanged
+        expect(result).not.toMatch(/[月火水木金土日]曜/)
+      })
+
+      it('works together with omitCurrentYear', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-05-15T12:00:00'))
+        const result = diaryDateLabel('2026-05-15', true, 'long', 'ja-JP', true, true)
+        expect(result).toContain('金')
+        expect(result).not.toContain('2026')
+        vi.useRealTimers()
+      })
+    })
+
     describe('year boundary with omitCurrentYear=true', () => {
       afterEach(() => {
         vi.useRealTimers()
