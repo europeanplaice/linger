@@ -78,7 +78,7 @@ export function diaryDateParts(date: string, locale = DEFAULT_DATE_LOCALE, omitC
   return { year, monthDay, yearFirst: yi < mi }
 }
 
-export function diaryDateLabel(date: string, includeYear = true, month: 'long' | 'short' = 'long', locale = DEFAULT_DATE_LOCALE, omitCurrentYear = false): string {
+export function diaryDateLabel(date: string, includeYear = true, month: 'long' | 'short' = 'long', locale = DEFAULT_DATE_LOCALE, omitCurrentYear = false, includeWeekday = false): string {
   const d = dateFromYmd(date)
   if (!d) return date
 
@@ -87,6 +87,7 @@ export function diaryDateLabel(date: string, includeYear = true, month: 'long' |
     month,
     day: 'numeric',
     ...(showYear ? { year: 'numeric' as const } : {}),
+    ...(includeWeekday ? { weekday: 'short' as const } : {}),
   })
 }
 
