@@ -88,6 +88,8 @@ interface Window {
       diaryListLoaded?: boolean
       milestones?: import('../src/types').Milestone[]
       enableMilestoneAdd?: boolean
+      relatedDates?: string[]
+      relatedVersion?: number
     }) => void
     saveCalls: () => { date: string; content: string; baseVersion: string | null; force?: boolean }[]
     saveCallsWithBaseContent: () => {
@@ -124,6 +126,7 @@ interface Window {
     unblockSave: () => void
     setOnline: (online: boolean) => void
     milestoneAddCalls: () => { label: string; date: string; emoji?: string; recurring?: boolean }[]
+    setRelatedVersion: (version: number) => void
   }
   historyHarness: {
     list: (resp: { status: number; body: unknown; delayMs?: number }) => void

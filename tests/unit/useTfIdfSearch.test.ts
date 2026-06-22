@@ -105,6 +105,22 @@ describe('useTfIdfSearch', () => {
     expect(hits[0].date).toBe('2024-01-02')
   })
 
+  it('indexVersion increments when updateEntry is called', async () => {
+    mockGetAllCached.mockResolvedValue([
+      makeEntry('2024-01-01', 'hello world'),
+    ])
+    const { result } = renderHook(() => useTfIdfSearch())
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    const versionAfterInit = result.current.indexVersion
+
+    await act(async () => {
+      result.current.updateEntry('2024-01-01', 'updated content')
+      await new Promise(r => setTimeout(r, 10))
+    })
+
+    expect(result.current.indexVersion).toBeGreaterThan(versionAfterInit)
+  })
+
   it('handles IndexedDB error gracefully — ready stays false, methods return empty', async () => {
     mockGetAllCached.mockRejectedValueOnce(new Error('IDB unavailable'))
     const { result } = renderHook(() => useTfIdfSearch())
