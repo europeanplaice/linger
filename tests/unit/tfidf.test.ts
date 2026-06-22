@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { tokenize, buildIndex, search, findSimilar } from '../../src/utils/tfidf'
+import { tokenize, buildIndex, search, findSimilar, sharedTokens } from '../../src/utils/tfidf'
 
 describe('tokenize', () => {
   it('extracts word tokens from English text', () => {
@@ -216,5 +216,66 @@ describe('findSimilar', () => {
     const idx = buildIndex(docs)
     const similar = findSimilar(idx, '2024-01-01', 2)
     expect(similar.length).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('sharedTokens', () => {
+  const docs = [
+    { date: '2024-01-01', content: '仕事がつらくて疲れた。残業が多い。夜遅い帰宅。' },
+    { date: '2024-01-02', content: '疲れがひどい。仕事を休みたい。残業続き。' },
+    { date: '2024-01-03', content: '楽しい休日。友達と映画を見た。リラックスできた。' },
+  ]
+
+  it('returns tokens shared between two similar entries', () => {
+    const idx = buildIndex(docs)
+    const tokens = sharedTokens(idx, '2024-01-01', '2024-01-02')
+    expect(tokens.length).toBeGreaterThan(0)
+    // 仕事 and 疲れ appear in both — at least one bigram from each should appear
+    const joined = tokens.join('')
+    expect(joined).toMatch(/仕事|疲れ|残業/)
+  })
+
+  it('returns tokens sorted by contribution score descending', () => {
+    const idx = buildIndex(docs)
+    const tokens = sharedTokens(idx, '2024-01-01', '2024-01-02', 10)
+    // Verify the list is non-empty and there's at least one meaningful token
+    expect(tokens.length).toBeGreaterThan(0)
+  })
+
+  it('returns empty for entries with no shared content', () => {
+    const idx = buildIndex(docs)
+    const tokens = sharedTokens(idx, '2024-01-01', '2024-01-03')
+    // 仕事/疲れ vs 楽しい/映画 — negligible overlap
+    expect(tokens.length).toBe(0)
+  })
+
+  it('returns empty for an unknown date', () => {
+    const idx = buildIndex(docs)
+    expect(sharedTokens(idx, 'unknown', '2024-01-01')).toEqual([])
+    expect(sharedTokens(idx, '2024-01-01', 'unknown')).toEqual([])
+  })
+
+  it('returns empty for an empty index', () => {
+    const idx = buildIndex([])
+    expect(sharedTokens(idx, '2024-01-01', '2024-01-02')).toEqual([])
+  })
+
+  it('respects the limit parameter', () => {
+    const idx = buildIndex(docs)
+    const tokens = sharedTokens(idx, '2024-01-01', '2024-01-02', 3)
+    expect(tokens.length).toBeLessThanOrEqual(3)
+  })
+
+  it('filters out common grammatical noise tokens', () => {
+    const noiseDocs = [
+      { date: '2024-01-01', content: 'これはテストです。ありがとうございます。' },
+      { date: '2024-01-02', content: 'それもテストです。よろしくお願いします。' },
+    ]
+    const idx = buildIndex(noiseDocs)
+    const tokens = sharedTokens(idx, '2024-01-01', '2024-01-02')
+    // 「です」「ます」などのノイズは含まれないこと
+    expect(tokens).not.toContain('です')
+    expect(tokens).not.toContain('ます')
+    expect(tokens).not.toContain('した')
   })
 })

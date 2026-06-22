@@ -2635,6 +2635,14 @@ dialog.related-preview-dialog::backdrop {
   margin: 0;
   color: var(--text);
 }
+.related-preview-highlight {
+  background: none;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-underline-offset: 2px;
+}
 .related-preview-empty {
   font-size: 0.88rem;
   color: var(--text-muted);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAllCached } from '../lib/diaryCache'
-import { buildIndex, search, findSimilar, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
+import { buildIndex, search, findSimilar, sharedTokens, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
 
 export interface LocalSearchResult {
   date: string
@@ -70,9 +70,15 @@ export function useTfIdfSearch() {
     return findSimilar(idx, date, limit)
   }, [])
 
+  const getSharedTokens = useCallback((date1: string, date2: string, limit = 8): string[] => {
+    const idx = indexRef.current
+    if (!idx) return []
+    return sharedTokens(idx, date1, date2, limit)
+  }, [])
+
   const hasEntry = useCallback((date: string): boolean => {
     return indexRef.current?.vectors.has(date) ?? false
   }, [])
 
-  return { ready, indexVersion, searchLocal, getSimilar, updateEntry, hasEntry }
+  return { ready, indexVersion, searchLocal, getSimilar, getSharedTokens, updateEntry, hasEntry }
 }

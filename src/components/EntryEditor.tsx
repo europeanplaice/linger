@@ -7,6 +7,7 @@ import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry } from '../types'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry } from '../utils/date'
+import { highlightText } from '../utils/highlight'
 import { HistoryModal } from './HistoryModal'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareEntry } from '../utils/share'
@@ -59,6 +60,7 @@ interface Props {
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   relatedDates?: string[]
   onSelectRelated?: (date: string) => void
+  getRelatedTokens?: (previewDate: string) => string[]
   backDate?: string
   onGoBack?: () => void
 }
@@ -115,7 +117,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, backDate, onGoBack }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -1139,7 +1141,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               <div className="entry-skeleton-row medium" />
             </div>
           ) : previewContent ? (
-            <p className="related-preview-content">{previewContent}</p>
+            <p className="related-preview-content">
+              {highlightText(
+                previewContent,
+                previewDate && getRelatedTokens ? getRelatedTokens(previewDate) : [],
+              ).map((seg, i) =>
+                typeof seg === 'string'
+                  ? seg
+                  : <mark key={i} className="related-preview-highlight">{seg.text}</mark>
+              )}
+            </p>
           ) : previewDate ? (
             <p className="related-preview-empty">{t.entry.placeholder}</p>
           ) : null}

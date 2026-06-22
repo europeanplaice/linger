@@ -114,6 +114,37 @@ export function search(index: TfIdfIndex, query: string, limit = 20): SearchHit[
   }))
 }
 
+// Common Japanese grammatical bigrams that contribute noise to similarity scoring.
+// TF-IDF suppresses these when the corpus is large, but this list provides
+// a safety net for small diaries where IDF hasn't had time to calibrate.
+const NOISE_BIGRAMS = new Set([
+  'です', 'した', 'ます', 'てい', 'のは', 'のが', 'ある', 'いる', 'なる',
+  'する', 'れる', 'られ', 'てし', 'しま', 'まし', 'ので', 'には', 'とい',
+  'うと', 'って', 'ては', 'たい', 'ない', 'から', 'こと', 'もの',
+])
+
+/**
+ * Returns the top `limit` tokens that most strongly connect two entries,
+ * ranked by contribution = tfidf1 × tfidf2 (cosine similarity per-token).
+ * Grammatical noise bigrams are filtered out.
+ */
+export function sharedTokens(index: TfIdfIndex, date1: string, date2: string, limit = 8): string[] {
+  const v1 = index.vectors.get(date1)
+  const v2 = index.vectors.get(date2)
+  if (!v1 || !v2) return []
+
+  const scores: { token: string; score: number }[] = []
+  v1.forEach((s1, token) => {
+    if (NOISE_BIGRAMS.has(token)) return
+    const s2 = v2.get(token)
+    if (!s2) return
+    scores.push({ token, score: s1 * s2 })
+  })
+
+  scores.sort((a, b) => b.score - a.score)
+  return scores.slice(0, limit).map(s => s.token)
+}
+
 export function findSimilar(index: TfIdfIndex, date: string, limit = 5): string[] {
   const vec = index.vectors.get(date)
   if (!vec || index.vectors.size <= 1) return []
