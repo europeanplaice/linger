@@ -22,7 +22,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Trash2 } from 'lucide-react'
+import { Clock3, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Sparkles, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -59,6 +59,7 @@ interface Props {
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   relatedDates?: string[]
+  relatedVersion?: number
   onSelectRelated?: (date: string) => void
   getRelatedTokens?: (previewDate: string) => string[]
   backDate?: string
@@ -117,7 +118,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, relatedVersion, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -140,6 +141,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [relatedFlashKey, setRelatedFlashKey] = useState(0)
+  const prevRelatedVersionRef = useRef<number | undefined>(undefined)
+  const prevDateForRelatedRef = useRef<string>(date)
+  useEffect(() => {
+    if (
+      relatedVersion !== undefined &&
+      prevRelatedVersionRef.current !== undefined &&
+      relatedVersion !== prevRelatedVersionRef.current &&
+      date === prevDateForRelatedRef.current
+    ) {
+      setRelatedFlashKey(k => k + 1)
+    }
+    prevRelatedVersionRef.current = relatedVersion
+    prevDateForRelatedRef.current = date
+  }, [relatedVersion, date])
+
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -1101,8 +1118,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         </div>
       )}
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
-        <div className="editor-related">
-          <span className="editor-related-label">{t.entry.relatedEntries}</span>
+        <div key={relatedFlashKey} className="editor-related editor-related--flash">
+          <span className="editor-related-label"><Sparkles size={11} strokeWidth={1.8} aria-hidden="true" />{t.entry.relatedEntries}</span>
           <div className="editor-related-list">
             {relatedDates.map(d => (
               <button
