@@ -271,13 +271,13 @@ test.describe('RecollectionJourney', () => {
     await expect(similarSection).toBeVisible()
 
     // Heading should reference the current serendipity date (rand1)
-    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Days like ${localDateLabel(rand1)}`)
+    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Similar to ${localDateLabel(rand1)}`)
 
     // Advancing serendipity should update the heading to reference rand2
     const serendipitySection = page.locator('.recollection-section', { hasText: 'A day, by chance' })
     await serendipitySection.locator('.recollection-another').click()
 
-    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Days like ${localDateLabel(rand2)}`)
+    await expect(similarSection.locator('.recollection-section-heading')).toContainText(`Similar to ${localDateLabel(rand2)}`)
   })
 
   test('"Meet another day" button disappears after the last candidate', async ({ page }) => {

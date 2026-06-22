@@ -54,8 +54,7 @@ const dictionaries = {
       another: 'Meet another day',
       empty: 'Nothing to look back on yet. Keep writing, and your past self will be here.',
       noText: 'No text on this day.',
-      similarDays: 'Similar days',
-      similarDaysOf: (label: string) => `Days like ${label}`,
+      similarDaysOf: (label: string) => `Similar to ${label}`,
     },
     calendar: {
       days: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
@@ -332,7 +331,6 @@ const dictionaries = {
       another: '別の日を見る',
       empty: 'まだ振り返れる日記がありません。書き続ければ、いつかの自分がここで待っています。',
       noText: 'この日には本文がありません。',
-      similarDays: '似た気持ちの日',
       similarDaysOf: (label: string) => `${label}と似た気持ちの日`,
     },
     calendar: {
