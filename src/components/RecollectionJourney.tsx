@@ -267,11 +267,11 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
               </section>
             )}
 
-            {similarDates.length > 0 && (
+            {similarDates.length > 0 && randomDate && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
                   <span className="recollection-section-glyph" aria-hidden="true">≈</span>
-                  {t.recollection.similarDays}
+                  {t.recollection.similarDaysOf(diaryDateLabel(randomDate, true, 'long', locale, true))}
                 </h3>
                 <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
                   {similarDates.map(date => {

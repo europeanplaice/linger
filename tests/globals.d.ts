@@ -150,7 +150,7 @@ interface Window {
     }) => void
   }
   recollectionHarness: {
-    render: (opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] }) => void
+    render: (opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[]; getSimilar?: (date: string, limit?: number) => string[] }) => void
     selectedDates: () => string[]
     closeCount: () => number
     getContentCalls: () => string[]

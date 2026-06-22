@@ -19,7 +19,7 @@ function makeLoaded(date: string, content: string): LoadedDiaryEntry {
 }
 
 window.recollectionHarness = {
-  render: ({ dates, contents, serendipityPrefetch }: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] }) => {
+  render: ({ dates, contents, serendipityPrefetch, getSimilar }: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[]; getSimilar?: (date: string, limit?: number) => string[] }) => {
     selectedDates.splice(0)
     getContentLog.splice(0)
     closeCount = 0
@@ -34,6 +34,7 @@ window.recollectionHarness = {
             return content === undefined ? null : makeLoaded(date, content)
           }}
           serendipityPrefetch={serendipityPrefetch}
+          getSimilar={getSimilar}
           onSelect={(d: string) => { selectedDates.push(d) }}
           onClose={() => { closeCount += 1 }}
           key={++renderCount}
