@@ -38,6 +38,22 @@ test('setAccent changes accent and persists to localStorage', () => {
   expect(document.documentElement.getAttribute('data-accent')).toBe('indigo')
 })
 
+test('reads terracotta from localStorage', () => {
+  localStorage.setItem('linger_accent', 'terracotta')
+  const { result } = renderHook(() => useAccentColor())
+  expect(result.current.accent).toBe('terracotta')
+  expect(document.documentElement.getAttribute('data-accent')).toBe('terracotta')
+})
+
+test('setAccent switches to terracotta and persists to localStorage', () => {
+  const { result } = renderHook(() => useAccentColor())
+
+  act(() => result.current.setAccent('terracotta'))
+  expect(result.current.accent).toBe('terracotta')
+  expect(localStorage.getItem('linger_accent')).toBe('terracotta')
+  expect(document.documentElement.getAttribute('data-accent')).toBe('terracotta')
+})
+
 test('unknown stored value falls back to indigo', () => {
   localStorage.setItem('linger_accent', 'magenta')
   const { result } = renderHook(() => useAccentColor())

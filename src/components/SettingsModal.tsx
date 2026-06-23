@@ -277,6 +277,16 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <span className="settings-color-swatch" style={{ background: '#4a6a4a' }} />
                 <span className="settings-color-label">{t.settings.accentSage}</span>
               </button>
+              <button
+                type="button"
+                className={`settings-color-option ${accentColor === 'terracotta' ? 'active' : ''}`}
+                onClick={() => onAccentChange('terracotta')}
+                aria-label={t.settings.accentTerracotta}
+                aria-pressed={accentColor === 'terracotta'}
+              >
+                <span className="settings-color-swatch" style={{ background: '#a8635c' }} />
+                <span className="settings-color-label">{t.settings.accentTerracotta}</span>
+              </button>
             </div>
           </div>
           <div className="settings-item">

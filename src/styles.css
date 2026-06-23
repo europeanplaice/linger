@@ -157,6 +157,30 @@
   --save-success-flash: #98c379;
 }
 
+[data-accent="terracotta"] {
+  --accent: #a8635c;
+  --accent-hover: #8f4f48;
+  --dot: #a8635c;
+  --selected-bg: #f5e3df;
+  --save-glow: rgba(168,99,92,0.25);
+  --save-success-flash: #c47b6f;
+}
+
+[data-accent="terracotta"][data-theme="light"] {
+  --bg: #faf8f6;
+  --sidebar-bg: #f1ece8;
+  --border: #e0d6d0;
+}
+
+[data-accent="terracotta"][data-theme="dark"] {
+  --accent: #d89a92;
+  --accent-hover: #cf8b82;
+  --dot: #d89a92;
+  --selected-bg: #3a3230;
+  --save-glow: rgba(216,154,146,0.5);
+  --save-success-flash: #d89a92;
+}
+
 [data-font="serif"] {
   --font-body: 'Source Serif 4', 'Noto Serif JP', serif;
   --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
@@ -1462,7 +1486,9 @@ dialog.settings-dialog::backdrop {
   letter-spacing: 0.04em;
 }
 .settings-color-picker {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 0.5rem;
 }
 .settings-color-option {

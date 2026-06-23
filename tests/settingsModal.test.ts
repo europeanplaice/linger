@@ -866,6 +866,22 @@ test.describe('SettingsModal — accent color', () => {
     await expect(picker).toBeVisible()
     await expect(picker.getByRole('button', { name: /indigo/i })).toBeVisible()
     await expect(picker.getByRole('button', { name: /sage/i })).toBeVisible()
+    await expect(picker.getByRole('button', { name: /terracotta/i })).toBeVisible()
+  })
+
+  test('clicking terracotta switches active state and persists to localStorage', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await page.locator('.settings-color-picker').getByRole('button', { name: /terracotta/i }).click()
+
+    const terracottaBtn = page.locator('.settings-color-picker').getByRole('button', { name: /terracotta/i })
+    await expect(terracottaBtn).toHaveAttribute('aria-pressed', 'true')
+    const indigoBtn = page.locator('.settings-color-picker').getByRole('button', { name: /indigo/i })
+    await expect(indigoBtn).toHaveAttribute('aria-pressed', 'false')
+
+    const stored = await page.evaluate(() => localStorage.getItem('linger_accent'))
+    expect(stored).toBe('terracotta')
   })
 
   test('indigo button is active by default', async ({ page }) => {
@@ -906,19 +922,23 @@ test.describe('SettingsModal — accent color', () => {
     expect(stored).toBe('indigo')
   })
 
-  test('Indigo and Sage buttons have equal width regardless of label length', async ({ page }) => {
+  test('Indigo, Sage and Terracotta buttons have equal width regardless of label length', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
     const options = page.locator('.settings-color-picker .settings-color-option')
     const indigoBox = await options.nth(0).boundingBox()
     const sageBox = await options.nth(1).boundingBox()
+    const terracottaBox = await options.nth(2).boundingBox()
 
     expect(indigoBox).not.toBeNull()
     expect(sageBox).not.toBeNull()
-    if (indigoBox && sageBox) {
+    expect(terracottaBox).not.toBeNull()
+    if (indigoBox && sageBox && terracottaBox) {
       expect(Math.abs(indigoBox.width - sageBox.width)).toBeLessThan(1)
       expect(Math.abs(indigoBox.height - sageBox.height)).toBeLessThan(1)
+      expect(Math.abs(indigoBox.width - terracottaBox.width)).toBeLessThan(1)
+      expect(Math.abs(indigoBox.height - terracottaBox.height)).toBeLessThan(1)
     }
   })
 })
