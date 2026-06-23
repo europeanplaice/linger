@@ -14,7 +14,6 @@ async function renderEditor(
     saveReject?: 'conflict' | 'error'
     getContentReject?: 'tokenExpired' | 'error'
     relatedDates?: string[]
-    relatedVersion?: number
     deleteReject?: 'error'
     pendingNavDate?: string | null
     token?: string | null
@@ -31,10 +30,10 @@ async function renderEditor(
   const getContentReject = opts.getContentReject
   const deleteReject = opts.deleteReject
   await page.evaluate(
-    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd, relatedDates, relatedVersion }) => {
-      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd, relatedDates, relatedVersion })
+    ({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd, relatedDates }) => {
+      window.editorHarness.render({ date, initialContent, version, saveReject, getContentReject, deleteReject, pendingNavDate, token, autoSave, knownDates, diaryListLoaded, milestones, enableMilestoneAdd, relatedDates })
     },
-    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, milestones: opts.milestones, enableMilestoneAdd: opts.enableMilestoneAdd, relatedDates: opts.relatedDates, relatedVersion: opts.relatedVersion },
+    { date, initialContent, version, saveReject: opts.saveReject, getContentReject, deleteReject, pendingNavDate: opts.pendingNavDate, token: opts.token, autoSave: opts.autoSave, knownDates: opts.knownDates, diaryListLoaded: opts.diaryListLoaded, milestones: opts.milestones, enableMilestoneAdd: opts.enableMilestoneAdd, relatedDates: opts.relatedDates },
   )
   // Wait for textarea to be visible (loading done)
   await page.waitForSelector('textarea.editor-textarea')
@@ -1976,34 +1975,15 @@ test.describe('EntryEditor — Add as Milestone', () => {
   })
 })
 
-test.describe('EntryEditor — related entries flash', () => {
+test.describe('EntryEditor — related entries', () => {
   test('shows related entry pills when relatedDates is provided', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
       date: '2026-05-01',
       relatedDates: ['2026-01-10', '2025-12-20'],
-      relatedVersion: 1,
     })
 
     await expect(page.locator('.editor-related')).toBeVisible()
     await expect(page.locator('.editor-related-item')).toHaveCount(2)
   })
-
-  test('re-mounts the related section (triggering flash animation) when relatedVersion increments on same date', async ({ page }) => {
-    await loadHarness(page)
-    await renderEditor(page, {
-      date: '2026-05-01',
-      relatedDates: ['2026-01-10', '2025-12-20'],
-      relatedVersion: 1,
-    })
-
-    const beforeNode = await page.locator('.editor-related').elementHandle()
-
-    await page.evaluate(() => window.editorHarness.setRelatedVersion(2))
-
-    const afterNode = await page.locator('.editor-related').elementHandle()
-    // key change causes React to unmount+remount — different DOM node
-    expect(beforeNode).not.toBe(afterNode)
-  })
-
 })

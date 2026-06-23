@@ -723,7 +723,6 @@ export default function App() {
           milestones={milestones}
           onMilestoneAdd={addMilestone}
           relatedDates={relatedDates}
-          relatedVersion={tfIdf.indexVersion}
           onSelectRelated={handleSelectRelated}
           getRelatedTokens={(previewDate) => tfIdf.getSharedTokens(selectedDate, previewDate)}
           backDate={previousDate ?? undefined}

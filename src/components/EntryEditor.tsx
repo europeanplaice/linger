@@ -59,7 +59,6 @@ interface Props {
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   relatedDates?: string[]
-  relatedVersion?: number
   onSelectRelated?: (date: string) => void
   getRelatedTokens?: (previewDate: string) => string[]
   backDate?: string
@@ -118,7 +117,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, relatedVersion, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
   const { t, locale } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -141,7 +140,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
-
 
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
