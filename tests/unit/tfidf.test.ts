@@ -217,6 +217,28 @@ describe('findSimilar', () => {
     const similar = findSimilar(idx, '2024-01-01', 2)
     expect(similar.length).toBeLessThanOrEqual(2)
   })
+
+  it('excludes entries whose similarity is only incidental (below threshold)', () => {
+    const thDocs = [
+      { date: 'work1', content: '仕事がつらくて疲れた。残業が多い。夜遅い帰宅。会議も長かった。' },
+      { date: 'work2', content: '疲れがひどい。仕事を休みたい。残業続き。会議が多すぎる。' },
+      { date: 'food', content: '夕食にカレーを作った。玉ねぎと人参を炒めて煮込んだ。美味しかった。' },
+    ]
+    const idx = buildIndex(thDocs)
+    const similar = findSimilar(idx, 'work1', 3)
+    expect(similar).toContain('work2')
+    expect(similar).not.toContain('food')
+  })
+
+  it('does not treat entries sharing only grammatical noise as similar', () => {
+    const noiseDocs = [
+      { date: 'a', content: '今日は晴れです。散歩しました。気持ちよかったです。' },
+      { date: 'b', content: '会議がありました。資料を作成しました。疲れました。' },
+    ]
+    const idx = buildIndex(noiseDocs)
+    // a and b share です/ます/した but have no content overlap
+    expect(findSimilar(idx, 'a', 3)).not.toContain('b')
+  })
 })
 
 describe('sharedTokens', () => {

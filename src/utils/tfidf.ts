@@ -25,6 +25,15 @@ export function tokenize(text: string): string[] {
   return tokens
 }
 
+// Common Japanese grammatical bigrams that carry no topical meaning.
+// Excluded from the index entirely so similarity reflects content, not writing
+// style — two entries that share only these (です/ます/した …) are not "related".
+const NOISE_BIGRAMS = new Set([
+  'です', 'した', 'ます', 'てい', 'のは', 'のが', 'ある', 'いる', 'なる',
+  'する', 'れる', 'られ', 'てし', 'しま', 'まし', 'ので', 'には', 'とい',
+  'うと', 'って', 'ては', 'たい', 'ない', 'から', 'こと', 'もの',
+])
+
 export interface TfIdfDoc {
   date: string
   content: string
@@ -42,7 +51,7 @@ export function buildIndex(docs: TfIdfDoc[]): TfIdfIndex {
   // Step 1: tokenize each doc and count term frequencies
   // tokenize() returns all occurrences (not deduplicated) so counts reflect real TF.
   const docTermCounts = docs.map(doc => {
-    const tokens = tokenize(doc.content)
+    const tokens = tokenize(doc.content).filter(t => !NOISE_BIGRAMS.has(t))
     const counts = new Map<string, number>()
     for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1)
     return { counts, totalTokens: tokens.length || 1 }
@@ -114,19 +123,10 @@ export function search(index: TfIdfIndex, query: string, limit = 20): SearchHit[
   }))
 }
 
-// Common Japanese grammatical bigrams that contribute noise to similarity scoring.
-// TF-IDF suppresses these when the corpus is large, but this list provides
-// a safety net for small diaries where IDF hasn't had time to calibrate.
-const NOISE_BIGRAMS = new Set([
-  'です', 'した', 'ます', 'てい', 'のは', 'のが', 'ある', 'いる', 'なる',
-  'する', 'れる', 'られ', 'てし', 'しま', 'まし', 'ので', 'には', 'とい',
-  'うと', 'って', 'ては', 'たい', 'ない', 'から', 'こと', 'もの',
-])
-
 /**
  * Returns the top `limit` tokens that most strongly connect two entries,
  * ranked by contribution = tfidf1 × tfidf2 (cosine similarity per-token).
- * Grammatical noise bigrams are filtered out.
+ * Noise bigrams are already absent from the index (see buildIndex).
  */
 export function sharedTokens(index: TfIdfIndex, date1: string, date2: string, limit = 8): string[] {
   const v1 = index.vectors.get(date1)
@@ -135,7 +135,6 @@ export function sharedTokens(index: TfIdfIndex, date1: string, date2: string, li
 
   const scores: { token: string; score: number }[] = []
   v1.forEach((s1, token) => {
-    if (NOISE_BIGRAMS.has(token)) return
     const s2 = v2.get(token)
     if (!s2) return
     scores.push({ token, score: s1 * s2 })
@@ -144,6 +143,11 @@ export function sharedTokens(index: TfIdfIndex, date1: string, date2: string, li
   scores.sort((a, b) => b.score - a.score)
   return scores.slice(0, limit).map(s => s.token)
 }
+
+// Minimum cosine similarity for two entries to count as "related". Below this,
+// the overlap is incidental and showing it as related hurts more than it helps —
+// better to surface fewer (or no) entries than irrelevant ones.
+const SIMILARITY_THRESHOLD = 0.1
 
 export function findSimilar(index: TfIdfIndex, date: string, limit = 5): string[] {
   const vec = index.vectors.get(date)
@@ -159,7 +163,7 @@ export function findSimilar(index: TfIdfIndex, date: string, limit = 5): string[
       const ov = otherVec.get(token)
       if (ov) dot += v * ov
     })
-    if (dot > 0) scores.push({ date: otherDate, score: dot })
+    if (dot >= SIMILARITY_THRESHOLD) scores.push({ date: otherDate, score: dot })
   })
 
   scores.sort((a, b) => b.score - a.score)
