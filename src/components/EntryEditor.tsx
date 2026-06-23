@@ -141,21 +141,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
-  const [relatedFlashKey, setRelatedFlashKey] = useState(0)
-  const prevRelatedVersionRef = useRef<number | undefined>(undefined)
-  const prevDateForRelatedRef = useRef<string>(date)
-  useEffect(() => {
-    if (
-      relatedVersion !== undefined &&
-      prevRelatedVersionRef.current !== undefined &&
-      relatedVersion !== prevRelatedVersionRef.current &&
-      date === prevDateForRelatedRef.current
-    ) {
-      setRelatedFlashKey(k => k + 1)
-    }
-    prevRelatedVersionRef.current = relatedVersion
-    prevDateForRelatedRef.current = date
-  }, [relatedVersion, date])
+
 
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
@@ -1118,7 +1104,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         </div>
       )}
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
-        <div key={relatedFlashKey} className="editor-related editor-related--flash">
+        <div className="editor-related">
           <span className="editor-related-label"><Sparkles size={11} strokeWidth={1.8} aria-hidden="true" />{t.entry.relatedEntries}</span>
           <div className="editor-related-list">
             {relatedDates.map(d => (
