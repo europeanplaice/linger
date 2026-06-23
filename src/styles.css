@@ -2637,7 +2637,7 @@ dialog.related-preview-dialog::backdrop {
 }
 .related-preview-highlight {
   background: none;
-  color: inherit;
+  color: var(--accent);
   font-weight: 600;
 }
 .related-preview-empty {
