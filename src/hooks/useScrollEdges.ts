@@ -19,7 +19,11 @@ export function useScrollEdges<T extends HTMLElement>(
     const el = elementRef.current
     if (!el) return
     const update = () => {
-      setScrollAtTop(el.scrollTop < 2)
+      // Treat "near the top" (within ~half a line) as the top edge: focusing a
+      // textarea can auto-scroll the caret a few px, and the 32px top fade band
+      // would otherwise cover the still-visible first line. Real one-line scrolls
+      // (~28-32px) stay well past this threshold.
+      setScrollAtTop(el.scrollTop < 16)
       setScrollAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
     }
     update()
