@@ -935,9 +935,10 @@ test.describe('SettingsModal — accent color', () => {
     expect(sageBox).not.toBeNull()
     expect(terracottaBox).not.toBeNull()
     if (indigoBox && sageBox && terracottaBox) {
-      expect(Math.abs(indigoBox.width - sageBox.width)).toBeLessThan(1)
+      // <2px width tolerance for WebKit sub-pixel flex rounding (see theme picker).
+      expect(Math.abs(indigoBox.width - sageBox.width)).toBeLessThan(2)
       expect(Math.abs(indigoBox.height - sageBox.height)).toBeLessThan(1)
-      expect(Math.abs(indigoBox.width - terracottaBox.width)).toBeLessThan(1)
+      expect(Math.abs(indigoBox.width - terracottaBox.width)).toBeLessThan(2)
       expect(Math.abs(indigoBox.height - terracottaBox.height)).toBeLessThan(1)
     }
   })
@@ -1106,8 +1107,11 @@ test.describe('SettingsModal — theme picker', () => {
     expect(darkBox).not.toBeNull()
     expect(autoBox).not.toBeNull()
     if (lightBox && darkBox && autoBox) {
-      expect(Math.abs(lightBox.width - darkBox.width)).toBeLessThan(1)
-      expect(Math.abs(lightBox.width - autoBox.width)).toBeLessThan(1)
+      // WebKit reports sub-pixel boundingBox widths; equal-width buttons can
+      // still differ by up to ~1.5px from rounding. Allow <2px (matching the
+      // export/share tolerance above) — real layout breakage is many px.
+      expect(Math.abs(lightBox.width - darkBox.width)).toBeLessThan(2)
+      expect(Math.abs(lightBox.width - autoBox.width)).toBeLessThan(2)
     }
   })
 })
@@ -1191,7 +1195,8 @@ test.describe('SettingsModal — font picker', () => {
     expect(sansBox).not.toBeNull()
     expect(serifBox).not.toBeNull()
     if (sansBox && serifBox) {
-      expect(Math.abs(sansBox.width - serifBox.width)).toBeLessThan(1)
+      // <2px width tolerance for WebKit sub-pixel flex rounding (see theme picker).
+      expect(Math.abs(sansBox.width - serifBox.width)).toBeLessThan(2)
       expect(Math.abs(sansBox.height - serifBox.height)).toBeLessThan(1)
     }
   })
