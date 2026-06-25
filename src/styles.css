@@ -1166,7 +1166,7 @@ html.session-restoring .landing {
   bottom: 0;
   z-index: 1;
   background: var(--sidebar-bg);
-  border-top: 1px solid var(--border);
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
 }
 .sidebar-bottom::before {
   content: "";
@@ -1174,35 +1174,70 @@ html.session-restoring .landing {
   bottom: 100%;
   left: 0;
   right: 0;
-  height: 1.5rem;
+  height: 2.25rem;
   background: linear-gradient(transparent, var(--sidebar-bg));
   pointer-events: none;
 }
-.user-email {
-  padding: 0.45rem 1rem 0.2rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
+.btn-account {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0.55rem 1rem;
+  min-height: 44px;
+  transition: background 0.15s ease;
+}
+.btn-account:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.btn-account:hover .account-gear {
+  transform: rotate(20deg);
+}
+.btn-account:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.account-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 18%, var(--sidebar-bg));
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+.account-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+  flex: 1;
+}
+.account-email {
+  font-size: 0.78rem;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.btn-settings {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-  background: transparent;
-  border: none;
+.account-sub {
+  font-size: 0.68rem;
   color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-family: inherit;
-  padding: 0.5rem 1rem;
-  transition: background 0.15s ease, color 0.15s ease;
 }
-.btn-settings:hover {
-  background: var(--border);
-  color: var(--text);
+.account-gear {
+  flex: 0 0 auto;
+  opacity: 0.5;
+  transition: transform 0.2s ease, opacity 0.15s ease;
+}
+.btn-account:hover .account-gear {
+  opacity: 0.8;
 }
 
 /* ── Settings modal ── */
@@ -4391,7 +4426,7 @@ dialog.history-dialog::backdrop {
 
   .more-menu-discard { display: flex; }
   .more-menu .btn-text { display: inline; }
-  .btn-settings .btn-text { display: inline; }
+  .btn-account .account-email { display: block; }
   .btn-recollection .btn-text { display: inline; }
   .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; }
 
@@ -4405,10 +4440,8 @@ dialog.history-dialog::backdrop {
   /* Larger tap targets for calendar */
   .cal-day { padding: 0.4rem 0; }
 
-  .btn-settings {
+  .btn-account {
     padding: 0.65rem 1rem;
-    font-size: 0.85rem;
-    min-height: 2.75rem;
   }
 
   dialog.history-dialog {
@@ -4455,11 +4488,32 @@ dialog.history-dialog::backdrop {
   font-family: inherit;
   padding: 0.5rem 0.7rem;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
+  min-height: 44px;
 }
 .btn-recollection:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 16%, var(--sidebar-bg));
+}
+.btn-recollection:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.recollection-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.3;
+  min-width: 0;
+}
+.recollection-hint {
+  font-size: 0.72rem;
+  color: var(--accent);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 dialog.recollection-dialog {

@@ -55,6 +55,9 @@ const dictionaries = {
       empty: 'Nothing to look back on yet. Keep writing, and your past self will be here.',
       noText: 'No text on this day.',
       similarDaysOf: (label: string) => `Similar to ${label}`,
+      hintOnThisDay: (n: number) => `${n} ${n === 1 ? 'year' : 'years'} ago today`,
+      hintMore: (n: number) => n > 0 ? ` +${n}` : '',
+      hintCount: (n: number) => `${n} past ${n === 1 ? 'entry' : 'entries'}`,
     },
     calendar: {
       days: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
@@ -333,6 +336,9 @@ const dictionaries = {
       empty: 'まだ振り返れる日記がありません。書き続ければ、いつかの自分がここで待っています。',
       noText: 'この日には本文がありません。',
       similarDaysOf: (label: string) => `${label}と似た気持ちの日`,
+      hintOnThisDay: (n: number) => `${n}年前の今日`,
+      hintMore: (n: number) => n > 0 ? ` +${n}` : '',
+      hintCount: (n: number) => `過去${n}件`,
     },
     calendar: {
       days: ['日', '月', '火', '水', '木', '金', '土'],
