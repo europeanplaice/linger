@@ -147,7 +147,7 @@ export function sharedTokens(index: TfIdfIndex, date1: string, date2: string, li
 // Minimum cosine similarity for two entries to count as "related". Below this,
 // the overlap is incidental and showing it as related hurts more than it helps —
 // better to surface fewer (or no) entries than irrelevant ones.
-const SIMILARITY_THRESHOLD = 0.1
+const SIMILARITY_THRESHOLD = 0.15
 
 export function findSimilar(index: TfIdfIndex, date: string, limit = 5): string[] {
   const vec = index.vectors.get(date)
