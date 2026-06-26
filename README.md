@@ -51,6 +51,7 @@ The browser never holds an OAuth token. Diary entries are stored as individual p
 ```
 /linger_diary/
   diary-YYYY-MM-DD.txt   ← plain-text body
+  milestones.json        ← milestone list (JSON array)
 ```
 
 New entries are written as `.txt`. Legacy `.md` files remain readable and are renamed to `.txt` by a one-time migration on first sign-in.
@@ -79,9 +80,13 @@ Drive 429/5xx responses are retried with exponential backoff.
 The browser stores only non-sensitive preferences and small UI hints in `localStorage`:
 - `linger_autosave` — whether auto-save is enabled
 - `linger_theme` — `light` / `dark` / `system`
+- `linger_accent` — accent color preference (`indigo` / `sage` / `terracotta`)
 - `linger_font` — font preference
 - `linger_fontsize` — font size (`sm` / `md` / `lg` / `xl`)
 - `linger_language` — `en` / `ja`
+- `linger_holiday_country` — holiday calendar country selection
+- `linger_milestones` — local cache of the milestone list (JSON array), synced to Drive
+- `linger_milestones_pending` — flag indicating a milestone save is pending Drive sync
 - `linger_had_session` — `true`/`false` flag indicating whether the user was previously signed in (used to show the "continue with your previous session" prompt on the login screen)
 - `linger_session_user` — last signed-in email; used to detect cross-device account switches and clear stale cached data
 - `linger_ext_migrated` — one-time flag set after the `.md` → `.txt` file-extension migration runs
@@ -102,10 +107,11 @@ No OAuth tokens are exposed to the browser or written to browser storage. Diary 
 - `EmojiPicker` — full Unicode emoji picker (grouped by category) used in milestone settings
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
 - `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random serendipity entries
-- `SettingsModal` — language, theme, font family/size, auto-save, holiday calendar, milestone management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
+- `SettingsModal` — language, theme, accent color, font family/size, auto-save, holiday calendar, milestone management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
 - `ExportButton` — ZIP export UI used inside `SettingsModal`
+- `MilestoneFormModal` — add/edit milestone form modal; used inside `SettingsModal` and `EntryEditor`
 - `SettingsSelect` — reusable styled select used inside `SettingsModal`
 - `ErrorBoundary` — catches render errors and displays a fallback UI
 - `useServiceWorkerUpdate` — applies waiting PWA updates when the tab is hidden and the current entry is not dirty
