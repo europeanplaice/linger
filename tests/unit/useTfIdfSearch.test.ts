@@ -57,7 +57,7 @@ describe('useTfIdfSearch', () => {
   it('getSimilar returns similar entries without including the source date', async () => {
     mockGetAllCached.mockResolvedValueOnce([
       makeEntry('2024-01-01', '仕事が大変で疲れた。残業が続く。'),
-      makeEntry('2024-01-02', '疲れが取れない。仕事を休みたい。'),
+      makeEntry('2024-01-02', '残業が続いて仕事が大変。疲れが取れない。'),
       makeEntry('2024-01-03', '楽しい休日。映画を見た。'),
     ])
     const { result } = renderHook(() => useTfIdfSearch())

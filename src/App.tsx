@@ -653,7 +653,7 @@ export default function App() {
             </motion.button>
             )}
           </AnimatePresence>
-          <button className="btn-account" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
+          <button className="btn-account btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
             {email && (
               <span className="account-avatar" aria-hidden="true">
                 {email[0].toUpperCase()}
