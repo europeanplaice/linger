@@ -10,10 +10,10 @@
 
 resource "cloudflare_workers_kv_namespace" "sessions" {
   account_id = var.cloudflare_account_id
-  title      = "linger-sessions"
+  title      = "SESSIONS"
 }
 
 resource "cloudflare_workers_kv_namespace" "sessions_preview" {
   account_id = var.cloudflare_account_id
-  title      = "linger-sessions-preview"
+  title      = "SESSIONS_preview"
 }
