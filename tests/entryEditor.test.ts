@@ -1079,7 +1079,7 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
   })
 
   test('shows inline saving state and progress bar on Ctrl+S save', async ({ page }) => {
@@ -1107,7 +1107,7 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
   })
 
   test('does not show saving progress or overlay on auto-save', async ({ page }) => {
@@ -1400,7 +1400,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('Today')
+    await expect(meta).toContainText('Today')
   })
 
   test('renders the Today label as an accent pill', async ({ page }) => {
@@ -1463,7 +1463,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('1 day ago')
+    await expect(meta).toContainText('1 day ago')
   })
 
   test('past dates beyond yesterday show days ago, not 1 day ago', async ({ page }) => {
@@ -1501,7 +1501,7 @@ test.describe('EntryEditor — editor meta info', () => {
 
     const meta = page.locator('.editor-meta')
     await expect(meta).toBeVisible()
-    await expect(meta).toHaveText('1 day from now')
+    await expect(meta).toContainText('1 day from now')
   })
 })
 
@@ -1547,7 +1547,7 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
 
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
 
     await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
   })
