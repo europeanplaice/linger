@@ -3020,6 +3020,15 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--unsaved-status);
   margin-left: 0.5em;
 }
+.editor-meta-drive {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-size: 0.72rem;
+  margin-left: auto;
+}
 .editor-meta-offline {
   display: inline-flex;
   align-items: center;

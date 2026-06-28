@@ -22,7 +22,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Sparkles, Trash2 } from 'lucide-react'
+import { Clock3, Cloud, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Sparkles, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -807,7 +807,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             onClick={handleExplicitSave}
             disabled={autoSave || saving || !isDirty || loadFailed}
             aria-busy={saving}
-            aria-label={saving ? t.entry.saving : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}
+            aria-label={saving ? t.entry.saving : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}
             title={autoSave ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
             data-autosave={autoSave || undefined}
             whileTap={{ scale: 0.95 }}
@@ -815,7 +815,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
               {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}</span>
+              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}</span>
             </span>
           </motion.button>
           {!isToday && onGoToToday && (
@@ -957,6 +957,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
             >{t.common.unsaved}</motion.span>
+          )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {!isDirty && !loading && !loadFailed && baseVersion !== null && (
+            <motion.span
+              key="drive"
+              className="editor-meta-drive"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              aria-label={t.entry.driveBadge}
+            >
+              <Cloud size={10} strokeWidth={1.8} aria-hidden="true" />
+              {t.entry.driveBadge}
+            </motion.span>
           )}
         </AnimatePresence>
       </div>
