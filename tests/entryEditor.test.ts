@@ -497,7 +497,7 @@ test.describe('EntryEditor — auto-save', () => {
     await expect(page.locator('.save-progress-bar')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(save).toHaveAttribute('aria-label', 'Saved')
+    await expect(save).toHaveAttribute('aria-label', 'Saved to Drive')
   })
 })
 
@@ -565,7 +565,7 @@ test.describe('EntryEditor — keyboard save', () => {
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'keyboard saved content', baseVersion: '1' },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
   })
 
   test('Ctrl+S passes the saved text as baseContent', async ({ page }) => {
@@ -625,11 +625,11 @@ test.describe('EntryEditor — repeated saves', () => {
 
     await page.fill('textarea.editor-textarea', 'first edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
 
     await page.fill('textarea.editor-textarea', 'second edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
 
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toEqual([
@@ -701,7 +701,7 @@ test.describe('EntryEditor — conflict resolution', () => {
       { date: '2026-05-01', content: 'local edits', baseVersion: '1' },
       { date: '2026-05-01', content: 'local edits', baseVersion: '99', force: true },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
   })
 
 })
