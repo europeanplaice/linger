@@ -24,7 +24,7 @@ resource "cloudflare_pages_project" "linger" {
       environment_variables                = {}
       fail_open                            = true
       kv_namespaces = {
-        SESSIONS = "c97ec063171444f7929955e3d8247211"
+        SESSIONS = cloudflare_workers_kv_namespace.sessions_preview.id
       }
       r2_buckets  = {}
       secrets     = null # sensitive
@@ -39,7 +39,7 @@ resource "cloudflare_pages_project" "linger" {
       environment_variables                = {}
       fail_open                            = true
       kv_namespaces = {
-        SESSIONS = "c97ec063171444f7929955e3d8247211"
+        SESSIONS = cloudflare_workers_kv_namespace.sessions.id
       }
       r2_buckets  = {}
       secrets     = null # sensitive
