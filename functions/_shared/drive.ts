@@ -76,7 +76,8 @@ async function driveWithRetry<T>(
 export async function ensureFolder(token: string, sessionId: string, session: SessionData, env: Env): Promise<string> {
   if (session.folder_id) return session.folder_id
 
-  const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${FOLDER_NAME}' and trashed=false`)
+  const folderName = env.SESSION_DOMAIN.includes('staging.') ? `${FOLDER_NAME}_staging` : FOLDER_NAME
+  const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`)
   const list = await driveWithRetry(
     () => fetch(`${BASE}/files?q=${q}&fields=files(id,name)`, { headers: driveHeaders(token) }),
     r => r.json() as Promise<{ files: { id: string }[] }>,
@@ -90,7 +91,7 @@ export async function ensureFolder(token: string, sessionId: string, session: Se
       () => fetch(`${BASE}/files`, {
         method: 'POST',
         headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+        body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
       }),
       r => r.json() as Promise<{ id: string }>,
     )
