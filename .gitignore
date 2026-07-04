@@ -12,6 +12,7 @@ playwright-report/
 .codex
 .serena/
 memo.txt
+staging-plan.md
 test-results/
 *.tsbuildinfo
 

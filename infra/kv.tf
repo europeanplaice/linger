@@ -17,3 +17,8 @@ resource "cloudflare_workers_kv_namespace" "sessions_preview" {
   account_id = var.cloudflare_account_id
   title      = "SESSIONS_preview"
 }
+
+resource "cloudflare_workers_kv_namespace" "sessions_staging" {
+  account_id = var.cloudflare_account_id
+  title      = "SESSIONS_staging"
+}
