@@ -353,6 +353,124 @@ test.describe('useDiary Drive read batching', () => {
   })
 })
 
+test.describe('useDiary importAll', () => {
+  test('imports new entries with bounded parallel requests', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    const dates = ['2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04', '2026-05-05', '2026-05-06']
+    await page.evaluate(({ metas, dates }) => {
+      window.diaryHarness.q(...metas.map(meta => ({ status: 200, body: meta, delayMs: 200 })))
+      ;(window as any).__importResult = null
+      void window.diaryHarness.importAll(dates.map(date => ({ date, content: `content ${date}` }))).then(result => {
+        ;(window as any).__importResult = result
+      })
+    }, { metas: dates.map(date => datedFileMeta(date)), dates })
+
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(4)
+    await expect.poll(async () => page.evaluate(() => (window as any).__importResult !== null)).toBe(true)
+
+    const result = await page.evaluate(() => (window as any).__importResult)
+    expect(result.ok).toBe(true)
+    expect([...result.result.imported].sort()).toEqual(dates)
+    expect(result.result.skipped).toEqual([])
+    expect(result.result.failed).toEqual([])
+    expect(await page.evaluate(() => window.diaryHarness.progressCalls())).toHaveLength(6)
+  })
+
+  test('skips dates that already exist locally without a network call', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page, { files: [datedFileMeta('2026-05-01'), datedFileMeta('2026-05-02')] })
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate((meta) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+      ;(window as any).__importResult = null
+      void window.diaryHarness.importAll([
+        { date: '2026-05-01', content: 'existing 1' },
+        { date: '2026-05-02', content: 'existing 2' },
+        { date: '2026-05-03', content: 'new entry' },
+      ]).then(result => { (window as any).__importResult = result })
+    }, datedFileMeta('2026-05-03'))
+
+    await expect.poll(async () => page.evaluate(() => (window as any).__importResult !== null)).toBe(true)
+    expect((await page.evaluate(() => window.diaryHarness.calls())).length).toBe(1)
+
+    const result = await page.evaluate(() => (window as any).__importResult)
+    expect(result.ok).toBe(true)
+    expect(result.result.imported).toEqual(['2026-05-03'])
+    expect([...result.result.skipped].sort()).toEqual(['2026-05-01', '2026-05-02'])
+    expect(result.result.failed).toEqual([])
+  })
+
+  test('treats a 409 conflict response as skipped, not failed', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 409, body: { conflict: null } })
+      ;(window as any).__importResult = null
+      void window.diaryHarness.importAll([{ date: '2026-05-01', content: 'raced entry' }]).then(result => {
+        (window as any).__importResult = result
+      })
+    })
+
+    await expect.poll(async () => page.evaluate(() => (window as any).__importResult !== null)).toBe(true)
+    const result = await page.evaluate(() => (window as any).__importResult)
+    expect(result.ok).toBe(true)
+    expect(result.result.skipped).toEqual(['2026-05-01'])
+    expect(result.result.imported).toEqual([])
+    expect(result.result.failed).toEqual([])
+  })
+
+  test('collects per-entry failures without aborting the batch', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    await page.evaluate((meta) => {
+      window.diaryHarness.q(
+        { status: 200, body: meta },
+        { status: 400, body: 'bad request' },
+      )
+      ;(window as any).__importResult = null
+      void window.diaryHarness.importAll([
+        { date: '2026-05-01', content: 'ok entry' },
+        { date: '2026-05-02', content: 'bad entry' },
+      ]).then(result => { (window as any).__importResult = result })
+    }, datedFileMeta('2026-05-01'))
+
+    await expect.poll(async () => page.evaluate(() => (window as any).__importResult !== null)).toBe(true)
+    const result = await page.evaluate(() => (window as any).__importResult)
+    expect(result.ok).toBe(true)
+    expect(result.result.imported).toEqual(['2026-05-01'])
+    expect(result.result.failed).toEqual(['2026-05-02'])
+    expect(result.result.skipped).toEqual([])
+  })
+
+  test('propagates a token-expiry failure and notifies the app', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+    await page.evaluate(() => window.diaryHarness.clearExpiredCalls())
+
+    await page.evaluate(() => {
+      window.diaryHarness.q({ status: 401, body: {} })
+      ;(window as any).__importResult = null
+      void window.diaryHarness.importAll([{ date: '2026-05-01', content: 'entry' }]).then(result => {
+        (window as any).__importResult = result
+      })
+    })
+
+    await expect.poll(async () => page.evaluate(() => (window as any).__importResult !== null)).toBe(true)
+    const result = await page.evaluate(() => (window as any).__importResult)
+    expect(result.ok).toBe(false)
+    expect(await page.evaluate(() => window.diaryHarness.expiredCalls())).toBe(1)
+  })
+})
+
 function change(date: string, version = '1', removed = false, id = `file-${date}`) {
   return {
     fileId: id,

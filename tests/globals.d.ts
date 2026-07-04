@@ -19,11 +19,22 @@ interface Window {
     exportCalls: () => number
     progressCalls: () => { done: number; total: number }[]
   }
+  importButtonHarness: {
+    render: (opts?: {
+      existingDates?: string[]
+      result?: { imported: string[]; skipped: string[]; failed: string[] }
+      delayMs?: number
+      reject?: boolean
+    }) => void
+    importCalls: () => { date: string; content: string }[][]
+    progressCalls: () => { done: number; total: number }[]
+  }
   settingsHarness: {
     render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; accentColor?: import('../src/hooks/useAccentColor').AccentColor; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; milestones?: import('../src/types').Milestone[] }) => void
     getStoredAutoSave: () => string | null
     getStoredTheme: () => string | null
     exportCalls: () => { hasProgress: boolean }[]
+    importCalls: () => { count: number; hasProgress: boolean }[]
     setExportReject: (v: boolean) => void
     signOutCount: () => number
   }
@@ -53,6 +64,10 @@ interface Window {
     triggerGetContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<import('../src/types').LoadedDiaryEntry | null>
     search: (query: string) => Promise<import('../src/hooks/useDiary').SearchResult>
     exportAll: () => Promise<{ date: string; content: string }[]>
+    importAll: (entries: { date: string; content: string }[]) => Promise<
+      | { ok: true; result: import('../src/hooks/useDiary').ImportResult }
+      | { ok: false; error: string }
+    >
     refreshEntries: () => Promise<void>
     retryPendingSave: () => Promise<
       | { ok: true; result: import('../src/types').LoadedDiaryEntry | null }

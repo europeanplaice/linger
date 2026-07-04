@@ -27,6 +27,13 @@ export interface DiaryState {
   prefetch: (dates: string[], concurrency?: number) => Promise<void>
   retryPendingSave: () => Promise<LoadedDiaryEntry | null>
   exportAll: (onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+  importAll: (entries: { date: string; content: string }[], onProgress?: (done: number, total: number) => void) => Promise<ImportResult>
+}
+
+export interface ImportResult {
+  imported: string[]
+  skipped: string[]
+  failed: string[]
 }
 
 export interface SearchResult {
@@ -661,6 +668,46 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     return results
   }, [isSignedIn, cache, getContent])
 
+  // Imports previously-exported entries. Dates that already exist locally (or
+  // that the server reports as a conflict, e.g. a stale cache snapshot) are
+  // skipped rather than overwritten, so a re-run or a partial migration can
+  // never clobber an entry written after the export was taken.
+  const importAll = useCallback(async (
+    entries: { date: string; content: string }[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ImportResult> => {
+    if (!isSignedIn) throw new Error('Not signed in')
+
+    const total = entries.length
+    let done = 0
+    const imported: string[] = []
+    const skipped: string[] = []
+    const failed: string[] = []
+
+    await mapWithConcurrency(entries, 4, async ({ date, content }) => {
+      try {
+        if (cacheRef.current.has(date)) {
+          skipped.push(date)
+        } else {
+          await save(date, content, null)
+          imported.push(date)
+        }
+      } catch (e) {
+        if (e instanceof TokenExpiredError) throw e
+        if (e instanceof EntryConflictError) {
+          skipped.push(date)
+        } else {
+          failed.push(date)
+        }
+      } finally {
+        done += 1
+        onProgress?.(done, total)
+      }
+    })
+
+    return { imported, skipped, failed }
+  }, [isSignedIn, save])
+
   // Prefetch a set of dates with bounded concurrency. Skips dates that have no
   // entry or whose content is already loaded; in-flight dedup in getContent
   // prevents racing with other prefetch paths.
@@ -691,5 +738,5 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const dates = useMemo(() => Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)), [cache])
   const hasLegacyMdFiles = useMemo(() => Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache])
 
-  return { loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }
+  return { loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }
 }

@@ -16,7 +16,10 @@ type ExportCall = { hasProgress: boolean }[]
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
 
+type ImportCall = { count: number; hasProgress: boolean }
+
 const exportCalls: ExportCall = []
+const importCalls: ImportCall[] = []
 let exportReject = false
 let signOutCount = 0
 let renderCount = 0
@@ -55,6 +58,15 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
     return []
   }, [])
 
+  const handleImport = useCallback(async (
+    entries: { date: string; content: string }[],
+    onProgress: (done: number, total: number) => void,
+  ) => {
+    importCalls.push({ count: entries.length, hasProgress: typeof onProgress === 'function' })
+    entries.forEach((_, i) => onProgress(i + 1, entries.length))
+    return { imported: entries.map(e => e.date), skipped: [], failed: [] }
+  }, [])
+
   return (
     <>
       <button id="open-settings" onClick={() => setOpen(true)}>Open Settings</button>
@@ -77,6 +89,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
           onHolidayCountryChange={setHolidayCountry}
           dates={['2026-05-01', '2026-05-02']}
           onExport={handleExport}
+          onImport={handleImport}
           onClose={() => setOpen(false)}
           onSignOut={() => { signOutCount++ }}
           email={email}
@@ -122,6 +135,7 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
 window.settingsHarness = {
   render: ({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: initialTheme, accentColor: initialAccent, fontSize: initialFontSize, email, milestones }: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; accentColor?: AccentColor; fontSize?: FontSize; email?: string; milestones?: Milestone[] } = {}) => {
     exportCalls.splice(0)
+    importCalls.splice(0)
     exportReject = false
     signOutCount = 0
     root.render(
@@ -142,6 +156,7 @@ window.settingsHarness = {
   getStoredAutoSave: () => localStorage.getItem('linger_autosave'),
   getStoredTheme: () => localStorage.getItem('linger_theme'),
   exportCalls: () => [...exportCalls],
+  importCalls: () => [...importCalls],
   setExportReject: (v: boolean) => { exportReject = v },
   signOutCount: () => signOutCount,
 }
