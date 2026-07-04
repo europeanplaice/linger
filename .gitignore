@@ -13,6 +13,7 @@ playwright-report/
 .serena/
 memo.txt
 staging-plan.md
+staging-rollout-summary.md
 test-results/
 *.tsbuildinfo
 
