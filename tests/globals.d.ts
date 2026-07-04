@@ -25,9 +25,12 @@ interface Window {
       result?: { imported: string[]; skipped: string[]; failed: string[] }
       delayMs?: number
       reject?: boolean
+      existingMilestones?: import('../src/types').Milestone[]
+      milestoneResult?: { imported: number; skipped: number }
     }) => void
     importCalls: () => { date: string; content: string }[][]
     progressCalls: () => { done: number; total: number }[]
+    milestoneImportCalls: () => import('../src/types').Milestone[][]
   }
   settingsHarness: {
     render: (opts?: { autoSave?: boolean; modalOpen?: boolean; themeMode?: 'light' | 'dark' | 'system'; accentColor?: import('../src/hooks/useAccentColor').AccentColor; fontSize?: import('../src/hooks/useFontSize').FontSize; email?: string; milestones?: import('../src/types').Milestone[] }) => void

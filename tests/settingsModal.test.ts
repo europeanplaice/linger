@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import JSZip from 'jszip'
 import { baseUrl } from './baseUrl'
 
 async function loadHarness(page: import('@playwright/test').Page) {
@@ -549,11 +550,12 @@ test.describe('SettingsModal — about data storage', () => {
 
     const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
     const listItems = aboutSection.locator('.settings-about-list li')
-    await expect(listItems).toHaveCount(4)
+    await expect(listItems).toHaveCount(5)
     await expect(listItems.nth(0)).toContainText('linger_diary')
     await expect(listItems.nth(1)).toContainText('diary-YYYY-MM-DD.txt')
     await expect(listItems.nth(2)).toContainText('plain text body')
-    await expect(listItems.nth(3)).toContainText('drive.file')
+    await expect(listItems.nth(3)).toContainText('milestones.json')
+    await expect(listItems.nth(4)).toContainText('drive.file')
   })
 
   test('about section appears after export section', async ({ page }) => {
@@ -673,6 +675,65 @@ test.describe('SettingsModal — export confirm modal', () => {
       }
     })
     // This test is limited by harness design; skip for now
+  })
+})
+
+test.describe('SettingsModal — import milestones', () => {
+  async function uploadZip(page: import('@playwright/test').Page, files: Record<string, string>) {
+    const zip = new JSZip()
+    for (const [name, content] of Object.entries(files)) zip.file(name, content)
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' })
+    await page.locator('input[type=file]').setInputFiles({ name: 'import.zip', mimeType: 'application/zip', buffer })
+  }
+
+  test('imports new milestones and skips ones that already exist', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      modalOpen: true,
+      milestones: [{ id: 'existing-1', label: 'Birthday', date: '2020-01-01' }],
+    })
+
+    await uploadZip(page, {
+      'milestones.json': JSON.stringify([
+        { id: 'old-1', label: 'Birthday', date: '2020-01-01' },
+        { id: 'old-2', label: 'Anniversary', date: '2021-02-14' },
+      ]),
+    })
+    await expect(page.locator('.import-confirm-dialog')).toBeVisible()
+    await page.locator('.import-confirm-start').click()
+    await expect(page.locator('.import-confirm-desc')).toContainText('Milestones: 1 added, 1 skipped')
+    await page.locator('.import-confirm-start').click() // dismiss the "Done" summary dialog
+    await expect(page.locator('.import-confirm-dialog')).not.toBeVisible()
+
+    await expandMilestoneList(page)
+    await expect(page.locator('.settings-milestone-row', { hasText: 'Birthday' })).toHaveCount(1)
+    await expect(page.locator('.settings-milestone-row', { hasText: 'Anniversary' })).toHaveCount(1)
+    await expect(page.locator('.settings-milestone-row')).toHaveCount(2)
+  })
+
+  test('does not exceed the 50-milestone cap when importing', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, {
+      modalOpen: true,
+      milestones: Array.from({ length: 49 }, (_, i) => ({
+        id: `existing-${i + 1}`,
+        label: `Existing ${i + 1}`,
+        date: `2020-${String((i % 12) + 1).padStart(2, '0')}-01`,
+      })),
+    })
+
+    await uploadZip(page, {
+      'milestones.json': JSON.stringify([
+        { id: 'new-1', label: 'New one', date: '2021-01-01' },
+        { id: 'new-2', label: 'New two', date: '2021-02-01' },
+        { id: 'new-3', label: 'New three', date: '2021-03-01' },
+      ]),
+    })
+    await expect(page.locator('.import-confirm-dialog')).toBeVisible()
+    await page.locator('.import-confirm-start').click()
+    await expect(page.locator('.import-confirm-desc')).toContainText('Milestones: 1 added, 2 skipped')
+
+    await expect(page.getByText('50 / 50 registered')).toBeVisible()
   })
 })
 

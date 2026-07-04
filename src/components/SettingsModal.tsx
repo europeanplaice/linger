@@ -151,6 +151,29 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }
   }, [signOutConfirmOpen])
 
+  // Adds imported milestones that don't already exist (matched by date+label,
+  // since imported entries get a fresh id — see ImportButton). Mirrors the
+  // MAX_MILESTONES cap onMilestoneAdd itself enforces, so the reported
+  // "imported" count never claims more than actually got added.
+  const handleImportMilestones = useCallback((imported: Milestone[]): { imported: number; skipped: number } => {
+    const seenKeys = new Set(milestones.map(m => `${m.date}|${m.label}`))
+    let count = milestones.length
+    let addedCount = 0
+    let skipped = 0
+    for (const m of imported) {
+      const key = `${m.date}|${m.label}`
+      if (seenKeys.has(key) || count >= MAX_MILESTONES) {
+        skipped += 1
+        continue
+      }
+      seenKeys.add(key)
+      count += 1
+      onMilestoneAdd?.(m.label, m.date, m.emoji, m.recurring)
+      addedCount += 1
+    }
+    return { imported: addedCount, skipped }
+  }, [milestones, onMilestoneAdd])
+
   async function handleShareApp() {
     try {
       const result = await shareApp()
@@ -549,7 +572,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <span className="settings-item-label">{t.settings.importAllEntries}</span>
               <InfoTip text={t.settings.importHelp} />
             </span>
-            <ImportButton existingDates={dates} onImport={onImport} />
+            <ImportButton
+              existingDates={dates}
+              onImport={onImport}
+              existingMilestones={milestones}
+              onImportMilestones={onMilestoneAdd ? handleImportMilestones : undefined}
+            />
           </div>
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
