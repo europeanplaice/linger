@@ -83,7 +83,7 @@ describe('ensureFolder', () => {
   it('finds existing folder on Drive', async () => {
     mockFetch(driveJsonResponse({ files: [{ id: 'existing-folder' }] }))
     const put = vi.fn()
-    const env = { SESSIONS: { put } }
+    const env = { SESSIONS: { put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
@@ -98,11 +98,29 @@ describe('ensureFolder', () => {
       .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
       .mockResolvedValueOnce(driveJsonResponse({ id: 'new-folder' })))
     const put = vi.fn()
-    const env = { SESSIONS: { put } }
+    const env = { SESSIONS: { put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
     expect(result).toBe('new-folder')
+  })
+
+  it('uses a staging-specific folder name on the staging domain', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
+      .mockResolvedValueOnce(driveJsonResponse({ id: 'staging-folder' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = { SESSIONS: { put: vi.fn() }, SESSION_DOMAIN: 'https://staging.linger.europeanplaice.com' }
+    const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+
+    const result = await ensureFolder('token', 'sid', session, env as any)
+
+    expect(result).toBe('staging-folder')
+    const searchUrl: string = fetchMock.mock.calls[0][0]
+    const q = new URL(searchUrl).searchParams.get('q') ?? ''
+    expect(q).toContain("name='linger_diary_staging'")
+    const createBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(createBody.name).toBe('linger_diary_staging')
   })
 })
 
