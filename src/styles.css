@@ -2413,6 +2413,7 @@ dialog.settings-dialog::backdrop {
   .settings-item:has(.settings-font-picker),
   .settings-item:has(.settings-color-picker),
   .settings-item:has(.settings-export),
+  .settings-item:has(.settings-import),
   .settings-item:has(.settings-action-btn) {
     grid-template-columns: 1fr;
     gap: 0.5rem;
@@ -2434,6 +2435,7 @@ dialog.settings-dialog::backdrop {
   }
 
   .settings-item:has(.settings-export) .settings-export,
+  .settings-item:has(.settings-import) .settings-import,
   .settings-item:has(.settings-action-btn) .settings-action-btn {
     justify-self: end;
   }
@@ -2561,7 +2563,8 @@ dialog.settings-dialog::backdrop {
 }
 .settings-legal a:hover { text-decoration: underline; }
 .settings-action-btn,
-.settings-export .btn-export-modern {
+.settings-export .btn-export-modern,
+.settings-import .btn-import-modern {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2580,27 +2583,32 @@ dialog.settings-dialog::backdrop {
   transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 .settings-action-btn:hover,
-.settings-export .btn-export-modern:hover:not(:disabled) {
+.settings-export .btn-export-modern:hover:not(:disabled),
+.settings-import .btn-import-modern:hover:not(:disabled) {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
 .settings-action-btn:active,
-.settings-export .btn-export-modern:active:not(:disabled) {
+.settings-export .btn-export-modern:active:not(:disabled),
+.settings-import .btn-import-modern:active:not(:disabled) {
   transform: scale(0.97);
 }
-.settings-export .btn-export-modern:disabled {
+.settings-export .btn-export-modern:disabled,
+.settings-import .btn-import-modern:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.btn-export-icon {
+.btn-export-icon,
+.btn-import-icon {
   flex-shrink: 0;
 }
 .btn-export-progress {
   font-size: 0.78rem;
 }
 
-/* ── Export confirm dialog ── */
+/* ── Export / Import confirm dialogs ── */
 dialog.export-confirm-dialog,
+dialog.import-confirm-dialog,
 dialog.signout-confirm-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2613,20 +2621,24 @@ dialog.signout-confirm-dialog {
   margin: auto;
 }
 dialog.export-confirm-dialog::backdrop,
+dialog.import-confirm-dialog::backdrop,
 dialog.signout-confirm-dialog::backdrop {
   background: var(--overlay-heavy);
 }
 @starting-style {
   dialog.export-confirm-dialog::backdrop,
+  dialog.import-confirm-dialog::backdrop,
   dialog.signout-confirm-dialog::backdrop { background: transparent; }
 }
 .export-confirm-title,
+.import-confirm-title,
 .signout-confirm-title {
   font-size: 1rem;
   font-weight: 600;
   margin: 0;
 }
 .export-confirm-desc,
+.import-confirm-desc,
 .signout-confirm-desc {
   font-size: 0.85rem;
   color: var(--text-muted);
@@ -2752,6 +2764,7 @@ dialog.related-preview-dialog::backdrop {
   padding-left: 0.4rem;
 }
 .export-confirm-actions,
+.import-confirm-actions,
 .signout-confirm-actions {
   display: flex;
   justify-content: flex-end;
@@ -2759,6 +2772,7 @@ dialog.related-preview-dialog::backdrop {
   margin-top: 0.3rem;
 }
 .export-confirm-cancel,
+.import-confirm-cancel,
 .signout-confirm-cancel {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -2770,10 +2784,12 @@ dialog.related-preview-dialog::backdrop {
   cursor: pointer;
 }
 .export-confirm-cancel:hover,
+.import-confirm-cancel:hover,
 .signout-confirm-cancel:hover {
   background: var(--border);
 }
 .export-confirm-start,
+.import-confirm-start,
 .signout-confirm-start {
   background: var(--accent);
   border: none;
@@ -2785,6 +2801,7 @@ dialog.related-preview-dialog::backdrop {
   cursor: pointer;
 }
 .export-confirm-start:hover,
+.import-confirm-start:hover,
 .signout-confirm-start:hover {
   opacity: 0.9;
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useDiary, EntryConflictError } from '../src/hooks/useDiary'
 import type { LoadedDiaryEntry } from '../src/types'
+import type { ImportResult } from '../src/hooks/useDiary'
 
 type FetchCall = { url: string; method: string; body?: string }
 type QueuedResponse = { status: number; body: unknown; delayMs?: number }
@@ -32,10 +33,12 @@ type SaveFn = (date: string, content: string, baseVersion: string | null, force?
 type GetContentFn = (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
 type SearchFn = (query: string) => Promise<{ results: { date: string; snippet: string }[]; unindexedCount: number; totalCount: number }>
 type ExportAllFn = (onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+type ImportAllFn = (entries: { date: string; content: string }[], onProgress?: (done: number, total: number) => void) => Promise<ImportResult>
 let _save: SaveFn | null = null
 let _getContent: GetContentFn | null = null
 let _search: SearchFn | null = null
 let _exportAll: ExportAllFn | null = null
+let _importAll: ImportAllFn | null = null
 let _refreshEntries: (() => Promise<void>) | null = null
 let _retryPendingSave: (() => Promise<LoadedDiaryEntry | null>) | null = null
 let expiredCount = 0
@@ -55,6 +58,7 @@ function Harness() {
     _getContent = diary.getContent
     _search = diary.search
     _exportAll = diary.exportAll
+    _importAll = diary.importAll
     _refreshEntries = diary.refreshEntries
     _retryPendingSave = diary.retryPendingSave
   })
@@ -100,6 +104,16 @@ window.diaryHarness = {
     if (!_exportAll) throw new Error('harness not started')
     progressCalls = []
     return _exportAll((done, total) => progressCalls.push({ done, total }))
+  },
+  importAll: async (entries) => {
+    if (!_importAll) throw new Error('harness not started')
+    progressCalls = []
+    try {
+      const result = await _importAll(entries, (done, total) => progressCalls.push({ done, total }))
+      return { ok: true, result }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
   },
   refreshEntries: async () => {
     if (!_refreshEntries) throw new Error('harness not started')

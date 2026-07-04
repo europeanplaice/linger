@@ -684,6 +684,7 @@ export default function App() {
             onHolidayCountryChange={setHolidayCountry}
             dates={diary.dates}
             onExport={diary.exportAll}
+            onImport={diary.importAll}
             onClose={() => setSettingsOpen(false)}
             onSignOut={handleSignOut}
             email={email ?? undefined}

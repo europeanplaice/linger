@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Info } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ExportButton } from './ExportButton'
+import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
@@ -9,6 +10,7 @@ import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { AccentColor } from '../hooks/useAccentColor'
 import type { FontSize } from '../hooks/useFontSize'
+import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
 
@@ -94,6 +96,7 @@ interface SettingsModalProps {
   onHolidayCountryChange: (country: HolidayCountry) => void
   dates: string[]
   onExport: (onProgress: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
+  onImport: (entries: { date: string; content: string }[], onProgress: (done: number, total: number) => void) => Promise<ImportResult>
   onClose: () => void
   onSignOut: () => void
   email?: string
@@ -104,7 +107,7 @@ interface SettingsModalProps {
   onMilestoneToggleBadge?: (id: string) => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
@@ -540,6 +543,13 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <InfoTip text={t.settings.exportHelp} />
             </span>
             <ExportButton dates={dates} onExport={onExport} />
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.importAllEntries}</span>
+              <InfoTip text={t.settings.importHelp} />
+            </span>
+            <ImportButton existingDates={dates} onImport={onImport} />
           </div>
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
