@@ -14,7 +14,9 @@
     "preview": "wrangler pages dev dist",
     "lint": "eslint src tests",
     "audit": "npm audit --audit-level=high",
-    "cf:deploy": "wrangler pages deploy dist --project-name=linger"
+    "cf:deploy": "wrangler pages deploy dist --project-name=linger --branch=main",
+    "cf:deploy:staging": "wrangler pages deploy dist --project-name=linger-staging --branch=staging",
+    "cf:swap-oauth": "bash scripts/swap-oauth-client.sh"
   },
   "dependencies": {
     "@github/relative-time-element": "^5.0.0",

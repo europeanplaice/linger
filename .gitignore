@@ -12,5 +12,14 @@ playwright-report/
 .codex
 .serena/
 memo.txt
+staging-plan.md
 test-results/
 *.tsbuildinfo
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/terraform.tfstate.*.backup
+infra/terraform.tfvars
