@@ -47,11 +47,13 @@ export class LocalStorageAdapter implements StorageAdapter {
         return null;
       }
       return {
-        date,
-        content,
-        fileId: `local-${date}`,
-        version: '1',
-        modifiedTime: new Date().toISOString(),
+        entry: { date, content },
+        meta: {
+          id: `local-${date}`,
+          name: `diary-${date}.txt`,
+          version: '1',
+          modifiedTime: new Date().toISOString(),
+        },
       };
     } catch {
       return null;
@@ -62,7 +64,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     try {
       localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${date}`, content);
     } catch (e) {
-      throw new Error('Local storage limit exceeded');
+      throw new Error('Local storage limit exceeded', { cause: e });
     }
     const index = this.getIndex();
     if (!index.includes(date)) {
@@ -70,11 +72,13 @@ export class LocalStorageAdapter implements StorageAdapter {
       this.setIndex(index);
     }
     return {
-      date,
-      content,
-      fileId: `local-${date}`,
-      version: String(Date.now()),
-      modifiedTime: new Date().toISOString(),
+      entry: { date, content },
+      meta: {
+        id: `local-${date}`,
+        name: `diary-${date}.txt`,
+        version: String(Date.now()),
+        modifiedTime: new Date().toISOString(),
+      },
     };
   }
 

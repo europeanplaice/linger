@@ -64,6 +64,8 @@ export class SyncQueueManager {
         const success = await handler(item);
         if (success) {
           await this.dequeue(item.id);
+        } else {
+          break;
         }
       } catch {
         break;

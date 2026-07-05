@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { broadcastMessage, subscribeTabSync, TabSyncEvent } from '../../src/utils/tabSync';
 
 describe('tabSync utility', () => {
-  let mockPostMessage: ReturnType<typeof vi.fn>;
-  let mockClose: ReturnType<typeof vi.fn>;
+  let mockPostMessage: Mock<(data: any) => void>;
+  let mockClose: Mock<() => void>;
   let messageListeners: Array<(e: { data: TabSyncEvent }) => void> = [];
 
   beforeEach(() => {

@@ -635,7 +635,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               href={`https://drive.google.com/drive/search?q=${
                 window.location.hostname.includes('staging.')
                   ? 'linger_diary_staging'
-                  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                  : (window.location.hostname.includes('localhost') || window.location.hostname === '127.0.0.1')
                     ? 'linger_diary_dev'
                     : 'linger_diary'
               }${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { LocalStorageAdapter } from '../../src/lib/storageAdapter';
 
 describe('LocalStorageAdapter', () => {
@@ -16,11 +16,11 @@ describe('LocalStorageAdapter', () => {
   it('saves and reads entries from local storage', async () => {
     const saved = await adapter.saveEntry('2026-07-05', 'Today was a productive TDD day!');
 
-    expect(saved.content).toBe('Today was a productive TDD day!');
-    expect(saved.date).toBe('2026-07-05');
+    expect(saved.entry.content).toBe('Today was a productive TDD day!');
+    expect(saved.entry.date).toBe('2026-07-05');
 
     const loaded = await adapter.getEntry('2026-07-05');
-    expect(loaded?.content).toBe('Today was a productive TDD day!');
+    expect(loaded?.entry.content).toBe('Today was a productive TDD day!');
 
     const list = await adapter.listEntries();
     expect(list).toContain('2026-07-05');

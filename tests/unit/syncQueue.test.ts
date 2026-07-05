@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SyncQueueManager, QueueItem } from '../../src/lib/syncQueue';
+import { SyncQueueManager } from '../../src/lib/syncQueue';
 
 describe('SyncQueueManager', () => {
   let queueManager: SyncQueueManager;

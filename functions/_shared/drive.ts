@@ -73,11 +73,12 @@ async function driveWithRetry<T>(
   }
 }
 
-export function getFolderName(sessionDomain: string): string {
-  if (sessionDomain.includes('staging.')) {
+export function getFolderName(sessionDomain?: string): string {
+  const domain = sessionDomain ?? ''
+  if (domain.includes('staging.')) {
     return `${FOLDER_NAME}_staging`
   }
-  if (sessionDomain.includes('localhost') || sessionDomain.includes('127.0.0.1')) {
+  if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
     return `${FOLDER_NAME}_dev`
   }
   return FOLDER_NAME
