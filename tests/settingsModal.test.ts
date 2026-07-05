@@ -657,11 +657,12 @@ test.describe('SettingsModal — export confirm modal', () => {
     await expect(tree.locator('.export-format-zip')).toContainText('linger_diary_export_')
     await expect(tree.locator('.export-format-zip')).toContainText('.zip')
 
-    // One file line per entry date, named diary-YYYY-MM-DD.txt.
+    // index.html, then one file line per entry date, named diary-YYYY-MM-DD.txt.
     const files = tree.locator('.export-format-file')
-    await expect(files).toHaveCount(2)
-    await expect(files.nth(0)).toContainText('diary-2026-05-01.txt')
-    await expect(files.nth(1)).toContainText('diary-2026-05-02.txt')
+    await expect(files).toHaveCount(3)
+    await expect(files.nth(0)).toContainText('index.html')
+    await expect(files.nth(1)).toContainText('diary-2026-05-01.txt')
+    await expect(files.nth(2)).toContainText('diary-2026-05-02.txt')
   })
 
   test('export button is disabled when no dates', async ({ page }) => {

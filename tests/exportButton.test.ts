@@ -41,6 +41,7 @@ test.describe('ExportButton', () => {
     expect(Object.keys(zip.files).sort()).toEqual([
       'diary-2026-05-01.txt',
       'diary-2026-05-02.txt',
+      'index.html',
     ])
     expect(await zip.file('diary-2026-05-01.txt')?.async('string')).toBe('first entry')
     expect(await zip.file('diary-2026-05-02.txt')?.async('string')).toBe('second entry')
