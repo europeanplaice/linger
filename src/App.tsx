@@ -10,6 +10,7 @@ import { useHolidayCountry } from './hooks/useHolidayCountry'
 import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
 import { useDeployVersionCheck } from './hooks/useDeployVersionCheck'
 import { useOnline } from './hooks/useOnline'
+import { useTabSync } from './hooks/useTabSync'
 import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -202,6 +203,14 @@ export default function App() {
       setEntryRefreshSignal(v => v + 1)
     }
   }, []), selectedDate)
+
+  useTabSync(useCallback((event) => {
+    if (event.type === 'DIARY_UPDATED' || event.type === 'DIARY_REMOVED') {
+      diary.refreshEntries()
+        .then(() => setEntryRefreshSignal(v => v + 1))
+        .catch(() => {})
+    }
+  }, [diary.refreshEntries]))
 
   useEffect(() => {
     if (!isSignedIn) {

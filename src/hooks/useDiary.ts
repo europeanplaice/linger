@@ -3,6 +3,9 @@ import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache, getAllDrafts, putDraft, deleteDraft } from '../lib/diaryCache'
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
+import { LocalStorageAdapter } from '../lib/storageAdapter'
+import { SyncQueueManager } from '../lib/syncQueue'
+import { broadcastMessage } from '../utils/tabSync'
 import type { AuthStatus } from './useAuth'
 import { shiftDate } from '../utils/date'
 import { useLatestRef } from './useEvent'
@@ -141,6 +144,9 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const pendingSaveRef = useRef<PendingSave | null>(null)
   const onExpiredRef = useLatestRef(onExpired)
   const onEvictedRef = useLatestRef(onEntriesEvicted)
+
+  const storageAdapter = useMemo(() => new LocalStorageAdapter(), [])
+  const syncQueue = useMemo(() => new SyncQueueManager(), [])
 
   const updateCache = useCallback((updater: (prev: Map<string, EntryCache>) => Map<string, EntryCache>) => {
     setCache(prev => {
@@ -457,6 +463,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           return next
         })
         if (email !== null) putCached({ date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
+        storageAdapter.saveEntry(date, content).catch(() => {})
+        broadcastMessage({ type: 'DIARY_UPDATED', date })
         deleteDraft(date).catch(() => {})
         return { entry, meta }
       } catch (e) {
@@ -469,6 +477,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           // The save never reached Drive — keep the edit as a durable local
           // draft so it survives a reload and is synced once back online.
           putDraft({ date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
+          syncQueue.enqueue({
+            id: `save-${date}-${Date.now()}`,
+            type: 'SAVE',
+            date,
+            content,
+            baseVersion,
+            timestamp: Date.now(),
+          }).catch(() => {})
         }
         if (e instanceof SaveConflictError) {
           if (e.remote) {
@@ -493,7 +509,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     })
     saveQueueRef.current.set(date, run)
     return run
-  }, [isSignedIn, email, updateCache])
+  }, [isSignedIn, email, updateCache, storageAdapter, syncQueue])
 
   const selectedDateRef = useLatestRef(selectedDate)
 
@@ -507,6 +523,27 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     replayingDraftsRef.current = true
     try {
+      await syncQueue.process(async (item) => {
+        try {
+          if (item.type === 'SAVE' && item.content !== undefined) {
+            await save(item.date, item.content, item.baseVersion ?? null)
+          } else if (item.type === 'REMOVE') {
+            await deleteEntry(item.date)
+            updateCache(prev => {
+              const next = new Map(prev)
+              next.delete(item.date)
+              return next
+            })
+            storageAdapter.deleteEntry(item.date).catch(() => {})
+            deleteCached(item.date).catch(() => {})
+            broadcastMessage({ type: 'DIARY_REMOVED', date: item.date })
+          }
+          return true
+        } catch {
+          return false
+        }
+      }).catch(() => {})
+
       const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
       for (const draft of drafts) {
         if (draft.conflicted) continue
@@ -530,7 +567,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     } finally {
       replayingDraftsRef.current = false
     }
-  }, [isSignedIn, save])
+  }, [isSignedIn, save, syncQueue, storageAdapter, updateCache])
 
   const replayDraftsRef = useLatestRef(replayDrafts)
 
@@ -560,13 +597,23 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         next.delete(date)
         return next
       })
+      storageAdapter.deleteEntry(date).catch(() => {})
       deleteCached(date).catch(() => {})
       deleteDraft(date).catch(() => {})
+      broadcastMessage({ type: 'DIARY_REMOVED', date })
     } catch (e) {
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
+      if (isNetworkFailure(e)) {
+        syncQueue.enqueue({
+          id: `remove-${date}-${Date.now()}`,
+          type: 'REMOVE',
+          date,
+          timestamp: Date.now(),
+        }).catch(() => {})
+      }
       throw e
     }
-  }, [isSignedIn, updateCache])
+  }, [isSignedIn, updateCache, storageAdapter, syncQueue])
 
   const search = useCallback(async (query: string): Promise<SearchResult> => {
     if (!isSignedIn || !query.trim()) return { results: [], unindexedCount: 0, totalCount: 0 }

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useI18n } from '../i18n'
+import { exportPortableHtml } from '../utils/portableExport'
 
 interface ExportButtonProps {
   dates: string[]
@@ -40,6 +41,7 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
       for (const { date, content } of entries) {
         zip.file(`diary-${date}.txt`, content)
       }
+      zip.file('index.html', exportPortableHtml(entries))
 
       const blob = await zip.generateAsync({ type: 'blob' })
       const url = URL.createObjectURL(blob)
@@ -100,6 +102,7 @@ export function ExportButton({ dates, onExport }: ExportButtonProps) {
         <p className="export-format-note">{t.export.formatNote}</p>
         <pre className="export-format-tree" aria-hidden="true">
           <span className="export-format-zip">{zipName}</span>
+          <span className="export-format-file">├ index.html</span>
           {sampleDates.map((date, i) => (
             <span key={date} className="export-format-file">
               {i === sampleDates.length - 1 ? '└' : '├'} diary-{date}.txt
