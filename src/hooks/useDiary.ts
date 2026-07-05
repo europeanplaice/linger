@@ -476,15 +476,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (email !== null && !(e instanceof SaveConflictError) && isNetworkFailure(e)) {
           // The save never reached Drive — keep the edit as a durable local
           // draft so it survives a reload and is synced once back online.
+          // Replay is handled solely by the drafts loop below (it knows how
+          // to skip the date open in the editor and mark conflicts) — do not
+          // also enqueue this in syncQueue, which would replay it a second time.
           putDraft({ date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
-          syncQueue.enqueue({
-            id: `save-${date}-${Date.now()}`,
-            type: 'SAVE',
-            date,
-            content,
-            baseVersion,
-            timestamp: Date.now(),
-          }).catch(() => {})
         }
         if (e instanceof SaveConflictError) {
           if (e.remote) {
@@ -525,9 +520,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     try {
       await syncQueue.process(async (item) => {
         try {
-          if (item.type === 'SAVE' && item.content !== undefined) {
-            await save(item.date, item.content, item.baseVersion ?? null)
-          } else if (item.type === 'REMOVE') {
+          if (item.type === 'REMOVE') {
             await deleteEntry(item.date)
             updateCache(prev => {
               const next = new Map(prev)
