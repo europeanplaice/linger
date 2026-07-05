@@ -1,8 +1,10 @@
+import type { StorageMode } from '../types';
+
 export type TabSyncEvent =
   | { type: 'DIARY_UPDATED'; date: string }
   | { type: 'DIARY_REMOVED'; date: string }
   | { type: 'MILESTONES_UPDATED' }
-  | { type: 'STORAGE_MODE_CHANGED'; mode: 'drive' | 'local' };
+  | { type: 'STORAGE_MODE_CHANGED'; mode: StorageMode };
 
 const CHANNEL_NAME = 'linger_tab_sync';
 

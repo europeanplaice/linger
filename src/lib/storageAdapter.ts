@@ -1,7 +1,7 @@
-import type { LoadedDiaryEntry } from '../types';
+import type { LoadedDiaryEntry, StorageMode } from '../types';
 
 export interface StorageAdapter {
-  getMode(): 'drive' | 'local' | 'fs';
+  getMode(): StorageMode;
   listEntries(): Promise<string[]>;
   getEntry(date: string): Promise<LoadedDiaryEntry | null>;
   saveEntry(date: string, content: string): Promise<LoadedDiaryEntry>;
@@ -11,8 +11,14 @@ export interface StorageAdapter {
 const LOCAL_STORAGE_PREFIX = 'linger_local_entry_';
 const LOCAL_STORAGE_INDEX = 'linger_local_entries_index';
 
+interface StoredEntry {
+  content: string;
+  version: string;
+  modifiedTime: string;
+}
+
 export class LocalStorageAdapter implements StorageAdapter {
-  getMode(): 'drive' | 'local' | 'fs' {
+  getMode(): StorageMode {
     return 'local';
   }
 
@@ -36,33 +42,60 @@ export class LocalStorageAdapter implements StorageAdapter {
     }
   }
 
+  private readRecord(date: string): StoredEntry | null {
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${date}`);
+    } catch {
+      return null;
+    }
+    if (raw === null) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string') {
+        return {
+          content: parsed.content,
+          version: typeof parsed.version === 'string' ? parsed.version : '1',
+          modifiedTime: typeof parsed.modifiedTime === 'string' ? parsed.modifiedTime : new Date(0).toISOString(),
+        };
+      }
+    } catch {
+      // Fall through: value predates the JSON record format
+    }
+    return { content: raw, version: '1', modifiedTime: new Date(0).toISOString() };
+  }
+
+  private toLoadedEntry(date: string, record: StoredEntry): LoadedDiaryEntry {
+    return {
+      entry: { date, content: record.content },
+      meta: {
+        id: `local-${date}`,
+        name: `diary-${date}.txt`,
+        version: record.version,
+        modifiedTime: record.modifiedTime,
+      },
+    };
+  }
+
   async listEntries(): Promise<string[]> {
     return this.getIndex();
   }
 
   async getEntry(date: string): Promise<LoadedDiaryEntry | null> {
-    try {
-      const content = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${date}`);
-      if (content === null) {
-        return null;
-      }
-      return {
-        entry: { date, content },
-        meta: {
-          id: `local-${date}`,
-          name: `diary-${date}.txt`,
-          version: '1',
-          modifiedTime: new Date().toISOString(),
-        },
-      };
-    } catch {
-      return null;
-    }
+    const record = this.readRecord(date);
+    if (record === null) return null;
+    return this.toLoadedEntry(date, record);
   }
 
   async saveEntry(date: string, content: string): Promise<LoadedDiaryEntry> {
+    const previous = this.readRecord(date);
+    const record: StoredEntry = {
+      content,
+      version: String(previous ? Number(previous.version) + 1 : 1),
+      modifiedTime: new Date().toISOString(),
+    };
     try {
-      localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${date}`, content);
+      localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${date}`, JSON.stringify(record));
     } catch (e) {
       throw new Error('Local storage limit exceeded', { cause: e });
     }
@@ -71,15 +104,7 @@ export class LocalStorageAdapter implements StorageAdapter {
       index.push(date);
       this.setIndex(index);
     }
-    return {
-      entry: { date, content },
-      meta: {
-        id: `local-${date}`,
-        name: `diary-${date}.txt`,
-        version: String(Date.now()),
-        modifiedTime: new Date().toISOString(),
-      },
-    };
+    return this.toLoadedEntry(date, record);
   }
 
   async deleteEntry(date: string): Promise<void> {

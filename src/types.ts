@@ -27,6 +27,8 @@ export interface LoadedDiaryEntry {
   meta: DriveFileMeta
 }
 
+export type StorageMode = 'drive' | 'local' | 'fs'
+
 export interface DriveRevisionMeta {
   id: string
   modifiedTime: string

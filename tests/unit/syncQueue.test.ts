@@ -5,6 +5,7 @@ describe('SyncQueueManager', () => {
   let queueManager: SyncQueueManager;
 
   beforeEach(() => {
+    localStorage.clear();
     queueManager = new SyncQueueManager();
   });
 
@@ -60,5 +61,58 @@ describe('SyncQueueManager', () => {
     expect(handler).toHaveBeenCalledTimes(2);
     const remaining = await queueManager.getPending();
     expect(remaining).toHaveLength(0);
+  });
+
+  it('continues past a failing item, keeps it queued, and rethrows the error', async () => {
+    await queueManager.enqueue({
+      id: 'item-1',
+      type: 'SAVE',
+      date: '2026-07-05',
+      content: 'Fails forever',
+      timestamp: Date.now(),
+    });
+    await queueManager.enqueue({
+      id: 'item-2',
+      type: 'SAVE',
+      date: '2026-07-04',
+      content: 'Should still sync',
+      timestamp: Date.now(),
+    });
+
+    const handler = vi.fn(async (item: { id: string }) => {
+      if (item.id === 'item-1') throw new Error('sync failed');
+      return true;
+    });
+
+    await expect(queueManager.process(handler)).rejects.toThrow('Failed to sync some queued diary changes');
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    const remaining = await queueManager.getPending();
+    expect(remaining.map((i) => i.id)).toEqual(['item-1']);
+  });
+
+  it('stops processing when the handler returns false, keeping remaining items', async () => {
+    await queueManager.enqueue({
+      id: 'item-1',
+      type: 'SAVE',
+      date: '2026-07-05',
+      content: 'Content 1',
+      timestamp: Date.now(),
+    });
+    await queueManager.enqueue({
+      id: 'item-2',
+      type: 'SAVE',
+      date: '2026-07-04',
+      content: 'Content 2',
+      timestamp: Date.now(),
+    });
+
+    const handler = vi.fn().mockResolvedValue(false);
+
+    await queueManager.process(handler);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const remaining = await queueManager.getPending();
+    expect(remaining).toHaveLength(2);
   });
 });

@@ -3,6 +3,7 @@ import type { DriveRevisionMeta, LoadedDiaryEntry, DiaryEntry } from '../types'
 import { listRevisions, getRevisionContent } from '../api/driveRevisions'
 import { TokenExpiredError } from '../api/driveEntries'
 import { EntryConflictError } from './useDiary'
+import { escapeHtml } from '../utils/escapeHtml'
 
 const UNSAVED_ID = '__unsaved__'
 
@@ -79,11 +80,7 @@ const DEFAULT_MESSAGES = {
 }
 
 function escapeDiffHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
+  return escapeHtml(value).replace(/\n/g, '<br>')
 }
 
 async function buildDiffHtml(previous: string, current: string): Promise<string> {

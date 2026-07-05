@@ -1,7 +1,6 @@
 import type { Env, SessionData } from './session'
 import { saveSession, SESSION_TTL } from './session'
-
-const FOLDER_NAME = 'linger_diary'
+import { folderNameForOrigin } from '../../src/utils/folderName'
 const BASE = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 
@@ -74,14 +73,7 @@ async function driveWithRetry<T>(
 }
 
 export function getFolderName(sessionDomain?: string): string {
-  const domain = sessionDomain ?? ''
-  if (domain.includes('staging.')) {
-    return `${FOLDER_NAME}_staging`
-  }
-  if (domain.includes('localhost') || domain.includes('127.0.0.1')) {
-    return `${FOLDER_NAME}_dev`
-  }
-  return FOLDER_NAME
+  return folderNameForOrigin(sessionDomain)
 }
 
 export async function ensureFolder(token: string, sessionId: string, session: SessionData, env: Env): Promise<string> {

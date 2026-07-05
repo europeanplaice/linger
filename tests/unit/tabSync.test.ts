@@ -1,71 +1,101 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { broadcastMessage, subscribeTabSync, TabSyncEvent } from '../../src/utils/tabSync';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { broadcastMessage, subscribeTabSync } from '../../src/utils/tabSync';
 
-describe('tabSync utility', () => {
-  let mockPostMessage: Mock<(data: any) => void>;
-  let mockClose: Mock<() => void>;
-  let messageListeners: Array<(e: { data: TabSyncEvent }) => void> = [];
+// Spec-compliant mock: BroadcastChannel delivers a posted message to every
+// OTHER channel object with the same name — never back to the posting
+// instance itself. tabSync shares one singleton channel per tab, so a tab
+// never receives its own broadcasts.
+const channels = new Set<MockBroadcastChannel>();
 
-  beforeEach(() => {
-    messageListeners = [];
-    mockPostMessage = vi.fn((data) => {
-      // Simulate broadcasting to other channels in test
-      messageListeners.forEach((listener) => listener({ data }));
-    });
-    mockClose = vi.fn();
-
-    // Mock BroadcastChannel globally if needed or verify mock behavior
-    class MockBroadcastChannel {
-      name: string;
-      onmessage: ((e: { data: any }) => void) | null = null;
-      constructor(name: string) {
-        this.name = name;
-      }
-      postMessage(data: any) {
-        mockPostMessage(data);
-      }
-      addEventListener(type: string, listener: any) {
-        if (type === 'message') {
-          messageListeners.push(listener);
-        }
-      }
-      removeEventListener(type: string, listener: any) {
-        if (type === 'message') {
-          messageListeners = messageListeners.filter((l) => l !== listener);
-        }
-      }
-      close() {
-        mockClose();
+class MockBroadcastChannel {
+  listeners: Array<(e: { data: unknown }) => void> = [];
+  constructor(public name: string) {
+    channels.add(this);
+  }
+  postMessage(data: unknown) {
+    for (const ch of channels) {
+      if (ch !== this && ch.name === this.name) {
+        ch.listeners.forEach((listener) => listener({ data }));
       }
     }
+  }
+  addEventListener(type: string, listener: (e: { data: unknown }) => void) {
+    if (type === 'message') this.listeners.push(listener);
+  }
+  removeEventListener(type: string, listener: (e: { data: unknown }) => void) {
+    if (type === 'message') this.listeners = this.listeners.filter((l) => l !== listener);
+  }
+  close() {
+    channels.delete(this);
+  }
+}
 
+function openOtherTab(): MockBroadcastChannel {
+  return new (globalThis.BroadcastChannel as unknown as typeof MockBroadcastChannel)('linger_tab_sync');
+}
+
+describe('tabSync utility', () => {
+  beforeAll(() => {
     vi.stubGlobal('BroadcastChannel', MockBroadcastChannel);
   });
 
-  afterEach(() => {
+  afterAll(() => {
     vi.unstubAllGlobals();
   });
 
-  it('broadcasts DIARY_UPDATED message correctly', () => {
-    const handler = vi.fn();
-    const unsubscribe = subscribeTabSync(handler);
+  it('delivers broadcasts to other tabs but not back to the broadcasting tab', () => {
+    const sameTabHandler = vi.fn();
+    const unsubscribe = subscribeTabSync(sameTabHandler);
+    const otherTab = openOtherTab();
+    const otherTabListener = vi.fn();
+    otherTab.addEventListener('message', otherTabListener);
 
     broadcastMessage({ type: 'DIARY_UPDATED', date: '2026-07-05' });
 
-    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'DIARY_UPDATED', date: '2026-07-05' });
+    expect(otherTabListener).toHaveBeenCalledWith({ data: { type: 'DIARY_UPDATED', date: '2026-07-05' } });
+    expect(sameTabHandler).not.toHaveBeenCalled();
+
+    unsubscribe();
+    otherTab.close();
+  });
+
+  it('receives events broadcast from another tab', () => {
+    const handler = vi.fn();
+    const unsubscribe = subscribeTabSync(handler);
+    const otherTab = openOtherTab();
+
+    otherTab.postMessage({ type: 'DIARY_UPDATED', date: '2026-07-05' });
+
     expect(handler).toHaveBeenCalledWith({ type: 'DIARY_UPDATED', date: '2026-07-05' });
 
     unsubscribe();
+    otherTab.close();
+  });
+
+  it('ignores malformed messages', () => {
+    const handler = vi.fn();
+    const unsubscribe = subscribeTabSync(handler);
+    const otherTab = openOtherTab();
+
+    otherTab.postMessage('not-an-event');
+    otherTab.postMessage(null);
+
+    expect(handler).not.toHaveBeenCalled();
+
+    unsubscribe();
+    otherTab.close();
   });
 
   it('unsubscribes from tab sync messages correctly', () => {
     const handler = vi.fn();
     const unsubscribe = subscribeTabSync(handler);
+    const otherTab = openOtherTab();
 
     unsubscribe();
 
-    broadcastMessage({ type: 'MILESTONES_UPDATED' });
+    otherTab.postMessage({ type: 'MILESTONES_UPDATED' });
 
     expect(handler).not.toHaveBeenCalled();
+    otherTab.close();
   });
 });

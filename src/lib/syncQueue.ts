@@ -57,19 +57,28 @@ export class SyncQueueManager {
     return [...this.queue];
   }
 
+  // Handler contract: resolve true → item synced (dequeued), resolve false →
+  // stop processing (e.g. went offline again), throw → this item failed but
+  // the rest are independent dates, so keep going and rethrow at the end.
   async process(handler: (item: QueueItem) => Promise<boolean>): Promise<void> {
     const items = [...this.queue];
+    const errors: unknown[] = [];
+    let processed = false;
     for (const item of items) {
+      let success: boolean;
       try {
-        const success = await handler(item);
-        if (success) {
-          await this.dequeue(item.id);
-        } else {
-          break;
-        }
-      } catch {
-        break;
+        success = await handler(item);
+      } catch (e) {
+        errors.push(e);
+        continue;
       }
+      if (!success) break;
+      this.queue = this.queue.filter((i) => i.id !== item.id);
+      processed = true;
+    }
+    if (processed) this.save();
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to sync some queued diary changes');
     }
   }
 }

@@ -6,6 +6,7 @@ import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
+import { folderNameForHostname } from '../utils/folderName'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { AccentColor } from '../hooks/useAccentColor'
@@ -632,13 +633,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
             </ul>
             <a
-              href={`https://drive.google.com/drive/search?q=${
-                window.location.hostname.includes('staging.')
-                  ? 'linger_diary_staging'
-                  : (window.location.hostname.includes('localhost') || window.location.hostname === '127.0.0.1')
-                    ? 'linger_diary_dev'
-                    : 'linger_diary'
-              }${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
+              href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
               target="_blank"
               rel="noopener noreferrer"
               className="settings-drive-link"
