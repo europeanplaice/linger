@@ -632,7 +632,13 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
             </ul>
             <a
-              href={`https://drive.google.com/drive/search?q=${window.location.hostname.includes('staging.') ? 'linger_diary_staging' : 'linger_diary'}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
+              href={`https://drive.google.com/drive/search?q=${
+                window.location.hostname.includes('staging.')
+                  ? 'linger_diary_staging'
+                  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                    ? 'linger_diary_dev'
+                    : 'linger_diary'
+              }${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
               target="_blank"
               rel="noopener noreferrer"
               className="settings-drive-link"

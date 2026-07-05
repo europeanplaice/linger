@@ -122,6 +122,24 @@ describe('ensureFolder', () => {
     const createBody = JSON.parse(fetchMock.mock.calls[1][1].body)
     expect(createBody.name).toBe('linger_diary_staging')
   })
+
+  it('uses a dev-specific folder name on the local domain', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
+      .mockResolvedValueOnce(driveJsonResponse({ id: 'dev-folder' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = { SESSIONS: { put: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
+    const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+
+    const result = await ensureFolder('token', 'sid', session, env as any)
+
+    expect(result).toBe('dev-folder')
+    const searchUrl: string = fetchMock.mock.calls[0][0]
+    const q = new URL(searchUrl).searchParams.get('q') ?? ''
+    expect(q).toContain("name='linger_diary_dev'")
+    const createBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(createBody.name).toBe('linger_diary_dev')
+  })
 })
 
 describe('getEntryContent', () => {

@@ -73,10 +73,20 @@ async function driveWithRetry<T>(
   }
 }
 
+export function getFolderName(sessionDomain: string): string {
+  if (sessionDomain.includes('staging.')) {
+    return `${FOLDER_NAME}_staging`
+  }
+  if (sessionDomain.includes('localhost') || sessionDomain.includes('127.0.0.1')) {
+    return `${FOLDER_NAME}_dev`
+  }
+  return FOLDER_NAME
+}
+
 export async function ensureFolder(token: string, sessionId: string, session: SessionData, env: Env): Promise<string> {
   if (session.folder_id) return session.folder_id
 
-  const folderName = env.SESSION_DOMAIN.includes('staging.') ? `${FOLDER_NAME}_staging` : FOLDER_NAME
+  const folderName = getFolderName(env.SESSION_DOMAIN)
   const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`)
   const list = await driveWithRetry(
     () => fetch(`${BASE}/files?q=${q}&fields=files(id,name)`, { headers: driveHeaders(token) }),
