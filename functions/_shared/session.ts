@@ -18,6 +18,7 @@ export interface SessionData {
   renewed_at?: number // ms since epoch — tracks last KV write to throttle sliding TTL renewal
   email?: string
   changes_start_page_token?: string // Drive Changes API page token for incremental sync
+  client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
 }
 
 export interface Data extends Record<string, unknown> {
@@ -75,6 +76,9 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     ...session,
     access_token: tokens.access_token,
     expires_at: Date.now() + tokens.expires_in * 1000,
+    // A successful refresh proves refresh_token is valid for the current client —
+    // stamp it so legacy sessions (created before client_id was tracked) self-heal.
+    client_id: env.GOOGLE_CLIENT_ID,
   }
   return updated
 }
@@ -111,14 +115,18 @@ export async function addEmailSessionIndex(email: string, sessionId: string, env
   }
 }
 
-export async function getRefreshTokenForEmail(email: string, env: Env): Promise<string | null> {
+// Only reuses a refresh_token minted by the currently-live OAuth client — after a
+// Blue/Green client swap, a token from the retired client is rejected by Google
+// (invalid_grant) on every refresh, so blindly reusing the oldest surviving session
+// forces the user into a repeated fail-then-relogin loop instead of a single relogin.
+export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env): Promise<string | null> {
   const key = `email_sessions:${normalizeEmail(email)}`
   const raw = await env.SESSIONS.get(key)
   if (!raw) return null
   const ids = JSON.parse(raw) as string[]
   for (const id of ids) {
     const session = await getSession(id, env)
-    if (session?.refresh_token) return session.refresh_token
+    if (session?.refresh_token && session.client_id === clientId) return session.refresh_token
   }
   return null
 }
@@ -133,6 +141,16 @@ export async function removeEmailSessionIndex(email: string, sessionId: string, 
   } else {
     await env.SESSIONS.put(key, JSON.stringify(ids), { expirationTtl: SESSION_TTL })
   }
+}
+
+// Removes a single dead session (e.g. refresh failed) from both the session record
+// and the email index, so it stops being offered as a reuse candidate by
+// getRefreshTokenForEmail while it waits out its KV TTL.
+export async function invalidateSession(sessionId: string, email: string | undefined, env: Env): Promise<void> {
+  if (email) {
+    await removeEmailSessionIndex(email, sessionId, env)
+  }
+  await env.SESSIONS.delete(`session:${sessionId}`)
 }
 
 export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {

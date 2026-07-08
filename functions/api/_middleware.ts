@@ -4,6 +4,7 @@ import {
   getSession,
   getValidSession,
   saveSession,
+  invalidateSession,
   makeSessionCookie,
   SESSION_TTL,
   jsonResponse,
@@ -29,6 +30,9 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   try {
     validSession = await getValidSession(sessionId, session, context.env)
   } catch {
+    // Dead refresh_token (e.g. from a retired Blue/Green OAuth client) — drop the
+    // session so it stops being offered as a reuse candidate on the next sign-in.
+    await invalidateSession(sessionId, session.email, context.env)
     return jsonResponse({ error: 'Token refresh failed' }, 401)
   }
 

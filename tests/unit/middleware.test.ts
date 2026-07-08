@@ -80,20 +80,45 @@ describe('API auth middleware', () => {
     expect(ctx.next).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when token refresh fails', async () => {
+  it('returns 401 when token refresh fails, and invalidates the dead session', async () => {
     const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Unauthorized', { status: 401 })))
+    const del = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
         headers: { Cookie: 'linger_session=sid123' },
       }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn() } },
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
     })
 
     const response = await onRequest(ctx as any)
 
     expect(response.status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
+    expect(del).toHaveBeenCalledWith('session:sid123')
+  })
+
+  it('removes the invalidated session from its email index when refresh fails', async () => {
+    const expiredSession = makeSession({ expires_at: Date.now() - 60_000, email: 'user@example.com' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Unauthorized', { status: 401 })))
+    const del = vi.fn()
+    const put = vi.fn()
+    const get = vi.fn().mockImplementation((key: string) => {
+      if (key === 'session:sid123') return Promise.resolve(JSON.stringify(expiredSession))
+      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid123', 'sid456']))
+      return Promise.resolve(null)
+    })
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get, put, delete: del } },
+    })
+
+    await onRequest(ctx as any)
+
+    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid456']), { expirationTtl: 60 * 60 * 24 * 30 })
+    expect(del).toHaveBeenCalledWith('session:sid123')
   })
 
   it('calls next() with sessionId and accessToken in data', async () => {

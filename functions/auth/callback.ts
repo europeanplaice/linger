@@ -58,7 +58,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // sign-ins (no prompt=consent), reuse the one stored from a previous session.
   let refreshToken = tokens.refresh_token
   if (!refreshToken && email) {
-    refreshToken = (await getRefreshTokenForEmail(email, env)) ?? undefined
+    refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env)) ?? undefined
   }
   if (!refreshToken) {
     return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 502)
@@ -69,6 +69,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     refresh_token: refreshToken,
     access_token: tokens.access_token,
     expires_at: Date.now() + tokens.expires_in * 1000,
+    client_id: env.GOOGLE_CLIENT_ID,
     ...(email ? { email } : {}),
   }
   await saveSession(sessionId, session, env)
