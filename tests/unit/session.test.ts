@@ -4,6 +4,7 @@ import {
   makeSessionCookie, clearSessionCookie, jsonResponse,
   addEmailSessionIndex, removeEmailSessionIndex, deleteAllSessionsForEmail,
   getRefreshTokenForEmail, invalidateSession,
+  RefreshTokenInvalidError,
   SESSION_TTL,
 } from '../../functions/_shared/session'
 
@@ -156,13 +157,23 @@ describe('getValidAccessToken', () => {
     expect(stored.client_id).toBe('id')
   })
 
-  it('throws when token refresh fails', async () => {
+  it('throws a generic error (not RefreshTokenInvalidError) on a transient failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('Unauthorized', { status: 401 })
+      new Response('Server Error', { status: 503 })
     ))
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
-    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toThrow('Token refresh failed: 401')
+    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toThrow('Token refresh failed: 503')
+    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.not.toBeInstanceOf(RefreshTokenInvalidError)
+  })
+
+  it('throws RefreshTokenInvalidError on a dead refresh_token (400 invalid_grant)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
+    ))
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toBeInstanceOf(RefreshTokenInvalidError)
   })
 })
 

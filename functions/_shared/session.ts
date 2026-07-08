@@ -54,6 +54,11 @@ export async function saveSession(sessionId: string, session: SessionData, env: 
   await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(session), { expirationTtl: SESSION_TTL })
 }
 
+// Thrown only when Google says the refresh_token itself is dead (400 invalid_grant —
+// e.g. revoked, or minted by a since-retired Blue/Green OAuth client). Distinct from
+// transient failures (429/5xx) so callers only tear down the session in this case.
+export class RefreshTokenInvalidError extends Error {}
+
 export async function getValidSession(_sessionId: string, session: SessionData, env: Env): Promise<SessionData> {
   if (session.expires_at > Date.now() + 60_000) {
     return session
@@ -69,6 +74,11 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     }).toString(),
   })
   if (!resp.ok) {
+    // Google returns 400 invalid_grant for a dead/revoked/wrong-client refresh_token.
+    // Anything else (429, 5xx) is transient — don't destroy an otherwise-valid session over it.
+    if (resp.status === 400) {
+      throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status}`)
+    }
     throw new Error(`Token refresh failed: ${resp.status}`)
   }
   const tokens = await resp.json() as { access_token: string; expires_in: number }

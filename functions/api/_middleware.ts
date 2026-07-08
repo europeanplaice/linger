@@ -9,6 +9,7 @@ import {
   SESSION_TTL,
   jsonResponse,
   validateMutationOrigin,
+  RefreshTokenInvalidError,
 } from '../_shared/session'
 
 // KV writes are capped at 1000/day on the free tier. Writing on every request
@@ -29,10 +30,13 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   let validSession = session
   try {
     validSession = await getValidSession(sessionId, session, context.env)
-  } catch {
-    // Dead refresh_token (e.g. from a retired Blue/Green OAuth client) — drop the
-    // session so it stops being offered as a reuse candidate on the next sign-in.
-    await invalidateSession(sessionId, session.email, context.env)
+  } catch (err) {
+    if (err instanceof RefreshTokenInvalidError) {
+      // Dead refresh_token (e.g. from a retired Blue/Green OAuth client) — drop the
+      // session so it stops being offered as a reuse candidate on the next sign-in.
+      // Best-effort: a KV hiccup here shouldn't turn a clean 401 into a 500.
+      await invalidateSession(sessionId, session.email, context.env).catch(() => {})
+    }
     return jsonResponse({ error: 'Token refresh failed' }, 401)
   }
 
