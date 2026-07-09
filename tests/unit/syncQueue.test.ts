@@ -91,6 +91,22 @@ describe('SyncQueueManager', () => {
     expect(remaining.map((i) => i.id)).toEqual(['item-1']);
   });
 
+  it('clear drops all queued items and the persisted record', async () => {
+    await queueManager.enqueue({
+      id: 'item-1',
+      type: 'REMOVE',
+      date: '2026-07-05',
+      timestamp: Date.now(),
+    });
+
+    await queueManager.clear();
+
+    expect(await queueManager.getPending()).toHaveLength(0);
+    expect(localStorage.getItem('linger_pending_sync_queue')).toBeNull();
+    // A fresh manager (e.g. after reload) must not resurrect the items.
+    expect(await new SyncQueueManager().getPending()).toHaveLength(0);
+  });
+
   it('stops processing when the handler returns false, keeping remaining items', async () => {
     await queueManager.enqueue({
       id: 'item-1',

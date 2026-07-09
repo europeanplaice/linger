@@ -57,6 +57,18 @@ export class SyncQueueManager {
     return [...this.queue];
   }
 
+  // Drops every queued item. Called on sign-out and account switch — a
+  // REMOVE queued by one account must never replay against another one.
+  async clear(): Promise<void> {
+    this.queue = [];
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Storage restriction error
+    }
+  }
+
   // Handler contract: resolve true → item synced (dequeued), resolve false →
   // stop processing (e.g. went offline again), throw → this item failed but
   // the rest are independent dates, so keep going and rethrow at the end.

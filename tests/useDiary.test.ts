@@ -642,9 +642,18 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     const firstUser = await page.evaluate(() => localStorage.getItem('linger_session_user'))
     expect(firstUser).toBe('user@example.com')
 
-    // Session 2: reload page (IDB preserved), sign in as a different account
+    // The save also mirrored the entry into localStorage
+    const mirrored = await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))
+    expect(mirrored).toContain('secret diary')
+
+    // Session 2: reload page (IDB preserved), sign in as a different account.
+    // A REMOVE left queued by the previous account must not survive either —
+    // it would replay against the new account's Drive.
     await reloadHarness(page)
     await page.evaluate(async () => {
+      localStorage.setItem('linger_pending_sync_queue', JSON.stringify([
+        { id: 'remove-2026-05-01-1', type: 'REMOVE', date: '2026-05-01', timestamp: Date.now() },
+      ]))
       window.diaryHarness.setEmail('other@example.com')
       window.diaryHarness.q({ status: 200, body: { files: [] } })
       window.diaryHarness.start()
@@ -655,6 +664,9 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '')
     const stored = await page.evaluate(() => localStorage.getItem('linger_session_user'))
     expect(stored).toBe('other@example.com')
+    // The local entry mirror and offline queue were wiped with the cache
+    expect(await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('linger_pending_sync_queue'))).toBeNull()
   })
 
   test('does not hydrate IDB when the signed-in account email is unknown', async ({ page }) => {

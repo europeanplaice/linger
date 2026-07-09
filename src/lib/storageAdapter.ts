@@ -6,6 +6,9 @@ export interface StorageAdapter {
   getEntry(date: string): Promise<LoadedDiaryEntry | null>;
   saveEntry(date: string, content: string): Promise<LoadedDiaryEntry>;
   deleteEntry(date: string): Promise<void>;
+  // Wipes every locally persisted entry. Called on sign-out and account
+  // switch so one account's diary text never lingers for the next one.
+  clearAll(): Promise<void>;
 }
 
 const LOCAL_STORAGE_PREFIX = 'linger_local_entry_';
@@ -115,5 +118,21 @@ export class LocalStorageAdapter implements StorageAdapter {
     }
     const index = this.getIndex().filter((d) => d !== date);
     this.setIndex(index);
+  }
+
+  async clearAll(): Promise<void> {
+    try {
+      // Scan actual keys rather than trusting the index — a failed index
+      // write must not leave orphaned entry records behind.
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key !== null && key.startsWith(LOCAL_STORAGE_PREFIX)) doomed.push(key);
+      }
+      for (const key of doomed) localStorage.removeItem(key);
+      localStorage.removeItem(LOCAL_STORAGE_INDEX);
+    } catch {
+      // Ignore
+    }
   }
 }

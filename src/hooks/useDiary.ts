@@ -148,6 +148,17 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const storageAdapter = useMemo(() => new LocalStorageAdapter(), [])
   const syncQueue = useMemo(() => new SyncQueueManager(), [])
 
+  // Wipes everything persisted for the current account: the IDB entry/draft
+  // cache, the local entry mirror, and the offline sync queue. Anything left
+  // behind would leak into (or replay against) the next signed-in account.
+  const clearLocalData = useCallback(async (): Promise<void> => {
+    await Promise.all([
+      clearCache().catch(() => {}),
+      storageAdapter.clearAll().catch(() => {}),
+      syncQueue.clear().catch(() => {}),
+    ])
+  }, [storageAdapter, syncQueue])
+
   const updateCache = useCallback((updater: (prev: Map<string, EntryCache>) => Map<string, EntryCache>) => {
     setCache(prev => {
       const next = updater(prev)
@@ -322,7 +333,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       // Only wipe the persistent cache once the session is known to be gone;
       // while auth is still restoring ('initializing') the cache must survive
       // so the IDB preload below has data after a reload.
-      if (authStatus === 'signedOut') clearCache().catch(() => {})
+      if (authStatus === 'signedOut') clearLocalData().catch(() => {})
       return
     }
     setFreshListLoaded(false)
@@ -330,15 +341,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     setError(null)
     ;(async () => {
       try {
-        // If the signed-in account differs from the last known account, evict IDB
-        // before hydrating to prevent one user's diary from briefly appearing to another.
+        // If the signed-in account differs from the last known account, evict all
+        // local data (IDB cache/drafts, entry mirror, offline queue) before
+        // hydrating to prevent one user's diary from briefly appearing to another.
         const canUsePersistentCache = email !== null
         const storedUser = localStorage.getItem('linger_session_user')
         if (!canUsePersistentCache) {
-          await clearCache().catch(() => {})
+          await clearLocalData()
           localStorage.removeItem('linger_session_user')
         } else if (storedUser !== email) {
-          await clearCache().catch(() => {})
+          await clearLocalData()
           localStorage.setItem('linger_session_user', email)
         }
 
@@ -374,7 +386,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         setLoading(false)
       }
     })()
-  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent])
+  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData])
 
   const refreshEntries = useCallback(async (): Promise<void> => {
     if (!isSignedIn) return

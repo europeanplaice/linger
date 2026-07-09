@@ -57,4 +57,20 @@ describe('LocalStorageAdapter', () => {
     const list = await adapter.listEntries();
     expect(list).not.toContain('2026-07-05');
   });
+
+  it('clearAll wipes every entry, orphaned records, and the index, sparing unrelated keys', async () => {
+    await adapter.saveEntry('2026-07-05', 'Entry one');
+    await adapter.saveEntry('2026-07-06', 'Entry two');
+    // Orphaned record missing from the index (e.g. a failed index write).
+    localStorage.setItem('linger_local_entry_2026-01-01', 'Orphan');
+    localStorage.setItem('linger_theme', 'dark');
+
+    await adapter.clearAll();
+
+    expect(await adapter.listEntries()).toHaveLength(0);
+    expect(await adapter.getEntry('2026-07-05')).toBeNull();
+    expect(localStorage.getItem('linger_local_entry_2026-01-01')).toBeNull();
+    expect(localStorage.getItem('linger_local_entries_index')).toBeNull();
+    expect(localStorage.getItem('linger_theme')).toBe('dark');
+  });
 });
