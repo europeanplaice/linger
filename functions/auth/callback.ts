@@ -34,7 +34,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   })
 
   if (!tokenResp.ok) {
-    return jsonResponse({ error: 'Authentication failed. Please try again.' }, 502)
+    // Not 502/503/504 — Cloudflare's edge silently replaces those status codes with
+    // its own branded error page, discarding this JSON body entirely.
+    return jsonResponse({ error: 'Authentication failed. Please try again.' }, 500)
   }
 
   const tokens = await tokenResp.json() as {
@@ -61,7 +63,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env)) ?? undefined
   }
   if (!refreshToken) {
-    return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 502)
+    // See note above — avoid 502/503/504, Cloudflare intercepts them at the edge.
+    return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 500)
   }
 
   const sessionId = crypto.randomUUID()

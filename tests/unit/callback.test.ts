@@ -68,20 +68,20 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(body).toEqual({ error: 'Invalid or expired state' })
   })
 
-  it('returns 502 when token exchange fails without exposing upstream error', async () => {
+  it('returns 500 when token exchange fails without exposing upstream error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('secret internal error from Google', { status: 400 })))
     const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
     const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
 
     const response = await onRequestGet({ request, env } as any)
 
-    expect(response.status).toBe(502)
+    expect(response.status).toBe(500)
     const body = await response.json() as Record<string, unknown>
     expect(body.error).not.toContain('secret internal error from Google')
     expect(typeof body.error).toBe('string')
   })
 
-  it('returns 502 when no refresh_token is received', async () => {
+  it('returns 500 when no refresh_token is received', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
         status: 200,
@@ -93,7 +93,7 @@ describe('onRequestGet (OAuth callback)', () => {
 
     const response = await onRequestGet({ request, env } as any)
 
-    expect(response.status).toBe(502)
+    expect(response.status).toBe(500)
     const body = await response.json() as Record<string, unknown>
     expect(body.error).toContain('No refresh token')
   })
@@ -141,7 +141,7 @@ describe('onRequestGet (OAuth callback)', () => {
 
     const response = await onRequestGet({ request, env } as any)
 
-    expect(response.status).toBe(502)
+    expect(response.status).toBe(500)
     const body = await response.json() as Record<string, unknown>
     expect(body.error).toContain('No refresh token')
   })

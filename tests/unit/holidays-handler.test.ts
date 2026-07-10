@@ -86,9 +86,9 @@ describe('holidays handler — fetch + cache', () => {
     expect(await res.json()).toEqual({ holidays: {} })
   })
 
-  it('returns 502 when the upstream errors', async () => {
+  it('returns 500 when the upstream errors', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })))
     const res = await onHolidays(makeContext({ country: 'JP', year: '2026' }) as any)
-    expect(res.status).toBe(502)
+    expect(res.status).toBe(500)
   })
 })

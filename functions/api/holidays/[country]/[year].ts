@@ -69,7 +69,9 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     const res = await fetchWithRetry(`https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`)
     // 404 = country/year not covered; treat as "no holidays" and cache it.
     if (res.status !== 404) {
-      if (!res.ok) return jsonResponse({ error: 'Upstream error' }, 502)
+      // Not 502 — Cloudflare's edge silently replaces 502/503/504 with its own
+      // branded error page, discarding this JSON body entirely.
+      if (!res.ok) return jsonResponse({ error: 'Upstream error' }, 500)
       const data = await res.json() as NagerHoliday[]
       for (const h of data) {
         // Skip regional-only holidays so the calendar shows nationwide days only.
@@ -80,7 +82,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     }
   } catch (e) {
     console.error('holidays.ts: upstream fetch failed', e)
-    return jsonResponse({ error: 'Upstream error' }, 502)
+    return jsonResponse({ error: 'Upstream error' }, 500)
   }
 
   try {
