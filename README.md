@@ -16,12 +16,14 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Delete entries with an explicit confirmation step
 - Detect cross-device edit conflicts and choose whether to load latest, keep local edits, or overwrite
 - View and restore past revisions of an entry
-- Export all entries as a ZIP of plain-text files
-- Settings modal for theme (light / dark / system), font family, font size, auto-save, language (English / Japanese), export, and sharing the app URL
+- Export all entries as a ZIP of plain-text files, plus a self-contained, searchable `index.html` viewer for offline browsing
+- Import entries and milestones from a ZIP — either the app's own export or a folder downloaded directly from Drive
+- Settings modal for theme (light / dark / system), accent color, font family, font size, auto-save, language (English / Japanese), export/import, and sharing the app URL
 - Data stays in your Google Drive (`linger_diary/` folder), one plain-text file per day
-- Warns before reload or date changes when there are unsaved edits, and retries offline saves when the connection returns
+- Warns before reload or date changes when there are unsaved edits; unsynced edits are kept as local drafts and offline deletes are queued, both retried automatically once the connection returns
+- Multiple tabs of the app stay in sync with each other via `BroadcastChannel`
 - Works on mobile with a drawer sidebar, Android back-button support, and keyboard-aware layout
-- Milestone management with badges on the calendar (up to 10 milestones, 3 with display badges, fully customizable emoji)
+- Milestone management with badges on the calendar (up to 50 milestones, 5 with display badges, fully customizable emoji)
 - Public holiday overlay on the calendar, customizable by country
 - Touch swipe navigation between days on mobile
 - Share individual entries or share the app URL
@@ -44,6 +46,8 @@ Uses **OAuth 2.0 Authorization Code Flow with PKCE** via Cloudflare Pages Functi
 Drive scope: `drive.file` — non-sensitive, only accesses files this app created.
 The login flow also requests `openid email` so the app can identify the signed-in account and clear local cache on account switches.
 
+`/auth/risc` receives Google [RISC](https://developers.google.com/identity/protocols/risc) Security Event Tokens (session/token revocation, account disabled, credential change) and revokes all Cloudflare KV sessions for the affected email server-side.
+
 ### Drive storage
 All Drive API v3 calls are made server-side by Cloudflare Pages Functions at `/api/drive/…`.
 The browser never holds an OAuth token. Diary entries are stored as individual plain-text files (MIME `text/plain`):
@@ -55,6 +59,9 @@ The browser never holds an OAuth token. Diary entries are stored as individual p
 ```
 
 New entries are written as `.txt`. Legacy `.md` files remain readable and are renamed to `.txt` by a one-time migration on first sign-in.
+Milestones are read from `milestones.json`, falling back to the legacy `anniversaries.json` name if present.
+
+The folder name is environment-dependent: `linger_diary` in production, `linger_diary_staging` on the `staging.*` host, and `linger_diary_dev` for local dev hostnames (`localhost`/`127.0.0.1`) — see `src/utils/folderName.ts`. This keeps dev/staging/production diary data fully separated even when signed in with the same Google account.
 
 Current `.txt` files contain only the entry body:
 
@@ -92,10 +99,16 @@ The browser stores only non-sensitive preferences and small UI hints in `localSt
 - `linger_ext_migrated` — one-time flag set after the `.md` → `.txt` file-extension migration runs
 - `linger_serendipity_seen` — recently surfaced Recollection Journey dates, stored as dates only to avoid immediate repeats
 - `gp-save-timings` — recent save durations (up to 10 samples) used to animate the save progress bar
+- `linger_local_entry_<date>` / `linger_local_entries_index` — a local mirror of saved entry content, written by `LocalStorageAdapter` (`src/lib/storageAdapter.ts`) on every save/delete
+- `linger_pending_sync_queue` — durable queue of offline deletes awaiting replay against Drive, managed by `SyncQueueManager` (`src/lib/syncQueue.ts`)
 
-Diary metadata, recently opened entry content, and snippets are cached in IndexedDB (`linger_diary_cache`) so the sidebar and recent entries can render quickly before the Drive network round trip completes. The cache is scoped to the last signed-in email and is cleared on sign-out or account switch.
+Both the local entry mirror and the sync queue are wiped on sign-out and account switch (`src/hooks/useDiary.ts`), same as the IndexedDB cache below.
 
-No OAuth tokens are exposed to the browser or written to browser storage. Diary content is never written to `localStorage`.
+Diary metadata, recently opened entry content, and snippets are cached in IndexedDB (`linger_diary_cache`) so the sidebar and recent entries can render quickly before the Drive network round trip completes. The same database also holds drafts — unsaved edits that failed to reach Drive (offline or a dropped request) — which are replayed automatically once the connection returns or the tab regains focus. The cache is scoped to the last signed-in email and is cleared on sign-out or account switch.
+
+Open tabs are kept in sync with each other via a `BroadcastChannel` (`linger_tab_sync`, `src/utils/tabSync.ts`): saving, deleting, or editing milestones in one tab refreshes the others.
+
+No OAuth tokens are exposed to the browser or written to browser storage. Diary content is written to `localStorage` only as the local mirror described above (Drive remains the source of truth); it is cleared on sign-out and account switch.
 
 ### Components
 - `Landing` — signed-out landing page with marketing content, privacy info, and the `LoginScreen` sign-in card
@@ -107,10 +120,11 @@ No OAuth tokens are exposed to the browser or written to browser storage. Diary 
 - `EmojiPicker` — full Unicode emoji picker (grouped by category) used in milestone settings
 - `SearchBar` — full-text search via Drive API; fetches and caches entry content for snippet extraction
 - `RecollectionJourney` — modal dialog surfacing "on this day" past entries and random serendipity entries
-- `SettingsModal` — language, theme, accent color, font family/size, auto-save, holiday calendar, milestone management, export, app sharing, keyboard shortcuts, data-storage links, and legal links
+- `SettingsModal` — language, theme, accent color, font family/size, auto-save, holiday calendar, milestone management, export/import, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
-- `ExportButton` — ZIP export UI used inside `SettingsModal`
+- `ExportButton` — ZIP export UI used inside `SettingsModal`; bundles plain-text entries plus a portable `index.html` viewer
+- `ImportButton` — ZIP import UI used inside `SettingsModal`; reads the app's own export format or a raw `linger_diary` folder downloaded from Drive, including milestones
 - `MilestoneFormModal` — add/edit milestone form modal; used inside `SettingsModal` and `EntryEditor`
 - `SettingsSelect` — reusable styled select used inside `SettingsModal`
 - `ErrorBoundary` — catches render errors and displays a fallback UI
@@ -122,6 +136,8 @@ The app uses **Cloudflare Web Analytics** — cookie-free, no individual trackin
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
 The workflow runs lint, unit tests, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
+
+Pushes to `main` deploy to the production Pages project (`linger`); pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com`, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/`.
 
 `vite.config.ts` uses `base: '/'` (correct for a custom domain).
 

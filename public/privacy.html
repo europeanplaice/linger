@@ -32,7 +32,7 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: June 1, 2026</p>
+  <p class="meta">Last updated: July 12, 2026</p>
 
   <h2>1. Overview</h2>
   <p>
@@ -75,24 +75,44 @@
   </p>
 
   <h2>5. Local Storage</h2>
-  <p>This app uses <code>localStorage</code> to persist non-sensitive preferences only:</p>
+  <p>This app uses <code>localStorage</code> to persist preferences and small UI hints:</p>
   <ul>
     <li><code>linger_autosave</code> — whether auto-save is enabled</li>
     <li><code>linger_theme</code> — theme preference (<code>light</code> / <code>dark</code> / <code>system</code>)</li>
+    <li><code>linger_accent</code> — accent color preference</li>
     <li><code>linger_font</code> — font preference</li>
+    <li><code>linger_fontsize</code> — font size preference</li>
     <li><code>linger_language</code> — language preference (<code>en</code> / <code>ja</code>)</li>
+    <li><code>linger_holiday_country</code> — holiday calendar country selection</li>
+    <li><code>linger_milestones</code> — a local copy of your milestone list, kept in sync with Drive</li>
+    <li><code>linger_milestones_pending</code> — a flag indicating a milestone change is waiting to sync to Drive</li>
     <li><code>linger_had_session</code> — a <code>true</code>/<code>false</code> flag indicating whether the user was previously signed in, used to show a "continue with your previous session" prompt on the login screen</li>
     <li><code>linger_session_user</code> — the email address of the last signed-in user, used to detect account switches and clear locally cached diary data before another user signs in</li>
-    <li><code>linger_fontsize</code> — font size preference</li>
+    <li><code>linger_ext_migrated</code> — a one-time flag set after a legacy file-format migration runs</li>
+    <li><code>linger_serendipity_seen</code> — dates of past entries recently surfaced by the "Recollection Journey" feature, kept only to avoid showing the same ones again right away</li>
     <li><code>gp-save-timings</code> — the last 10 save durations (in milliseconds), used to animate the save progress bar; contains no diary content</li>
   </ul>
-  <p>None of these contain diary content or authentication tokens.</p>
+  <p>None of the keys above contain diary content or authentication tokens.</p>
+  <p>
+    Two additional keys do store your diary content locally, purely as an offline safety net:
+  </p>
+  <ul>
+    <li><code>linger_local_entry_&lt;date&gt;</code> / <code>linger_local_entries_index</code> — a local copy of each entry's plain text, written every time you save or delete, so a copy survives on this device even when Drive can't be reached</li>
+    <li><code>linger_pending_sync_queue</code> — a queue of deletions made while offline, replayed against Google Drive automatically once you're back online</li>
+  </ul>
+  <p>
+    Both are stored only on your device, are never transmitted anywhere except back to your own Google Drive
+    once syncing resumes, and are cleared automatically when you sign out or switch accounts.
+  </p>
 
   <h2>5a. IndexedDB Cache</h2>
   <p>
     To enable instant startup, this app caches diary entry metadata and content in your browser's
-    IndexedDB under the key <code>linger_diary_cache</code>. This data is stored locally on your
-    device and is never transmitted anywhere. It is cleared automatically when you sign out.
+    IndexedDB under the key <code>linger_diary_cache</code>. The same database also holds drafts of
+    edits that haven't yet been saved to Drive (for example while offline), so unsaved work survives
+    a reload and is synced automatically once saving succeeds. This data is stored locally on your
+    device and is never transmitted anywhere except back to your own Google Drive when syncing.
+    It is cleared automatically when you sign out or switch accounts.
     You can also clear it manually via your browser's developer tools or by clearing site data.
   </p>
 
