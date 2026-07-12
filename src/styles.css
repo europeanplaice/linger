@@ -3782,6 +3782,100 @@ dialog.session-expired-dialog::backdrop {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   transform: translateY(-1px);
 }
+.editor-idea {
+  padding: 0.5rem 0 0.15rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+}
+.editor-idea-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 20px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.editor-idea-trigger:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  transform: translateY(-1px);
+}
+.editor-idea-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.editor-idea-text {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+.editor-idea-excerpt {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  font-style: italic;
+}
+.editor-idea-skeleton {
+  height: 0.85rem;
+  width: 65%;
+  border-radius: 999px;
+  background-color: var(--skeleton-row-bg);
+  background-image: linear-gradient(90deg, transparent, var(--skeleton-overlay), transparent);
+  background-size: 220% 100%;
+  animation: entry-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.editor-idea-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.editor-idea-action {
+  font-size: 0.76rem;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 20px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.editor-idea-action:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.editor-idea-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  transition: background-color 0.15s, color 0.15s;
+}
+.editor-idea-icon-btn:hover {
+  background: var(--selected-bg);
+  color: var(--text);
+}
 
 @property --entry-date-mask-start {
   syntax: "<percentage>";

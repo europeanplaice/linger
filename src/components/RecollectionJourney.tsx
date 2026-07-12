@@ -7,6 +7,7 @@ import { buildPeriodicSpecs } from '../utils/recollectionDates'
 import type { PeriodicKind } from '../utils/recollectionDates'
 import { weightedOrder } from '../utils/serendipityWeights'
 import { loadSeen, recordSeen } from '../utils/serendipitySeen'
+import { excerpt } from '../utils/text'
 import type { DiaryState } from '../hooks/useDiary'
 
 interface RecollectionJourneyProps {
@@ -26,11 +27,6 @@ interface Preview {
 interface PeriodicEntry {
   date: string
   eyebrow: string
-}
-
-function excerpt(content: string, max = 140): string {
-  const text = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('  ')
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
 const cardContainerVariants = {

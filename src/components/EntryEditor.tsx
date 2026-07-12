@@ -6,8 +6,10 @@ import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry } from '../types'
-import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry } from '../utils/date'
+import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
 import { highlightText } from '../utils/highlight'
+import { excerpt } from '../utils/text'
+import { writingPrompts } from '../data/writingPrompts'
 import { HistoryModal } from './HistoryModal'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareEntry } from '../utils/share'
@@ -22,7 +24,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, Cloud, CloudUpload, ExternalLink, Flag, MoreHorizontal, Share2, Sparkles, Trash2 } from 'lucide-react'
+import { Clock3, Cloud, CloudUpload, ExternalLink, Flag, Lightbulb, MoreHorizontal, RefreshCw, Share2, Sparkles, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -32,6 +34,8 @@ const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 
 function preventFocusSteal(e: ReactPointerEvent) {
   e.preventDefault()
 }
+
+type IdeaCandidate = { kind: 'memory'; date: string } | { kind: 'prompt'; text: string }
 
 interface Props {
   date: string
@@ -118,7 +122,7 @@ function TodayIcon() {
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
 export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
-  const { t, locale } = useI18n()
+  const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
   const [text, setText] = useState('')
@@ -144,6 +148,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [ideaOpen, setIdeaOpen] = useState(false)
+  const [ideaIndex, setIdeaIndex] = useState(0)
+  const [ideaMemoryContent, setIdeaMemoryContent] = useState<string | null>(null)
+  const [ideaMemoryLoading, setIdeaMemoryLoading] = useState(false)
   const previewDialogRef = useRef<HTMLDialogElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -246,6 +254,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setConflictRemote(null)
     setPendingOfflineSave(false)
     setDiscardedText(null)
+    setIdeaOpen(false)
+    setIdeaIndex(0)
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
     void (async () => {
@@ -638,6 +648,58 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       if (dialog.open) dialog.close()
     }
   }, [previewDate])
+
+  const pastIdeaDates = useMemo(
+    () => (knownDates ? sameMonthDayInPastYears(Array.from(knownDates), date) : []),
+    [knownDates, date]
+  )
+
+  // Reshuffled once per date so re-renders don't reorder the list under the user.
+  const shuffledPrompts = useMemo(() => {
+    const bank = writingPrompts[language] ?? writingPrompts.en
+    const shuffled = [...bank]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled.slice(0, 6)
+  }, [language, date])
+
+  const ideaCandidates = useMemo<IdeaCandidate[]>(() => [
+    ...pastIdeaDates.map(d => ({ kind: 'memory' as const, date: d })),
+    ...shuffledPrompts.map(text => ({ kind: 'prompt' as const, text })),
+  ], [pastIdeaDates, shuffledPrompts])
+
+  const currentIdea = ideaCandidates[ideaIndex % ideaCandidates.length] ?? null
+
+  useEffect(() => {
+    if (!ideaOpen || !currentIdea || currentIdea.kind !== 'memory') { setIdeaMemoryContent(null); return }
+    let cancelled = false
+    setIdeaMemoryLoading(true)
+    getContent(currentIdea.date)
+      .then(result => {
+        if (!cancelled) { setIdeaMemoryContent(result?.entry.content ?? ''); setIdeaMemoryLoading(false) }
+      })
+      .catch(() => {
+        if (!cancelled) { setIdeaMemoryContent(''); setIdeaMemoryLoading(false) }
+      })
+    return () => { cancelled = true }
+  }, [ideaOpen, currentIdea, getContent])
+
+  const handleShuffleIdea = () => setIdeaIndex(i => (i + 1) % ideaCandidates.length)
+
+  const handleUseIdea = () => {
+    if (!currentIdea || currentIdea.kind !== 'prompt') return
+    const next = `${currentIdea.text}\n\n`
+    textRef.current = next
+    setText(next)
+    if (status && status !== savedStatus) setStatus('')
+    setIdeaOpen(false)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) { el.focus(); el.setSelectionRange(next.length, next.length) }
+    })
+  }
 
   async function handleShareEntry() {
     setShowMoreMenu(false)
@@ -1115,6 +1177,96 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       {!loading && !loadFailed && !isNewEmptyEntry && (
         <div className="editor-charcount" aria-hidden="true">
           {t.entry.charCount(charCount)}
+        </div>
+      )}
+      {!loading && !loadFailed && text.trim().length === 0 && (
+        <div className="editor-idea">
+          {!ideaOpen ? (
+            <button
+              type="button"
+              className="editor-idea-trigger"
+              onClick={() => setIdeaOpen(true)}
+              onPointerDown={preventFocusSteal}
+            >
+              <Lightbulb size={13} strokeWidth={1.8} aria-hidden="true" />
+              {t.entry.wantIdea}
+            </button>
+          ) : currentIdea && (
+            <div className="editor-idea-card">
+              {currentIdea.kind === 'memory' ? (
+                <>
+                  <p className="editor-idea-text">
+                    {t.recollection.hintOnThisDay(Number(date.slice(0, 4)) - Number(currentIdea.date.slice(0, 4)))}
+                  </p>
+                  {ideaMemoryLoading ? (
+                    <div className="editor-idea-skeleton" aria-hidden="true" />
+                  ) : (
+                    <p className="editor-idea-excerpt">{excerpt(ideaMemoryContent ?? '', 160)}</p>
+                  )}
+                  <div className="editor-idea-actions">
+                    <button
+                      type="button"
+                      className="editor-idea-action"
+                      onClick={() => setPreviewDate(currentIdea.date)}
+                      onPointerDown={preventFocusSteal}
+                    >
+                      {t.entry.ideaViewFull}
+                    </button>
+                    {ideaCandidates.length > 1 && (
+                      <button
+                        type="button"
+                        className="editor-idea-icon-btn"
+                        aria-label={t.entry.ideaAnother}
+                        onClick={handleShuffleIdea}
+                        onPointerDown={preventFocusSteal}
+                      >
+                        <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="editor-idea-icon-btn"
+                      aria-label={t.common.close}
+                      onClick={() => setIdeaOpen(false)}
+                      onPointerDown={preventFocusSteal}
+                    >×</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="editor-idea-text">{currentIdea.text}</p>
+                  <div className="editor-idea-actions">
+                    <button
+                      type="button"
+                      className="editor-idea-action"
+                      onClick={handleUseIdea}
+                      onPointerDown={preventFocusSteal}
+                    >
+                      {t.entry.ideaUsePrompt}
+                    </button>
+                    {ideaCandidates.length > 1 && (
+                      <button
+                        type="button"
+                        className="editor-idea-icon-btn"
+                        aria-label={t.entry.ideaAnother}
+                        onClick={handleShuffleIdea}
+                        onPointerDown={preventFocusSteal}
+                      >
+                        <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="editor-idea-icon-btn"
+                      aria-label={t.common.close}
+                      onClick={() => setIdeaOpen(false)}
+                      onPointerDown={preventFocusSteal}
+                    >×</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
