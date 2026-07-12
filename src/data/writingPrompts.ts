@@ -56,6 +56,31 @@ export const writingPrompts: Record<Language, string[]> = {
   ],
 }
 
+// Shown once an entry already has content, to nudge elaboration rather than
+// a fresh start — phrased around what's missing or unsaid, not "what happened".
+export const appendPrompts: Record<Language, string[]> = {
+  en: [
+    "Is there a detail you left out that's worth adding?",
+    "What's still on your mind that you haven't written down yet?",
+    'Who else was part of today that you haven\'t mentioned?',
+    'What happened right before or after what you just wrote?',
+    "Is there a feeling underneath this that's worth naming?",
+    "What's a detail you'd want to remember if you read this in five years?",
+    'Anything you glossed over that deserves another sentence?',
+    "What's the part of today you haven't gotten to yet?",
+  ],
+  ja: [
+    '書き忘れていて、残しておきたいことはある？',
+    'まだ言葉にできていないけど、気になっていることは？',
+    'まだ登場していない人で、今日関わった人は？',
+    'さっき書いたことの前後で、何かあった？',
+    '書いた内容の裏にある気持ちを、言葉にするなら？',
+    '5年後にこれを読み返すとしたら、他に何を書いておきたい？',
+    'さらっと流したけど、もう一言足したいことは？',
+    'まだ書けていない、今日のもう一つの場面は？',
+  ],
+}
+
 export interface DynamicPromptTemplates {
   milestoneUpcoming: (label: string, days: number) => string
   milestoneToday: (label: string) => string

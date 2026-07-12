@@ -1989,7 +1989,7 @@ test.describe('EntryEditor — related entries', () => {
 })
 
 test.describe('EntryEditor — writing idea prompts', () => {
-  test('shows a "Need an idea?" trigger only while the entry is empty', async ({ page }) => {
+  test('keeps the "Need an idea?" trigger visible after the entry has content', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
 
@@ -1997,7 +1997,25 @@ test.describe('EntryEditor — writing idea prompts', () => {
 
     await page.locator('textarea.editor-textarea').fill('Something I wrote')
 
-    await expect(page.locator('.editor-idea')).toHaveCount(0)
+    await expect(page.locator('.editor-idea-trigger')).toBeVisible()
+  })
+
+  test('appends (rather than replaces) a prompt once the entry already has content', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await page.locator('textarea.editor-textarea').fill('Something I wrote')
+    await page.locator('.editor-idea-trigger').click()
+    await expect(page.locator('.editor-idea-card')).toBeVisible()
+
+    const ideaText = await page.locator('.editor-idea-text').textContent()
+    expect(ideaText).toBeTruthy()
+
+    await page.getByRole('button', { name: 'Continue writing with this' }).click()
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue(`Something I wrote\n\n${ideaText}\n\n`)
+    await expect(page.locator('.editor-idea-card')).toHaveCount(0)
+    await expect(page.locator('.editor-idea-trigger')).toBeVisible()
   })
 
   test('opens a prompt card and starts the entry from it', async ({ page }) => {
@@ -2015,7 +2033,8 @@ test.describe('EntryEditor — writing idea prompts', () => {
     await page.getByRole('button', { name: 'Start writing from this' }).click()
 
     await expect(page.locator('textarea.editor-textarea')).toHaveValue(`${ideaText}\n\n`)
-    await expect(page.locator('.editor-idea')).toHaveCount(0)
+    await expect(page.locator('.editor-idea-card')).toHaveCount(0)
+    await expect(page.locator('.editor-idea-trigger')).toBeVisible()
   })
 
   test('shuffling shows a different idea, and closing returns to the trigger', async ({ page }) => {

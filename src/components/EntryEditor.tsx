@@ -9,7 +9,7 @@ import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryE
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
 import { highlightText } from '../utils/highlight'
 import { excerpt } from '../utils/text'
-import { writingPrompts } from '../data/writingPrompts'
+import { writingPrompts, appendPrompts } from '../data/writingPrompts'
 import { buildDynamicPrompts } from '../utils/dynamicPrompts'
 import type { RecurringTopic } from '../utils/topicExtraction'
 import { HistoryModal } from './HistoryModal'
@@ -660,16 +660,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     [knownDates, date]
   )
 
-  // Only relevant while the idea UI can show at all — gates the recurring-topic
-  // lookup below, which rescans the whole cached corpus and would otherwise
-  // redo that work on every autosave-triggered index rebuild while typing.
   const isEntryEmpty = text.trim().length === 0
+
+  // The idea UI is always available, but its candidate pool is only worth
+  // (re)building while empty (the original "need an idea?" case) or while the
+  // panel is actually open — recomputing the recurring-topic scan on every
+  // autosave-triggered index rebuild while the user is mid-sentence would be
+  // wasteful, and nobody's looking at the pool until they open it anyway.
+  const shouldBuildIdeas = isEntryEmpty || ideaOpen
 
   // Signals derived from the user's own history/calendar rather than a fixed
   // list — milestone proximity, entry cadence, weekday/season, holidays, and
-  // a topic they used to write about but haven't lately.
+  // a topic they used to write about but haven't lately. Reused as-is once an
+  // entry already has content: these ask about the day in general, not about
+  // starting to write, so they read fine as an append nudge too.
   const dynamicPrompts = useMemo(
-    () => (isEntryEmpty ? buildDynamicPrompts({
+    () => (shouldBuildIdeas ? buildDynamicPrompts({
       date,
       knownDates: knownDates ? Array.from(knownDates) : [],
       milestones: activeMilestones,
@@ -677,19 +683,21 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       recurringTopic: getRecurringTopic?.(date) ?? null,
       language,
     }) : []),
-    [isEntryEmpty, date, knownDates, activeMilestones, yearHolidays, getRecurringTopic, language]
+    [shouldBuildIdeas, date, knownDates, activeMilestones, yearHolidays, getRecurringTopic, language]
   )
 
-  // Curated fallback so the pool is never empty for a brand-new or sparse account.
+  // Curated fallback so the pool is never empty for a brand-new or sparse
+  // account — a "start from scratch" bank while empty, an "add to what's
+  // there" bank once the entry already has content.
   const staticPrompts = useMemo(() => {
-    const bank = writingPrompts[language] ?? writingPrompts.en
+    const bank = (isEntryEmpty ? writingPrompts : appendPrompts)[language] ?? (isEntryEmpty ? writingPrompts.en : appendPrompts.en)
     const shuffled = [...bank]
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
     return shuffled.slice(0, 4)
-  }, [language, date])
+  }, [language, date, isEntryEmpty])
 
   // Memory, dynamic, and static candidates are shuffled together into one pool
   // (rather than a strict fallback chain) so the same tier doesn't always lead,
@@ -727,7 +735,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   const handleUseIdea = () => {
     if (!currentIdea || currentIdea.kind !== 'prompt') return
-    const next = `${currentIdea.text}\n\n`
+    const base = textRef.current
+    const next = base.trim().length === 0
+      ? `${currentIdea.text}\n\n`
+      : `${base.replace(/\s+$/, '')}\n\n${currentIdea.text}\n\n`
     textRef.current = next
     setText(next)
     if (status && status !== savedStatus) setStatus('')
@@ -1217,7 +1228,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           {t.entry.charCount(charCount)}
         </div>
       )}
-      {!loading && !loadFailed && text.trim().length === 0 && (
+      {!loading && !loadFailed && (
         <div className="editor-idea">
           {!ideaOpen ? (
             <button
@@ -1280,7 +1291,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                       onClick={handleUseIdea}
                       onPointerDown={preventFocusSteal}
                     >
-                      {t.entry.ideaUsePrompt}
+                      {isEntryEmpty ? t.entry.ideaUsePrompt : t.entry.ideaUsePromptAppend}
                     </button>
                     {ideaCandidates.length > 1 && (
                       <button
