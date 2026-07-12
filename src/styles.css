@@ -3782,6 +3782,9 @@ dialog.session-expired-dialog::backdrop {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   transform: translateY(-1px);
 }
+.editor-footer:empty {
+  display: none;
+}
 .editor-idea {
   padding: 0.5rem 0 0.15rem;
   border-top: 1px solid var(--border);
@@ -4508,7 +4511,11 @@ dialog.history-dialog::backdrop {
 
   /* Today FAB — pill chip above the save FAB. Not affected by keyboard-inset so it
      naturally disappears behind the keyboard when the user is typing.
-     Visual size is ~2.1rem; ::after expands the tap target to ≥44px. */
+     Visual size is ~2.1rem; ::after expands the tap target to ≥44px.
+     `bottom` takes the larger of two clearances: enough to clear the save FAB,
+     or enough to clear the editor footer (char count / "need an idea?" trigger
+     or card) — whose height is measured at runtime via --editor-footer-inset
+     (useFooterInset) since the idea card's height varies with its content. */
   .editor-actions .btn-today-fab {
     display: flex;
     align-items: center;
@@ -4516,7 +4523,10 @@ dialog.history-dialog::backdrop {
     gap: 0.35rem;
     position: fixed;
     right: max(1rem, env(safe-area-inset-right));
-    bottom: calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.85rem);
+    bottom: max(
+      calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.85rem),
+      calc(1rem + var(--editor-footer-inset, 0px) + 0.75rem)
+    );
     z-index: 89;
     height: 2.1rem;
     padding: 0 0.8rem;

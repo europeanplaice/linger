@@ -20,6 +20,7 @@ import { useSaveProgress } from '../hooks/useSaveProgress'
 import { useEvent, useLatestRef } from '../hooks/useEvent'
 import { useAutoSave } from '../hooks/useAutoSave'
 import { useKeyboardInset } from '../hooks/useKeyboardInset'
+import { useFooterInset } from '../hooks/useFooterInset'
 import { useScrollEdges } from '../hooks/useScrollEdges'
 import { useDismissOnOutside } from '../hooks/useDismissOnOutside'
 import { useSwipeNav } from '../hooks/useSwipeNav'
@@ -159,6 +160,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollWrapRef = useRef<HTMLDivElement>(null)
+  const footerRef = useRef<HTMLDivElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
   const [hasConflict, setHasConflict] = useState(false)
@@ -596,6 +598,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [])
 
   useKeyboardInset()
+  useFooterInset(footerRef)
 
   const closeMoreMenu = useCallback(() => {
     setShowMoreMenu(false)
@@ -1208,6 +1211,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         </motion.div>
       </AnimatePresence>
       </div>
+      <div className="editor-footer" ref={footerRef}>
       {!loading && !loadFailed && !isNewEmptyEntry && (
         <div className="editor-charcount" aria-hidden="true">
           {t.entry.charCount(charCount)}
@@ -1303,6 +1307,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </div>
       )}
+      </div>
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
         <div className="editor-related">
           <span className="editor-related-label"><Sparkles size={11} strokeWidth={1.8} aria-hidden="true" />{t.entry.relatedEntries}</span>
