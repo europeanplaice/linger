@@ -10,6 +10,8 @@ import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearE
 import { highlightText } from '../utils/highlight'
 import { excerpt } from '../utils/text'
 import { writingPrompts } from '../data/writingPrompts'
+import { buildDynamicPrompts } from '../utils/dynamicPrompts'
+import type { RecurringTopic } from '../utils/topicExtraction'
 import { HistoryModal } from './HistoryModal'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareEntry } from '../utils/share'
@@ -65,6 +67,7 @@ interface Props {
   relatedDates?: string[]
   onSelectRelated?: (date: string) => void
   getRelatedTokens?: (previewDate: string) => string[]
+  getRecurringTopic?: (forDate: string) => RecurringTopic | null
   backDate?: string
   onGoBack?: () => void
 }
@@ -121,7 +124,7 @@ function TodayIcon() {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, backDate, onGoBack }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -654,21 +657,52 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     [knownDates, date]
   )
 
-  // Reshuffled once per date so re-renders don't reorder the list under the user.
-  const shuffledPrompts = useMemo(() => {
+  // Only relevant while the idea UI can show at all — gates the recurring-topic
+  // lookup below, which rescans the whole cached corpus and would otherwise
+  // redo that work on every autosave-triggered index rebuild while typing.
+  const isEntryEmpty = text.trim().length === 0
+
+  // Signals derived from the user's own history/calendar rather than a fixed
+  // list — milestone proximity, entry cadence, weekday/season, holidays, and
+  // a topic they used to write about but haven't lately.
+  const dynamicPrompts = useMemo(
+    () => (isEntryEmpty ? buildDynamicPrompts({
+      date,
+      knownDates: knownDates ? Array.from(knownDates) : [],
+      milestones: activeMilestones,
+      holiday: yearHolidays[date],
+      recurringTopic: getRecurringTopic?.(date) ?? null,
+      language,
+    }) : []),
+    [isEntryEmpty, date, knownDates, activeMilestones, yearHolidays, getRecurringTopic, language]
+  )
+
+  // Curated fallback so the pool is never empty for a brand-new or sparse account.
+  const staticPrompts = useMemo(() => {
     const bank = writingPrompts[language] ?? writingPrompts.en
     const shuffled = [...bank]
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
-    return shuffled.slice(0, 6)
+    return shuffled.slice(0, 4)
   }, [language, date])
 
-  const ideaCandidates = useMemo<IdeaCandidate[]>(() => [
-    ...pastIdeaDates.map(d => ({ kind: 'memory' as const, date: d })),
-    ...shuffledPrompts.map(text => ({ kind: 'prompt' as const, text })),
-  ], [pastIdeaDates, shuffledPrompts])
+  // Memory, dynamic, and static candidates are shuffled together into one pool
+  // (rather than a strict fallback chain) so the same tier doesn't always lead,
+  // and reshuffled only once per date so re-renders don't reorder it under the user.
+  const ideaCandidates = useMemo<IdeaCandidate[]>(() => {
+    const pool: IdeaCandidate[] = [
+      ...pastIdeaDates.map(d => ({ kind: 'memory' as const, date: d })),
+      ...dynamicPrompts.map(text => ({ kind: 'prompt' as const, text })),
+      ...staticPrompts.map(text => ({ kind: 'prompt' as const, text })),
+    ]
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    return pool
+  }, [pastIdeaDates, dynamicPrompts, staticPrompts])
 
   const currentIdea = ideaCandidates[ideaIndex % ideaCandidates.length] ?? null
 

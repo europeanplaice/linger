@@ -41,7 +41,7 @@ export interface Milestone {
   date: string   // YYYY-MM-DD
   showBadge?: boolean
   emoji?: string       // custom emoji, default 🎀
-  recurring?: boolean  // true = yearly (shows Nth year), false/undefined = one-time
+  recurring?: boolean  // false = one-time; true/undefined = yearly (shows Nth year)
 }
 
 export const MAX_MILESTONES = 50

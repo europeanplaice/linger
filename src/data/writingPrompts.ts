@@ -1,4 +1,5 @@
 import type { Language } from '../i18n'
+import type { SeasonKey } from '../utils/date'
 
 export const writingPrompts: Record<Language, string[]> = {
   en: [
@@ -53,4 +54,67 @@ export const writingPrompts: Record<Language, string[]> = {
     '最近気になっている曲・映画・本は？',
     '今日をもう一度過ごせるなら、どの瞬間を選ぶ？',
   ],
+}
+
+export interface DynamicPromptTemplates {
+  milestoneUpcoming: (label: string, days: number) => string
+  milestoneToday: (label: string) => string
+  milestoneRecent: (label: string, days: number) => string
+  gapShort: (days: number) => string
+  gapMedium: (days: number) => string
+  gapLong: (days: number) => string
+  streak: (days: number) => string
+  weekdayMonday: () => string
+  weekdayFriday: () => string
+  weekend: () => string
+  season: (season: SeasonKey) => string
+  holiday: (name: string) => string
+  recurringTopic: (term: string) => string
+}
+
+// Templated prompts filled from cheap per-user signals (milestones, entry
+// cadence, calendar) rather than a fixed list, so the "need an idea?" nudge
+// stays personalized without depending on any content in the (empty) entry
+// itself. See src/utils/dynamicPrompts.ts for how these are selected.
+export const dynamicPromptTemplates: Record<Language, DynamicPromptTemplates> = {
+  en: {
+    milestoneUpcoming: (label, days) => `${label} is in ${days} day${days === 1 ? '' : 's'} — what's on your mind about it?`,
+    milestoneToday: label => `Today is ${label} — how does it feel?`,
+    milestoneRecent: (label, days) => `It's been ${days} day${days === 1 ? '' : 's'} since ${label} — how are you settling back in?`,
+    gapShort: days => `It's been ${days} days since your last entry — what happened in between?`,
+    gapMedium: days => `${days} days since you last wrote — what stands out looking back?`,
+    gapLong: days => `It's been ${days} days since your last entry — where are you at right now?`,
+    streak: days => `${days} days in a row now — what's today's entry?`,
+    weekdayMonday: () => 'Monday again — what are you hoping for this week?',
+    weekdayFriday: () => 'Friday — how would you sum up this week?',
+    weekend: () => 'Weekend mode — how are you spending today?',
+    season: season => ({
+      spring: 'Anything about this spring on your mind?',
+      summer: 'Anything from the summer heat worth writing down?',
+      autumn: "What's caught your eye this autumn?",
+      winter: "How's the winter cold treating you?",
+    })[season],
+    holiday: name => `Today is ${name} — how are you spending it?`,
+    recurringTopic: term => `You used to write about "${term}" a lot — what's the latest there?`,
+  },
+  ja: {
+    milestoneUpcoming: (label, days) => `「${label}」まであと${days}日。今どんな気持ち？`,
+    milestoneToday: label => `今日は「${label}」ですね。どんな一日でしたか？`,
+    milestoneRecent: (label, days) => `「${label}」から${days}日経ちました。その後はどうですか？`,
+    gapShort: days => `前回の記録から${days}日経ちました。その間に何がありましたか？`,
+    gapMedium: days => `${days}日ぶりの記録ですね。振り返ってみると、印象に残っていることは？`,
+    gapLong: days => `${days}日ぶりの記録です。今、どんな気分ですか？`,
+    streak: days => `${days}日連続で書けていますね。今日は何を書きますか？`,
+    weekdayMonday: () => 'また月曜日ですね。今週楽しみにしていることは？',
+    weekdayFriday: () => '週末目前ですね。今週を一言でまとめると？',
+    weekend: () => '週末はどう過ごしていますか？',
+    season: season => ({
+      spring: '春らしさを感じたことは？',
+      summer: 'この夏、印象に残っていることは？',
+      autumn: '秋らしいと感じた瞬間は？',
+      winter: '冬の寒さの中で感じたことは？',
+    })[season],
+    holiday: name => `今日は${name}ですね。どう過ごしましたか？`,
+    recurringTopic: term => `以前「${term}」についてよく書いていましたね。最近はどうですか？`,
+  },
 }

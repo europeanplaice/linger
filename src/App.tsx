@@ -153,6 +153,12 @@ export default function App() {
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
   const { milestones, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired)
   const tfIdf = useTfIdfSearch()
+  const getRecurringTopic = useCallback(
+    (forDate: string) => tfIdf.getRecurringTopic(forDate, language),
+    // indexVersion is included so a new identity is produced whenever the TF-IDF
+    // index rebuilds (getRecurringTopic itself is a stable ref/closure otherwise).
+    [tfIdf.getRecurringTopic, language, tfIdf.indexVersion],
+  )
   const isOnline = useOnline()
   const previewParams = new URLSearchParams(window.location.search).getAll('preview')
   const forceEmptyState = previewParams.includes('empty-state')
@@ -754,6 +760,7 @@ export default function App() {
           relatedDates={relatedDates}
           onSelectRelated={handleSelectRelated}
           getRelatedTokens={(previewDate) => tfIdf.getSharedTokens(selectedDate, previewDate)}
+          getRecurringTopic={getRecurringTopic}
           backDate={previousDate ?? undefined}
           onGoBack={handleGoBack}
         />

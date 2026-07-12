@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAllCached } from '../lib/diaryCache'
 import { buildIndex, search, findSimilar, sharedTokens, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
+import { findRecurringAbsentTopic, type RecurringTopic } from '../utils/topicExtraction'
+import type { Language } from '../i18n'
 
 export interface LocalSearchResult {
   date: string
@@ -80,5 +82,11 @@ export function useTfIdfSearch() {
     return indexRef.current?.vectors.has(date) ?? false
   }, [])
 
-  return { ready, indexVersion, searchLocal, getSimilar, getSharedTokens, updateEntry, hasEntry }
+  const getRecurringTopic = useCallback((date: string, language: Language, windowDays = 14): RecurringTopic | null => {
+    const idx = indexRef.current
+    if (!idx) return null
+    return findRecurringAbsentTopic(idx.contents, date, windowDays, language)
+  }, [])
+
+  return { ready, indexVersion, searchLocal, getSimilar, getSharedTokens, updateEntry, hasEntry, getRecurringTopic }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak, milestonesNearEntry } from '../../src/utils/date'
+import { todayYmd, yesterdayYmd, ymd, parseYmd, dateFromYmd, weekdayLabel, diaryDateLabel, diaryDateParts, daysInMonth, addMonths, formatRevisionTime, sameMonthDayInPastYears, nearestEntryWithin, nearestWithDistance, consecutiveWeekStreak, consecutiveMonthStreak, milestonesNearEntry, consecutiveDayStreak, daysSinceLastEntry, weekdayCategory, seasonKey, nearestMilestoneOccurrence } from '../../src/utils/date'
 
 describe('date utils', () => {
   describe('todayYmd', () => {
@@ -484,6 +484,112 @@ describe('date utils', () => {
 
     it('returns 0 for no entries', () => {
       expect(consecutiveMonthStreak([])).toBe(0)
+    })
+  })
+
+  describe('consecutiveDayStreak', () => {
+    it('counts consecutive days ending the day before the given date', () => {
+      const dates = ['2026-07-09', '2026-07-10', '2026-07-11']
+      expect(consecutiveDayStreak(dates, '2026-07-12')).toBe(3)
+    })
+
+    it('breaks the streak on a gap day', () => {
+      const dates = ['2026-07-08', '2026-07-10', '2026-07-11']
+      expect(consecutiveDayStreak(dates, '2026-07-12')).toBe(2)
+    })
+
+    it('returns 0 when the day before is missing', () => {
+      expect(consecutiveDayStreak(['2026-07-01'], '2026-07-12')).toBe(0)
+    })
+
+    it('does not require an entry on the given date itself', () => {
+      // Today may still be empty (that's the whole point of the idea feature);
+      // the streak should still count entries strictly before it.
+      const dates = ['2026-07-10', '2026-07-11']
+      expect(consecutiveDayStreak(dates, '2026-07-12')).toBe(2)
+    })
+  })
+
+  describe('daysSinceLastEntry', () => {
+    it('returns the gap to the most recent earlier entry', () => {
+      const dates = ['2026-06-20', '2026-07-01', '2026-07-05']
+      expect(daysSinceLastEntry(dates, '2026-07-12')).toBe(7)
+    })
+
+    it('ignores entries on or after the given date', () => {
+      const dates = ['2026-07-05', '2026-07-12', '2026-07-13']
+      expect(daysSinceLastEntry(dates, '2026-07-12')).toBe(7)
+    })
+
+    it('returns null when there is no earlier entry', () => {
+      expect(daysSinceLastEntry([], '2026-07-12')).toBeNull()
+      expect(daysSinceLastEntry(['2026-07-12', '2026-08-01'], '2026-07-12')).toBeNull()
+    })
+  })
+
+  describe('weekdayCategory', () => {
+    it('identifies monday, friday, weekend, and midweek', () => {
+      expect(weekdayCategory('2026-07-13')).toBe('monday') // Mon
+      expect(weekdayCategory('2026-07-17')).toBe('friday') // Fri
+      expect(weekdayCategory('2026-07-18')).toBe('weekend') // Sat
+      expect(weekdayCategory('2026-07-19')).toBe('weekend') // Sun
+      expect(weekdayCategory('2026-07-15')).toBe('midweek') // Wed
+    })
+  })
+
+  describe('seasonKey', () => {
+    it('maps months to meteorological seasons', () => {
+      expect(seasonKey('2026-04-01')).toBe('spring')
+      expect(seasonKey('2026-07-01')).toBe('summer')
+      expect(seasonKey('2026-10-01')).toBe('autumn')
+      expect(seasonKey('2026-01-01')).toBe('winter')
+      expect(seasonKey('2026-12-25')).toBe('winter')
+    })
+  })
+
+  describe('nearestMilestoneOccurrence', () => {
+    it('remaps a recurring milestone onto the entry year regardless of creation year', () => {
+      const milestones = [
+        { id: 'birthday', label: 'Birthday', date: '2019-06-15', recurring: true },
+      ]
+      const result = nearestMilestoneOccurrence('2026-06-12', milestones, 10)
+      expect(result).toEqual({
+        id: 'birthday', label: 'Birthday', date: '2026-06-15', distance: 3, emoji: undefined, recurring: true, nthYear: 7,
+      })
+    })
+
+    it('handles occurrences that wrap across a year boundary', () => {
+      const milestones = [
+        { id: 'nye', label: 'New Year', date: '2018-01-01', recurring: true },
+      ]
+      const result = nearestMilestoneOccurrence('2025-12-29', milestones, 10)
+      expect(result?.date).toBe('2026-01-01')
+      expect(result?.distance).toBe(3)
+    })
+
+    it('uses the literal date for non-recurring milestones', () => {
+      const milestones = [
+        { id: 'trip', label: 'Trip', date: '2026-06-15', recurring: false },
+      ]
+      expect(nearestMilestoneOccurrence('2027-06-12', milestones, 10)).toBeNull()
+      expect(nearestMilestoneOccurrence('2026-06-12', milestones, 10)?.distance).toBe(3)
+    })
+
+    it('returns null when nothing is within range', () => {
+      const milestones = [
+        { id: 'birthday', label: 'Birthday', date: '2019-06-15', recurring: true },
+      ]
+      expect(nearestMilestoneOccurrence('2026-01-01', milestones, 10)).toBeNull()
+    })
+
+    it('picks the closest occurrence among several milestones', () => {
+      const milestones = [
+        { id: 'far', label: 'Far', date: '2020-06-20', recurring: true },
+        { id: 'near', label: 'Near', date: '2020-06-14', recurring: true },
+      ]
+      const result = nearestMilestoneOccurrence('2026-06-12', milestones, 10)
+      expect(result?.id).toBe('near')
+      expect(result?.distance).toBe(2)
     })
   })
 

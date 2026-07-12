@@ -176,6 +176,50 @@ export function milestonesNearEntry(
   return results
 }
 
+/**
+ * Nearest milestone occurrence to `entryDate`, within `maxDistanceDays`.
+ *
+ * Unlike `milestonesNearEntry`, this correctly handles recurring milestones
+ * whose stored `date` may be years old: it checks the milestone's month/day
+ * against entryDate's year (and the adjacent year, for occurrences near a
+ * year boundary) rather than diffing against the literal stored date, which
+ * would only be "near" in the milestone's original creation year.
+ */
+export function nearestMilestoneOccurrence(
+  entryDate: string,
+  milestones: ReadonlyArray<{ id: string; label: string; date: string; emoji?: string; recurring?: boolean }>,
+  maxDistanceDays: number,
+): MilestoneProximity | null {
+  const entry = parseYmd(entryDate)
+  if (!entry) return null
+  const entryDay = Date.UTC(entry.y, entry.m - 1, entry.d)
+
+  let best: MilestoneProximity | null = null
+  for (const m of milestones) {
+    const stored = parseYmd(m.date)
+    if (!stored) continue
+    const isRecurring = m.recurring !== false
+    const candidateYears = isRecurring ? [entry.y - 1, entry.y, entry.y + 1] : [stored.y]
+
+    for (const y of candidateYears) {
+      const day = Math.min(stored.d, daysInMonth(y, stored.m))
+      const occurrenceDay = Date.UTC(y, stored.m - 1, day)
+      const distance = Math.round((occurrenceDay - entryDay) / 86_400_000)
+      if (Math.abs(distance) > maxDistanceDays) continue
+
+      let nthYear: number | undefined
+      if (isRecurring && stored.y > 0 && stored.y !== 2000) {
+        nthYear = y - stored.y
+        if (nthYear <= 0) nthYear = undefined
+      }
+      if (!best || Math.abs(distance) < Math.abs(best.distance)) {
+        best = { id: m.id, label: m.label, date: ymd(y, stored.m, day), distance, emoji: m.emoji, recurring: m.recurring, nthYear }
+      }
+    }
+  }
+  return best
+}
+
 function mondayStart(date: Date): Date {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const offset = (d.getDay() + 6) % 7 // Monday = 0
@@ -242,6 +286,58 @@ export function consecutiveMonthStreak(dates: string[]): number {
     if (m === 0) { m = 12; y -= 1 }
   }
   return streak
+}
+
+/**
+ * Number of consecutive days with an entry, counting back from the day
+ * before `beforeDate` (so a streak in progress doesn't require today's
+ * not-yet-written entry to count).
+ */
+export function consecutiveDayStreak(dates: string[], beforeDate: string): number {
+  const known = new Set(dates)
+  let streak = 0
+  let cursor = shiftDate(beforeDate, -1)
+  while (known.has(cursor)) {
+    streak += 1
+    cursor = shiftDate(cursor, -1)
+  }
+  return streak
+}
+
+/** Days between the most recent known entry strictly before `date`, and `date` itself. Null if there is no earlier entry. */
+export function daysSinceLastEntry(dates: string[], date: string): number | null {
+  const before = dates.filter(d => d < date)
+  if (before.length === 0) return null
+  const last = before.reduce((a, b) => (b > a ? b : a))
+  const lastDate = dateFromYmd(last)
+  const d = dateFromYmd(date)
+  if (!lastDate || !d) return null
+  return Math.round((d.getTime() - lastDate.getTime()) / 86_400_000)
+}
+
+export type WeekdayCategory = 'monday' | 'friday' | 'weekend' | 'midweek'
+
+/** Monday/Friday get their own tone (week start/end); Sat/Sun are "weekend"; Tue-Thu are "midweek". */
+export function weekdayCategory(date: string): WeekdayCategory {
+  const d = dateFromYmd(date)
+  if (!d) return 'midweek'
+  const day = d.getDay() // 0=Sun..6=Sat
+  if (day === 0 || day === 6) return 'weekend'
+  if (day === 1) return 'monday'
+  if (day === 5) return 'friday'
+  return 'midweek'
+}
+
+export type SeasonKey = 'spring' | 'summer' | 'autumn' | 'winter'
+
+/** Northern-hemisphere meteorological seasons (Mar-May spring, ... Dec-Feb winter). */
+export function seasonKey(date: string): SeasonKey {
+  const d = dateFromYmd(date)
+  const month = d ? d.getMonth() + 1 : 1
+  if (month >= 3 && month <= 5) return 'spring'
+  if (month >= 6 && month <= 8) return 'summer'
+  if (month >= 9 && month <= 11) return 'autumn'
+  return 'winter'
 }
 
 export function daysInMonth(year: number, month1to12: number): number {
