@@ -2082,4 +2082,49 @@ test.describe('EntryEditor — writing idea prompts', () => {
     await page.getByRole('button', { name: 'Read full entry' }).click()
     await expect(page.locator('.related-preview-content')).toHaveText('Long walk on the beach with old friends.')
   })
+
+  test('surfaces a prompt referencing a word from the entry once it has content', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await page.locator('textarea.editor-textarea').fill('Had ramen with my coworker after the meeting.')
+    await page.locator('.editor-idea-trigger').click()
+
+    // The content-aware idea is always somewhere in the (randomly ordered)
+    // pool — cycle through candidates until it surfaces.
+    let matched = false
+    for (let i = 0; i < 20; i++) {
+      const text = await page.locator('.editor-idea-text').textContent()
+      if (text && text.includes('coworker')) { matched = true; break }
+      await page.getByRole('button', { name: 'Another idea' }).click()
+    }
+    expect(matched).toBe(true)
+  })
+
+  test('does not echo a word from a previously-inserted idea back as the mentioned topic', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await page.locator('textarea.editor-textarea').fill('Had ramen with my coworker after the meeting.')
+    await page.locator('.editor-idea-trigger').click()
+
+    // Cycle to the mentioned-topic idea and use it, appending its own
+    // question text (which itself contains the word "mentioned") into the entry.
+    for (let i = 0; i < 20; i++) {
+      const text = await page.locator('.editor-idea-text').textContent()
+      if (text && text.includes('coworker')) break
+      await page.getByRole('button', { name: 'Another idea' }).click()
+    }
+    await page.getByRole('button', { name: 'Continue writing with this' }).click()
+
+    // Reopen the idea panel and cycle through every candidate: the inserted
+    // question's own text should be excluded from re-extraction, so nothing
+    // should surface "mentioned" as if it were the topic.
+    await page.locator('.editor-idea-trigger').click()
+    for (let i = 0; i < 20; i++) {
+      const text = await page.locator('.editor-idea-text').textContent()
+      expect(text).not.toContain('"mentioned"')
+      await page.getByRole('button', { name: 'Another idea' }).click()
+    }
+  })
 })

@@ -79,4 +79,23 @@ describe('buildDynamicPrompts', () => {
     const prompts = buildDynamicPrompts({ ...baseCtx, language: 'ja' })
     expect(prompts.some(p => /[ぁ-んァ-ヿ一-鿿]/.test(p))).toBe(true)
   })
+
+  it('adds a prompt referencing a word from the entry once it has content', () => {
+    const prompts = buildDynamicPrompts({
+      ...baseCtx,
+      currentText: 'Had ramen with my coworker after the meeting.',
+    })
+    expect(prompts.some(p => p.includes('coworker'))).toBe(true)
+  })
+
+  it('omits the mentioned-topic prompt when there is no current text', () => {
+    // baseCtx has no other active signal (no milestone/gap/streak/weekday/
+    // holiday/recurring topic for this date), so the only baseline prompt is
+    // the always-on season one — checked by count rather than by matching
+    // template wording, so this doesn't silently pass once that wording changes.
+    const withText = buildDynamicPrompts({ ...baseCtx, currentText: 'Had ramen with my coworker.' })
+    const withoutText = buildDynamicPrompts(baseCtx)
+    expect(withText.length).toBe(withoutText.length + 1)
+    expect(withoutText).toHaveLength(1)
+  })
 })

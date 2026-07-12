@@ -1,7 +1,7 @@
 import type { Language } from '../i18n'
 import type { Milestone } from '../types'
 import type { HolidayInfo } from './holidays'
-import type { RecurringTopic } from './topicExtraction'
+import { extractCandidateWords, type RecurringTopic } from './topicExtraction'
 import { dynamicPromptTemplates } from '../data/writingPrompts'
 import { daysSinceLastEntry, consecutiveDayStreak, weekdayCategory, seasonKey, nearestMilestoneOccurrence } from './date'
 
@@ -15,16 +15,36 @@ export interface DynamicPromptContext {
   milestones: ReadonlyArray<Milestone>
   holiday?: HolidayInfo
   recurringTopic?: RecurringTopic | null
+  // The entry's own text so far, when it's not empty. Lets the pool nudge
+  // toward elaborating on something the user just wrote rather than only
+  // generic "add-on" questions — omit for an empty entry, where there's
+  // nothing yet to reference.
+  currentText?: string
   language: Language
+}
+
+// Longest content word actually present in what's been written so far — a
+// cheap proxy for "the most concrete/specific thing they just mentioned"
+// without real NLP, reusing the same word-run heuristic as recurring-topic
+// detection (see topicExtraction.ts).
+function mostSpecificWord(text: string, language: Language): string | null {
+  const words = extractCandidateWords(text, language)
+  let best: string | null = null
+  for (const w of words) {
+    if (!best || w.length > best.length) best = w
+  }
+  return best
 }
 
 /**
  * Builds a pool of contextual writing prompts from cheap per-user signals —
- * milestones, entry cadence, weekday/season, holidays, and the user's own
- * recurring-but-lately-untouched topics — rather than a single fixed list.
- * Each signal is independently gated by its own condition, so the result only
- * contains prompts that are actually applicable right now; callers blend this
- * with the static prompt bank to keep the pool from ever being empty.
+ * milestones, entry cadence, weekday/season, holidays, the user's own
+ * recurring-but-lately-untouched topics, and (once the entry has content) a
+ * word pulled from what's already been written — rather than a single fixed
+ * list. Each signal is independently gated by its own condition, so the
+ * result only contains prompts that are actually applicable right now;
+ * callers blend this with the static prompt bank to keep the pool from ever
+ * being empty.
  */
 export function buildDynamicPrompts(ctx: DynamicPromptContext): string[] {
   const T = dynamicPromptTemplates[ctx.language] ?? dynamicPromptTemplates.en
@@ -61,6 +81,11 @@ export function buildDynamicPrompts(ctx: DynamicPromptContext): string[] {
   if (ctx.holiday) prompts.push(T.holiday(ctx.holiday.localName || ctx.holiday.name))
 
   if (ctx.recurringTopic) prompts.push(T.recurringTopic(ctx.recurringTopic.term))
+
+  if (ctx.currentText) {
+    const term = mostSpecificWord(ctx.currentText, ctx.language)
+    if (term) prompts.push(T.mentionedTopic(term))
+  }
 
   return prompts
 }

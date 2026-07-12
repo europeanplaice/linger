@@ -2,9 +2,11 @@ import type { Language } from '../i18n'
 import { shiftDate } from './date'
 
 // Kanji/katakana runs read as reasonably clean Japanese noun phrases without a
-// real tokenizer — most content words in a diary are 2-6 character compounds,
+// real tokenizer — most content words in a diary are 2-12 character compounds
+// (long enough to cover multi-kanji compounds and longer katakana loanwords
+// like オーストラリア or プレゼンテーション without truncating them mid-word),
 // while grammar (particles, verb endings) is hiragana and falls outside the run.
-const JA_WORD_RUN = /[一-鿿゠-ヿ]{2,6}/g
+const JA_WORD_RUN = /[一-鿿゠-ヿ]{2,12}/g
 const EN_WORD = /[a-z]{4,}/g
 
 // Words too generic to ever be a useful "you used to write about X" prompt,

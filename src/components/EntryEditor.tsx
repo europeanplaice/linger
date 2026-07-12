@@ -40,6 +40,14 @@ function preventFocusSteal(e: ReactPointerEvent) {
 
 type IdeaCandidate = { kind: 'memory'; date: string } | { kind: 'prompt'; text: string }
 
+// Removes previously-inserted idea/prompt text before the entry's own text is
+// scanned for a "mentioned topic" signal, so a re-opened idea panel doesn't
+// pick a word out of a question it just suggested (e.g. "mentioned" from a
+// prior "You mentioned ... " prompt) instead of the user's actual writing.
+function stripInsertedIdeaText(text: string, inserted: readonly string[]): string {
+  return inserted.reduce((acc, snippet) => (snippet ? acc.split(snippet).join(' ') : acc), text)
+}
+
 interface Props {
   date: string
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
@@ -156,6 +164,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [ideaIndex, setIdeaIndex] = useState(0)
   const [ideaMemoryContent, setIdeaMemoryContent] = useState<string | null>(null)
   const [ideaMemoryLoading, setIdeaMemoryLoading] = useState(false)
+  // Prompt text already inserted via "Use idea" for this date, so it can be
+  // excluded when a later pool rebuild scans the entry's own text for a
+  // mentioned-topic prompt — otherwise a rebuilt pool tends to pick a word
+  // out of the previously-inserted question itself rather than the user's
+  // own writing. Reset alongside ideaOpen/ideaIndex on date change below.
+  const insertedIdeaTextsRef = useRef<string[]>([])
   const previewDialogRef = useRef<HTMLDialogElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -261,6 +275,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setDiscardedText(null)
     setIdeaOpen(false)
     setIdeaIndex(0)
+    insertedIdeaTextsRef.current = []
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
     void (async () => {
@@ -673,7 +688,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // list — milestone proximity, entry cadence, weekday/season, holidays, and
   // a topic they used to write about but haven't lately. Reused as-is once an
   // entry already has content: these ask about the day in general, not about
-  // starting to write, so they read fine as an append nudge too.
+  // starting to write, so they read fine as an append nudge too. Once there's
+  // content, a snapshot of it (via textRef, not the reactive `text` state) is
+  // also passed in so one signal can reference something the user actually
+  // just wrote — snapshotted rather than live so typing while the idea card
+  // is open doesn't reshuffle the pool underneath the user. Text from a
+  // previously-inserted idea is stripped out first, so a rebuilt pool picks a
+  // word out of what the user actually wrote rather than echoing a word back
+  // from the question that was just appended.
   const dynamicPrompts = useMemo(
     () => (shouldBuildIdeas ? buildDynamicPrompts({
       date,
@@ -681,9 +703,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       milestones: activeMilestones,
       holiday: yearHolidays[date],
       recurringTopic: getRecurringTopic?.(date) ?? null,
+      currentText: isEntryEmpty ? undefined : stripInsertedIdeaText(textRef.current, insertedIdeaTextsRef.current),
       language,
     }) : []),
-    [shouldBuildIdeas, date, knownDates, activeMilestones, yearHolidays, getRecurringTopic, language]
+    [shouldBuildIdeas, date, knownDates, activeMilestones, yearHolidays, getRecurringTopic, language, isEntryEmpty]
   )
 
   // Curated fallback so the pool is never empty for a brand-new or sparse
@@ -741,6 +764,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       : `${base.replace(/\s+$/, '')}\n\n${currentIdea.text}\n\n`
     textRef.current = next
     setText(next)
+    insertedIdeaTextsRef.current = [...insertedIdeaTextsRef.current, currentIdea.text].slice(-20)
     if (status && status !== savedStatus) setStatus('')
     setIdeaOpen(false)
     requestAnimationFrame(() => {

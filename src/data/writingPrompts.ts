@@ -95,6 +95,7 @@ export interface DynamicPromptTemplates {
   season: (season: SeasonKey) => string
   holiday: (name: string) => string
   recurringTopic: (term: string) => string
+  mentionedTopic: (term: string) => string
 }
 
 // Templated prompts filled from cheap per-user signals (milestones, entry
@@ -109,7 +110,7 @@ export const dynamicPromptTemplates: Record<Language, DynamicPromptTemplates> = 
     gapShort: days => `It's been ${days} days since your last entry — what happened in between?`,
     gapMedium: days => `${days} days since you last wrote — what stands out looking back?`,
     gapLong: days => `It's been ${days} days since your last entry — where are you at right now?`,
-    streak: days => `${days} days in a row now — what's today's entry?`,
+    streak: days => `${days} days in a row now — what's on your mind today?`,
     weekdayMonday: () => 'Monday again — what are you hoping for this week?',
     weekdayFriday: () => 'Friday — how would you sum up this week?',
     weekend: () => 'Weekend mode — how are you spending today?',
@@ -121,6 +122,7 @@ export const dynamicPromptTemplates: Record<Language, DynamicPromptTemplates> = 
     })[season],
     holiday: name => `Today is ${name} — how are you spending it?`,
     recurringTopic: term => `You used to write about "${term}" a lot — what's the latest there?`,
+    mentionedTopic: term => `You mentioned "${term}" — is there more to say about it?`,
   },
   ja: {
     milestoneUpcoming: (label, days) => `「${label}」まであと${days}日。今どんな気持ち？`,
@@ -129,7 +131,7 @@ export const dynamicPromptTemplates: Record<Language, DynamicPromptTemplates> = 
     gapShort: days => `前回の記録から${days}日経ちました。その間に何がありましたか？`,
     gapMedium: days => `${days}日ぶりの記録ですね。振り返ってみると、印象に残っていることは？`,
     gapLong: days => `${days}日ぶりの記録です。今、どんな気分ですか？`,
-    streak: days => `${days}日連続で書けていますね。今日は何を書きますか？`,
+    streak: days => `${days}日連続で書けていますね。今日はどんなことがありましたか？`,
     weekdayMonday: () => 'また月曜日ですね。今週楽しみにしていることは？',
     weekdayFriday: () => '週末目前ですね。今週を一言でまとめると？',
     weekend: () => '週末はどう過ごしていますか？',
@@ -141,5 +143,6 @@ export const dynamicPromptTemplates: Record<Language, DynamicPromptTemplates> = 
     })[season],
     holiday: name => `今日は${name}ですね。どう過ごしましたか？`,
     recurringTopic: term => `以前「${term}」についてよく書いていましたね。最近はどうですか？`,
+    mentionedTopic: term => `「${term}」について書いていましたね。もう少し詳しく書いてみる？`,
   },
 }
