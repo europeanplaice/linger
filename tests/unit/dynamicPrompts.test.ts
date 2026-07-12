@@ -51,6 +51,14 @@ describe('buildDynamicPrompts', () => {
     expect(friday.some(p => p.toLowerCase().includes('friday'))).toBe(true)
   })
 
+  it('adds a weekend prompt on Saturday and Sunday', () => {
+    const saturday = buildDynamicPrompts({ ...baseCtx, date: '2026-07-18' })
+    expect(saturday.some(p => p.toLowerCase().includes('weekend'))).toBe(true)
+
+    const sunday = buildDynamicPrompts({ ...baseCtx, date: '2026-07-19' })
+    expect(sunday.some(p => p.toLowerCase().includes('weekend'))).toBe(true)
+  })
+
   it('adds a holiday prompt when one is provided for the date', () => {
     const prompts = buildDynamicPrompts({
       ...baseCtx,

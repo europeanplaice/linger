@@ -137,4 +137,44 @@ describe('useTfIdfSearch', () => {
     expect(result.current.getSimilar('2024-01-01')).toEqual([])
     act(() => resolve([]))
   })
+
+  describe('getRecurringTopic', () => {
+    it('returns null before the index is ready', () => {
+      let resolve!: (v: CachedEntry[]) => void
+      mockGetAllCached.mockReturnValueOnce(new Promise(r => { resolve = r }))
+      const { result } = renderHook(() => useTfIdfSearch())
+      expect(result.current.getRecurringTopic('2024-06-12', 'ja')).toBeNull()
+      act(() => resolve([]))
+    })
+
+    it('finds a topic written about steadily in the past but absent from the recent window', async () => {
+      mockGetAllCached.mockResolvedValueOnce([
+        makeEntry('2024-02-01', '仕事で疲れた一日だった'),
+        makeEntry('2024-03-05', '今日も仕事が忙しかった'),
+        makeEntry('2024-04-10', '仕事の後に友達と会った'),
+        makeEntry('2024-05-01', '仕事のことばかり考えていた'),
+        makeEntry('2024-06-01', '友達とご飯を食べた'),
+      ])
+      const { result } = renderHook(() => useTfIdfSearch())
+      await waitFor(() => expect(result.current.ready).toBe(true))
+
+      const topic = result.current.getRecurringTopic('2024-06-12', 'ja', 14)
+      expect(topic?.term).toBe('仕事')
+      expect(topic?.count).toBe(4)
+    })
+
+    it('returns null when the topic also appears in the recent window', async () => {
+      mockGetAllCached.mockResolvedValueOnce([
+        makeEntry('2024-02-01', '仕事で疲れた一日だった'),
+        makeEntry('2024-03-05', '今日も仕事が忙しかった'),
+        makeEntry('2024-04-10', '仕事の後に友達と会った'),
+        makeEntry('2024-05-01', '仕事のことばかり考えていた'),
+        makeEntry('2024-06-10', '仕事が終わって一息ついた'),
+      ])
+      const { result } = renderHook(() => useTfIdfSearch())
+      await waitFor(() => expect(result.current.ready).toBe(true))
+
+      expect(result.current.getRecurringTopic('2024-06-12', 'ja', 14)).toBeNull()
+    })
+  })
 })

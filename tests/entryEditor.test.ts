@@ -1987,3 +1987,80 @@ test.describe('EntryEditor — related entries', () => {
     await expect(page.locator('.editor-related-item')).toHaveCount(2)
   })
 })
+
+test.describe('EntryEditor — writing idea prompts', () => {
+  test('shows a "Need an idea?" trigger only while the entry is empty', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await expect(page.locator('.editor-idea-trigger')).toBeVisible()
+
+    await page.locator('textarea.editor-textarea').fill('Something I wrote')
+
+    await expect(page.locator('.editor-idea')).toHaveCount(0)
+  })
+
+  test('opens a prompt card and starts the entry from it', async ({ page }) => {
+    await loadHarness(page)
+    // 2026-05-02 has no same month/day entry in a past year among knownDates,
+    // so every idea candidate here is a plain prompt (never a memory).
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await page.locator('.editor-idea-trigger').click()
+    await expect(page.locator('.editor-idea-card')).toBeVisible()
+
+    const ideaText = await page.locator('.editor-idea-text').textContent()
+    expect(ideaText).toBeTruthy()
+
+    await page.getByRole('button', { name: 'Start writing from this' }).click()
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue(`${ideaText}\n\n`)
+    await expect(page.locator('.editor-idea')).toHaveCount(0)
+  })
+
+  test('shuffling shows a different idea, and closing returns to the trigger', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-02', knownDates: ['2026-05-01'], diaryListLoaded: true })
+
+    await page.locator('.editor-idea-trigger').click()
+    const firstIdea = await page.locator('.editor-idea-text').textContent()
+
+    await page.locator('.editor-idea-icon-btn', { hasText: '' }).and(page.getByRole('button', { name: 'Another idea' })).click()
+    const secondIdea = await page.locator('.editor-idea-text').textContent()
+    expect(secondIdea).not.toBe(firstIdea)
+
+    await page.locator('.editor-idea-card').getByRole('button', { name: 'Close' }).click()
+
+    await expect(page.locator('.editor-idea-card')).toHaveCount(0)
+    await expect(page.locator('.editor-idea-trigger')).toBeVisible()
+  })
+
+  test('surfaces a same-day-in-a-past-year memory idea with a working full-entry preview', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-07-12',
+      knownDates: ['2024-07-12', '2026-07-01'],
+      diaryListLoaded: true,
+    })
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2024-07-12', 'Long walk on the beach with old friends.', '1')
+    })
+
+    await page.locator('.editor-idea-trigger').click()
+
+    // The memory idea is always somewhere in the (randomly ordered) pool —
+    // cycle through candidates until it surfaces.
+    let matched = false
+    for (let i = 0; i < 20; i++) {
+      const text = await page.locator('.editor-idea-text').textContent()
+      if (text && /ago today/.test(text)) { matched = true; break }
+      await page.getByRole('button', { name: 'Another idea' }).click()
+    }
+    expect(matched).toBe(true)
+
+    await expect(page.locator('.editor-idea-excerpt')).toHaveText('Long walk on the beach with old friends.')
+
+    await page.getByRole('button', { name: 'Read full entry' }).click()
+    await expect(page.locator('.related-preview-content')).toHaveText('Long walk on the beach with old friends.')
+  })
+})

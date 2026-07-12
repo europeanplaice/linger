@@ -89,4 +89,18 @@ describe('findRecurringAbsentTopic', () => {
   it('returns null when there is nothing to surface', () => {
     expect(findRecurringAbsentTopic(new Map(), '2026-06-12', 14, 'ja')).toBeNull()
   })
+
+  it('works with English content too', () => {
+    const contents = new Map([
+      ['2026-02-01', 'Spent the evening on pottery again'],
+      ['2026-03-05', 'Pottery class was tiring today'],
+      ['2026-04-10', 'Went for pottery after work with friends'],
+      ['2026-05-01', 'Could not stop thinking about pottery'],
+      ['2026-06-01', 'Had dinner with friends'],
+      ['2026-06-05', 'The weather was nice'],
+    ])
+    const result = findRecurringAbsentTopic(contents, '2026-06-12', 14, 'en')
+    expect(result?.term).toBe('pottery')
+    expect(result?.count).toBe(4)
+  })
 })
