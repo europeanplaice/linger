@@ -19,6 +19,8 @@ export interface SessionData {
   email?: string
   changes_start_page_token?: string // Drive Changes API page token for incremental sync
   client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
+  id_token?: string // Google-signed JWT (openid scope) — handed to AWS STS AssumeRoleWithWebIdentity for self-hosted S3
+  google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
 }
 
 export interface Data extends Record<string, unknown> {
@@ -81,7 +83,7 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     }
     throw new Error(`Token refresh failed: ${resp.status}`)
   }
-  const tokens = await resp.json() as { access_token: string; expires_in: number }
+  const tokens = await resp.json() as { access_token: string; expires_in: number; id_token?: string }
   const updated: SessionData = {
     ...session,
     access_token: tokens.access_token,
@@ -89,6 +91,9 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     // A successful refresh proves refresh_token is valid for the current client —
     // stamp it so legacy sessions (created before client_id was tracked) self-heal.
     client_id: env.GOOGLE_CLIENT_ID,
+    // Google only returns id_token on refresh when the refresh_token was originally
+    // granted the openid scope. Keep the previous one otherwise rather than dropping it.
+    ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
   }
   return updated
 }
@@ -99,6 +104,17 @@ export async function getValidAccessToken(sessionId: string, session: SessionDat
     await saveSession(sessionId, validSession, env)
   }
   return validSession.access_token
+}
+
+// id_token shares the same expiry as access_token (both minted in the same token
+// response), so freshness reuses getValidSession's expires_at check rather than
+// tracking a second timestamp.
+export async function getValidIdToken(sessionId: string, session: SessionData, env: Env): Promise<string | null> {
+  const validSession = await getValidSession(sessionId, session, env)
+  if (validSession !== session) {
+    await saveSession(sessionId, validSession, env)
+  }
+  return validSession.id_token ?? null
 }
 
 export function makeSessionCookie(sessionId: string, maxAge: number, secure = true): string {

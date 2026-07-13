@@ -47,12 +47,14 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   let email: string | undefined
+  let googleSub: string | undefined
   if (tokens.id_token) {
     try {
-      const payload = JSON.parse(atob(tokens.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { email?: string }
+      const payload = JSON.parse(atob(tokens.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { email?: string; sub?: string }
       email = payload.email
+      googleSub = payload.sub
     } catch {
-      // id_token decode failed — proceed without email
+      // id_token decode failed — proceed without email/sub
     }
   }
 
@@ -74,6 +76,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     expires_at: Date.now() + tokens.expires_in * 1000,
     client_id: env.GOOGLE_CLIENT_ID,
     ...(email ? { email } : {}),
+    ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
+    ...(googleSub ? { google_sub: googleSub } : {}),
   }
   await saveSession(sessionId, session, env)
   if (email) {

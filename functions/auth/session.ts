@@ -15,7 +15,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     'X-Content-Type-Options': 'nosniff',
   })
   headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
-  return new Response(JSON.stringify({ signedIn: true, email: session.email ?? null }), { status: 200, headers })
+  return new Response(JSON.stringify({ signedIn: true, email: session.email ?? null, googleSub: session.google_sub ?? null }), { status: 200, headers })
 }
 
 function signedOutResponse(): Response {

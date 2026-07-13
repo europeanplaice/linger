@@ -141,6 +141,7 @@ export default function App() {
     tokenExpired,
     hadSession,
     email,
+    googleSub,
     signIn,
     signOut,
     handleExpired,
@@ -703,6 +704,7 @@ export default function App() {
             onClose={() => setSettingsOpen(false)}
             onSignOut={handleSignOut}
             email={email ?? undefined}
+            googleSub={googleSub ?? undefined}
             milestones={milestones}
             onMilestoneAdd={addMilestone}
             onMilestoneUpdate={updateMilestone}

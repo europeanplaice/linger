@@ -31,6 +31,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     request: new Request('http://localhost/'),
     data: { accessToken: 'tok', sessionId: 'sid', session: {} },
     env: {},
+    waitUntil: vi.fn(),
     ...overrides,
   }
 }

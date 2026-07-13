@@ -14,11 +14,13 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
+import { loadS3Settings, saveS3Settings } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
   MAX_MILESTONE_BADGES,
   type Milestone,
+  type S3Settings,
 } from '../types'
 
 function InfoTip({ text }: { text: string }) {
@@ -101,6 +103,7 @@ interface SettingsModalProps {
   onClose: () => void
   onSignOut: () => void
   email?: string
+  googleSub?: string
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   onMilestoneUpdate?: (id: string, label: string, date: string, emoji?: string, recurring?: boolean) => void
@@ -108,7 +111,7 @@ interface SettingsModalProps {
   onMilestoneToggleBadge?: (id: string) => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
@@ -135,6 +138,45 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const signOutDialogRef = useRef<HTMLDialogElement>(null)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
+  const [s3Enabled, setS3Enabled] = useState(false)
+  const [s3RoleArn, setS3RoleArn] = useState('')
+  const [s3Bucket, setS3Bucket] = useState('')
+  const [s3Region, setS3Region] = useState('')
+  const [s3SaveState, setS3SaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [subCopied, setSubCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    loadS3Settings().then(settings => {
+      if (cancelled || !settings) return
+      setS3Enabled(settings.enabled)
+      setS3RoleArn(settings.roleArn)
+      setS3Bucket(settings.bucket)
+      setS3Region(settings.region)
+    }).catch(e => console.error('Failed to load S3 settings:', e))
+    return () => { cancelled = true }
+  }, [])
+
+  const handleS3Save = useCallback(async () => {
+    setS3SaveState('saving')
+    try {
+      const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
+      await saveS3Settings(settings)
+      setS3SaveState('saved')
+      setTimeout(() => setS3SaveState('idle'), 2000)
+    } catch (e) {
+      console.error('Failed to save S3 settings:', e)
+      setS3SaveState('error')
+    }
+  }, [s3Enabled, s3RoleArn, s3Bucket, s3Region])
+
+  const handleCopySub = useCallback(() => {
+    if (!googleSub) return
+    navigator.clipboard.writeText(googleSub).then(() => {
+      setSubCopied(true)
+      setTimeout(() => setSubCopied(false), 2000)
+    }).catch(() => {})
+  }, [googleSub])
 
   useEffect(() => {
     const dialog = dialogRef.current!
@@ -586,6 +628,81 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               {shareMsg ?? t.settings.share}
             </button>
+          </div>
+        </div>
+
+        {/* S3 backup (advanced) */}
+        <div className="settings-section">
+          <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
+          <p className="settings-about-text">
+            {t.settings.s3Help}
+            {' '}
+            <a
+              href="https://github.com/europeanplaice/linger/tree/main/self-hosted/aws-s3"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t.settings.s3SetupGuide} ↗
+            </a>
+          </p>
+          {googleSub && (
+            <div className="settings-item">
+              <span className="settings-item-label-group">
+                <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
+                <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
+              </span>
+              <button type="button" className="settings-action-btn" onClick={handleCopySub}>
+                {subCopied ? t.settings.s3Copied : `${googleSub} — ${t.settings.s3Copy}`}
+              </button>
+            </div>
+          )}
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Enabled}</span>
+            <input
+              type="checkbox"
+              checked={s3Enabled}
+              onChange={e => setS3Enabled(e.target.checked)}
+              aria-label={t.settings.s3Enabled}
+            />
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3RoleArn}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3RoleArn}
+              onChange={e => setS3RoleArn(e.target.value)}
+              placeholder={t.settings.s3RoleArnPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Bucket}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Bucket}
+              onChange={e => setS3Bucket(e.target.value)}
+              placeholder={t.settings.s3BucketPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Region}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Region}
+              onChange={e => setS3Region(e.target.value)}
+              placeholder={t.settings.s3RegionPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <div className="settings-item">
+            <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
+              {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
+            </button>
+            {s3SaveState === 'error' && <span className="settings-item-error">{t.settings.s3SaveError}</span>}
           </div>
         </div>
 

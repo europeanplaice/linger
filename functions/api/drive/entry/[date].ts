@@ -11,6 +11,7 @@ import {
   DriveConflictError,
 } from '../../../_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../_shared/drive'
+import { mirrorEntrySave, mirrorEntryDelete } from '../../../_shared/s3Settings'
 
 const MAX_ENTRY_CONTENT_LENGTH = 500_000
 const MAX_ENTRY_BODY_BYTES = 1_000_000
@@ -118,6 +119,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
       }
       try {
         const savedMeta = await saveEntry(accessToken, entry, folderId, currentMeta?.id ?? body.fileId)
+        context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
         return jsonResponse(savedMeta)
       } catch (e) {
         if (e instanceof DriveConflictError) {
@@ -133,6 +135,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
           if (body.baseContent != null && remoteEntry.content === body.baseContent) {
             // Content is identical despite the version bump — safe to overwrite
             const savedMeta = await saveEntry(accessToken, entry, folderId, meta.id)
+            context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
             return jsonResponse(savedMeta)
           }
           return jsonResponse({ conflict: { entry: remoteEntry, meta } }, 409)
@@ -157,6 +160,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     }
 
     const savedMeta = await saveEntry(accessToken, entry, folderId, fileId)
+    context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
     return jsonResponse(savedMeta)
   } catch (e) {
     if (e instanceof DriveError) return jsonResponse({ error: e.message }, e.status)
@@ -177,6 +181,7 @@ export const onRequestDelete: PagesFunction<Env, 'date', Data> = async (context)
     if (!meta) return new Response(null, { status: 204 })
 
     await deleteEntry(accessToken, meta.id)
+    context.waitUntil(mirrorEntryDelete(accessToken, sessionId, session, context.env, date))
     return new Response(null, { status: 204 })
   } catch (e) {
     if (e instanceof DriveError) {

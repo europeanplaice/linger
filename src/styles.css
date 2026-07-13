@@ -1313,6 +1313,26 @@ dialog.settings-dialog::backdrop {
   color: var(--text);
   min-width: 0;
 }
+.settings-text-input {
+  min-width: 0;
+  width: 100%;
+  max-width: 16rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: inherit;
+}
+.settings-text-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-item-error {
+  font-size: 0.78rem;
+  color: var(--danger, #b3453a);
+}
 .settings-account-info {
   display: flex;
   flex-direction: column;

@@ -29,6 +29,15 @@ export interface LoadedDiaryEntry {
 
 export type StorageMode = 'drive' | 'local' | 'fs'
 
+// Self-hosted S3 mirror connection (see self-hosted/aws-s3/). Stored per-user in
+// Drive, not in linger's own infra — linger holds no AWS credentials for this.
+export interface S3Settings {
+  enabled: boolean
+  roleArn: string
+  bucket: string
+  region: string
+}
+
 export interface DriveRevisionMeta {
   id: string
   modifiedTime: string
