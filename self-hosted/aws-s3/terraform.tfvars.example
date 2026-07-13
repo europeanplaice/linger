@@ -1,0 +1,9 @@
+aws_region  = "us-east-1"
+bucket_name = "my-linger-diary" # must be globally unique across all of AWS
+
+# Not secret, but changes rarely — get this from linger's Settings or the operator.
+linger_google_client_id = "YOUR_LINGER_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+
+# Your own Google account's stable numeric ID (the 'sub' claim), not your email.
+# Without this, any signed-in linger user could assume this role.
+linger_google_sub = "YOUR_GOOGLE_ACCOUNT_SUB"

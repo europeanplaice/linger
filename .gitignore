@@ -24,3 +24,9 @@ infra/terraform.tfstate
 infra/terraform.tfstate.backup
 infra/terraform.tfstate.*.backup
 infra/terraform.tfvars
+self-hosted/aws-s3/.terraform/
+self-hosted/aws-s3/.terraform.lock.hcl
+self-hosted/aws-s3/terraform.tfstate
+self-hosted/aws-s3/terraform.tfstate.backup
+self-hosted/aws-s3/terraform.tfstate.*.backup
+self-hosted/aws-s3/terraform.tfvars
