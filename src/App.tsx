@@ -142,6 +142,7 @@ export default function App() {
     hadSession,
     email,
     googleSub,
+    googleClientId,
     signIn,
     signOut,
     handleExpired,
@@ -705,6 +706,7 @@ export default function App() {
             onSignOut={handleSignOut}
             email={email ?? undefined}
             googleSub={googleSub ?? undefined}
+            googleClientId={googleClientId ?? undefined}
             milestones={milestones}
             onMilestoneAdd={addMilestone}
             onMilestoneUpdate={updateMilestone}

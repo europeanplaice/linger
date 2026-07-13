@@ -6,15 +6,21 @@ export interface SessionInfo {
   signedIn: boolean
   email: string | null
   googleSub: string | null
+  googleClientId: string | null
 }
 
 export async function checkSession(): Promise<SessionInfo> {
   try {
     const resp = await fetch('/auth/session', { credentials: 'include' })
-    const data = await resp.json() as { signedIn: boolean; email?: string | null; googleSub?: string | null }
-    return { signedIn: Boolean(data.signedIn), email: data.email ?? null, googleSub: data.googleSub ?? null }
+    const data = await resp.json() as { signedIn: boolean; email?: string | null; googleSub?: string | null; googleClientId?: string | null }
+    return {
+      signedIn: Boolean(data.signedIn),
+      email: data.email ?? null,
+      googleSub: data.googleSub ?? null,
+      googleClientId: data.googleClientId ?? null,
+    }
   } catch {
-    return { signedIn: false, email: null, googleSub: null }
+    return { signedIn: false, email: null, googleSub: null, googleClientId: null }
   }
 }
 

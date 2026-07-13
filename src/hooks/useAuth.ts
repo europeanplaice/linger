@@ -9,6 +9,7 @@ export interface AuthState {
   hadSession: boolean
   email: string | null
   googleSub: string | null
+  googleClientId: string | null
   signIn: () => void
   signOut: () => void
   handleExpired: () => void
@@ -20,6 +21,7 @@ export function useAuth(): AuthState {
   const [tokenExpired, setTokenExpired] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
   const [googleSub, setGoogleSub] = useState<string | null>(null)
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null)
   const [hadSession] = useState<boolean>(
     () => localStorage.getItem('linger_had_session') === 'true'
   )
@@ -40,6 +42,7 @@ export function useAuth(): AuthState {
       setStatus(info.signedIn ? 'signedIn' : 'signedOut')
       setEmail(info.email)
       setGoogleSub(info.googleSub)
+      setGoogleClientId(info.googleClientId)
     })
     return () => { cancelled = true }
   }, [])
@@ -63,5 +66,5 @@ export function useAuth(): AuthState {
     startSignIn()
   }, [])
 
-  return { status, tokenExpired, hadSession, email, googleSub, signIn, signOut, handleExpired, retryAfterExpired }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, signIn, signOut, handleExpired, retryAfterExpired }
 }

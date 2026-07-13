@@ -1332,6 +1332,14 @@ dialog.settings-dialog::backdrop {
 .settings-item-error {
   font-size: 0.78rem;
   color: var(--danger, #b3453a);
+  padding: 0 1.35rem 0.6rem;
+  margin: 0;
+}
+.settings-s3-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .settings-account-info {
   display: flex;

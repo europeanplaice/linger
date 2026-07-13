@@ -49,7 +49,9 @@ at request time via `sts:AssumeRoleWithWebIdentity`.
    ```
 
 3. Copy the `role_arn` output and paste it into linger's Settings under your
-   S3 connection.
+   S3 connection, along with the bucket name and region. Use the "Test
+   connection" button there to confirm the trust policy and bucket
+   permissions actually work before enabling the backup.
 
 ## Rotating access
 

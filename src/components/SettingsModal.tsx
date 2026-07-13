@@ -14,7 +14,7 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
@@ -104,6 +104,7 @@ interface SettingsModalProps {
   onSignOut: () => void
   email?: string
   googleSub?: string
+  googleClientId?: string
   milestones?: Milestone[]
   onMilestoneAdd?: (label: string, date: string, emoji?: string, recurring?: boolean) => void
   onMilestoneUpdate?: (id: string, label: string, date: string, emoji?: string, recurring?: boolean) => void
@@ -111,7 +112,7 @@ interface SettingsModalProps {
   onMilestoneToggleBadge?: (id: string) => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
@@ -143,7 +144,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3Bucket, setS3Bucket] = useState('')
   const [s3Region, setS3Region] = useState('')
   const [s3SaveState, setS3SaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [subCopied, setSubCopied] = useState(false)
+  const [s3TestState, setS3TestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [s3TestError, setS3TestError] = useState<string | null>(null)
+  const [copiedField, setCopiedField] = useState<'sub' | 'clientId' | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -159,6 +162,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
 
   const handleS3Save = useCallback(async () => {
     setS3SaveState('saving')
+    setS3TestState('idle')
     try {
       const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
       await saveS3Settings(settings)
@@ -170,13 +174,31 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }
   }, [s3Enabled, s3RoleArn, s3Bucket, s3Region])
 
-  const handleCopySub = useCallback(() => {
-    if (!googleSub) return
-    navigator.clipboard.writeText(googleSub).then(() => {
-      setSubCopied(true)
-      setTimeout(() => setSubCopied(false), 2000)
+  const handleS3Test = useCallback(async () => {
+    setS3TestState('testing')
+    setS3TestError(null)
+    try {
+      const result = await testS3Settings({ roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() })
+      if (result.ok) {
+        setS3TestState('ok')
+      } else {
+        setS3TestState('error')
+        setS3TestError(result.error ?? null)
+      }
+    } catch (e) {
+      console.error('S3 connection test failed:', e)
+      setS3TestState('error')
+      setS3TestError(null)
+    }
+  }, [s3RoleArn, s3Bucket, s3Region])
+
+  const handleCopy = useCallback((field: 'sub' | 'clientId', value: string | undefined) => {
+    if (!value) return
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 2000)
     }).catch(() => {})
-  }, [googleSub])
+  }, [])
 
   useEffect(() => {
     const dialog = dialogRef.current!
@@ -645,14 +667,25 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {t.settings.s3SetupGuide} ↗
             </a>
           </p>
+          {googleClientId && (
+            <div className="settings-item">
+              <span className="settings-item-label-group">
+                <span className="settings-item-label">{t.settings.s3LingerClientId}</span>
+                <InfoTip text={t.settings.s3LingerClientIdHelp} />
+              </span>
+              <button type="button" className="settings-action-btn" onClick={() => handleCopy('clientId', googleClientId)}>
+                {copiedField === 'clientId' ? t.settings.s3Copied : `${googleClientId} — ${t.settings.s3Copy}`}
+              </button>
+            </div>
+          )}
           {googleSub && (
             <div className="settings-item">
               <span className="settings-item-label-group">
                 <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
                 <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
               </span>
-              <button type="button" className="settings-action-btn" onClick={handleCopySub}>
-                {subCopied ? t.settings.s3Copied : `${googleSub} — ${t.settings.s3Copy}`}
+              <button type="button" className="settings-action-btn" onClick={() => handleCopy('sub', googleSub)}>
+                {copiedField === 'sub' ? t.settings.s3Copied : `${googleSub} — ${t.settings.s3Copy}`}
               </button>
             </div>
           )}
@@ -699,11 +732,25 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             />
           </div>
           <div className="settings-item">
-            <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
-              {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
-            </button>
-            {s3SaveState === 'error' && <span className="settings-item-error">{t.settings.s3SaveError}</span>}
+            <span className="settings-item-label" />
+            <div className="settings-s3-actions">
+              <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
+                {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
+              </button>
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={handleS3Test}
+                disabled={s3TestState === 'testing' || !s3RoleArn || !s3Bucket || !s3Region}
+              >
+                {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
+              </button>
+            </div>
           </div>
+          {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
+          {s3TestState === 'error' && (
+            <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
+          )}
         </div>
 
         {/* Keyboard Shortcuts (hidden on mobile) */}
