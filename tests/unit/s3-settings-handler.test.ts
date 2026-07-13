@@ -1,0 +1,124 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { onRequestGet, onRequestPut } from '../../functions/api/s3/settings'
+import * as drive from '../../functions/_shared/drive'
+import * as s3Settings from '../../functions/_shared/s3Settings'
+import * as session from '../../functions/_shared/session'
+
+vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
+  ensureFolder: vi.fn().mockResolvedValue('folder-1'),
+  findJsonFile: vi.fn().mockResolvedValue(null),
+  readJsonFile: vi.fn(),
+  writeJsonFile: vi.fn().mockResolvedValue({ id: 'settings-file', name: 's3_settings.json', version: '1' }),
+}))
+
+vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
+  backfillAllEntries: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('../../functions/_shared/session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../functions/_shared/session')>()),
+  saveSession: vi.fn().mockResolvedValue(undefined),
+}))
+
+const validSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
+
+function makeContext(overrides: Record<string, unknown> = {}) {
+  return {
+    request: new Request('http://localhost/'),
+    data: { accessToken: 'tok', sessionId: 'sid', session: {} },
+    env: {},
+    waitUntil: vi.fn(),
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
+  vi.mocked(drive.findJsonFile).mockResolvedValue(null)
+  vi.mocked(drive.writeJsonFile).mockResolvedValue({ id: 'settings-file', name: 's3_settings.json', version: '1' })
+})
+
+describe('GET /api/s3/settings', () => {
+  it('returns null when no settings file exists', async () => {
+    const res = await onRequestGet(makeContext() as any)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toBeNull()
+  })
+})
+
+describe('PUT /api/s3/settings', () => {
+  it('rejects malformed settings', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ enabled: true }) }),
+    })
+    const res = await onRequestPut(ctx as any)
+    expect(res.status).toBe(400)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('triggers a backfill when enabling for the first time (no prior settings file)', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
+    })
+
+    const res = await onRequestPut(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(ctx.waitUntil).toHaveBeenCalledOnce()
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
+      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file',
+    )
+  })
+
+  it('triggers a backfill when transitioning from disabled to enabled', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
+    })
+
+    await onRequestPut(ctx as any)
+
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
+  })
+
+  it('does not trigger a backfill when already enabled and settings are merely edited', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, bucket: 'other-bucket' }) }),
+    })
+
+    await onRequestPut(ctx as any)
+
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('does not trigger a backfill when disabling', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, enabled: false }) }),
+    })
+
+    await onRequestPut(ctx as any)
+
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('clears a stale negative settings-cache on the session after a successful write', async () => {
+    const sess = { s3_settings_negative_cache_at: Date.now() }
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
+      data: { accessToken: 'tok', sessionId: 'sid', session: sess },
+    })
+
+    await onRequestPut(ctx as any)
+
+    expect(sess.s3_settings_negative_cache_at).toBeUndefined()
+    expect(session.saveSession).toHaveBeenCalledWith('sid', sess, {})
+  })
+})

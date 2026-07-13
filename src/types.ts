@@ -36,6 +36,8 @@ export interface S3Settings {
   roleArn: string
   bucket: string
   region: string
+  lastSyncError?: string
+  lastSyncErrorAt?: string // ISO timestamp
 }
 
 export interface DriveRevisionMeta {

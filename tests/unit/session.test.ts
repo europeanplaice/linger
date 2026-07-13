@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
-  parseSessionId, getSession, saveSession, getValidAccessToken,
+  parseSessionId, getSession, saveSession, getValidAccessToken, getValidIdToken,
   makeSessionCookie, clearSessionCookie, jsonResponse,
   addEmailSessionIndex, removeEmailSessionIndex, deleteAllSessionsForEmail,
   getRefreshTokenForEmail, invalidateSession,
@@ -174,6 +174,61 @@ describe('getValidAccessToken', () => {
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toBeInstanceOf(RefreshTokenInvalidError)
+  })
+})
+
+describe('getValidIdToken', () => {
+  const baseEnv = { GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret' }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('returns the current id_token when the session is not expired', async () => {
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000, id_token: 'idtok' }
+    expect(await getValidIdToken('sid', session, baseEnv as any)).toBe('idtok')
+  })
+
+  it('carries the new id_token forward when refresh returns one', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600, id_token: 'new_idtok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    const put = vi.fn()
+    const env = { ...baseEnv, SESSIONS: { put } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
+
+    expect(await getValidIdToken('sid', session, env as any)).toBe('new_idtok')
+    const stored = JSON.parse(put.mock.calls[0][1])
+    expect(stored.id_token).toBe('new_idtok')
+  })
+
+  it('drops a stale id_token instead of keeping it when refresh omits a new one', async () => {
+    // The id_token shares the access_token's expiry, so a kept-but-not-reissued
+    // id_token is expired by definition — every subsequent STS AssumeRoleWithWebIdentity
+    // call for self-hosted S3 mirroring would fail silently forever. Dropping it makes
+    // getValidIdToken honestly return null instead of handing out dead credentials.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    const put = vi.fn()
+    const env = { ...baseEnv, SESSIONS: { put } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
+
+    expect(await getValidIdToken('sid', session, env as any)).toBeNull()
+    const stored = JSON.parse(put.mock.calls[0][1])
+    expect(stored.id_token).toBeUndefined()
   })
 })
 

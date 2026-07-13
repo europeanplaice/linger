@@ -69,6 +69,8 @@ function objectUrl(bucket: string, region: string, key: string): string {
   return `https://${bucket}.s3.${region}.amazonaws.com/${key.split('/').map(encodeURIComponent).join('/')}`
 }
 
+// `version` (Drive's monotonically increasing per-file version string) is stamped as
+// object metadata so a later write can tell whether it would clobber a newer one.
 export async function putObject(
   creds: AssumedCredentials,
   bucket: string,
@@ -76,16 +78,52 @@ export async function putObject(
   key: string,
   body: string,
   contentType = 'text/plain; charset=UTF-8',
+  version?: string,
 ): Promise<void> {
   const client = s3Client(creds, region)
+  const headers: Record<string, string> = { 'Content-Type': contentType }
+  if (version) headers['x-amz-meta-linger-version'] = version
   const resp = await client.fetch(objectUrl(bucket, region, key), {
     method: 'PUT',
-    headers: { 'Content-Type': contentType },
+    headers,
     body,
   })
   if (!resp.ok) {
     throw new S3Error(resp.status, `S3 PutObject failed: ${await resp.text()}`)
   }
+}
+
+function isAtLeast(existing: string, incoming: string): boolean {
+  try {
+    return BigInt(existing) >= BigInt(incoming)
+  } catch {
+    return false // unexpected (non-numeric) version format — don't block the write
+  }
+}
+
+// Guards against out-of-order mirror writes (e.g. two rapid saves of the same date from
+// autosave + Ctrl+S, or two open tabs) leaving a stale version as the bucket's "current"
+// object. Compares against the version already stored in the object's metadata rather
+// than relying on request arrival order, which is not guaranteed under concurrent waitUntil
+// calls.
+export async function putObjectIfNewer(
+  creds: AssumedCredentials,
+  bucket: string,
+  region: string,
+  key: string,
+  body: string,
+  version?: string,
+  contentType?: string,
+): Promise<void> {
+  if (version) {
+    const client = s3Client(creds, region)
+    const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD' })
+    if (head.ok) {
+      const existing = head.headers.get('x-amz-meta-linger-version')
+      if (existing && isAtLeast(existing, version)) return
+    }
+  }
+  await putObject(creds, bucket, region, key, body, contentType, version)
 }
 
 export async function deleteObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<void> {
@@ -94,4 +132,19 @@ export async function deleteObject(creds: AssumedCredentials, bucket: string, re
   if (!resp.ok && resp.status !== 404) {
     throw new S3Error(resp.status, `S3 DeleteObject failed: ${await resp.text()}`)
   }
+}
+
+// Extracts a short human-readable message from an S3/STS error (XML or JSON error body),
+// or from any other Error, truncated so it's safe to surface to the user and to store.
+export function describeError(e: unknown): string {
+  let detail: string
+  if (e instanceof S3Error) {
+    const match = e.message.match(/<Message>([^<]+)<\/Message>/) ?? e.message.match(/"message"\s*:\s*"([^"]+)"/i)
+    detail = match?.[1] ?? e.message
+  } else if (e instanceof Error) {
+    detail = e.message
+  } else {
+    detail = 'Unknown error'
+  }
+  return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail
 }

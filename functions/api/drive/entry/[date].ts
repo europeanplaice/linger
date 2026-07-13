@@ -119,7 +119,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
       }
       try {
         const savedMeta = await saveEntry(accessToken, entry, folderId, currentMeta?.id ?? body.fileId)
-        context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
+        context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content, savedMeta.version))
         return jsonResponse(savedMeta)
       } catch (e) {
         if (e instanceof DriveConflictError) {
@@ -135,7 +135,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
           if (body.baseContent != null && remoteEntry.content === body.baseContent) {
             // Content is identical despite the version bump — safe to overwrite
             const savedMeta = await saveEntry(accessToken, entry, folderId, meta.id)
-            context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
+            context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content, savedMeta.version))
             return jsonResponse(savedMeta)
           }
           return jsonResponse({ conflict: { entry: remoteEntry, meta } }, 409)
@@ -160,7 +160,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     }
 
     const savedMeta = await saveEntry(accessToken, entry, folderId, fileId)
-    context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content))
+    context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content, savedMeta.version))
     return jsonResponse(savedMeta)
   } catch (e) {
     if (e instanceof DriveError) return jsonResponse({ error: e.message }, e.status)

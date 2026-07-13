@@ -146,6 +146,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3SaveState, setS3SaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [s3TestState, setS3TestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [s3TestError, setS3TestError] = useState<string | null>(null)
+  const [s3LastSyncError, setS3LastSyncError] = useState<string | null>(null)
+  const [s3LastSyncErrorAt, setS3LastSyncErrorAt] = useState<string | null>(null)
   const [copiedField, setCopiedField] = useState<'sub' | 'clientId' | null>(null)
 
   useEffect(() => {
@@ -156,6 +158,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3RoleArn(settings.roleArn)
       setS3Bucket(settings.bucket)
       setS3Region(settings.region)
+      setS3LastSyncError(settings.lastSyncError ?? null)
+      setS3LastSyncErrorAt(settings.lastSyncErrorAt ?? null)
     }).catch(e => console.error('Failed to load S3 settings:', e))
     return () => { cancelled = true }
   }, [])
@@ -167,6 +171,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
       await saveS3Settings(settings)
       setS3SaveState('saved')
+      // Saving rewrites the whole settings file without sync-status fields, so the
+      // stored error is cleared server-side too — mirror that locally right away.
+      setS3LastSyncError(null)
+      setS3LastSyncErrorAt(null)
       setTimeout(() => setS3SaveState('idle'), 2000)
     } catch (e) {
       console.error('Failed to save S3 settings:', e)
@@ -750,6 +758,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
           {s3TestState === 'error' && (
             <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
+          )}
+          {s3Enabled && s3LastSyncError && (
+            <p className="settings-item-error">
+              {t.settings.s3SyncError}: {s3LastSyncError}
+              {s3LastSyncErrorAt ? ` (${new Date(s3LastSyncErrorAt).toLocaleString()})` : ''}
+            </p>
           )}
         </div>
 

@@ -9,9 +9,20 @@ variable "bucket_name" {
   type        = string
 }
 
+variable "noncurrent_version_expiration_days" {
+  description = "Days to keep a past version of a diary entry (or a deleted entry's delete marker) before S3 permanently expires it. Bucket versioning otherwise retains every past revision forever."
+  type        = number
+  default     = 90
+}
+
 variable "linger_google_client_id" {
   description = "linger's Google OAuth client ID (the OIDC 'aud' value). Find it in linger's Settings, or ask the linger operator — this is not secret, but changes rarely."
   type        = string
+
+  validation {
+    condition     = can(regex("\\.apps\\.googleusercontent\\.com$", var.linger_google_client_id))
+    error_message = "linger_google_client_id must end in .apps.googleusercontent.com — this is linger's own Google OAuth client ID (the 'aud' value), not something you create yourself."
+  }
 }
 
 variable "linger_google_sub" {
@@ -23,4 +34,9 @@ variable "linger_google_sub" {
     decoding your own id_token.
   EOT
   type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.linger_google_sub))
+    error_message = "linger_google_sub must be your Google account's numeric 'sub' claim (digits only) — not your email address, and not the terraform.tfvars.example placeholder."
+  }
 }

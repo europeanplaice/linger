@@ -26,3 +26,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "diary" {
     bucket_key_enabled = true
   }
 }
+
+# Versioning alone keeps every past revision of every entry (including deleted ones,
+# which are just a delete marker on top of the version stack) forever. This expires
+# old versions after a while so "I deleted that entry" eventually means what it says.
+resource "aws_s3_bucket_lifecycle_configuration" "diary" {
+  bucket = aws_s3_bucket.diary.id
+
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+    filter {} # applies to every object in the bucket
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.noncurrent_version_expiration_days
+    }
+  }
+}

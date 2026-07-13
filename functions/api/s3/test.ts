@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../_shared/session'
-import { assumeRoleWithWebIdentity, putObject, deleteObject, S3Error } from '../../_shared/s3'
+import { assumeRoleWithWebIdentity, putObject, deleteObject, S3Error, describeError } from '../../_shared/s3'
 import { S3_ROLE_ARN_RE, S3_BUCKET_RE, S3_REGION_RE } from '../../_shared/s3Settings'
 
 // Writes and immediately deletes a small marker object — proves the role trust
@@ -8,12 +8,6 @@ import { S3_ROLE_ARN_RE, S3_BUCKET_RE, S3_REGION_RE } from '../../_shared/s3Sett
 // fields are well-formed. Same key every time so repeated tests don't litter
 // the bucket if a delete ever fails.
 const TEST_KEY = '_linger_connection_test.txt'
-
-function describeS3Error(e: S3Error): string {
-  const match = e.message.match(/<Message>([^<]+)<\/Message>/) ?? e.message.match(/"message"\s*:\s*"([^"]+)"/i)
-  const detail = match?.[1] ?? e.message
-  return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail
-}
 
 export const onRequestPost: PagesFunction<Env, string, Data> = async (context) => {
   const { sessionId, session } = context.data
@@ -46,7 +40,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   } catch (e) {
     if (e instanceof S3Error) {
       console.error('s3/test.ts: connection test failed', e)
-      return jsonResponse({ ok: false, error: describeS3Error(e) })
+      return jsonResponse({ ok: false, error: describeError(e) })
     }
     console.error('s3/test.ts: unexpected failure', e)
     return jsonResponse({ ok: false, error: 'Unexpected error' })

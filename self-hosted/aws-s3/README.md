@@ -67,3 +67,24 @@ its contents are untouched.
   trusting linger until you update the variable and re-apply.
 - The bucket has versioning enabled and is fully private (no public access,
   no bucket policy needed) — only the IAM role created here can reach it.
+- Past versions of an entry (including deleted entries, which are just a
+  delete marker on top of the version stack) are expired automatically after
+  `noncurrent_version_expiration_days` (default 90) — override it in your
+  `terraform.tfvars` if you want them kept longer or shorter.
+
+## Troubleshooting
+
+**`terraform apply` fails with `EntityAlreadyExists` on the OIDC provider** —
+IAM allows only one OIDC provider per URL per AWS account. If your account
+already has a `https://accounts.google.com` provider (from another tool, or a
+previous run outside this Terraform state), import the existing one instead
+of creating a new one:
+
+```bash
+terraform import aws_iam_openid_connect_provider.google \
+  arn:aws:iam::<your-account-id>:oidc-provider/accounts.google.com
+```
+
+Then re-run `terraform apply` — Terraform will reconcile `client_id_list` to
+include linger's client ID alongside whatever else already trusts that
+provider.

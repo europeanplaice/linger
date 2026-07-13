@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestGet as onSearch } from '../../functions/api/drive/search'
-import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../functions/api/drive/entry/[date]'
+import { onRequestGet as onGetEntry, onRequestPost as onPostEntry, onRequestDelete as onDeleteEntry } from '../../functions/api/drive/entry/[date]'
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
 import { onRequestGet as onGetRevision } from '../../functions/api/drive/revisions/[fileId]/[revisionId]'
 import { onRequestGet as onChanges } from '../../functions/api/drive/changes'
 import { onRequestGet as onGetMilestones, onRequestPut as onPutMilestones } from '../../functions/api/drive/milestones'
 import * as drive from '../../functions/_shared/drive'
+import * as s3Settings from '../../functions/_shared/s3Settings'
+
+vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
+  mirrorEntrySave: vi.fn().mockResolvedValue(undefined),
+  mirrorEntryDelete: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
@@ -418,6 +425,35 @@ describe('post entry handler', () => {
       'folder-1',
       'entry-1',
     )
+  })
+
+  it('passes the saved Drive version through to mirrorEntrySave for S3 ordering', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entry/2026-05-01', {
+        method: 'POST',
+        body: JSON.stringify({ content: 'updated', fileId: 'validFileId1234567890', baseVersion: '8' }),
+      }),
+      params: { date: '2026-05-01' },
+    })
+
+    await onPostEntry(ctx as any)
+
+    expect(s3Settings.mirrorEntrySave).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01', 'updated', '9')
+  })
+})
+
+describe('delete entry handler', () => {
+  it('mirrors the delete to S3 after removing the Drive file', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entry/2026-05-01', { method: 'DELETE' }),
+      params: { date: '2026-05-01' },
+    })
+
+    const res = await onDeleteEntry(ctx as any)
+
+    expect(res.status).toBe(204)
+    expect(drive.deleteEntry).toHaveBeenCalledWith('tok', 'entry-1')
+    expect(s3Settings.mirrorEntryDelete).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01')
   })
 })
 

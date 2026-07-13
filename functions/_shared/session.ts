@@ -21,6 +21,7 @@ export interface SessionData {
   client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
   id_token?: string // Google-signed JWT (openid scope) — handed to AWS STS AssumeRoleWithWebIdentity for self-hosted S3
   google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
+  s3_settings_negative_cache_at?: number // ms since epoch — last time a save/delete confirmed no s3_settings.json exists, so Drive-only users don't pay a files.list lookup on every save
 }
 
 export interface Data extends Record<string, unknown> {
@@ -91,9 +92,11 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     // A successful refresh proves refresh_token is valid for the current client —
     // stamp it so legacy sessions (created before client_id was tracked) self-heal.
     client_id: env.GOOGLE_CLIENT_ID,
-    // Google only returns id_token on refresh when the refresh_token was originally
-    // granted the openid scope. Keep the previous one otherwise rather than dropping it.
-    ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
+    // id_token shares this same refresh response's expires_in, so a previous id_token
+    // is expired by definition whenever this branch runs. Carry forward only a freshly
+    // issued one; otherwise drop it rather than handing callers a dead token that would
+    // make every subsequent STS AssumeRoleWithWebIdentity call fail silently.
+    id_token: tokens.id_token,
   }
   return updated
 }
