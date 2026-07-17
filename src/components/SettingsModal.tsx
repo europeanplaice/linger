@@ -666,7 +666,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
           <p className="settings-about-text settings-s3-help">
             {t.settings.s3Help}
-            {' '}
+          </p>
+          <ol className="settings-about-list settings-s3-help">
+            {t.settings.s3Steps.map((step, i) => <li key={i}>{step}</li>)}
+          </ol>
+          <p className="settings-about-text settings-s3-help">
             <a
               href="/self-hosted-s3"
               target="_blank"
