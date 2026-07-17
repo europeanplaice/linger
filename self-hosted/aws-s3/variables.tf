@@ -5,8 +5,13 @@ variable "aws_region" {
 }
 
 variable "bucket_name" {
-  description = "Name of the S3 bucket linger will store your diary data in. Must be globally unique across all of AWS."
+  description = "Name of the S3 bucket linger will store your diary data in. Must be globally unique across all of AWS — try appending your AWS account ID or a random suffix, e.g. \"linger-diary-123456789012\"."
   type        = string
+
+  validation {
+    condition     = var.bucket_name != "CHANGE-ME-linger-diary-<your-aws-account-id-or-random-suffix>"
+    error_message = "bucket_name must be a name you chose yourself, not the terraform.tfvars.example placeholder — S3 bucket names are globally unique across all of AWS, so a generic placeholder like \"my-linger-diary\" will almost always already be taken. Try appending your AWS account ID or a random suffix, e.g. \"linger-diary-123456789012\"."
+  }
 }
 
 variable "linger_google_client_id" {

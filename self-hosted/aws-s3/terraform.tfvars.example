@@ -1,5 +1,9 @@
-aws_region  = "us-east-1"
-bucket_name = "my-linger-diary" # must be globally unique across all of AWS
+aws_region = "us-east-1"
+
+# Must be globally unique across all of AWS — a plausible-looking name like
+# "my-linger-diary" will almost always already be taken by someone else. Try
+# appending your AWS account ID or a random suffix.
+bucket_name = "CHANGE-ME-linger-diary-<your-aws-account-id-or-random-suffix>"
 
 # Not secret, but changes rarely — get this from linger's Settings or the operator.
 linger_google_client_id = "YOUR_LINGER_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
