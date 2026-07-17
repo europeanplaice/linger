@@ -9,12 +9,6 @@ variable "bucket_name" {
   type        = string
 }
 
-variable "noncurrent_version_expiration_days" {
-  description = "Days to keep a past version of a diary entry (or a deleted entry's delete marker) before S3 permanently expires it. Bucket versioning otherwise retains every past revision forever."
-  type        = number
-  default     = 90
-}
-
 variable "linger_google_client_id" {
   description = "linger's Google OAuth client ID (the OIDC 'aud' value). Find it in linger's Settings, or ask the linger operator — this is not secret, but changes rarely."
   type        = string

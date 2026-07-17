@@ -68,9 +68,12 @@ its contents are untouched.
 - The bucket has versioning enabled and is fully private (no public access,
   no bucket policy needed) — only the IAM role created here can reach it.
 - Past versions of an entry (including deleted entries, which are just a
-  delete marker on top of the version stack) are expired automatically after
-  `noncurrent_version_expiration_days` (default 90) — override it in your
-  `terraform.tfvars` if you want them kept longer or shorter.
+  delete marker on top of the version stack) are kept forever — nothing here
+  ever expires them automatically. If you want to permanently purge old
+  versions (e.g. after deleting an entry for privacy reasons), do it
+  yourself: `aws s3api list-object-versions --bucket <bucket>` to find the
+  version IDs, then `aws s3api delete-object --bucket <bucket> --key <key>
+  --version-id <id>` for each one you want gone. This is irreversible.
 - The bucket has `prevent_destroy` set, so `terraform destroy` (or removing
   it from your config) will refuse to delete it and everything in it. To
   actually remove the bucket, delete the `lifecycle` block in `s3.tf` first,
