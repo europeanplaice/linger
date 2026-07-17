@@ -105,3 +105,11 @@ Terraform config — including ones it didn't create — gets removed from the
 provider, silently breaking whatever else was relying on it. Only once
 `additional_google_oidc_client_ids` accounts for everything already there is
 it safe to `terraform apply`.
+
+Note this cuts both ways: if that existing provider is itself managed by
+another Terraform config (not just some other tool that used the AWS
+console), importing it here too means two configs now own the same
+resource. That other config's next apply won't know about linger's client
+ID and may remove it in turn. Prefer adding linger's client ID as a change
+to that existing config instead of importing the provider into this one,
+if you have the option.

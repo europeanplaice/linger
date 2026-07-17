@@ -150,5 +150,13 @@ terraform apply</code></pre>
     breaking whatever else was relying on it. Only once <code>additional_google_oidc_client_ids</code>
     accounts for everything already there is it safe to <code>terraform apply</code>.
   </p>
+  <p>
+    Note this cuts both ways: if that existing provider is itself managed by another
+    Terraform config (not just some other tool that used the AWS console), importing it
+    here too means two configs now own the same resource. That other config's next apply
+    won't know about Linger's client ID and may remove it in turn. Prefer adding Linger's
+    client ID as a change to that existing config instead of importing the provider into
+    this one, if you have the option.
+  </p>
 </body>
 </html>
