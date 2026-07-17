@@ -681,14 +681,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <span className="settings-item-label">{t.settings.s3LingerClientId}</span>
                 <InfoTip text={t.settings.s3LingerClientIdHelp} />
               </span>
-              <button
-                type="button"
-                className="settings-action-btn"
-                title={googleClientId}
-                onClick={() => handleCopy('clientId', googleClientId)}
-              >
-                {copiedField === 'clientId' ? t.settings.s3Copied : `${googleClientId} — ${t.settings.s3Copy}`}
-              </button>
+              <div className="settings-copy-row">
+                <code className="settings-copy-value" title={googleClientId}>{googleClientId}</code>
+                <button
+                  type="button"
+                  className="settings-copy-btn"
+                  onClick={() => handleCopy('clientId', googleClientId)}
+                >
+                  {copiedField === 'clientId' ? (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  )}
+                  {copiedField === 'clientId' ? t.settings.s3Copied : t.settings.s3Copy}
+                </button>
+              </div>
             </div>
           )}
           {googleSub && (
@@ -697,14 +704,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
                 <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
               </span>
-              <button
-                type="button"
-                className="settings-action-btn"
-                title={googleSub}
-                onClick={() => handleCopy('sub', googleSub)}
-              >
-                {copiedField === 'sub' ? t.settings.s3Copied : `${googleSub} — ${t.settings.s3Copy}`}
-              </button>
+              <div className="settings-copy-row">
+                <code className="settings-copy-value" title={googleSub}>{googleSub}</code>
+                <button
+                  type="button"
+                  className="settings-copy-btn"
+                  onClick={() => handleCopy('sub', googleSub)}
+                >
+                  {copiedField === 'sub' ? (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  )}
+                  {copiedField === 'sub' ? t.settings.s3Copied : t.settings.s3Copy}
+                </button>
+              </div>
             </div>
           )}
           <div className="settings-item">

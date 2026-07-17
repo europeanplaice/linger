@@ -1422,12 +1422,49 @@ dialog.settings-dialog::backdrop {
   grid-template-columns: 1fr;
   gap: 0.4rem;
 }
-.settings-item-copy .settings-action-btn {
-  width: 100%;
-  max-width: 100%;
+.settings-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.settings-copy-value {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  justify-content: flex-start;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+}
+.settings-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 7px;
+  color: var(--on-accent);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 0.42rem 0.7rem;
+  white-space: nowrap;
+  transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.settings-copy-btn:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 2px 8px var(--save-glow);
+}
+.settings-copy-btn:active {
+  transform: scale(0.97);
 }
 .infotip-btn {
   background: none;
