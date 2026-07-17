@@ -1416,6 +1416,19 @@ dialog.settings-dialog::backdrop {
   gap: 0.3rem;
   min-width: 0;
 }
+/* Copy-value rows (e.g. S3 setup IDs): the value can be arbitrarily long, so
+   stack it under the label instead of squeezing both into a 2-col grid. */
+.settings-item-copy {
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+}
+.settings-item-copy .settings-action-btn {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  justify-content: flex-start;
+}
 .infotip-btn {
   background: none;
   border: none;
@@ -1730,6 +1743,9 @@ dialog.settings-dialog::backdrop {
 }
 .settings-about-text {
   line-height: 1.5;
+}
+.settings-s3-help {
+  padding-inline: 1.35rem;
 }
 .settings-about-list {
   font-size: 0.8rem;

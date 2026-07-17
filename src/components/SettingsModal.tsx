@@ -664,7 +664,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* S3 backup (advanced) */}
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
-          <p className="settings-about-text">
+          <p className="settings-about-text settings-s3-help">
             {t.settings.s3Help}
             {' '}
             <a
@@ -676,23 +676,33 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </a>
           </p>
           {googleClientId && (
-            <div className="settings-item">
+            <div className="settings-item settings-item-copy">
               <span className="settings-item-label-group">
                 <span className="settings-item-label">{t.settings.s3LingerClientId}</span>
                 <InfoTip text={t.settings.s3LingerClientIdHelp} />
               </span>
-              <button type="button" className="settings-action-btn" onClick={() => handleCopy('clientId', googleClientId)}>
+              <button
+                type="button"
+                className="settings-action-btn"
+                title={googleClientId}
+                onClick={() => handleCopy('clientId', googleClientId)}
+              >
                 {copiedField === 'clientId' ? t.settings.s3Copied : `${googleClientId} — ${t.settings.s3Copy}`}
               </button>
             </div>
           )}
           {googleSub && (
-            <div className="settings-item">
+            <div className="settings-item settings-item-copy">
               <span className="settings-item-label-group">
                 <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
                 <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
               </span>
-              <button type="button" className="settings-action-btn" onClick={() => handleCopy('sub', googleSub)}>
+              <button
+                type="button"
+                className="settings-action-btn"
+                title={googleSub}
+                onClick={() => handleCopy('sub', googleSub)}
+              >
                 {copiedField === 'sub' ? t.settings.s3Copied : `${googleSub} — ${t.settings.s3Copy}`}
               </button>
             </div>
