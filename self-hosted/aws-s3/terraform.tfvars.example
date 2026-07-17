@@ -4,9 +4,11 @@ bucket_name = "my-linger-diary" # must be globally unique across all of AWS
 # Not secret, but changes rarely — get this from linger's Settings or the operator.
 linger_google_client_id = "YOUR_LINGER_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
 
-# Your own Google account's stable numeric ID (the 'sub' claim), not your email.
+# Your own Google account's stable numeric ID (the 'sub' claim, digits only,
+# e.g. "112233445566778899001"), not your email. This is the same value shown
+# as "Your Google account ID" in linger's Settings under S3 backup (advanced).
 # Without this, any signed-in linger user could assume this role.
-linger_google_sub = "YOUR_GOOGLE_ACCOUNT_SUB"
+linger_google_sub = "YOUR_GOOGLE_ACCOUNT_ID_FROM_LINGER_SETTINGS" # digits only
 
 # Only needed if you imported an existing accounts.google.com OIDC provider that
 # other tools/apps already trust (see the README's troubleshooting section) — list

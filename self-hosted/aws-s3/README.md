@@ -30,7 +30,8 @@ at request time via `sts:AssumeRoleWithWebIdentity`.
 - linger's current Google OAuth client ID (`linger_google_client_id`) — from
   linger's Settings, or from the operator
 - Your own Google account's `sub` claim (`linger_google_sub`) — a stable
-  numeric ID, not your email
+  numeric ID, not your email. Shown as "Your Google account ID" in linger's
+  Settings under S3 backup (advanced)
 
 ## Steps
 

@@ -37,8 +37,9 @@ variable "linger_google_sub" {
     Your own Google account's stable numeric ID (the OIDC 'sub' claim), NOT your email.
     This is what restricts the IAM role to only your linger session — without it, any
     signed-in linger user could assume this role, since 'aud' alone is the same for
-    every linger user. Find your sub via linger's Settings, or by decoding your own
-    id_token.
+    every linger user. This is the same value shown as "Your Google account ID" in
+    linger's Settings under S3 backup (advanced) — copy it from there, or decode it
+    yourself from your own id_token.
   EOT
   type        = string
 
