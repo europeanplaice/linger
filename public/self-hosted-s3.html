@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>Bring your own S3 bucket — Linger</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+      color: #2c2c2c;
+      line-height: 1.8;
+      background: #faf9f6;
+    }
+    h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+    p, li { font-size: 0.95rem; }
+    ul, ol { padding-left: 1.4rem; }
+    li + li { margin-top: 0.3rem; }
+    .meta { color: #777; font-size: 0.85rem; margin-bottom: 2rem; }
+    a { color: #5a7a5a; }
+    code { background: #eee7da; border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.88em; }
+    pre {
+      background: #2c2c2c;
+      color: #f4f1ea;
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; padding: 0; color: inherit; }
+    .back { display: inline-block; font-size: 0.9rem; color: #5a7a5a; text-decoration: none; margin-bottom: 1.5rem; }
+    .back:hover { text-decoration: underline; }
+    .back-nav { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body>
+  <nav class="back-nav">
+    <a href="/home" class="back">← About</a>
+    <a href="/" class="back">Open app</a>
+  </nav>
+  <h1>Bring your own S3 bucket</h1>
+  <p class="meta">Self-hosting guide — advanced, optional</p>
+
+  <p>
+    Advanced option: connect Linger to an S3 bucket in your own AWS account, instead of
+    (or alongside) Linger's default Google Drive storage. This requires an AWS account and
+    basic familiarity with Terraform and IAM — it isn't a one-click option because AWS, unlike
+    Google, has no consumer-facing OAuth consent screen that lets an app request access to
+    "your" S3 bucket. You set up the trust relationship yourself, once, in your own account.
+  </p>
+
+  <h2>What this does</h2>
+  <p>Creates, in <strong>your own AWS account</strong>:</p>
+  <ul>
+    <li>An IAM OIDC identity provider trusting Google (<code>accounts.google.com</code>)</li>
+    <li>An IAM role that only <em>your</em> Linger session can assume — scoped to both Linger's
+      OAuth client ID (<code>aud</code>) and your personal Google account ID (<code>sub</code>),
+      so no other Linger user can use it even though they share the same <code>aud</code></li>
+    <li>An S3 bucket (versioned, encrypted, fully private) that role can read/write</li>
+  </ul>
+  <p>
+    Linger never receives long-lived AWS credentials for this bucket — it exchanges your
+    existing Google sign-in token for short-lived AWS credentials at request time via
+    <code>sts:AssumeRoleWithWebIdentity</code>.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ul>
+    <li>An AWS account, and credentials for it available to Terraform (<code>AWS_PROFILE</code>,
+      or <code>AWS_ACCESS_KEY_ID</code>/<code>AWS_SECRET_ACCESS_KEY</code>, or SSO)</li>
+    <li><a href="https://developer.hashicorp.com/terraform" target="_blank" rel="noopener noreferrer">Terraform</a> &gt;= 1.5</li>
+    <li>Linger's current Google OAuth client ID (<code>linger_google_client_id</code>) — copy it
+      from Linger's Settings, under S3 backup</li>
+    <li>Your own Google account's <code>sub</code> claim (<code>linger_google_sub</code>) — a
+      stable numeric ID, not your email — also copyable from Linger's Settings</li>
+  </ul>
+
+  <h2>Steps</h2>
+  <ol>
+    <li>
+      Clone the <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">Linger repository</a>
+      and go to the <code>self-hosted/aws-s3</code> directory, then copy the example vars and fill them in:
+      <pre><code>cd self-hosted/aws-s3
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars</code></pre>
+    </li>
+    <li>
+      Apply:
+      <pre><code>terraform init
+terraform apply</code></pre>
+    </li>
+    <li>
+      Copy the <code>role_arn</code> output and paste it into Linger's Settings under your S3
+      connection, along with the bucket name and region. Use the "Test connection" button
+      there to confirm the trust policy and bucket permissions actually work before enabling
+      the backup.
+    </li>
+  </ol>
+
+  <h2>Rotating access</h2>
+  <p>
+    If you ever want to revoke Linger's access, delete the IAM role (<code>terraform destroy</code>,
+    or just delete <code>aws_iam_role.linger_s3</code> in the AWS console) — Linger immediately
+    loses the ability to assume it. Your bucket and its contents are untouched.
+  </p>
+
+  <h2>Notes</h2>
+  <ul>
+    <li>If Linger rotates its Google OAuth client (a blue/green swap on Linger's side),
+      <code>linger_google_client_id</code> here goes stale and this role stops trusting Linger
+      until you update the variable and re-apply.</li>
+    <li>The bucket has versioning enabled and is fully private (no public access, no bucket
+      policy needed) — only the IAM role created here can reach it.</li>
+    <li>Past versions of an entry (including deleted entries, which are just a delete marker on
+      top of the version stack) are expired automatically after
+      <code>noncurrent_version_expiration_days</code> (default 90) — override it in your
+      <code>terraform.tfvars</code> if you want them kept longer or shorter.</li>
+  </ul>
+
+  <h2>Troubleshooting</h2>
+  <p>
+    <strong><code>terraform apply</code> fails with <code>EntityAlreadyExists</code> on the OIDC
+    provider</strong> — IAM allows only one OIDC provider per URL per AWS account. If your account
+    already has a <code>https://accounts.google.com</code> provider (from another tool, or a
+    previous run outside this Terraform state), import the existing one instead of creating a new one:
+  </p>
+  <pre><code>terraform import aws_iam_openid_connect_provider.google \
+  arn:aws:iam::&lt;your-account-id&gt;:oidc-provider/accounts.google.com</code></pre>
+  <p>
+    Then re-run <code>terraform apply</code> — Terraform will reconcile <code>client_id_list</code>
+    to include Linger's client ID alongside whatever else already trusts that provider.
+  </p>
+</body>
+</html>

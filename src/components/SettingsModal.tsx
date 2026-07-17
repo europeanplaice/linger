@@ -668,7 +668,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             {t.settings.s3Help}
             {' '}
             <a
-              href="https://github.com/europeanplaice/linger/tree/main/self-hosted/aws-s3"
+              href="/self-hosted-s3"
               target="_blank"
               rel="noopener noreferrer"
             >
