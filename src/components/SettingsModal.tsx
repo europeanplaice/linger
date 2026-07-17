@@ -661,6 +661,60 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
         </div>
 
+        {/* Keyboard Shortcuts (hidden on mobile) */}
+        <div className="settings-section settings-shortcuts-section">
+          <h4 className="settings-section-title">{t.settings.keyboardShortcuts}</h4>
+          <div className="settings-about settings-about-body">
+            <div className="settings-shortcuts">
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.saveEntry}</span>
+                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></span>
+              </div>
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.previousNextDay}</span>
+                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>←</kbd><span>/</span><kbd>→</kbd></span>
+              </div>
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.goToToday}</span>
+                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>↑</kbd></span>
+              </div>
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.toggleDarkTheme}</span>
+                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>D</kbd></span>
+              </div>
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.toggleSerifFont}</span>
+                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>F</kbd></span>
+              </div>
+              <div className="settings-shortcut-row">
+                <span className="settings-shortcut-desc">{t.settings.focusSearch}</span>
+                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* About Data Storage */}
+        <div className="settings-section">
+          <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
+          <div className="settings-about settings-about-body">
+            <p className="settings-about-text">
+              {t.settings.storageIntro}
+            </p>
+            <ul className="settings-about-list">
+              {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+            <a
+              href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="settings-drive-link"
+            >
+              {t.settings.viewInDrive} ↗
+            </a>
+          </div>
+        </div>
+
         {/* S3 backup (advanced) */}
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
@@ -793,60 +847,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {s3LastSyncErrorAt ? ` (${new Date(s3LastSyncErrorAt).toLocaleString()})` : ''}
             </p>
           )}
-        </div>
-
-        {/* Keyboard Shortcuts (hidden on mobile) */}
-        <div className="settings-section settings-shortcuts-section">
-          <h4 className="settings-section-title">{t.settings.keyboardShortcuts}</h4>
-          <div className="settings-about settings-about-body">
-            <div className="settings-shortcuts">
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.saveEntry}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.previousNextDay}</span>
-                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>←</kbd><span>/</span><kbd>→</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.goToToday}</span>
-                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>↑</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.toggleDarkTheme}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>D</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.toggleSerifFont}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>F</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.focusSearch}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* About Data Storage */}
-        <div className="settings-section">
-          <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
-          <div className="settings-about settings-about-body">
-            <p className="settings-about-text">
-              {t.settings.storageIntro}
-            </p>
-            <ul className="settings-about-list">
-              {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
-            </ul>
-            <a
-              href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="settings-drive-link"
-            >
-              {t.settings.viewInDrive} ↗
-            </a>
-          </div>
         </div>
 
         <div className="settings-legal">
