@@ -8,5 +8,11 @@
 resource "aws_iam_openid_connect_provider" "google" {
   url = "https://accounts.google.com"
 
-  client_id_list = [var.linger_google_client_id]
+  # client_id_list is diffed and reconciled entry-by-entry against whatever this
+  # provider actually has in AWS (Add/RemoveClientIDFromOpenIDConnectProvider) — any
+  # client ID missing from this list gets REMOVED on apply, including ones this
+  # Terraform config didn't create. If you imported an existing provider (see the
+  # README's troubleshooting section), list its other client IDs in
+  # additional_google_oidc_client_ids or this apply will rip them out.
+  client_id_list = concat([var.linger_google_client_id], var.additional_google_oidc_client_ids)
 }

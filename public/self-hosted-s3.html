@@ -136,8 +136,19 @@ terraform apply</code></pre>
   <pre><code>terraform import aws_iam_openid_connect_provider.google \
   arn:aws:iam::&lt;your-account-id&gt;:oidc-provider/accounts.google.com</code></pre>
   <p>
-    Then re-run <code>terraform apply</code> — Terraform will reconcile <code>client_id_list</code>
-    to include Linger's client ID alongside whatever else already trusts that provider.
+    Before you re-run <code>terraform apply</code>, check what client IDs the existing provider
+    already trusts:
+  </p>
+  <pre><code>aws iam get-open-id-connect-provider \
+  --open-id-connect-provider-arn arn:aws:iam::&lt;your-account-id&gt;:oidc-provider/accounts.google.com \
+  --query 'ClientIDList'</code></pre>
+  <p>
+    List any of those (other than Linger's own) in <code>additional_google_oidc_client_ids</code>
+    in your <code>terraform.tfvars</code>. <strong>This matters</strong>: <code>client_id_list</code>
+    is reconciled against AWS's actual state on every apply, so any client ID missing from this
+    Terraform config — including ones it didn't create — gets removed from the provider, silently
+    breaking whatever else was relying on it. Only once <code>additional_google_oidc_client_ids</code>
+    accounts for everything already there is it safe to <code>terraform apply</code>.
   </p>
 </body>
 </html>

@@ -25,6 +25,19 @@ variable "linger_google_client_id" {
   }
 }
 
+variable "additional_google_oidc_client_ids" {
+  description = <<-EOT
+    Other OAuth client IDs (the 'aud' values other tools/apps use) that already trust
+    this AWS account's https://accounts.google.com OIDC provider, if you imported an
+    existing one (see the README's troubleshooting section). client_id_list is
+    reconciled against AWS's actual state on every apply, so any client ID missing
+    from this list — including ones this Terraform config didn't create — is removed
+    from the provider. Leave empty if you're creating a brand-new OIDC provider.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "linger_google_sub" {
   description = <<-EOT
     Your own Google account's stable numeric ID (the OIDC 'sub' claim), NOT your email.

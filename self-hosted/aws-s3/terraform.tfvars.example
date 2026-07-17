@@ -7,3 +7,8 @@ linger_google_client_id = "YOUR_LINGER_GOOGLE_CLIENT_ID.apps.googleusercontent.c
 # Your own Google account's stable numeric ID (the 'sub' claim), not your email.
 # Without this, any signed-in linger user could assume this role.
 linger_google_sub = "YOUR_GOOGLE_ACCOUNT_SUB"
+
+# Only needed if you imported an existing accounts.google.com OIDC provider that
+# other tools/apps already trust (see the README's troubleshooting section) — list
+# their client IDs here or apply will remove them from the provider.
+# additional_google_oidc_client_ids = ["some-other-tool-client-id"]
