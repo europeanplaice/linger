@@ -120,6 +120,10 @@ terraform apply</code></pre>
       top of the version stack) are expired automatically after
       <code>noncurrent_version_expiration_days</code> (default 90) — override it in your
       <code>terraform.tfvars</code> if you want them kept longer or shorter.</li>
+    <li>The bucket has <code>prevent_destroy</code> set, so <code>terraform destroy</code> (or
+      removing it from your config) will refuse to delete it and everything in it. To actually
+      remove the bucket, delete the <code>lifecycle</code> block in <code>s3.tf</code> first,
+      then destroy/empty it deliberately.</li>
   </ul>
 
   <h2>Troubleshooting</h2>
