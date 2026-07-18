@@ -164,6 +164,22 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     return () => { cancelled = true }
   }, [])
 
+  // The Role ARN / bucket / region are exactly what Save persists and Test
+  // checks — once any of them changes, a prior "Saved"/"Connected" result no
+  // longer describes the current form, so clear it rather than leave a stale
+  // success state on screen.
+  const handleS3FieldChange = useCallback((setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setter(e.target.value)
+    setS3SaveState('idle')
+    setS3TestState('idle')
+    setS3TestError(null)
+  }, [])
+
+  const handleS3EnabledChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setS3Enabled(e.target.checked)
+    setS3SaveState('idle')
+  }, [])
+
   const handleS3Save = useCallback(async () => {
     setS3SaveState('saving')
     setS3TestState('idle')
@@ -762,7 +778,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               type="text"
               className="settings-text-input"
               value={s3Bucket}
-              onChange={e => setS3Bucket(e.target.value)}
+              onChange={handleS3FieldChange(setS3Bucket)}
               placeholder={t.settings.s3BucketPlaceholder}
               spellCheck={false}
             />
@@ -773,7 +789,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               type="text"
               className="settings-text-input"
               value={s3Region}
-              onChange={e => setS3Region(e.target.value)}
+              onChange={handleS3FieldChange(setS3Region)}
               placeholder={t.settings.s3RegionPlaceholder}
               spellCheck={false}
             />
@@ -853,7 +869,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               type="text"
               className="settings-text-input"
               value={s3RoleArn}
-              onChange={e => setS3RoleArn(e.target.value)}
+              onChange={handleS3FieldChange(setS3RoleArn)}
               placeholder={t.settings.s3RoleArnPlaceholder}
               spellCheck={false}
             />
@@ -863,16 +879,16 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <input
               type="checkbox"
               checked={s3Enabled}
-              onChange={e => setS3Enabled(e.target.checked)}
+              onChange={handleS3EnabledChange}
               aria-label={t.settings.s3Enabled}
             />
           </div>
+          <p className="settings-about-text settings-s3-help settings-s3-actions-help">
+            {t.settings.s3ActionsHelp}
+          </p>
           <div className="settings-item">
             <span className="settings-item-label" />
             <div className="settings-s3-actions">
-              <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
-                {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
-              </button>
               <button
                 type="button"
                 className="settings-action-btn"
@@ -881,12 +897,19 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               >
                 {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
               </button>
+              <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
+                {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
+              </button>
             </div>
           </div>
-          {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
-          {s3TestState === 'error' && (
-            <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
-          )}
+          <div aria-live="polite">
+            {s3TestState === 'ok' && <p className="settings-item-success">{t.settings.s3TestOkMsg}</p>}
+            {s3TestState === 'error' && (
+              <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
+            )}
+            {s3SaveState === 'saved' && <p className="settings-item-success">{t.settings.s3SaveSuccess}</p>}
+            {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
+          </div>
           {s3Enabled && s3LastSyncError && (
             <p className="settings-item-error">
               {t.settings.s3SyncError}: {s3LastSyncError}

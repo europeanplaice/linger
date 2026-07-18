@@ -1335,6 +1335,17 @@ dialog.settings-dialog::backdrop {
   padding: 0 1.35rem 0.6rem;
   margin: 0;
 }
+.settings-item-success {
+  font-size: 0.78rem;
+  color: var(--save-success-flash);
+  padding: 0 1.35rem 0.6rem;
+  margin: 0;
+}
+.settings-s3-actions-help {
+  font-size: 0.74rem;
+  opacity: 0.8;
+  margin-bottom: 0.5rem;
+}
 .settings-s3-actions {
   display: flex;
   gap: 0.5rem;
