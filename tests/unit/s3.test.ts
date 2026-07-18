@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { assumeRoleWithWebIdentity, putObject, putObjectIfNewer, deleteObject, S3Error, describeError } from '../../functions/_shared/s3'
+import { assumeRoleWithWebIdentity, putObject, putObjectIfNewer, deleteObject, listObjectKeys, S3Error, describeError } from '../../functions/_shared/s3'
 
 const creds = { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }
 
@@ -113,6 +113,74 @@ describe('putObjectIfNewer', () => {
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('listObjectKeys', () => {
+  function listXml(keys: string[], opts: { truncated?: boolean; nextToken?: string } = {}) {
+    const contents = keys.map(k => `<Contents><Key>${k}</Key></Contents>`).join('')
+    return `<?xml version="1.0"?><ListBucketResult>${contents}<IsTruncated>${opts.truncated ? 'true' : 'false'}</IsTruncated>${opts.nextToken ? `<NextContinuationToken>${opts.nextToken}</NextContinuationToken>` : ''}</ListBucketResult>`
+  }
+
+  it('returns keys from a single, non-truncated page', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(listXml(['diary-2026-01-01.txt', 'diary-2026-01-02.txt']), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const keys = await listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')
+
+    expect(keys).toEqual(['diary-2026-01-01.txt', 'diary-2026-01-02.txt'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const request: Request = fetchMock.mock.calls[0][0]
+    expect(request.method).toBe('GET')
+    expect(request.url).toContain('https://my-bucket.s3.us-east-1.amazonaws.com/?')
+    expect(request.url).toContain('list-type=2')
+    expect(request.url).toContain('prefix=diary-')
+  })
+
+  it('follows continuation tokens until IsTruncated is false', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(listXml(['diary-2026-01-01.txt'], { truncated: true, nextToken: 'tok-1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(listXml(['diary-2026-01-02.txt']), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const keys = await listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')
+
+    expect(keys).toEqual(['diary-2026-01-01.txt', 'diary-2026-01-02.txt'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const secondRequest: Request = fetchMock.mock.calls[1][0]
+    expect(secondRequest.url).toContain('continuation-token=tok-1')
+  })
+
+  it('stops after a bounded number of pages even if S3 keeps claiming truncation', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(listXml(['diary-2026-01-01.txt'], { truncated: true, nextToken: 'tok' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const keys = await listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')
+
+    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(keys).toHaveLength(10)
+  })
+
+  it('unescapes XML entities in keys', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(listXml(['diary-2026-01-01&amp;copy.txt']), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const keys = await listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')
+
+    expect(keys).toEqual(['diary-2026-01-01&copy.txt'])
+  })
+
+  it('returns an empty array when nothing matches the prefix', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(listXml([]), { status: 200 })))
+
+    expect(await listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')).toEqual([])
+  })
+
+  it('throws S3Error on a non-ok response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Forbidden', { status: 403 })))
+
+    await expect(listObjectKeys(creds, 'my-bucket', 'us-east-1', 'diary-')).rejects.toBeInstanceOf(S3Error)
   })
 })
 

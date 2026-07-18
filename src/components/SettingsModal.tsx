@@ -14,7 +14,7 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings, testS3Settings } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
@@ -148,13 +148,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3TestError, setS3TestError] = useState<string | null>(null)
   const [s3LastSyncError, setS3LastSyncError] = useState<string | null>(null)
   const [s3LastSyncErrorAt, setS3LastSyncErrorAt] = useState<string | null>(null)
+  // Tracks the enabled value as of the last load/save, so we know whether the next Save
+  // is a first-time enable (the only time the backfill precheck below needs to run).
+  const [s3InitiallyEnabled, setS3InitiallyEnabled] = useState(false)
+  const [s3Prechecking, setS3Prechecking] = useState(false)
+  const [s3OverwriteConfirmOpen, setS3OverwriteConfirmOpen] = useState(false)
+  const [s3Collisions, setS3Collisions] = useState<string[]>([])
   const [copiedField, setCopiedField] = useState<'sub' | 'clientId' | null>(null)
+  const s3OverwriteDialogRef = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
     let cancelled = false
     loadS3Settings().then(settings => {
       if (cancelled || !settings) return
       setS3Enabled(settings.enabled)
+      setS3InitiallyEnabled(settings.enabled)
       setS3RoleArn(settings.roleArn)
       setS3Bucket(settings.bucket)
       setS3Region(settings.region)
@@ -163,6 +171,16 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }).catch(e => console.error('Failed to load S3 settings:', e))
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    const dialog = s3OverwriteDialogRef.current
+    if (!dialog) return
+    if (s3OverwriteConfirmOpen) {
+      dialog.showModal()
+    } else if (dialog.open) {
+      dialog.close()
+    }
+  }, [s3OverwriteConfirmOpen])
 
   // The Role ARN / bucket / region are exactly what Save persists and Test
   // checks — once any of them changes, a prior "Saved"/"Connected" result no
@@ -187,6 +205,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
       await saveS3Settings(settings)
       setS3SaveState('saved')
+      setS3InitiallyEnabled(s3Enabled)
       // Saving rewrites the whole settings file without sync-status fields, so the
       // stored error is cleared server-side too — mirror that locally right away.
       setS3LastSyncError(null)
@@ -197,6 +216,34 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3SaveState('error')
     }
   }, [s3Enabled, s3RoleArn, s3Bucket, s3Region])
+
+  // The very first time backup is enabled, the server does a one-shot backfill that
+  // overwrites any diary-*.txt object already sitting at a colliding key — including
+  // files that were never written by linger. Check for that before saving so the user
+  // can back out instead of finding out after the fact. Re-enabling later (once
+  // s3InitiallyEnabled is already true) skips this, since a fresh backfill isn't
+  // triggered again.
+  const handleS3SaveClick = useCallback(async () => {
+    if (s3Enabled && !s3InitiallyEnabled) {
+      setS3Prechecking(true)
+      try {
+        const result = await precheckS3Settings({ roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() })
+        if (result.ok && result.collisions && result.collisions.length > 0) {
+          setS3Collisions(result.collisions)
+          setS3OverwriteConfirmOpen(true)
+          return
+        }
+      } catch (e) {
+        // A failed precheck shouldn't block Save — any real problem (bad Role ARN,
+        // no bucket access, etc.) surfaces the same way it always did, via Save/the
+        // background backfill's own error handling.
+        console.error('S3 precheck failed:', e)
+      } finally {
+        setS3Prechecking(false)
+      }
+    }
+    await handleS3Save()
+  }, [s3Enabled, s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region, handleS3Save])
 
   const handleS3Test = useCallback(async () => {
     setS3TestState('testing')
@@ -897,8 +944,13 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               >
                 {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
               </button>
-              <button type="button" className="settings-action-btn" onClick={handleS3Save} disabled={s3SaveState === 'saving'}>
-                {s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => { void handleS3SaveClick() }}
+                disabled={s3SaveState === 'saving' || s3Prechecking}
+              >
+                {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
               </button>
             </div>
           </div>
@@ -956,6 +1008,32 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <div className="signout-confirm-actions">
           <button className="signout-confirm-cancel" onClick={() => setSignOutConfirmOpen(false)}>{t.common.cancel}</button>
           <button className="signout-confirm-start" onClick={() => { setSignOutConfirmOpen(false); onSignOut() }}>{t.app.signOut}</button>
+        </div>
+      </dialog>
+
+      <dialog
+        ref={s3OverwriteDialogRef}
+        className="signout-confirm-dialog s3-overwrite-confirm-dialog"
+        aria-labelledby="s3-overwrite-confirm-title"
+        onCancel={(e) => { e.preventDefault(); setS3OverwriteConfirmOpen(false) }}
+        onClick={(e) => { if (e.target === s3OverwriteDialogRef.current) setS3OverwriteConfirmOpen(false) }}
+      >
+        <h4 id="s3-overwrite-confirm-title" className="signout-confirm-title">{t.settings.s3OverwriteConfirmTitle}</h4>
+        <p className="signout-confirm-desc">{t.settings.s3OverwriteConfirmDesc(s3Collisions.length)}</p>
+        <ul className="export-format-tree s3-overwrite-confirm-list">
+          {s3Collisions.slice(0, 20).map(key => <li key={key} className="export-format-file">{key}</li>)}
+          {s3Collisions.length > 20 && (
+            <li className="export-format-file">{t.settings.s3OverwriteConfirmMore(s3Collisions.length - 20)}</li>
+          )}
+        </ul>
+        <div className="signout-confirm-actions">
+          <button className="signout-confirm-cancel" onClick={() => setS3OverwriteConfirmOpen(false)}>{t.common.cancel}</button>
+          <button
+            className="signout-confirm-start"
+            onClick={() => { setS3OverwriteConfirmOpen(false); void handleS3Save() }}
+          >
+            {t.settings.s3OverwriteConfirmProceed}
+          </button>
         </div>
       </dialog>
     </motion.dialog>

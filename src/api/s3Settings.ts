@@ -29,3 +29,20 @@ export async function testS3Settings(settings: Pick<S3Settings, 'roleArn' | 'buc
   })
   return data
 }
+
+export interface S3PrecheckResult {
+  ok: boolean
+  collisions?: string[]
+  error?: string
+}
+
+// Checks, before a first-time enable, whether the bucket already has diary-dated
+// objects that the initial backfill would silently overwrite.
+export async function precheckS3Settings(settings: Pick<S3Settings, 'roleArn' | 'bucket' | 'region'>): Promise<S3PrecheckResult> {
+  const { data } = await apiFetch<S3PrecheckResult>('/api/s3/precheck', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  return data
+}

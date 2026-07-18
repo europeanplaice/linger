@@ -2762,6 +2762,14 @@ dialog.signout-confirm-dialog {
   gap: 0.8rem;
   margin: auto;
 }
+dialog.s3-overwrite-confirm-dialog {
+  width: min(420px, 92vw);
+}
+.s3-overwrite-confirm-list {
+  max-height: 160px;
+  overflow-y: auto;
+  list-style: none;
+}
 dialog.export-confirm-dialog::backdrop,
 dialog.import-confirm-dialog::backdrop,
 dialog.signout-confirm-dialog::backdrop {

@@ -158,7 +158,7 @@ export async function mirrorEntryDelete(
 // Diary filenames only ever look like diary-YYYY-MM-DD.txt (legacy .md files are migrated
 // to .txt long before this can run); anything else in the folder (e.g. s3_settings.json,
 // milestones.json) is skipped.
-const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
+export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 
 // Mirrors every existing entry to S3 the first time backup is enabled — without this, only
 // entries saved/deleted after enabling would ever reach the bucket, silently leaving prior

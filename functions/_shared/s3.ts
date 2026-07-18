@@ -126,6 +126,50 @@ export async function putObjectIfNewer(
   await putObject(creds, bucket, region, key, body, contentType, version)
 }
 
+function unescapeXmlEntities(s: string): string {
+  return s.replace(/&(amp|lt|gt|quot|apos);/g, (_m, entity: string) => {
+    switch (entity) {
+      case 'amp': return '&'
+      case 'lt': return '<'
+      case 'gt': return '>'
+      case 'quot': return '"'
+      case 'apos': return "'"
+      default: return _m
+    }
+  })
+}
+
+// Caps ListObjectsV2 pagination — diary buckets hold at most one object per saved
+// date, so real accounts never come close to this; it just bounds worst-case latency
+// against a bucket stuffed with unrelated objects sharing the "diary-" prefix.
+const MAX_LIST_PAGES = 10
+
+// Lists object keys under `prefix`. S3's XML response is parsed with regexes (like
+// describeError does for error bodies below) rather than a full XML parser, which
+// the Workers runtime doesn't provide and this simple flat structure doesn't need.
+export async function listObjectKeys(creds: AssumedCredentials, bucket: string, region: string, prefix: string): Promise<string[]> {
+  const client = s3Client(creds, region)
+  const keys: string[] = []
+  let continuationToken: string | undefined
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const params = new URLSearchParams({ 'list-type': '2', prefix, 'max-keys': '1000' })
+    if (continuationToken) params.set('continuation-token', continuationToken)
+    const resp = await client.fetch(`https://${bucket}.s3.${region}.amazonaws.com/?${params.toString()}`, { method: 'GET' })
+    if (!resp.ok) {
+      throw new S3Error(resp.status, `S3 ListObjectsV2 failed: ${await resp.text()}`)
+    }
+    const xml = await resp.text()
+    for (const match of xml.matchAll(/<Key>([^<]*)<\/Key>/g)) {
+      keys.push(unescapeXmlEntities(match[1]))
+    }
+    if (!/<IsTruncated>true<\/IsTruncated>/.test(xml)) break
+    const tokenMatch = xml.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/)
+    if (!tokenMatch) break
+    continuationToken = unescapeXmlEntities(tokenMatch[1])
+  }
+  return keys
+}
+
 export async function deleteObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<void> {
   const client = s3Client(creds, region)
   const resp = await client.fetch(objectUrl(bucket, region, key), { method: 'DELETE' })
