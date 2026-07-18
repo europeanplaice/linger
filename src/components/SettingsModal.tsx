@@ -208,6 +208,35 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }).catch(() => {})
   }, [])
 
+  const handleDownloadTfvars = useCallback(() => {
+    const lines = [
+      `aws_region = "${s3Region.trim() || 'us-east-1'}"`,
+      '',
+      '# Must be globally unique across all of AWS — a plausible-looking name like',
+      '# "my-linger-diary" will almost always already be taken by someone else. Try',
+      '# appending your AWS account ID or a random suffix.',
+      `bucket_name = "${s3Bucket.trim() || 'CHANGE-ME-linger-diary-<your-aws-account-id-or-random-suffix>'}"`,
+      '',
+      '# Not secret, but changes rarely — get this from linger\'s Settings or the operator.',
+      `linger_google_client_id = "${googleClientId || 'YOUR_LINGER_GOOGLE_GOOGLE_CLIENT_ID.apps.googleusercontent.com'}"`,
+      '',
+      '# Your own Google account\'s stable numeric ID (the \'sub\' claim, digits only,',
+      '# e.g. "112233445566778899001"), not your email. This is the same value shown',
+      '# as "Your Google account ID" in linger\'s Settings under S3 backup (advanced).',
+      '# Without this, any signed-in linger user could assume this role.',
+      `linger_google_sub = "${googleSub || 'YOUR_GOOGLE_ACCOUNT_ID_FROM_LINGER_SETTINGS'}"`,
+    ]
+    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'terraform.tfvars'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [googleClientId, googleSub, s3Region, s3Bucket])
+
   useEffect(() => {
     const dialog = dialogRef.current!
     dialog.showModal()
@@ -718,21 +747,38 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* S3 backup (advanced) */}
         <div className="settings-section">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
+          
+          <div className="settings-s3-group-title">{t.settings.s3GroupSetup}</div>
           <p className="settings-about-text settings-s3-help">
             {t.settings.s3Help}
           </p>
           <ol className="settings-about-list settings-s3-help">
             {t.settings.s3Steps.map((step, i) => <li key={i}>{step}</li>)}
           </ol>
-          <p className="settings-about-text settings-s3-help">
-            <a
-              href="/self-hosted-s3"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t.settings.s3SetupGuide} ↗
-            </a>
-          </p>
+
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Bucket}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Bucket}
+              onChange={e => setS3Bucket(e.target.value)}
+              placeholder={t.settings.s3BucketPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Region}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Region}
+              onChange={e => setS3Region(e.target.value)}
+              placeholder={t.settings.s3RegionPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+
           {googleClientId && (
             <div className="settings-item settings-item-copy">
               <span className="settings-item-label-group">
@@ -770,24 +816,37 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                   onClick={() => handleCopy('sub', googleSub)}
                 >
                   {copiedField === 'sub' ? (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                   ) : (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   )}
                   {copiedField === 'sub' ? t.settings.s3Copied : t.settings.s3Copy}
                 </button>
               </div>
             </div>
           )}
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Enabled}</span>
-            <input
-              type="checkbox"
-              checked={s3Enabled}
-              onChange={e => setS3Enabled(e.target.checked)}
-              aria-label={t.settings.s3Enabled}
-            />
-          </div>
+
+          <p className="settings-about-text settings-s3-help settings-s3-help-links">
+            <a
+              href="/self-hosted-s3"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t.settings.s3SetupGuide} ↗
+            </a>
+            <span className="settings-s3-link-separator" aria-hidden="true">|</span>
+            <button
+              type="button"
+              className="settings-tfvars-download-btn"
+              onClick={handleDownloadTfvars}
+            >
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              {t.settings.s3DownloadTfvars}
+            </button>
+          </p>
+
+          <div className="settings-s3-group-title">{t.settings.s3GroupConnection}</div>
+          
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3RoleArn}</span>
             <input
@@ -800,25 +859,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             />
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Bucket}</span>
+            <span className="settings-item-label">{t.settings.s3Enabled}</span>
             <input
-              type="text"
-              className="settings-text-input"
-              value={s3Bucket}
-              onChange={e => setS3Bucket(e.target.value)}
-              placeholder={t.settings.s3BucketPlaceholder}
-              spellCheck={false}
-            />
-          </div>
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Region}</span>
-            <input
-              type="text"
-              className="settings-text-input"
-              value={s3Region}
-              onChange={e => setS3Region(e.target.value)}
-              placeholder={t.settings.s3RegionPlaceholder}
-              spellCheck={false}
+              type="checkbox"
+              checked={s3Enabled}
+              onChange={e => setS3Enabled(e.target.checked)}
+              aria-label={t.settings.s3Enabled}
             />
           </div>
           <div className="settings-item">

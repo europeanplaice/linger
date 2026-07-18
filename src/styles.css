@@ -1784,6 +1784,56 @@ dialog.settings-dialog::backdrop {
 .settings-s3-help {
   padding-inline: 1.35rem;
 }
+.settings-s3-group-title {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 1rem 1.35rem 0.4rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.settings-s3-group-title:first-of-type {
+  border-top: none;
+  padding-top: 0.4rem;
+  margin-top: 0;
+}
+.settings-s3-help-links {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+.settings-s3-link-separator {
+  color: var(--border);
+  user-select: none;
+}
+.settings-s3-help a,
+.settings-tfvars-download-btn {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.settings-s3-help a:hover,
+.settings-tfvars-download-btn:hover {
+  text-decoration: underline;
+}
+.settings-tfvars-download-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  vertical-align: middle;
+}
 .settings-about-list {
   font-size: 0.8rem;
   color: var(--text-muted, var(--text));
