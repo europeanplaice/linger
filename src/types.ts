@@ -40,6 +40,15 @@ export interface S3Settings {
   lastSyncErrorAt?: string // ISO timestamp
 }
 
+// Per-entry mirror status for the currently open entry, checked on demand after
+// a save (see src/api/s3Settings.ts getS3EntryStatus) — not persisted anywhere.
+export type S3EntrySyncStatus = 'disabled' | 'pending' | 'synced' | 'failed'
+
+export interface S3EntryStatusResult {
+  status: S3EntrySyncStatus
+  error?: string
+}
+
 export interface DriveRevisionMeta {
   id: string
   modifiedTime: string

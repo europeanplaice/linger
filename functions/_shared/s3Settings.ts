@@ -76,7 +76,7 @@ export async function getS3Settings(token: string, sessionId: string, session: S
   return record?.settings ?? null
 }
 
-function entryKey(date: string): string {
+export function entryKey(date: string): string {
   return `diary-${date}.txt`
 }
 

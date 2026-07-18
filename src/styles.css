@@ -3196,6 +3196,18 @@ dialog.milestone-form-dialog::backdrop {
   font-size: 0.72rem;
   margin-left: auto;
 }
+.editor-meta-s3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-size: 0.72rem;
+}
+.editor-meta-s3--failed {
+  color: var(--warning);
+  opacity: 1;
+}
 .editor-meta-offline {
   display: inline-flex;
   align-items: center;

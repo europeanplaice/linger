@@ -93,12 +93,21 @@ export async function putObject(
   }
 }
 
-function isAtLeast(existing: string, incoming: string): boolean {
+export function isAtLeast(existing: string, incoming: string): boolean {
   try {
     return BigInt(existing) >= BigInt(incoming)
   } catch {
     return false // unexpected (non-numeric) version format — don't block the write
   }
+}
+
+// Reads the linger-stamped version off an object without fetching its body, or
+// null if the object doesn't exist (or carries no version metadata).
+export async function headObjectVersion(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<string | null> {
+  const client = s3Client(creds, region)
+  const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD' })
+  if (!head.ok) return null
+  return head.headers.get('x-amz-meta-linger-version')
 }
 
 // Guards against out-of-order mirror writes (e.g. two rapid saves of the same date from
@@ -116,12 +125,8 @@ export async function putObjectIfNewer(
   contentType?: string,
 ): Promise<void> {
   if (version) {
-    const client = s3Client(creds, region)
-    const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD' })
-    if (head.ok) {
-      const existing = head.headers.get('x-amz-meta-linger-version')
-      if (existing && isAtLeast(existing, version)) return
-    }
+    const existing = await headObjectVersion(creds, bucket, region, key)
+    if (existing && isAtLeast(existing, version)) return
   }
   await putObject(creds, bucket, region, key, body, contentType, version)
 }

@@ -5,7 +5,8 @@ import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
-import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry } from '../types'
+import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
+import { getS3EntryStatus } from '../api/s3Settings'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
 import { highlightText } from '../utils/highlight'
 import { excerpt } from '../utils/text'
@@ -27,10 +28,13 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, Cloud, CloudUpload, ExternalLink, Flag, Lightbulb, MoreHorizontal, RefreshCw, Share2, Sparkles, Trash2 } from 'lucide-react'
+import { Clock3, Cloud, CloudOff, CloudUpload, ExternalLink, Flag, Lightbulb, MoreHorizontal, RefreshCw, Share2, Sparkles, Trash2 } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
+
+// Backoff schedule for polling AWS S3 mirror status after a save (~16.5s total).
+const S3_POLL_DELAYS_MS = [1500, 3000, 5000, 7000]
 
 // Keep the textarea focused (and the mobile keyboard open) when tapping a
 // toolbar button, so the keyboard doesn't collapse and shift the toolbar down.
@@ -156,6 +160,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  // AWS S3 backup status for the currently open entry, polled after a save; null
+  // means "not checked yet" or "S3 backup isn't enabled" (s3DisabledRef short-circuits
+  // further checks once we learn that, to avoid a status request on every save).
+  const [s3Status, setS3Status] = useState<S3EntrySyncStatus | null>(null)
+  const s3DisabledRef = useRef(false)
+  const s3PollTokenRef = useRef(0)
 
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
@@ -191,6 +201,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
+  const s3BadgeLabel = s3Status === 'synced' ? t.entry.s3BadgeSynced
+    : s3Status === 'failed' ? t.entry.s3BadgeFailed
+    : t.entry.s3BadgePending
   const activeMilestones = useMemo(
     () => (milestones ?? []).filter(a => a.showBadge !== false),
     [milestones],
@@ -233,6 +246,39 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setBaseVersion(value)
   }, [baseVersionRef])
 
+  // Checks /api/s3/entry-status for the AWS S3 mirror status of a given Drive
+  // version. Used two ways: right after a save, with `retry: true` (default) and
+  // `since` set to when the save attempt started, so a few backoff attempts can
+  // catch the mirror finishing and scope out unrelated stale errors; and once
+  // when an entry is simply opened/displayed, with `retry: false` and no `since`
+  // (so any currently-recorded sync error is surfaced — there's no specific save
+  // attempt to scope it against). `token` guards against a stale check (from a
+  // previous save/load or a since-abandoned date) clobbering a newer one — see
+  // the s3PollTokenRef bump on date change below.
+  const pollS3Status = useCallback((forDate: string, version: string | null, since = '', opts: { retry?: boolean } = {}) => {
+    if (s3DisabledRef.current || !version) return
+    const retry = opts.retry ?? true
+    const token = ++s3PollTokenRef.current
+
+    const attempt = async (i: number) => {
+      if (s3PollTokenRef.current !== token) return
+      const result = await getS3EntryStatus(forDate, version, since).catch(
+        (): S3EntryStatusResult => ({ status: 'pending' }),
+      )
+      if (s3PollTokenRef.current !== token) return
+      if (result.status === 'disabled') {
+        s3DisabledRef.current = true
+        setS3Status(null)
+        return
+      }
+      setS3Status(result.status)
+      if (retry && result.status === 'pending' && i < S3_POLL_DELAYS_MS.length) {
+        setTimeout(() => { void attempt(i + 1) }, S3_POLL_DELAYS_MS[i])
+      }
+    }
+    void attempt(0)
+  }, [])
+
   const applyLoadedEntry = useCallback((entry: LoadedDiaryEntry | null) => {
     const driveText = entry?.entry.content ?? ''
     setText(driveText)
@@ -272,6 +318,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setHasConflict(false)
     setConflictRemote(null)
     setPendingOfflineSave(false)
+    setS3Status(null)
+    s3PollTokenRef.current += 1 // invalidate any in-flight poll for the entry we're leaving
     setDiscardedText(null)
     setIdeaOpen(false)
     setIdeaIndex(0)
@@ -301,6 +349,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           // No draft, or the draft already made it to Drive — drop it.
           if (draft) deleteDraft(date).catch(() => {})
           applyLoadedEntry(entry)
+          if (entry?.meta.version) pollS3Status(date, entry.meta.version, '', { retry: false })
         }
       } else if (draft) {
         // Couldn't reach Drive but an offline draft exists — let the user keep
@@ -317,7 +366,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [date, applyLoadedEntry, applyDraft, dateKnownAbsent])
+  }, [date, applyLoadedEntry, applyDraft, dateKnownAbsent, pollS3Status])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
@@ -365,6 +414,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setHasConflict(false)
       setConflictRemote(null)
     }
+    const attemptStartedAt = new Date().toISOString()
     let success = false
     try {
       const currentText = textRef.current
@@ -376,6 +426,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       fileIdRef.current = newId
       setPendingOfflineSave(false)
       setStatus(savedStatus)
+      pollS3Status(date, newVersion, attemptStartedAt)
       success = true
       if (explicit) haptics.success()
       return true
@@ -405,7 +456,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setSaving(false)
       if (explicit) completeSave(success)
     }
-  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave])
+  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status])
 
   const handleExplicitSave = useCallback(async () => {
     const ok = await save(true)
@@ -1106,6 +1157,24 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             >
               <Cloud size={10} strokeWidth={1.8} aria-hidden="true" />
               {t.entry.driveBadge}
+            </motion.span>
+          )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {!isDirty && !loading && !loadFailed && s3Status && (
+            <motion.span
+              key="s3"
+              className={`editor-meta-s3 editor-meta-s3--${s3Status}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              aria-label={s3BadgeLabel}
+            >
+              {s3Status === 'failed'
+                ? <CloudOff size={10} strokeWidth={1.8} aria-hidden="true" />
+                : <CloudUpload size={10} strokeWidth={1.8} aria-hidden="true" />}
+              {s3BadgeLabel}
             </motion.span>
           )}
         </AnimatePresence>

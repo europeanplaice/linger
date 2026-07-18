@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { assumeRoleWithWebIdentity, putObject, putObjectIfNewer, deleteObject, listObjectKeys, S3Error, describeError } from '../../functions/_shared/s3'
+import { assumeRoleWithWebIdentity, putObject, putObjectIfNewer, headObjectVersion, deleteObject, listObjectKeys, S3Error, describeError } from '../../functions/_shared/s3'
 
 const creds = { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }
 
@@ -113,6 +113,28 @@ describe('putObjectIfNewer', () => {
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('headObjectVersion', () => {
+  it('returns the linger-version metadata when the object exists', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } }),
+    ))
+
+    expect(await headObjectVersion(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt')).toBe('7')
+  })
+
+  it('returns null when the object has no version metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })))
+
+    expect(await headObjectVersion(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt')).toBeNull()
+  })
+
+  it('returns null when the object does not exist', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
+
+    expect(await headObjectVersion(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt')).toBeNull()
   })
 })
 

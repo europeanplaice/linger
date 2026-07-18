@@ -1,4 +1,4 @@
-import type { S3Settings } from '../types'
+import type { S3Settings, S3EntryStatusResult } from '../types'
 import { apiFetch, TokenExpiredError } from './driveEntries'
 
 export { TokenExpiredError }
@@ -44,5 +44,14 @@ export async function precheckS3Settings(settings: Pick<S3Settings, 'roleArn' | 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
   })
+  return data
+}
+
+// Checked after a Drive save to learn whether the S3 mirror has caught up to
+// `version` yet. `since` scopes stale sync errors out (see the endpoint).
+export async function getS3EntryStatus(date: string, version: string, since: string): Promise<S3EntryStatusResult> {
+  const { data } = await apiFetch<S3EntryStatusResult>(
+    `/api/s3/entry-status/${date}?version=${encodeURIComponent(version)}&since=${encodeURIComponent(since)}`,
+  )
   return data
 }
