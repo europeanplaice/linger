@@ -3208,34 +3208,109 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--unsaved-status);
   margin-left: 0.5em;
 }
-.editor-meta-drive {
+.editor-meta-sync {
   display: inline-flex;
   align-items: center;
-  color: var(--text-muted);
+  gap: 0.6rem;
   margin-left: auto;
 }
-.editor-meta-drive::before {
+
+.editor-meta-sync:empty {
+  display: none;
+}
+
+.editor-meta-sync::before {
   content: '';
   width: 1px;
-  height: 0.9em;
-  background: color-mix(in srgb, var(--text-muted) 40%, transparent);
-  margin-right: 0.5rem;
+  height: 0.85em;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+  margin-right: 0.2rem;
   flex-shrink: 0;
 }
-.editor-meta-s3 {
+
+.editor-meta-badge {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  color: var(--text-muted);
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: default;
+  transition: background-color 0.2s ease;
 }
-.editor-meta-s3--failed {
-  color: var(--warning);
+
+.editor-meta-badge:hover {
+  background-color: color-mix(in srgb, var(--text-muted) 5%, transparent);
 }
-.s3-sync-pending {
-  animation: s3-pulse 1.4s ease-in-out infinite;
+
+.editor-meta-badge-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
-@keyframes s3-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
+
+.editor-meta-badge-icon-wrapper svg {
+  display: block;
+  opacity: 0.85;
+  transition: opacity 0.2s ease;
+}
+
+.editor-meta-badge:hover svg {
+  opacity: 1;
+}
+
+.editor-meta-badge-status {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px var(--bg);
+  z-index: 1;
+}
+
+.editor-meta-badge-status--synced {
+  background: #10b981;
+}
+
+.editor-meta-badge-status--failed {
+  background: #ef4444;
+}
+
+.editor-meta-badge-status--pending {
+  background: #f59e0b;
+}
+
+.editor-meta-badge-status--pending::after {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: -1.5px;
+  right: -1.5px;
+  bottom: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid #f59e0b;
+  animation: badge-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0;
+}
+
+@keyframes badge-ping {
+  0% { transform: scale(0.7); opacity: 0.8; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+.editor-meta-badge-status-svg {
+  width: 7px;
+  height: 7px;
+  display: block;
+  color: #ffffff;
 }
 .editor-meta-offline {
   display: inline-flex;
