@@ -30,3 +30,8 @@ self-hosted/aws-s3/terraform.tfstate
 self-hosted/aws-s3/terraform.tfstate.backup
 self-hosted/aws-s3/terraform.tfstate.*.backup
 self-hosted/aws-s3/terraform.tfvars
+
+# Personal dev+staging+production split for the S3 self-host feature — not
+# part of the public self-host template.
+self-hosted/aws-s3/personal-staging/
+self-hosted/aws-s3/personal-production/
