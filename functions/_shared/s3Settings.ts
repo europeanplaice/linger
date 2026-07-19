@@ -16,6 +16,16 @@ export const S3_REGION_RE = /^[a-z]{2}-[a-z]+-\d$/
 // while saving a Drive files.list call on nearly every save/delete for Drive-only users.
 export const S3_SETTINGS_NEGATIVE_CACHE_MS = 5 * 60 * 1000
 
+// Progress of the one-time initial backfill (or a subsequent retry of just its
+// failed entries — see backfillAllEntries's `onlyDates` param). `failed` holds
+// the dates that errored on this run; `finishedAt` is absent while still running.
+export interface BackfillProgress {
+  total: number
+  done: number
+  failed: string[]
+  finishedAt?: string // ISO timestamp
+}
+
 export interface S3Settings {
   enabled: boolean
   roleArn: string
@@ -23,6 +33,7 @@ export interface S3Settings {
   region: string
   lastSyncError?: string
   lastSyncErrorAt?: string // ISO timestamp
+  backfillProgress?: BackfillProgress
 }
 
 export function isValidS3Settings(body: unknown): body is S3Settings {
@@ -160,10 +171,49 @@ export async function mirrorEntryDelete(
 // milestones.json) is skipped.
 export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 
-// Mirrors every existing entry to S3 the first time backup is enabled — without this, only
-// entries saved/deleted after enabling would ever reach the bucket, silently leaving prior
-// history un-backed-up despite the feature being labeled a "backup". Never throws; failures
-// are recorded on the settings record the same way mirrorEntrySave/mirrorEntryDelete do.
+// How often (at most) backfill progress is written back to Drive while running — writing
+// on every single entry would multiply Drive API calls for large diaries; this keeps the
+// UI's polling reasonably fresh without that cost. The final state is always written
+// regardless of this throttle.
+const BACKFILL_PROGRESS_WRITE_INTERVAL_MS = 2000
+
+async function writeBackfillProgress(token: string, record: S3SettingsRecord, progress: BackfillProgress): Promise<void> {
+  const updated: S3Settings = { ...record.settings, backfillProgress: progress }
+  try {
+    await writeJsonFile(token, record.folderId, S3_SETTINGS_FILE_NAME, updated, record.fileId)
+    record.settings = updated
+  } catch (e) {
+    // Progress reporting is a pure UX nicety — a failure to persist it must not abort the backfill itself.
+    console.error('s3Settings.ts: failed to persist backfill progress', e)
+  }
+}
+
+async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[]): Promise<void> {
+  const finishedAt = new Date().toISOString()
+  const updated: S3Settings = { ...record.settings }
+  if (failed.length === 0) {
+    delete updated.backfillProgress
+    delete updated.lastSyncError
+    delete updated.lastSyncErrorAt
+  } else {
+    updated.backfillProgress = { total, done: total, failed, finishedAt }
+    updated.lastSyncError = `Initial backfill: ${failed.length} of ${total} entr${failed.length === 1 ? 'y' : 'ies'} failed to back up`
+    updated.lastSyncErrorAt = finishedAt
+  }
+  try {
+    await writeJsonFile(token, record.folderId, S3_SETTINGS_FILE_NAME, updated, record.fileId)
+  } catch (e) {
+    console.error('s3Settings.ts: failed to record backfill completion', e)
+  }
+}
+
+// Mirrors existing entries to S3, either the first time backup is enabled (without this,
+// only entries saved/deleted after enabling would ever reach the bucket, silently leaving
+// prior history un-backed-up despite the feature being labeled a "backup"), or — when
+// `onlyDates` is given — a retry of just the entries a previous run failed on (see
+// api/s3/backfill-retry.ts). Never throws. A per-entry failure (transient network/S3/Drive
+// hiccup) is recorded and skipped rather than aborting the rest of the run; progress and the
+// resulting failed-dates list are persisted so the UI can show and retry them.
 export async function backfillAllEntries(
   accessToken: string,
   sessionId: string,
@@ -172,6 +222,7 @@ export async function backfillAllEntries(
   settings: S3Settings,
   folderId: string,
   fileId: string,
+  onlyDates?: string[],
 ): Promise<void> {
   const record: S3SettingsRecord = { settings, folderId, fileId }
   try {
@@ -179,14 +230,30 @@ export async function backfillAllEntries(
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
     const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
-    const entries = await listEntries(accessToken, sessionId, session, env)
-    for (const meta of entries) {
-      const date = meta.name.match(DIARY_FILENAME_RE)?.[1]
-      if (!date) continue
-      const { content } = await getEntryContent(accessToken, meta.id, date)
-      await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+    const wanted = onlyDates ? new Set(onlyDates) : null
+    const entries = (await listEntries(accessToken, sessionId, session, env))
+      .map(meta => ({ meta, date: meta.name.match(DIARY_FILENAME_RE)?.[1] }))
+      .filter((e): e is { meta: typeof e.meta; date: string } => !!e.date && (!wanted || wanted.has(e.date)))
+
+    const failed: string[] = []
+    let done = 0
+    let lastProgressWriteAt = 0
+    for (const { meta, date } of entries) {
+      try {
+        const { content } = await getEntryContent(accessToken, meta.id, date)
+        await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+      } catch (e) {
+        console.error(`s3Settings.ts: backfill failed for ${date}`, e)
+        failed.push(date)
+      }
+      done += 1
+      const now = Date.now()
+      if (now - lastProgressWriteAt >= BACKFILL_PROGRESS_WRITE_INTERVAL_MS || done === entries.length) {
+        lastProgressWriteAt = now
+        await writeBackfillProgress(accessToken, record, { total: entries.length, done, failed: [...failed] })
+      }
     }
-    await recordMirrorSuccess(accessToken, record)
+    await finishBackfill(accessToken, record, entries.length, failed)
   } catch (e) {
     console.error('s3Settings.ts: backfillAllEntries failed', e)
     await recordMirrorFailure(accessToken, record, `Initial backfill failed: ${describeError(e)}`)

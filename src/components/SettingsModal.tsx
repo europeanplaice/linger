@@ -14,13 +14,14 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
   MAX_MILESTONE_BADGES,
   type Milestone,
   type S3Settings,
+  type BackfillProgress,
 } from '../types'
 
 function InfoTip({ text }: { text: string }) {
@@ -148,6 +149,12 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3TestError, setS3TestError] = useState<string | null>(null)
   const [s3LastSyncError, setS3LastSyncError] = useState<string | null>(null)
   const [s3LastSyncErrorAt, setS3LastSyncErrorAt] = useState<string | null>(null)
+  const [s3BackfillProgress, setS3BackfillProgress] = useState<BackfillProgress | null>(null)
+  // Set right after a first-time-enable save (or a retry), before the server has had a
+  // chance to write the first backfillProgress record — keeps polling started even though
+  // s3BackfillProgress is still null at that point. Cleared once any poll response arrives.
+  const [s3ExpectingBackfill, setS3ExpectingBackfill] = useState(false)
+  const [s3Retrying, setS3Retrying] = useState(false)
   // Tracks the enabled value as of the last load/save, so we know whether the next Save
   // is a first-time enable (the only time the backfill precheck below needs to run).
   const [s3InitiallyEnabled, setS3InitiallyEnabled] = useState(false)
@@ -168,9 +175,32 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3Region(settings.region)
       setS3LastSyncError(settings.lastSyncError ?? null)
       setS3LastSyncErrorAt(settings.lastSyncErrorAt ?? null)
+      setS3BackfillProgress(settings.backfillProgress ?? null)
     }).catch(e => console.error('Failed to load S3 settings:', e))
     return () => { cancelled = true }
   }, [])
+
+  // Polls /api/s3/settings while a backfill (initial, or a retry of failed entries) is
+  // running server-side — there's no way to push progress from the context.waitUntil
+  // task, so this is the only way the modal learns it's progressing/done. Bounded by the
+  // modal's own lifetime: closing Settings unmounts this and stops polling.
+  const s3BackfillActive = s3ExpectingBackfill || (s3BackfillProgress !== null && !s3BackfillProgress.finishedAt)
+  useEffect(() => {
+    if (!s3BackfillActive) return
+    let cancelled = false
+    const poll = () => {
+      loadS3Settings().then(settings => {
+        if (cancelled || !settings) return
+        setS3BackfillProgress(settings.backfillProgress ?? null)
+        setS3LastSyncError(settings.lastSyncError ?? null)
+        setS3LastSyncErrorAt(settings.lastSyncErrorAt ?? null)
+        setS3ExpectingBackfill(false)
+      }).catch(e => console.error('Failed to poll S3 backfill progress:', e))
+    }
+    poll()
+    const id = setInterval(poll, 2000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [s3BackfillActive])
 
   useEffect(() => {
     const dialog = s3OverwriteDialogRef.current
@@ -203,6 +233,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     setS3TestState('idle')
     try {
       const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
+      const isFirstTimeEnable = s3Enabled && !s3InitiallyEnabled
       await saveS3Settings(settings)
       setS3SaveState('saved')
       setS3InitiallyEnabled(s3Enabled)
@@ -210,12 +241,28 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       // stored error is cleared server-side too — mirror that locally right away.
       setS3LastSyncError(null)
       setS3LastSyncErrorAt(null)
+      if (isFirstTimeEnable) {
+        setS3BackfillProgress(null)
+        setS3ExpectingBackfill(true)
+      }
       setTimeout(() => setS3SaveState('idle'), 2000)
     } catch (e) {
       console.error('Failed to save S3 settings:', e)
       setS3SaveState('error')
     }
-  }, [s3Enabled, s3RoleArn, s3Bucket, s3Region])
+  }, [s3Enabled, s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region])
+
+  const handleS3RetryBackfill = useCallback(async () => {
+    setS3Retrying(true)
+    try {
+      await retryS3Backfill()
+      setS3ExpectingBackfill(true)
+    } catch (e) {
+      console.error('Failed to retry S3 backfill:', e)
+    } finally {
+      setS3Retrying(false)
+    }
+  }, [])
 
   // The very first time backup is enabled, the server does a one-shot backfill that
   // overwrites any diary-*.txt object already sitting at a colliding key — including
@@ -972,7 +1019,38 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             {s3SaveState === 'saved' && <p className="settings-item-success">{t.settings.s3SaveSuccess}</p>}
             {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
           </div>
-          {s3Enabled && s3LastSyncError && (
+          {s3Enabled && s3BackfillProgress && !s3BackfillProgress.finishedAt && (
+            <div className="settings-backfill-progress" aria-live="polite">
+              <p className="settings-about-text settings-s3-help">
+                {t.settings.s3BackfillInProgress(s3BackfillProgress.done, s3BackfillProgress.total)}
+              </p>
+              <progress
+                className="settings-backfill-progress-bar"
+                value={s3BackfillProgress.done}
+                max={Math.max(s3BackfillProgress.total, 1)}
+              />
+            </div>
+          )}
+          {s3Enabled && s3BackfillProgress?.finishedAt && s3BackfillProgress.failed.length > 0 && (
+            <div className="settings-backfill-failed">
+              <p className="settings-item-error">{t.settings.s3BackfillFailedSummary(s3BackfillProgress.failed.length)}</p>
+              <ul className="export-format-tree s3-overwrite-confirm-list">
+                {s3BackfillProgress.failed.slice(0, 20).map(date => <li key={date} className="export-format-file">{date}</li>)}
+                {s3BackfillProgress.failed.length > 20 && (
+                  <li className="export-format-file">{t.settings.s3BackfillFailedMore(s3BackfillProgress.failed.length - 20)}</li>
+                )}
+              </ul>
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => { void handleS3RetryBackfill() }}
+                disabled={s3Retrying}
+              >
+                {s3Retrying ? t.settings.s3BackfillRetrying : t.settings.s3BackfillRetry}
+              </button>
+            </div>
+          )}
+          {s3Enabled && s3LastSyncError && !(s3BackfillProgress && s3BackfillProgress.failed.length > 0) && (
             <p className="settings-item-error">
               {t.settings.s3SyncError}: {s3LastSyncError}
               {s3LastSyncErrorAt ? ` (${new Date(s3LastSyncErrorAt).toLocaleString()})` : ''}

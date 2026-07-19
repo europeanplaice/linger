@@ -47,6 +47,11 @@ export async function precheckS3Settings(settings: Pick<S3Settings, 'roleArn' | 
   return data
 }
 
+// Re-runs the initial backfill for just the entries it failed on last time.
+export async function retryS3Backfill(): Promise<void> {
+  await apiFetch('/api/s3/backfill-retry', { method: 'POST' })
+}
+
 // Checked after a Drive save to learn whether the S3 mirror has caught up to
 // `version` yet. `since` scopes stale sync errors out (see the endpoint).
 export async function getS3EntryStatus(date: string, version: string, since: string): Promise<S3EntryStatusResult> {

@@ -31,6 +31,16 @@ export type StorageMode = 'drive' | 'local' | 'fs'
 
 // Self-hosted S3 mirror connection (see self-hosted/aws-s3/). Stored per-user in
 // Drive, not in linger's own infra — linger holds no AWS credentials for this.
+// Progress of the one-time initial backfill (or a retry of just its failed
+// entries). `failed` holds the dates that errored on the most recent run;
+// `finishedAt` is absent while still running.
+export interface BackfillProgress {
+  total: number
+  done: number
+  failed: string[]
+  finishedAt?: string // ISO timestamp
+}
+
 export interface S3Settings {
   enabled: boolean
   roleArn: string
@@ -38,6 +48,7 @@ export interface S3Settings {
   region: string
   lastSyncError?: string
   lastSyncErrorAt?: string // ISO timestamp
+  backfillProgress?: BackfillProgress
 }
 
 // Per-entry mirror status for the currently open entry, checked on demand after
