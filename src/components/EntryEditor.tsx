@@ -247,14 +247,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [baseVersionRef])
 
   // Checks /api/s3/entry-status for the AWS S3 mirror status of a given Drive
-  // version. Used two ways: right after a save, with `retry: true` (default) and
-  // `since` set to when the save attempt started, so a few backoff attempts can
-  // catch the mirror finishing and scope out unrelated stale errors; and once
-  // when an entry is simply opened/displayed, with `retry: false` and no `since`
-  // (so any currently-recorded sync error is surfaced — there's no specific save
-  // attempt to scope it against). `token` guards against a stale check (from a
-  // previous save/load or a since-abandoned date) clobbering a newer one — see
-  // the s3PollTokenRef bump on date change below.
+  // version. Used two ways, both with `retry: true` (default) so a transient
+  // STS/S3 hiccup on a single check doesn't strand the badge on "pending"
+  // forever: right after a save, with `since` set to when the save attempt
+  // started, so backoff attempts can catch the mirror finishing and scope out
+  // unrelated stale errors; and when an entry is simply opened/displayed, with
+  // no `since` (so any currently-recorded sync error is surfaced immediately,
+  // on the first attempt — there's no specific save attempt to scope it
+  // against). `token` guards against a stale check (from a previous save/load
+  // or a since-abandoned date) clobbering a newer one — see the
+  // s3PollTokenRef bump on date change below.
   const pollS3Status = useCallback((forDate: string, version: string | null, since = '', opts: { retry?: boolean } = {}) => {
     if (s3DisabledRef.current || !version) return
     const retry = opts.retry ?? true
@@ -349,7 +351,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           // No draft, or the draft already made it to Drive — drop it.
           if (draft) deleteDraft(date).catch(() => {})
           applyLoadedEntry(entry)
-          if (entry?.meta.version) pollS3Status(date, entry.meta.version, '', { retry: false })
+          if (entry?.meta.version) pollS3Status(date, entry.meta.version)
         }
       } else if (draft) {
         // Couldn't reach Drive but an offline draft exists — let the user keep
