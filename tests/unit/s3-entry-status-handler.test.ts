@@ -163,12 +163,24 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
-  it('reports pending rather than throwing when the AWS call fails unexpectedly', async () => {
-    vi.mocked(s3.headObjectVersion).mockRejectedValue(new Error('network blip'))
+  it('reports failed when the STS/S3 call fails and no sync error was recorded', async () => {
+    vi.mocked(s3.assumeRoleWithWebIdentity).mockRejectedValue(new Error('network blip'))
 
     const res = await onRequestGet(makeContext() as any)
 
-    expect(await res.json()).toEqual({ status: 'pending' })
+    expect(await res.json()).toEqual({ status: 'failed', error: 'network blip' })
+  })
+
+  it('reports failed when STS fails with InvalidIdentityToken and no other error is recorded', async () => {
+    vi.mocked(s3.assumeRoleWithWebIdentity).mockRejectedValue(
+      new Error('STS AssumeRoleWithWebIdentity failed: {"Error":{"Code":"InvalidIdentityToken","Message":"The web identity token provided could not be validated."}}')
+    )
+
+    const res = await onRequestGet(makeContext() as any)
+
+    const body = await res.json() as { status: string; error: string }
+    expect(body.status).toBe('failed')
+    expect(body.error).toContain('InvalidIdentityToken')
   })
 
   it('reports failed when the AWS call fails unexpectedly but a sync error was recorded after the save attempt started', async () => {

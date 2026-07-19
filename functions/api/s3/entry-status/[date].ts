@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
-import { assumeRoleWithWebIdentity, headObjectVersion, isAtLeast } from '../../../_shared/s3'
+import { assumeRoleWithWebIdentity, headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
 import { getS3Settings, entryKey } from '../../../_shared/s3Settings'
 
 // Polled by the editor right after a Drive save to learn whether the S3 mirror
@@ -28,12 +28,14 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     const idToken = await getValidIdToken(sessionId, session, context.env)
     if (!idToken) return jsonResponse({ status: 'pending' })
 
+    let stsError: unknown = null
     try {
       const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
       const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
       if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
     } catch (e) {
       console.error('s3/entry-status.ts: S3/STS operation failed', e)
+      stsError = e
     }
 
     // A finished backfill (or backfill retry) that explicitly failed on this exact date
@@ -61,6 +63,15 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
         return jsonResponse({ status: 'failed', error: settings.lastSyncError })
       }
     }
+
+    // If the STS/S3 call itself failed (e.g. InvalidIdentityToken) and no other error
+    // was already surfaced above, report it as failed — it won't resolve without user
+    // intervention (re-login or IAM fix), so returning pending would keep the UI stuck
+    // in "syncing" forever.
+    if (stsError) {
+      return jsonResponse({ status: 'failed', error: describeError(stsError) })
+    }
+
     return jsonResponse({ status: 'pending' })
   } catch (e) {
     // A transient failure of this status check itself (network blip, STS hiccup)
