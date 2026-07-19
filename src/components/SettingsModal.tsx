@@ -200,6 +200,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       if (!s3ContinueInFlight.current) {
         s3ContinueInFlight.current = true
         continueS3Backfill()
+          .then(result => {
+            // Server reports backfill is done (no progress record left, or
+            // finishedAt set). Stop polling immediately rather than waiting
+            // for the next settings poll to notice.
+            if (result.done && !cancelled) {
+              setS3BackfillProgress(null)
+              setS3ExpectingBackfill(false)
+            }
+          })
           .catch(e => console.error('Failed to continue S3 backfill:', e))
           .finally(() => { s3ContinueInFlight.current = false })
       }

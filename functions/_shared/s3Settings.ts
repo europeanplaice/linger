@@ -250,11 +250,17 @@ export async function backfillAllEntries(
     const entries = chunkSize ? allEntries.slice(0, chunkSize) : allEntries
 
     // Carry over cumulative progress from prior chunks so total/done are accurate
-    // across multiple invocations.
+    // across multiple invocations. When onlyDates is unset (full resync / initial
+    // backfill) we always start from zero — the caller wants to re-check every
+    // entry, so carrying over a stale `done` from a previous run would let the
+    // counter race ahead of the actual work and cause finishBackfill to fire
+    // prematurely (or a later parallel chunk to overwrite a higher done with a
+    // lower value, making the progress bar jump backwards).
     const existingProgress = settings.backfillProgress
-    const totalAll = existingProgress?.total ?? allEntries.length
-    const baseDone = existingProgress?.done ?? 0
-    const existingFailed = existingProgress?.failed ?? []
+    const freshStart = !onlyDates
+    const totalAll = freshStart ? allEntries.length : (existingProgress?.total ?? allEntries.length)
+    const baseDone = freshStart ? 0 : (existingProgress?.done ?? 0)
+    const existingFailed = freshStart ? [] : (existingProgress?.failed ?? [])
 
     const failed: string[] = [...existingFailed]
     let done = baseDone

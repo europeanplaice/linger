@@ -330,4 +330,100 @@ describe('backfillAllEntries', () => {
     expect(updated).not.toHaveProperty('lastSyncError')
     expect(updated).not.toHaveProperty('lastSyncErrorAt')
   })
+
+  it('resets baseDone to 0 on a full resync (onlyDates undefined) even with stale progress', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    // Stale progress from a previous backfill: done=2 out of 3
+    const staleProgress = { total: 3, done: 2, failed: [] as string[] }
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings, backfillProgress: staleProgress,
+    }, 'folder-1', 'settings-file', undefined, 'Resync')
+
+    // All three entries should have been processed (not just the remaining 1)
+    expect(s3.putObjectIfNewer).toHaveBeenCalledTimes(3)
+
+    // Progress total should be 3 (actual entry count), and finishBackfill
+    // should have been called (clearing backfillProgress) since all entries succeeded.
+    const lastWrite = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    const updated = lastWrite[3] as any
+    expect(updated).not.toHaveProperty('backfillProgress')
+  })
+
+  it('uses allEntries.length as totalAll on a full resync, not the stale progress total', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    // Stale progress claims total=5 but only 2 entries exist now
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings, backfillProgress: { total: 5, done: 3, failed: [] },
+    }, 'folder-1', 'settings-file', undefined, 'Resync')
+
+    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.find(
+      ([, , name, body]) => name === 's3_settings.json' && (body as any).backfillProgress,
+    )
+    expect(progressWrite).toBeDefined()
+    const written = progressWrite![3] as any
+    // total should be 2 (actual entries), not 5 (stale progress)
+    expect(written.backfillProgress.total).toBe(2)
+  })
+
+  it('carries over progress when onlyDates is given (retry/continue)', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    // Only retry the third entry (previously failed), progress says done=2 of 3
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings, backfillProgress: { total: 3, done: 2, failed: ['2026-01-03'] },
+    }, 'folder-1', 'settings-file', ['2026-01-03'])
+
+    // Only one entry processed (the failed one)
+    expect(s3.putObjectIfNewer).toHaveBeenCalledTimes(1)
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3')
+
+    // Progress should carry over: done=3 (baseDone=2 + 1 processed)
+    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.find(
+      ([, , name, body]) => name === 's3_settings.json' && (body as any).backfillProgress,
+    )
+    expect(progressWrite).toBeDefined()
+    const written = progressWrite![3] as any
+    expect(written.backfillProgress).toEqual(expect.objectContaining({ total: 3, done: 3 }))
+  })
+
+  it('starts a fresh resync from done=0 even when the previous backfill had failures', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    // Previous backfill finished with a failure
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings,
+      backfillProgress: { total: 3, done: 3, failed: ['2026-01-01'], finishedAt: '2026-01-01T00:00:00.000Z' },
+    }, 'folder-1', 'settings-file', undefined, 'Resync')
+
+    // The single entry is processed and succeeds
+    expect(s3.putObjectIfNewer).toHaveBeenCalledOnce()
+
+    // failed list should be cleared (entry succeeded this time), not carried over
+    const lastWrite = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    const updated = lastWrite[3] as any
+    expect(updated).not.toHaveProperty('backfillProgress')
+  })
 })

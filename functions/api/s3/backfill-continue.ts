@@ -34,27 +34,33 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
       return jsonResponse({ ok: true, done: true })
     }
 
+    // No progress record yet — the initial/resync chunk is still in-flight or
+    // already finished and cleared the record. Don't start a brand-new backfill
+    // here; the trigger endpoint (settings.ts / resync.ts / backfill-retry.ts)
+    // is responsible for kicking off the first chunk. Return done: false so the
+    // client keeps polling and re-checks once progress appears.
+    if (!progress) {
+      return jsonResponse({ ok: true, done: false })
+    }
+
     // List all diary entries so we can determine which ones remain.
     const allEntries = (await listEntries(accessToken, sessionId, session, context.env))
       .map(meta => ({ meta, date: meta.name.match(DIARY_FILENAME_RE)?.[1] }))
       .filter((e): e is { meta: typeof e.meta; date: string } => !!e.date)
 
     let remainingDates: string[]
-    if (progress && progress.failed.length > 0 && progress.done >= progress.total) {
+    if (progress.failed.length > 0 && progress.done >= progress.total) {
       // Previous run finished but had failures — retry only those dates.
       remainingDates = progress.failed
-    } else if (progress) {
+    } else {
       // Ongoing initial/resync backfill — skip the entries already processed.
       remainingDates = allEntries.slice(progress.done).map(e => e.date)
-    } else {
-      // No progress record yet (first call after enable/resync/retry).
-      remainingDates = allEntries.map(e => e.date)
     }
 
     if (remainingDates.length === 0) {
       // Either all entries are synced, or entries were deleted mid-backfill and the
       // positional slice now yields nothing. Finalise in both cases.
-      if (progress && progress.done < progress.total) {
+      if (progress.done < progress.total) {
         await finishBackfill(accessToken, record, progress.total, progress.failed, 'Backfill')
       }
       return jsonResponse({ ok: true, done: true })
