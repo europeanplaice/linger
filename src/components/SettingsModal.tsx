@@ -14,7 +14,7 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill, resyncS3Backfill } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
@@ -155,6 +155,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   // s3BackfillProgress is still null at that point. Cleared once any poll response arrives.
   const [s3ExpectingBackfill, setS3ExpectingBackfill] = useState(false)
   const [s3Retrying, setS3Retrying] = useState(false)
+  const [s3Resyncing, setS3Resyncing] = useState(false)
   // Tracks the enabled value as of the last load/save, so we know whether the next Save
   // is a first-time enable (the only time the backfill precheck below needs to run).
   const [s3InitiallyEnabled, setS3InitiallyEnabled] = useState(false)
@@ -261,6 +262,23 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       console.error('Failed to retry S3 backfill:', e)
     } finally {
       setS3Retrying(false)
+    }
+  }, [])
+
+  // Unlike handleS3RetryBackfill (just the previously-failed dates), this re-mirrors
+  // every entry — the only way to recover an entry whose per-save mirror silently missed
+  // without ever being recorded in backfillProgress.failed (e.g. a dropped Google
+  // id_token on refresh outliving that one save). Safe to run any time: putObjectIfNewer
+  // skips anything already at least as new as Drive.
+  const handleS3Resync = useCallback(async () => {
+    setS3Resyncing(true)
+    try {
+      await resyncS3Backfill()
+      setS3ExpectingBackfill(true)
+    } catch (e) {
+      console.error('Failed to start S3 resync:', e)
+    } finally {
+      setS3Resyncing(false)
     }
   }, [])
 
@@ -1008,8 +1026,23 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               >
                 {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
               </button>
+              {s3InitiallyEnabled && (
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={() => { void handleS3Resync() }}
+                  disabled={s3Resyncing || s3BackfillActive}
+                >
+                  {s3Resyncing || s3BackfillActive ? t.settings.s3Resyncing : t.settings.s3Resync}
+                </button>
+              )}
             </div>
           </div>
+          {s3InitiallyEnabled && (
+            <p className="settings-about-text settings-s3-help settings-s3-actions-help">
+              {t.settings.s3ResyncHelp}
+            </p>
+          )}
           <div aria-live="polite">
             {s3TestState === 'ok' && <p className="settings-item-success">{t.settings.s3TestOkMsg}</p>}
             {s3TestState === 'error' && (

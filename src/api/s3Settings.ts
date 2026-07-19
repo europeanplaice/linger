@@ -52,6 +52,12 @@ export async function retryS3Backfill(): Promise<void> {
   await apiFetch('/api/s3/backfill-retry', { method: 'POST' })
 }
 
+// Re-mirrors every entry against S3, not just previously-failed ones — catches
+// individual per-save mirror misses that never made it into a failed list.
+export async function resyncS3Backfill(): Promise<void> {
+  await apiFetch('/api/s3/resync', { method: 'POST' })
+}
+
 // Checked after a Drive save to learn whether the S3 mirror has caught up to
 // `version` yet. `since` scopes stale sync errors out (see the endpoint).
 export async function getS3EntryStatus(date: string, version: string, since: string): Promise<S3EntryStatusResult> {
