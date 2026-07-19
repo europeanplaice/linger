@@ -1,63 +1,27 @@
 import { expect, test } from '@playwright/test'
 import { checkSession, revokeSession } from '../src/api/auth'
+import { FetchMock, jsonResponse } from './helpers/mockFetch'
 
-type FetchCall = { url: string; init?: RequestInit }
-type MockResponse = {
-  status: number
-  ok: boolean
-  headers: Headers
-  json: () => Promise<unknown>
-  text: () => Promise<string>
-}
+const fetchMock = new FetchMock()
 
-const originalFetch = globalThis.fetch
-let calls: FetchCall[]
-let responses: MockResponse[]
-
-function jsonResponse(body: unknown, status = 200): MockResponse {
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    headers: new Headers(),
-    json: async () => body,
-    text: async () => JSON.stringify(body),
-  }
-}
-
-function mockFetch(...nextResponses: MockResponse[]): void {
-  responses = [...nextResponses]
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ url: String(input), init })
-    const response = responses.shift()
-    if (!response) throw new Error(`Unexpected fetch: ${String(input)}`)
-    return response as Response
-  }) as typeof fetch
-}
-
-test.beforeEach(() => {
-  calls = []
-  responses = []
-})
-
-test.afterEach(() => {
-  globalThis.fetch = originalFetch
-})
+test.beforeEach(() => fetchMock.reset())
+test.afterEach(() => fetchMock.restore())
 
 test.describe('checkSession', () => {
   test('returns true when server responds signedIn: true', async () => {
-    mockFetch(jsonResponse({ signedIn: true, email: 'user@example.com' }))
+    fetchMock.mock(jsonResponse({ signedIn: true, email: 'user@example.com' }))
 
     const result = await checkSession()
 
     expect(result.signedIn).toBe(true)
     expect(result.email).toBe('user@example.com')
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('/auth/session')
-    expect(calls[0].init?.credentials).toBe('include')
+    expect(fetchMock.calls).toHaveLength(1)
+    expect(fetchMock.calls[0].url).toBe('/auth/session')
+    expect(fetchMock.calls[0].init?.credentials).toBe('include')
   })
 
   test('returns false when server responds signedIn: false', async () => {
-    mockFetch(jsonResponse({ signedIn: false, email: null }))
+    fetchMock.mock(jsonResponse({ signedIn: false, email: null }))
 
     const result = await checkSession()
 
@@ -77,13 +41,13 @@ test.describe('checkSession', () => {
 
 test.describe('revokeSession', () => {
   test('sends POST to /auth/logout with credentials', async () => {
-    mockFetch(jsonResponse(null, 200))
+    fetchMock.mock(jsonResponse(null, 200))
 
     await revokeSession()
 
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe('/auth/logout')
-    expect(calls[0].init?.method).toBe('POST')
-    expect(calls[0].init?.credentials).toBe('include')
+    expect(fetchMock.calls).toHaveLength(1)
+    expect(fetchMock.calls[0].url).toBe('/auth/logout')
+    expect(fetchMock.calls[0].init?.method).toBe('POST')
+    expect(fetchMock.calls[0].init?.credentials).toBe('include')
   })
 })
