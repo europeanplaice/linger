@@ -1268,6 +1268,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     testResult?: { ok: boolean; error?: string }
     precheckResult?: { ok: boolean; collisions?: string[]; error?: string }
     onSave?: (body: unknown) => void
+    onTest?: (body: unknown) => void
   } = {}) {
     await page.route('**/api/s3/settings', async route => {
       if (route.request().method() === 'GET') {
@@ -1278,6 +1279,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
       }
     })
     await page.route('**/api/s3/test', async route => {
+      opts.onTest?.(route.request().postDataJSON())
       await route.fulfill({ json: opts.testResult ?? { ok: true } })
     })
     await page.route('**/api/s3/precheck', async route => {
@@ -1327,19 +1329,28 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await expect(page.getByText('Connection failed: Access denied')).toBeVisible()
   })
 
-  test('Test connection button stays disabled until all three fields are filled', async ({ page }) => {
+  test('Test connection alerts about missing fields instead of calling the server', async ({ page }) => {
     await loadHarness(page)
-    await routeS3(page)
+    let called = false
+    await routeS3(page, { onTest: () => { called = true } })
     await render(page)
 
     const testBtn = page.getByRole('button', { name: 'Test connection' })
-    await expect(testBtn).toBeDisabled()
-    await bucketField(page).fill('my-bucket')
-    await expect(testBtn).toBeDisabled()
-    await regionField(page).fill('us-east-1')
-    await expect(testBtn).toBeDisabled()
-    await roleArnField(page).fill('arn:aws:iam::123456789012:role/x')
     await expect(testBtn).toBeEnabled()
+
+    await testBtn.click()
+    await expect(page.getByText('Enter Bucket, Region, Role ARN before testing the connection.')).toBeVisible()
+    expect(called).toBe(false)
+
+    await bucketField(page).fill('my-bucket')
+    await testBtn.click()
+    await expect(page.getByText('Enter Region, Role ARN before testing the connection.')).toBeVisible()
+    expect(called).toBe(false)
+
+    await regionField(page).fill('us-east-1')
+    await roleArnField(page).fill('arn:aws:iam::123456789012:role/x')
+    await testBtn.click()
+    expect(called).toBe(true)
   })
 
   test('enabling for the first time saves immediately when the bucket has no colliding files', async ({ page }) => {

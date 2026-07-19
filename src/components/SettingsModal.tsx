@@ -144,7 +144,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3Bucket, setS3Bucket] = useState('')
   const [s3Region, setS3Region] = useState('')
   const [s3SaveState, setS3SaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [s3TestState, setS3TestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+  const [s3TestState, setS3TestState] = useState<'idle' | 'testing' | 'ok' | 'error' | 'invalid'>('idle')
   const [s3TestError, setS3TestError] = useState<string | null>(null)
   const [s3LastSyncError, setS3LastSyncError] = useState<string | null>(null)
   const [s3LastSyncErrorAt, setS3LastSyncErrorAt] = useState<string | null>(null)
@@ -246,6 +246,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   }, [s3Enabled, s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region, handleS3Save])
 
   const handleS3Test = useCallback(async () => {
+    const missing: string[] = []
+    if (!s3Bucket.trim()) missing.push(t.settings.s3Bucket)
+    if (!s3Region.trim()) missing.push(t.settings.s3Region)
+    if (!s3RoleArn.trim()) missing.push(t.settings.s3RoleArn)
+    if (missing.length > 0) {
+      setS3TestState('invalid')
+      setS3TestError(t.settings.s3RequiredFieldsMissing(missing))
+      return
+    }
     setS3TestState('testing')
     setS3TestError(null)
     try {
@@ -261,7 +270,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3TestState('error')
       setS3TestError(null)
     }
-  }, [s3RoleArn, s3Bucket, s3Region])
+  }, [s3RoleArn, s3Bucket, s3Region, t])
 
   const handleCopy = useCallback((field: 'sub' | 'clientId', value: string | undefined) => {
     if (!value) return
@@ -940,7 +949,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 type="button"
                 className="settings-action-btn"
                 onClick={handleS3Test}
-                disabled={s3TestState === 'testing' || !s3RoleArn || !s3Bucket || !s3Region}
+                disabled={s3TestState === 'testing'}
               >
                 {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
               </button>
@@ -959,6 +968,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             {s3TestState === 'error' && (
               <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
             )}
+            {s3TestState === 'invalid' && <p className="settings-item-error">{s3TestError}</p>}
             {s3SaveState === 'saved' && <p className="settings-item-success">{t.settings.s3SaveSuccess}</p>}
             {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
           </div>
