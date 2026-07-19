@@ -14,7 +14,7 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "accounts.google.com:aud"
-      values   = [var.linger_google_client_id]
+      values   = concat([var.linger_google_client_id], var.linger_additional_trusted_client_ids)
     }
 
     condition {

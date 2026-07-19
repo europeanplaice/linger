@@ -37,6 +37,20 @@ variable "additional_google_oidc_client_ids" {
   default     = []
 }
 
+variable "linger_additional_trusted_client_ids" {
+  description = <<-EOT
+    Other Google OAuth client IDs (the 'aud' values) that should ALSO be allowed to
+    assume this role via AssumeRoleWithWebIdentity — e.g. if you run more than one
+    linger environment (production plus your own staging deployment) against this
+    same self-hosted role. Every value here is both registered on the OIDC provider
+    (client_id_list) and trusted by the role's trust policy condition, unlike
+    additional_google_oidc_client_ids below (registration only, no role trust — for
+    unrelated tools that merely share this AWS account's OIDC provider).
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "linger_google_sub" {
   description = <<-EOT
     Your own Google account's stable numeric ID (the OIDC 'sub' claim), NOT your email.

@@ -14,5 +14,5 @@ resource "aws_iam_openid_connect_provider" "google" {
   # Terraform config didn't create. If you imported an existing provider (see the
   # README's troubleshooting section), list its other client IDs in
   # additional_google_oidc_client_ids or this apply will rip them out.
-  client_id_list = concat([var.linger_google_client_id], var.additional_google_oidc_client_ids)
+  client_id_list = concat([var.linger_google_client_id], var.linger_additional_trusted_client_ids, var.additional_google_oidc_client_ids)
 }
