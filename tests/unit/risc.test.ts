@@ -1,7 +1,14 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { onRequestPost } from '../../functions/auth/risc'
 
 // --- helpers ---
+
+interface JwkKey {
+  kty: string
+  kid: string
+  n: string
+  e: string
+}
 
 function encodeBase64Url(obj: object): string {
   return btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -11,6 +18,31 @@ function makeJwt(header: object, payload: object): string {
   const h = encodeBase64Url(header)
   const p = encodeBase64Url(payload)
   return `${h}.${p}.fakesig`
+}
+
+function bufferToBase64Url(buf: ArrayBufferLike): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+function base64UrlToBytes(input: string): Uint8Array {
+  const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4))
+  const binary = atob((input + pad).replace(/-/g, '+').replace(/_/g, '/'))
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+async function makeSignedJwt(header: object, payload: object, privateKey: CryptoKey): Promise<string> {
+  const signingInput = `${encodeBase64Url(header)}.${encodeBase64Url(payload)}`
+  const sig = await crypto.subtle.sign(
+    { name: 'RSASSA-PKCS1-v1_5' },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  )
+  return `${signingInput}.${bufferToBase64Url(sig)}`
 }
 
 const VALID_HEADER = { alg: 'RS256', kid: 'key-1', typ: 'secevent+jwt' }
@@ -45,6 +77,16 @@ function mockJwks(cache = makeMockCache()) {
   vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue(cache) })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
     new Response(JSON.stringify(FAKE_JWKS), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ))
+  return cache
+}
+
+// Stubs only the network (fetch/caches) boundary, leaving `crypto` untouched so
+// crypto.subtle.importKey/verify run for real against the given JWK set.
+function stubJwksFetch(keys: JwkKey[], cache = makeMockCache()) {
+  vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue(cache) })
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ keys }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
   ))
   return cache
 }
@@ -338,5 +380,88 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(response.status).toBe(202)
     expect(body.revoked).toBe(1)
     expect(del).toHaveBeenCalledWith('session:sid1')
+  })
+})
+
+// Every case above stubs `crypto.subtle.verify` to a fixed true/false, so the
+// actual RSASSA-PKCS1-v1_5 verification code path is never exercised. These
+// tests leave `crypto` untouched — only the network (fetch/caches) boundary is
+// stubbed — so importKey/verify run against a real key pair and a real signature.
+describe('onRequestPost (RISC webhook) — real RSA signature verification', () => {
+  let privateKey: CryptoKey
+  let publicJwk: JsonWebKey
+
+  beforeAll(async () => {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify'],
+    ) as CryptoKeyPair
+    privateKey = keyPair.privateKey
+    publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey) as JsonWebKey
+  })
+
+  it('accepts a JWT with a genuine RS256 signature over the published JWK', async () => {
+    stubJwksFetch([{ kty: 'RSA', kid: 'key-1', n: publicJwk.n!, e: publicJwk.e! }])
+    const jwt = await makeSignedJwt(VALID_HEADER, validPayload(), privateKey)
+
+    const response = await postRisc(jwt, makeEnv())
+
+    expect(response.status).toBe(202)
+  })
+
+  it('rejects a JWT whose signature bytes have been tampered with', async () => {
+    stubJwksFetch([{ kty: 'RSA', kid: 'key-1', n: publicJwk.n!, e: publicJwk.e! }])
+    const jwt = await makeSignedJwt(VALID_HEADER, validPayload(), privateKey)
+    const [headerB64, payloadB64, signatureB64] = jwt.split('.')
+    // Flip a bit in a byte from the middle of the raw signature, not a base64url
+    // character — the last char of an RSA-2048 (256-byte) signature only encodes
+    // 2 bits, so flipping *that* char can round-trip to the same decoded byte and
+    // leave verification (wrongly) passing.
+    const sigBytes = base64UrlToBytes(signatureB64)
+    sigBytes[Math.floor(sigBytes.length / 2)] ^= 0xff
+    const tampered = `${headerB64}.${payloadB64}.${bufferToBase64Url(sigBytes.buffer)}`
+
+    const response = await postRisc(tampered, makeEnv())
+
+    expect(response.status).toBe(400)
+  })
+
+  it('rejects a JWT whose payload has been tampered with after signing', async () => {
+    stubJwksFetch([{ kty: 'RSA', kid: 'key-1', n: publicJwk.n!, e: publicJwk.e! }])
+    const jwt = await makeSignedJwt(VALID_HEADER, validPayload(), privateKey)
+    const [headerB64, , signatureB64] = jwt.split('.')
+    // Keep every claim verifyJwt itself checks (iss/aud/iat/exp) valid, so a
+    // rejection can only come from the signature no longer matching the
+    // payload — changing `aud` instead would get rejected by the aud check
+    // regardless of whether signature verification even ran.
+    const tamperedPayload = encodeBase64Url(validPayload({
+      events: {
+        'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked': {
+          subject: { subject_type: 'iss-sub', iss: 'https://accounts.google.com', sub: '12345' },
+          hint_identifier: 'attacker@example.com',
+        },
+      },
+    }))
+    const tampered = `${headerB64}.${tamperedPayload}.${signatureB64}`
+
+    const response = await postRisc(tampered, makeEnv())
+
+    expect(response.status).toBe(400)
+  })
+
+  it('rejects a JWT signed by a key other than the one published under its kid', async () => {
+    const otherKeyPair = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify'],
+    ) as CryptoKeyPair
+    // JWKS still publishes the original public key under kid 'key-1'.
+    stubJwksFetch([{ kty: 'RSA', kid: 'key-1', n: publicJwk.n!, e: publicJwk.e! }])
+    const jwt = await makeSignedJwt(VALID_HEADER, validPayload(), otherKeyPair.privateKey)
+
+    const response = await postRisc(jwt, makeEnv())
+
+    expect(response.status).toBe(400)
   })
 })
