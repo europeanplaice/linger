@@ -38,9 +38,17 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     // Only attribute a failure to this save if it was recorded after the save
     // attempt started — otherwise a stale, unrelated failure (e.g. from a
     // previous outage) would wrongly mark a brand-new, still-in-flight save
-    // as failed.
-    if (settings.lastSyncErrorAt && (!since || settings.lastSyncErrorAt > since)) {
-      return jsonResponse({ status: 'failed', error: settings.lastSyncError })
+    // as failed. However, if the error is persistent and unchanged, we avoid
+    // writing to Drive, meaning the timestamp doesn't update. If a significant
+    // amount of time has elapsed (e.g., 5 seconds) and we are still not synced,
+    // we fallback to reporting the recorded error.
+    const sinceTime = since ? Date.parse(since) : NaN
+    const elapsedMs = !isNaN(sinceTime) ? Date.now() - sinceTime : 0
+    if (settings.lastSyncErrorAt) {
+      const isPersistentError = elapsedMs > 5000 && elapsedMs < 30000
+      if (!since || settings.lastSyncErrorAt > since || isPersistentError) {
+        return jsonResponse({ status: 'failed', error: settings.lastSyncError })
+      }
     }
     return jsonResponse({ status: 'pending' })
   } catch (e) {

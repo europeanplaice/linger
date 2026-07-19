@@ -147,4 +147,25 @@ describe('GET /api/s3/entry-status/[date]', () => {
 
     expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
   })
+
+  it('reports failed for persistent errors after the elapsed threshold even if the error timestamp is before the save started', async () => {
+    // Save started at 2026-05-01T00:00:00.000Z (set in makeContext)
+    // Error was recorded before that, at 2026-04-30T00:00:00.000Z
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-04-30T00:00:00.000Z',
+    })
+
+    // Current time is 10 seconds after the save started (2026-05-01T00:00:10.000Z)
+    const mockNow = new Date('2026-05-01T00:00:10.000Z').getTime()
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(mockNow)
+
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
 })
