@@ -650,7 +650,7 @@ test.describe('SettingsModal — export confirm modal', () => {
 
     await page.locator('.btn-export-modern').click()
 
-    const tree = page.locator('.export-format-tree')
+    const tree = page.locator('.export-confirm-dialog .export-format-tree')
     await expect(tree).toBeVisible()
 
     // ZIP archive name line.
@@ -887,7 +887,10 @@ test.describe('SettingsModal — sign out button', () => {
 
     await page.locator('.settings-signout-btn').click()
 
-    const confirm = page.locator('.signout-confirm-dialog')
+    // Scoped by role/name, not the `.signout-confirm-dialog` class alone — the S3
+    // backfill overwrite dialog shares that class for styling and is always present
+    // in the DOM (just hidden), so the class-only locator matches both.
+    const confirm = page.getByRole('dialog', { name: 'Sign out?' })
     await expect(confirm).toBeVisible()
     expect(await page.evaluate(() => window.settingsHarness.signOutCount())).toBe(0)
   })
@@ -897,7 +900,7 @@ test.describe('SettingsModal — sign out button', () => {
     await render(page)
 
     await page.locator('.settings-signout-btn').click()
-    const confirm = page.locator('.signout-confirm-dialog')
+    const confirm = page.getByRole('dialog', { name: 'Sign out?' })
     await confirm.locator('.signout-confirm-cancel').click()
 
     await expect(confirm).toBeHidden()
@@ -911,7 +914,7 @@ test.describe('SettingsModal — sign out button', () => {
     await render(page)
 
     await page.locator('.settings-signout-btn').click()
-    const confirm = page.locator('.signout-confirm-dialog')
+    const confirm = page.getByRole('dialog', { name: 'Sign out?' })
     await confirm.locator('.signout-confirm-start').click()
 
     await page.waitForFunction(() => window.settingsHarness.signOutCount() === 1)
@@ -1143,7 +1146,9 @@ test.describe('SettingsModal — settings-item layout', () => {
     await render(page, { modalOpen: true })
 
     const exportBtn = page.locator('.btn-export-modern')
-    const shareBtn = page.locator('.settings-action-btn')
+    // `.settings-action-btn` is shared with the S3 section's Test/Save buttons —
+    // scope by accessible name to get the Share button specifically.
+    const shareBtn = page.getByRole('button', { name: 'Share' })
     const exportBox = await exportBtn.boundingBox()
     const shareBox = await shareBtn.boundingBox()
 
@@ -1231,8 +1236,228 @@ test.describe('SettingsModal — mobile layout (≤480px)', () => {
     const exportItem = page.locator('.settings-item:has(.settings-export)')
     expect(await exportItem.evaluate(el => el.scrollWidth)).toBe(await exportItem.evaluate(el => el.clientWidth))
 
-    const shareItem = page.locator('.settings-item:has(.settings-action-btn)')
+    // `.settings-action-btn` is shared with the S3 section's Test/Save buttons —
+    // scope by accessible name to get the Share row specifically.
+    const shareItem = page.locator('.settings-item', { has: page.getByRole('button', { name: 'Share' }) })
     expect(await shareItem.evaluate(el => el.scrollWidth)).toBe(await shareItem.evaluate(el => el.clientWidth))
+  })
+})
+
+test.describe('SettingsModal — S3 backup (advanced)', () => {
+  type Page = import('@playwright/test').Page
+  type S3SettingsPayload = {
+    enabled: boolean
+    roleArn: string
+    bucket: string
+    region: string
+    lastSyncError?: string
+    lastSyncErrorAt?: string
+  }
+
+  const bucketField = (page: Page) => page.getByPlaceholder('my-linger-diary')
+  const regionField = (page: Page) => page.getByPlaceholder('us-east-1')
+  const roleArnField = (page: Page) => page.getByPlaceholder(/arn:aws:iam/)
+  const enabledCheckbox = (page: Page) => page.getByRole('checkbox', { name: 'Enable S3 backup' })
+  const overwriteDialog = (page: Page) => page.locator('.s3-overwrite-confirm-dialog')
+
+  // The component fetches /api/s3/settings itself on mount, so these routes stand
+  // in for the Cloudflare Pages Functions (functions/api/s3/*) it talks to —
+  // without them every S3 UI flow silently no-ops behind a caught fetch error.
+  async function routeS3(page: Page, opts: {
+    initial?: S3SettingsPayload | null
+    testResult?: { ok: boolean; error?: string }
+    precheckResult?: { ok: boolean; collisions?: string[]; error?: string }
+    onSave?: (body: unknown) => void
+  } = {}) {
+    await page.route('**/api/s3/settings', async route => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ json: opts.initial ?? null })
+      } else {
+        opts.onSave?.(route.request().postDataJSON())
+        await route.fulfill({ json: {} })
+      }
+    })
+    await page.route('**/api/s3/test', async route => {
+      await route.fulfill({ json: opts.testResult ?? { ok: true } })
+    })
+    await page.route('**/api/s3/precheck', async route => {
+      await route.fulfill({ json: opts.precheckResult ?? { ok: true, collisions: [] } })
+    })
+  }
+
+  async function fillConnectionFields(page: Page) {
+    await bucketField(page).fill('my-bucket')
+    await regionField(page).fill('us-east-1')
+    await roleArnField(page).fill('arn:aws:iam::123456789012:role/linger-s3-self-hosted')
+  }
+
+  test('loads existing settings into the form on open', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page, {
+      initial: { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/x', bucket: 'existing-bucket', region: 'eu-west-1' },
+    })
+    await render(page)
+
+    await expect(bucketField(page)).toHaveValue('existing-bucket')
+    await expect(regionField(page)).toHaveValue('eu-west-1')
+    await expect(roleArnField(page)).toHaveValue('arn:aws:iam::123456789012:role/x')
+    await expect(enabledCheckbox(page)).toBeChecked()
+  })
+
+  test('Test connection shows a success message on a valid connection', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page, { testResult: { ok: true } })
+    await render(page)
+    await fillConnectionFields(page)
+
+    await page.getByRole('button', { name: 'Test connection' }).click()
+
+    await expect(page.getByText('✓ Connection verified.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Connected' })).toBeVisible()
+  })
+
+  test('Test connection surfaces the server error message on failure', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page, { testResult: { ok: false, error: 'Access denied' } })
+    await render(page)
+    await fillConnectionFields(page)
+
+    await page.getByRole('button', { name: 'Test connection' }).click()
+
+    await expect(page.getByText('Connection failed: Access denied')).toBeVisible()
+  })
+
+  test('Test connection button stays disabled until all three fields are filled', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page)
+    await render(page)
+
+    const testBtn = page.getByRole('button', { name: 'Test connection' })
+    await expect(testBtn).toBeDisabled()
+    await bucketField(page).fill('my-bucket')
+    await expect(testBtn).toBeDisabled()
+    await regionField(page).fill('us-east-1')
+    await expect(testBtn).toBeDisabled()
+    await roleArnField(page).fill('arn:aws:iam::123456789012:role/x')
+    await expect(testBtn).toBeEnabled()
+  })
+
+  test('enabling for the first time saves immediately when the bucket has no colliding files', async ({ page }) => {
+    await loadHarness(page)
+    let saved: unknown = null
+    await routeS3(page, {
+      precheckResult: { ok: true, collisions: [] },
+      onSave: body => { saved = body },
+    })
+    await render(page)
+    await fillConnectionFields(page)
+    await enabledCheckbox(page).check()
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    await expect(page.getByText('✓ Settings saved.')).toBeVisible()
+    await expect(overwriteDialog(page)).toBeHidden()
+    expect(saved).toMatchObject({ enabled: true, bucket: 'my-bucket', region: 'us-east-1' })
+  })
+
+  test('warns before the first-time backfill would overwrite existing bucket files', async ({ page }) => {
+    await loadHarness(page)
+    let saveCount = 0
+    await routeS3(page, {
+      precheckResult: { ok: true, collisions: ['diary-2026-01-01.txt', 'diary-2026-01-02.txt'] },
+      onSave: () => { saveCount++ },
+    })
+    await render(page)
+    await fillConnectionFields(page)
+    await enabledCheckbox(page).check()
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    const dialog = overwriteDialog(page)
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('diary-2026-01-01.txt')
+    await expect(dialog).toContainText('diary-2026-01-02.txt')
+    expect(saveCount).toBe(0)
+
+    await dialog.getByRole('button', { name: 'Overwrite and enable' }).click()
+
+    await expect(dialog).toBeHidden()
+    expect(saveCount).toBe(1)
+  })
+
+  test('cancelling the overwrite warning leaves backup disabled and unsaved', async ({ page }) => {
+    await loadHarness(page)
+    let saveCount = 0
+    await routeS3(page, {
+      precheckResult: { ok: true, collisions: ['diary-2026-01-01.txt'] },
+      onSave: () => { saveCount++ },
+    })
+    await render(page)
+    await fillConnectionFields(page)
+    await enabledCheckbox(page).check()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    const dialog = overwriteDialog(page)
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+    await expect(dialog).toBeHidden()
+    expect(saveCount).toBe(0)
+  })
+
+  test('does not re-run the overwrite precheck once backup is already enabled', async ({ page }) => {
+    await loadHarness(page)
+    let precheckCalled = false
+    let saveCount = 0
+    await routeS3(page, {
+      initial: { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/x', bucket: 'my-bucket', region: 'us-east-1' },
+      onSave: () => { saveCount++ },
+    })
+    // Collisions here prove the precheck result is never consulted, not merely unfetched —
+    // if Save wrongly ran the precheck, it would open the overwrite dialog instead of saving.
+    await page.route('**/api/s3/precheck', async route => {
+      precheckCalled = true
+      await route.fulfill({ json: { ok: true, collisions: ['should-not-be-checked.txt'] } })
+    })
+    await render(page)
+    await expect(enabledCheckbox(page)).toBeChecked()
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    await expect(page.getByText('✓ Settings saved.')).toBeVisible()
+    expect(precheckCalled).toBe(false)
+    expect(saveCount).toBe(1)
+  })
+
+  test('shows a persistent banner when the last background sync failed', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page, {
+      initial: {
+        enabled: true,
+        roleArn: 'arn:aws:iam::123456789012:role/x',
+        bucket: 'my-bucket',
+        region: 'us-east-1',
+        lastSyncError: 'Access Denied',
+        lastSyncErrorAt: '2026-07-01T00:00:00.000Z',
+      },
+    })
+    await render(page)
+
+    await expect(page.getByText(/Backup sync failing: Access Denied/)).toBeVisible()
+  })
+
+  test('editing a connection field after a successful Test clears the stale result', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3(page, { testResult: { ok: true } })
+    await render(page)
+    await fillConnectionFields(page)
+    await page.getByRole('button', { name: 'Test connection' }).click()
+    await expect(page.getByRole('button', { name: 'Connected' })).toBeVisible()
+
+    await bucketField(page).fill('my-bucket-2')
+
+    await expect(page.getByRole('button', { name: 'Test connection' })).toBeVisible()
+    await expect(page.getByText('✓ Connection verified.')).toBeHidden()
   })
 })
 

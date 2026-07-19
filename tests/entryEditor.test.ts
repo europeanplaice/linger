@@ -497,7 +497,7 @@ test.describe('EntryEditor — auto-save', () => {
     await expect(page.locator('.save-progress-bar')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(save).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(save).toHaveAttribute('aria-label', 'Saved to Google Drive')
   })
 })
 
@@ -565,7 +565,7 @@ test.describe('EntryEditor — keyboard save', () => {
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'keyboard saved content', baseVersion: '1' },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
   })
 
   test('Ctrl+S passes the saved text as baseContent', async ({ page }) => {
@@ -625,11 +625,11 @@ test.describe('EntryEditor — repeated saves', () => {
 
     await page.fill('textarea.editor-textarea', 'first edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
 
     await page.fill('textarea.editor-textarea', 'second edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
 
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toEqual([
@@ -701,7 +701,7 @@ test.describe('EntryEditor — conflict resolution', () => {
       { date: '2026-05-01', content: 'local edits', baseVersion: '1' },
       { date: '2026-05-01', content: 'local edits', baseVersion: '99', force: true },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
   })
 
 })
@@ -1079,7 +1079,7 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
   })
 
   test('shows inline saving state and progress bar on Ctrl+S save', async ({ page }) => {
@@ -1107,7 +1107,7 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
   })
 
   test('does not show saving progress or overlay on auto-save', async ({ page }) => {
@@ -1505,6 +1505,89 @@ test.describe('EntryEditor — editor meta info', () => {
   })
 })
 
+test.describe('EntryEditor — Drive/S3 sync status badges', () => {
+  type Page = import('@playwright/test').Page
+
+  // getS3EntryStatus (src/api/s3Settings.ts) hits this endpoint directly, so
+  // without a route it always fails against the Vite-only dev server — caught
+  // and treated as 'pending' (see pollS3Status's .catch in EntryEditor.tsx).
+  function routeS3Status(page: Page, status: 'disabled' | 'pending' | 'synced' | 'failed') {
+    return page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status } })
+    })
+  }
+
+  test('shows the Google Drive badge for an already-saved entry', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'disabled')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.locator('.editor-meta-drive')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveText('Saved to Google Drive')
+  })
+
+  test('hides the Google Drive badge for a brand-new unsaved entry', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'disabled')
+    await renderEditor(page, { date: '2026-05-02', initialContent: '', version: null })
+
+    await expect(page.locator('.editor-meta-drive')).toHaveCount(0)
+  })
+
+  test('shows no S3 badge when S3 backup is not configured', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'disabled')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect(page.locator('.editor-meta-drive')).toBeVisible()
+    await expect(page.locator('.editor-meta-s3')).toHaveCount(0)
+  })
+
+  test('shows a pending S3 badge while the mirror status is inconclusive', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'pending')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.locator('.editor-meta-s3')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-s3--pending/)
+    await expect(badge).toHaveText('Syncing to AWS…')
+  })
+
+  test('shows a synced S3 badge once the mirror catches up after a save', async ({ page }) => {
+    await loadHarness(page)
+    // No initial poll fires (no baseVersion yet), so this only governs the
+    // post-save check — see the s3DisabledRef short-circuit in EntryEditor.tsx.
+    await routeS3Status(page, 'synced')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'draft', version: null, autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'draft saved to s3')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+
+    const badge = page.locator('.editor-meta-s3')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-s3--synced/)
+    await expect(badge).toHaveText('Backed up to AWS')
+  })
+
+  test('shows a failed S3 badge when the mirror reports a sync error', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'failed')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'draft', version: null, autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'draft that fails to mirror')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+
+    const badge = page.locator('.editor-meta-s3')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-s3--failed/)
+    await expect(badge).toHaveText('AWS backup failed')
+  })
+})
+
 test.describe('EntryEditor — unsaved indicator', () => {
   test('unsaved label is absent when content is clean', async ({ page }) => {
     await loadHarness(page)
@@ -1547,7 +1630,7 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
 
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Drive')
+    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
 
     await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
   })

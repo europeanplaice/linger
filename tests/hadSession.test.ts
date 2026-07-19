@@ -114,8 +114,10 @@ test('clears linger_had_session on sign-out', async ({ page }) => {
 
   await page.locator('.btn-settings').click()
   await page.locator('.settings-signout-btn').click()
-  // Sign-out is now confirmed through a dialog before it takes effect.
-  await page.locator('.signout-confirm-start').click()
+  // Sign-out is now confirmed through a dialog before it takes effect. Scoped by
+  // role/name — the S3 backfill overwrite dialog shares the `.signout-confirm-start`
+  // class for styling and is always present in the DOM (just hidden).
+  await page.getByRole('dialog', { name: 'Sign out?' }).getByRole('button', { name: 'Sign out' }).click()
   await expect(page.locator('.login-screen')).toBeVisible()
 
   const value = await page.evaluate(() => localStorage.getItem('linger_had_session'))
