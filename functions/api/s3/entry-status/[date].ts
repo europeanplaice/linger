@@ -27,9 +27,13 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     const idToken = await getValidIdToken(sessionId, session, context.env)
     if (!idToken) return jsonResponse({ status: 'pending' })
 
-    const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
-    const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
-    if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
+    try {
+      const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
+      const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
+      if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
+    } catch (e) {
+      console.error('s3/entry-status.ts: S3/STS operation failed', e)
+    }
 
     // Only attribute a failure to this save if it was recorded after the save
     // attempt started — otherwise a stale, unrelated failure (e.g. from a

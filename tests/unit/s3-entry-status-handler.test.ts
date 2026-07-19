@@ -134,4 +134,17 @@ describe('GET /api/s3/entry-status/[date]', () => {
 
     expect(await res.json()).toEqual({ status: 'pending' })
   })
+
+  it('reports failed when the AWS call fails unexpectedly but a sync error was recorded after the save attempt started', async () => {
+    vi.mocked(s3.assumeRoleWithWebIdentity).mockRejectedValue(new Error('STS failed'))
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z',
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
+  })
 })
