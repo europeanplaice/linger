@@ -257,4 +257,77 @@ describe('backfillAllEntries', () => {
       'settings-file',
     )
   })
+
+  it('skips an entry whose mirror fails and continues to the rest, recording it in backfillProgress.failed', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockImplementation(async (_tok, fileId) => {
+      if (fileId === 'f1') throw new Error('S3 hiccup')
+      return { date: '', content: 'day two' }
+    })
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, baseSettings, 'folder-1', 'settings-file')
+
+    // Both entries were attempted despite the first one failing.
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'day two', '2')
+    expect(drive.writeJsonFile).toHaveBeenLastCalledWith(
+      'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
+      expect.objectContaining({
+        backfillProgress: expect.objectContaining({ total: 2, done: 2, failed: ['2026-01-01'] }),
+        lastSyncError: expect.stringContaining('1 of 2'),
+      }),
+      'settings-file',
+    )
+  })
+
+  it('only processes dates in onlyDates when given (a retry of previously-failed entries)', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day one' })
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, baseSettings, 'folder-1', 'settings-file', ['2026-01-01'])
+
+    expect(drive.getEntryContent).toHaveBeenCalledOnce()
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'day one', '1')
+    expect(s3.putObjectIfNewer).not.toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', expect.anything(), expect.anything())
+  })
+
+  it('uses the given runLabel in the recorded failure message instead of "Initial backfill"', async () => {
+    vi.mocked(drive.listEntries).mockRejectedValue(new Error('Drive is down'))
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, baseSettings, 'folder-1', 'settings-file', undefined, 'Resync')
+
+    expect(drive.writeJsonFile).toHaveBeenCalledWith(
+      'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
+      expect.objectContaining({ lastSyncError: expect.stringMatching(/^Resync failed:/) }),
+      'settings-file',
+    )
+  })
+
+  it('clears backfillProgress and lastSyncError once every entry succeeds', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day one' })
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings,
+      backfillProgress: { total: 1, done: 1, failed: ['2026-01-01'], finishedAt: '2026-01-01T00:00:00.000Z' },
+      lastSyncError: 'Initial backfill: 1 of 1 entry failed to back up',
+      lastSyncErrorAt: '2026-01-01T00:00:00.000Z',
+    }, 'folder-1', 'settings-file')
+
+    const [, , , updated] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect(updated).not.toHaveProperty('backfillProgress')
+    expect(updated).not.toHaveProperty('lastSyncError')
+    expect(updated).not.toHaveProperty('lastSyncErrorAt')
+  })
 })

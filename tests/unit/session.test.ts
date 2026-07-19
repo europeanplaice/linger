@@ -211,6 +211,39 @@ describe('getValidIdToken', () => {
     expect(stored.id_token).toBe('new_idtok')
   })
 
+  it('forces a refresh when id_token is missing even though the access token is not yet expired', async () => {
+    // A previous refresh can drop id_token (see below) without expires_at being anywhere
+    // near expiry — without forcing a refresh here, id_token would stay missing, and
+    // every S3 mirror attempt would keep failing, for up to ~1hr until expires_at forces
+    // the normal refresh path anyway.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600, id_token: 'recovered_idtok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    const put = vi.fn()
+    const env = { ...baseEnv, SESSIONS: { put } }
+    const session = { refresh_token: 'rt', access_token: 'still_valid_at', expires_at: Date.now() + 120_000 }
+
+    expect(await getValidIdToken('sid', session, env as any)).toBe('recovered_idtok')
+    expect(put).toHaveBeenCalledOnce()
+    const stored = JSON.parse(put.mock.calls[0][1])
+    expect(stored.id_token).toBe('recovered_idtok')
+    expect(stored.access_token).toBe('new_at')
+  })
+
+  it('does not force a refresh for getValidAccessToken just because id_token is absent', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const session = { refresh_token: 'rt', access_token: 'still_valid_at', expires_at: Date.now() + 120_000 }
+
+    const result = await getValidAccessToken('sid', session, baseEnv as any)
+
+    expect(result).toBe('still_valid_at')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('drops a stale id_token instead of keeping it when refresh omits a new one', async () => {
     // The id_token shares the access_token's expiry, so a kept-but-not-reissued
     // id_token is expired by definition — every subsequent STS AssumeRoleWithWebIdentity

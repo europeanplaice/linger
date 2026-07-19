@@ -188,7 +188,7 @@ async function writeBackfillProgress(token: string, record: S3SettingsRecord, pr
   }
 }
 
-async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[]): Promise<void> {
+async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[], runLabel: string): Promise<void> {
   const finishedAt = new Date().toISOString()
   const updated: S3Settings = { ...record.settings }
   if (failed.length === 0) {
@@ -197,7 +197,7 @@ async function finishBackfill(token: string, record: S3SettingsRecord, total: nu
     delete updated.lastSyncErrorAt
   } else {
     updated.backfillProgress = { total, done: total, failed, finishedAt }
-    updated.lastSyncError = `Initial backfill: ${failed.length} of ${total} entr${failed.length === 1 ? 'y' : 'ies'} failed to back up`
+    updated.lastSyncError = `${runLabel}: ${failed.length} of ${total} entr${failed.length === 1 ? 'y' : 'ies'} failed to back up`
     updated.lastSyncErrorAt = finishedAt
   }
   try {
@@ -207,13 +207,16 @@ async function finishBackfill(token: string, record: S3SettingsRecord, total: nu
   }
 }
 
-// Mirrors existing entries to S3, either the first time backup is enabled (without this,
-// only entries saved/deleted after enabling would ever reach the bucket, silently leaving
-// prior history un-backed-up despite the feature being labeled a "backup"), or — when
-// `onlyDates` is given — a retry of just the entries a previous run failed on (see
-// api/s3/backfill-retry.ts). Never throws. A per-entry failure (transient network/S3/Drive
-// hiccup) is recorded and skipped rather than aborting the rest of the run; progress and the
-// resulting failed-dates list are persisted so the UI can show and retry them.
+// Mirrors existing entries to S3: the first time backup is enabled (without this, only
+// entries saved/deleted after enabling would ever reach the bucket, silently leaving prior
+// history un-backed-up despite the feature being labeled a "backup"); a retry of just the
+// entries a previous run failed on, when `onlyDates` is given (see api/s3/backfill-retry.ts);
+// or a full resync of every entry regardless of prior failures (api/s3/resync.ts) — safe to
+// run any time since putObjectIfNewer no-ops anything already at least as new as Drive.
+// `runLabel` only affects the wording of any recorded lastSyncError/backfillProgress message.
+// Never throws. A per-entry failure (transient network/S3/Drive hiccup) is recorded and
+// skipped rather than aborting the rest of the run; progress and the resulting failed-dates
+// list are persisted so the UI can show and retry them.
 export async function backfillAllEntries(
   accessToken: string,
   sessionId: string,
@@ -223,6 +226,7 @@ export async function backfillAllEntries(
   folderId: string,
   fileId: string,
   onlyDates?: string[],
+  runLabel = 'Initial backfill',
 ): Promise<void> {
   const record: S3SettingsRecord = { settings, folderId, fileId }
   try {
@@ -253,9 +257,9 @@ export async function backfillAllEntries(
         await writeBackfillProgress(accessToken, record, { total: entries.length, done, failed: [...failed] })
       }
     }
-    await finishBackfill(accessToken, record, entries.length, failed)
+    await finishBackfill(accessToken, record, entries.length, failed, runLabel)
   } catch (e) {
     console.error('s3Settings.ts: backfillAllEntries failed', e)
-    await recordMirrorFailure(accessToken, record, `Initial backfill failed: ${describeError(e)}`)
+    await recordMirrorFailure(accessToken, record, `${runLabel} failed: ${describeError(e)}`)
   }
 }

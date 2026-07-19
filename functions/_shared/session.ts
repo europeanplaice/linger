@@ -62,8 +62,8 @@ export async function saveSession(sessionId: string, session: SessionData, env: 
 // transient failures (429/5xx) so callers only tear down the session in this case.
 export class RefreshTokenInvalidError extends Error {}
 
-export async function getValidSession(_sessionId: string, session: SessionData, env: Env): Promise<SessionData> {
-  if (session.expires_at > Date.now() + 60_000) {
+export async function getValidSession(_sessionId: string, session: SessionData, env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
+  if (!opts.forceRefresh && session.expires_at > Date.now() + 60_000) {
     return session
   }
   const resp = await fetch('https://oauth2.googleapis.com/token', {
@@ -110,10 +110,16 @@ export async function getValidAccessToken(sessionId: string, session: SessionDat
 }
 
 // id_token shares the same expiry as access_token (both minted in the same token
-// response), so freshness reuses getValidSession's expires_at check rather than
-// tracking a second timestamp.
+// response), so freshness normally reuses getValidSession's expires_at check rather
+// than tracking a second timestamp. But Google's refresh-token grant doesn't always
+// re-include id_token (see the comment above on dropping a stale one) — when that
+// happens, id_token stays missing until access_token itself next expires, up to ~1hr
+// later, silently breaking every S3 mirror attempt in the meantime with no way to
+// self-heal sooner. Force a refresh here whenever id_token is missing, since only
+// getValidIdToken callers actually need it — a plain getValidAccessToken caller has no
+// reason to pay for an early refresh just because id_token happens to be absent.
 export async function getValidIdToken(sessionId: string, session: SessionData, env: Env): Promise<string | null> {
-  const validSession = await getValidSession(sessionId, session, env)
+  const validSession = await getValidSession(sessionId, session, env, { forceRefresh: !session.id_token })
   if (validSession !== session) {
     await saveSession(sessionId, validSession, env)
   }
