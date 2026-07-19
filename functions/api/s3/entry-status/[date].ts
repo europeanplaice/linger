@@ -6,8 +6,9 @@ import { getS3Settings, entryKey } from '../../../_shared/s3Settings'
 // Polled by the editor right after a Drive save to learn whether the S3 mirror
 // (written asynchronously via context.waitUntil, see drive/entry/[date].ts) has
 // caught up to that specific save yet. Never persists anything itself — it just
-// reads the version already stamped on the mirrored object (see s3.ts) and the
-// account-wide lastSyncError/lastSyncErrorAt already recorded by the mirror.
+// reads the version already stamped on the mirrored object (see s3.ts), the
+// account-wide lastSyncError/lastSyncErrorAt already recorded by the mirror, and
+// the per-date backfillProgress.failed list recorded by backfillAllEntries.
 export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
   const date = context.params.date as string
@@ -33,6 +34,16 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
       if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
     } catch (e) {
       console.error('s3/entry-status.ts: S3/STS operation failed', e)
+    }
+
+    // A finished backfill (or backfill retry) that explicitly failed on this exact date
+    // is a stronger, date-specific signal than lastSyncErrorAt below — and unlike it,
+    // isn't at risk of going stale/cleared by an unrelated successful save elsewhere
+    // (recordMirrorSuccess clears lastSyncError on any successful mirror, but never
+    // touches backfillProgress). Surface it regardless of `since`; nothing will re-sync
+    // this date until the user retries the backfill from Settings.
+    if (settings.backfillProgress?.finishedAt && settings.backfillProgress.failed.includes(date)) {
+      return jsonResponse({ status: 'failed', error: settings.lastSyncError ?? 'Backfill failed for this entry — retry from Settings.' })
     }
 
     // Only attribute a failure to this save if it was recorded after the save

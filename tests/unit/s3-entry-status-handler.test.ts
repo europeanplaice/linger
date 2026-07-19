@@ -94,6 +94,42 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(await res.json()).toEqual({ status: 'pending' })
   })
 
+  it('reports failed when a finished backfill explicitly failed on this date, even with no lastSyncErrorAt', async () => {
+    // No lastSyncError/lastSyncErrorAt here mirrors recordMirrorSuccess clearing them
+    // after some unrelated later save succeeded, without touching backfillProgress —
+    // the exact gap this check exists to cover.
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 10, failed: ['2026-05-01'], finishedAt: '2026-05-01T00:00:05.000Z' },
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'Backfill failed for this entry — retry from Settings.' })
+  })
+
+  it('reports pending when backfillProgress lists a different date as failed', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 10, failed: ['2026-05-02'], finishedAt: '2026-05-01T00:00:05.000Z' },
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'pending' })
+  })
+
+  it('reports pending when backfill is still running (not finished) even if this date is currently in the failed list', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: ['2026-05-01'] },
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'pending' })
+  })
+
   it('reports failed when a sync error was recorded after the save attempt started', async () => {
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,
