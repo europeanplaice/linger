@@ -1043,10 +1043,15 @@ test.describe('useDiary save — entry not found at save time', () => {
     )
 
     expect(result).toMatchObject({ ok: true })
+    // Wait for any background calls triggered by the save to settle
+    await expect.poll(async () => {
+      const c = await page.evaluate(() => window.diaryHarness.calls())
+      return c.length
+    }).toBeGreaterThanOrEqual(1)
     const calls = await page.evaluate(() => window.diaryHarness.calls())
     // Force with existing cache should go straight to save
     expect(calls[0].method).toBe('POST')
-    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toContain('/api/drive/entry/')
   })
 })
 

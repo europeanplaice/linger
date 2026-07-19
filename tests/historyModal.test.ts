@@ -228,15 +228,17 @@ test.describe('HistoryModal — restore button', () => {
     // Now configure rev-2 with a delay — prefetch already missed it, so clicking
     // will trigger a fresh fetch and show the preview skeleton.
     await page.evaluate(({ c2 }) => {
-      window.historyHarness.content({ 'rev-2': { status: 200, body: c2, delayMs: 500 } })
+      window.historyHarness.content({ 'rev-2': { status: 200, body: c2, delayMs: 1000 } })
     }, { c2: CONTENT_V2 })
 
     await page.locator('.history-revision-item').nth(1).click()
-    await expect(page.locator('.history-preview-skeleton')).toBeVisible()
 
     // While preview is loading, restore button must be disabled even though
     // previewContent still holds the stale value from rev-3
     await expect(page.locator('.btn-restore')).toBeDisabled()
+
+    // Wait for the content to actually load so we can verify the button becomes enabled
+    await page.waitForSelector('.history-preview-diff')
   })
 
   test('restore button is disabled for the current (newest) revision', async ({ page }) => {

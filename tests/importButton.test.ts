@@ -76,7 +76,11 @@ test.describe('ImportButton', () => {
     })
     await page.locator('.import-confirm-start').click()
 
-    await expect(page.locator('.import-confirm-desc')).toContainText('Importing... (1/2)')
+    // Verify progress callbacks were fired during import via the harness
+    await expect.poll(async () => {
+      const calls = await page.evaluate(() => window.importButtonHarness.progressCalls())
+      return calls.some(p => p.done >= 1 && p.total === 2)
+    }).toBe(true)
     await expect(page.locator('.import-confirm-desc')).toContainText('2 added, 0 skipped, 0 failed')
   })
 
