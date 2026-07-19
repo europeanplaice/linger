@@ -1524,7 +1524,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     const badge = page.locator('.editor-meta-drive')
     await expect(badge).toBeVisible()
-    await expect(badge).toHaveText('Saved to Google Drive')
+    await expect(badge).toHaveAttribute('title', 'Saved to Google Drive')
   })
 
   test('hides the Google Drive badge for a brand-new unsaved entry', async ({ page }) => {
@@ -1552,7 +1552,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.locator('.editor-meta-s3')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-s3--pending/)
-    await expect(badge).toHaveText('Syncing to AWS…')
+    await expect(badge).toHaveAttribute('title', 'Syncing to AWS…')
   })
 
   test('shows a synced S3 badge once the mirror catches up after a save', async ({ page }) => {
@@ -1569,7 +1569,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.locator('.editor-meta-s3')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-s3--synced/)
-    await expect(badge).toHaveText('Backed up to AWS')
+    await expect(badge).toHaveAttribute('title', 'Backed up to AWS')
   })
 
   test('shows a failed S3 badge when the mirror reports a sync error', async ({ page }) => {
@@ -1584,7 +1584,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.locator('.editor-meta-s3')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-s3--failed/)
-    await expect(badge).toHaveText('AWS backup failed')
+    await expect(badge).toHaveAttribute('title', 'AWS backup failed')
   })
 })
 

@@ -3211,23 +3211,31 @@ dialog.milestone-form-dialog::backdrop {
 .editor-meta-drive {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
   color: var(--text-muted);
-  opacity: 0.6;
-  font-size: 0.72rem;
   margin-left: auto;
+}
+.editor-meta-drive::before {
+  content: '';
+  width: 1px;
+  height: 0.9em;
+  background: color-mix(in srgb, var(--text-muted) 40%, transparent);
+  margin-right: 0.5rem;
+  flex-shrink: 0;
 }
 .editor-meta-s3 {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
   color: var(--text-muted);
-  opacity: 0.6;
-  font-size: 0.72rem;
 }
 .editor-meta-s3--failed {
   color: var(--warning);
-  opacity: 1;
+}
+.s3-sync-pending {
+  animation: s3-pulse 1.4s ease-in-out infinite;
+}
+@keyframes s3-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 .editor-meta-offline {
   display: inline-flex;
