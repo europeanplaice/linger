@@ -58,6 +58,14 @@ export async function resyncS3Backfill(): Promise<void> {
   await apiFetch('/api/s3/resync', { method: 'POST' })
 }
 
+// Continues a chunked backfill that was started but not yet finished. Each call
+// processes at most 20 entries; the caller should invoke this repeatedly (driven
+// by the Settings modal's polling loop) until the response indicates done.
+export async function continueS3Backfill(): Promise<{ ok: boolean; done?: boolean; remaining?: number }> {
+  const { data } = await apiFetch<{ ok: boolean; done?: boolean; remaining?: number }>('/api/s3/backfill-continue', { method: 'POST' })
+  return data
+}
+
 // Checked after a Drive save to learn whether the S3 mirror has caught up to
 // `version` yet. `since` scopes stale sync errors out (see the endpoint).
 export async function getS3EntryStatus(date: string, version: string, since: string): Promise<S3EntryStatusResult> {

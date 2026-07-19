@@ -45,7 +45,7 @@ export function isValidS3Settings(body: unknown): body is S3Settings {
     && typeof b.region === 'string' && S3_REGION_RE.test(b.region)
 }
 
-interface S3SettingsRecord {
+export interface S3SettingsRecord {
   settings: S3Settings
   folderId: string
   fileId: string
@@ -177,7 +177,7 @@ export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 // regardless of this throttle.
 const BACKFILL_PROGRESS_WRITE_INTERVAL_MS = 2000
 
-async function writeBackfillProgress(token: string, record: S3SettingsRecord, progress: BackfillProgress): Promise<void> {
+export async function writeBackfillProgress(token: string, record: S3SettingsRecord, progress: BackfillProgress): Promise<void> {
   const updated: S3Settings = { ...record.settings, backfillProgress: progress }
   try {
     await writeJsonFile(token, record.folderId, S3_SETTINGS_FILE_NAME, updated, record.fileId)
@@ -188,7 +188,7 @@ async function writeBackfillProgress(token: string, record: S3SettingsRecord, pr
   }
 }
 
-async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[], runLabel: string): Promise<void> {
+export async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[], runLabel: string): Promise<void> {
   const finishedAt = new Date().toISOString()
   const updated: S3Settings = { ...record.settings }
   if (failed.length === 0) {
@@ -217,6 +217,13 @@ async function finishBackfill(token: string, record: S3SettingsRecord, total: nu
 // Never throws. A per-entry failure (transient network/S3/Drive hiccup) is recorded and
 // skipped rather than aborting the rest of the run; progress and the resulting failed-dates
 // list are persisted so the UI can show and retry them.
+//
+// `chunkSize` limits how many entries are processed per invocation. Cloudflare Pages
+// Functions have a wall-clock timeout, so processing hundreds of entries sequentially
+// in a single waitUntil call would be killed mid-backfill. The caller (typically
+// backfill-continue.ts) passes only the remaining dates via `onlyDates` and a modest
+// `chunkSize` so each invocation completes well within the timeout. Progress is
+// cumulative across chunks (total/done carry over from prior runs).
 export async function backfillAllEntries(
   accessToken: string,
   sessionId: string,
@@ -227,6 +234,7 @@ export async function backfillAllEntries(
   fileId: string,
   onlyDates?: string[],
   runLabel = 'Initial backfill',
+  chunkSize?: number,
 ): Promise<void> {
   const record: S3SettingsRecord = { settings, folderId, fileId }
   try {
@@ -235,29 +243,46 @@ export async function backfillAllEntries(
 
     const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
     const wanted = onlyDates ? new Set(onlyDates) : null
-    const entries = (await listEntries(accessToken, sessionId, session, env))
+    const allEntries = (await listEntries(accessToken, sessionId, session, env))
       .map(meta => ({ meta, date: meta.name.match(DIARY_FILENAME_RE)?.[1] }))
       .filter((e): e is { meta: typeof e.meta; date: string } => !!e.date && (!wanted || wanted.has(e.date)))
 
-    const failed: string[] = []
-    let done = 0
+    const entries = chunkSize ? allEntries.slice(0, chunkSize) : allEntries
+
+    // Carry over cumulative progress from prior chunks so total/done are accurate
+    // across multiple invocations.
+    const existingProgress = settings.backfillProgress
+    const totalAll = existingProgress?.total ?? allEntries.length
+    const baseDone = existingProgress?.done ?? 0
+    const existingFailed = existingProgress?.failed ?? []
+
+    const failed: string[] = [...existingFailed]
+    let done = baseDone
     let lastProgressWriteAt = 0
     for (const { meta, date } of entries) {
       try {
         const { content } = await getEntryContent(accessToken, meta.id, date)
         await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+        // A previously-failed entry that now succeeded — remove from the failed list.
+        const failedIdx = failed.indexOf(date)
+        if (failedIdx !== -1) failed.splice(failedIdx, 1)
       } catch (e) {
         console.error(`s3Settings.ts: backfill failed for ${date}`, e)
-        failed.push(date)
+        if (!failed.includes(date)) failed.push(date)
       }
       done += 1
       const now = Date.now()
-      if (now - lastProgressWriteAt >= BACKFILL_PROGRESS_WRITE_INTERVAL_MS || done === entries.length) {
+      const isLastInChunk = chunkSize ? (done - baseDone) >= chunkSize : false
+      const isLastOverall = done >= totalAll
+      if (now - lastProgressWriteAt >= BACKFILL_PROGRESS_WRITE_INTERVAL_MS || isLastInChunk || isLastOverall) {
         lastProgressWriteAt = now
-        await writeBackfillProgress(accessToken, record, { total: entries.length, done, failed: [...failed] })
+        await writeBackfillProgress(accessToken, record, { total: totalAll, done, failed: [...failed] })
       }
     }
-    await finishBackfill(accessToken, record, entries.length, failed, runLabel)
+    // Only finalise when every entry has been processed across all chunks.
+    if (done >= totalAll) {
+      await finishBackfill(accessToken, record, totalAll, failed, runLabel)
+    }
   } catch (e) {
     console.error('s3Settings.ts: backfillAllEntries failed', e)
     await recordMirrorFailure(accessToken, record, `${runLabel} failed: ${describeError(e)}`)

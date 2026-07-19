@@ -23,7 +23,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
       return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
     }
 
-    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, undefined, 'Resync'))
+    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, undefined, 'Resync', 20))
     return jsonResponse({ ok: true })
   } catch (e) {
     console.error('s3/resync.ts: POST failed', e)

@@ -23,7 +23,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     const failed = settings.backfillProgress?.failed ?? []
     if (failed.length === 0) return jsonResponse({ error: 'No failed entries to retry' }, 400)
 
-    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, failed, 'Retry'))
+    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, failed, 'Retry', 20))
     return jsonResponse({ ok: true, retrying: failed.length })
   } catch (e) {
     console.error('s3/backfill-retry.ts: POST failed', e)

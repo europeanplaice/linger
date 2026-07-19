@@ -54,8 +54,10 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
 
     // Mirror every existing entry the first time backup is enabled — otherwise only
     // entries saved/deleted after this point would ever reach the bucket.
+    // Uses chunkSize so the backfill completes within Cloudflare's execution timeout;
+    // the client's polling loop will call /api/s3/backfill-continue for the rest.
     if (body.enabled && !previouslyEnabled) {
-      context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, body, folderId, meta.id))
+      context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, body, folderId, meta.id, undefined, 'Initial backfill', 20))
     }
 
     return jsonResponse(meta)

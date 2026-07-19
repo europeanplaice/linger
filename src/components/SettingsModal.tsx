@@ -14,7 +14,7 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill, resyncS3Backfill } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill, resyncS3Backfill, continueS3Backfill } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
@@ -185,17 +185,36 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   // running server-side — there's no way to push progress from the context.waitUntil
   // task, so this is the only way the modal learns it's progressing/done. Bounded by the
   // modal's own lifetime: closing Settings unmounts this and stops polling.
+  // Each poll also kicks off the next chunk via /api/s3/backfill-continue so the backfill
+  // progresses even though each server-side invocation is time-boxed.
   const s3BackfillActive = s3ExpectingBackfill || (s3BackfillProgress !== null && !s3BackfillProgress.finishedAt)
+  const s3ContinueInFlight = useRef(false)
   useEffect(() => {
     if (!s3BackfillActive) return
     let cancelled = false
     const poll = () => {
+      // Kick off the next chunk (fire-and-forget) so the server starts processing
+      // while we wait for the settings poll to come back. Guard against overlapping
+      // calls when a chunk takes longer than the poll interval — the S3 writes are
+      // idempotent (putObjectIfNewer) so overlap is safe but wasteful.
+      if (!s3ContinueInFlight.current) {
+        s3ContinueInFlight.current = true
+        continueS3Backfill()
+          .catch(e => console.error('Failed to continue S3 backfill:', e))
+          .finally(() => { s3ContinueInFlight.current = false })
+      }
       loadS3Settings().then(settings => {
         if (cancelled || !settings) return
-        setS3BackfillProgress(settings.backfillProgress ?? null)
         setS3LastSyncError(settings.lastSyncError ?? null)
         setS3LastSyncErrorAt(settings.lastSyncErrorAt ?? null)
-        setS3ExpectingBackfill(false)
+        // Only clear s3ExpectingBackfill once the server has actually written a
+        // backfillProgress record — otherwise the first poll could arrive before
+        // the initial chunk finishes writing progress, see no progress, clear the
+        // flag, and permanently stop polling before the backfill even starts.
+        if (settings.backfillProgress) {
+          setS3BackfillProgress(settings.backfillProgress)
+          setS3ExpectingBackfill(false)
+        }
       }).catch(e => console.error('Failed to poll S3 backfill progress:', e))
     }
     poll()

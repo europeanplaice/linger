@@ -70,6 +70,7 @@ describe('PUT /api/s3/settings', () => {
     expect(ctx.waitUntil).toHaveBeenCalledOnce()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
       'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file',
+      undefined, 'Initial backfill', 20,
     )
   })
 
