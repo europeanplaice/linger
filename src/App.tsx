@@ -11,6 +11,7 @@ import { useServiceWorkerUpdate } from './hooks/useServiceWorkerUpdate'
 import { useDeployVersionCheck } from './hooks/useDeployVersionCheck'
 import { useOnline } from './hooks/useOnline'
 import { useTabSync } from './hooks/useTabSync'
+import { useS3Backfill } from './hooks/useS3Backfill'
 import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -203,6 +204,7 @@ export default function App() {
   }, [sidebarOpen])
 
   const isSignedIn = status === 'signedIn'
+  const s3Backfill = useS3Backfill(isSignedIn)
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
   const loadingSeenRef = useRef(false)
 
@@ -712,6 +714,12 @@ export default function App() {
             onMilestoneUpdate={updateMilestone}
             onMilestoneRemove={removeMilestone}
             onMilestoneToggleBadge={toggleMilestoneBadge}
+            s3BackfillProgress={s3Backfill.backfillProgress}
+            s3LastSyncError={s3Backfill.lastSyncError}
+            s3LastSyncErrorAt={s3Backfill.lastSyncErrorAt}
+            s3BackfillActive={s3Backfill.backfillActive}
+            onS3StartBackfill={s3Backfill.startBackfill}
+            onS3ClearSyncError={s3Backfill.clearSyncError}
           />
         )}
       </AnimatePresence>

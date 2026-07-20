@@ -60,7 +60,7 @@ export async function resyncS3Backfill(): Promise<void> {
 
 // Continues a chunked backfill that was started but not yet finished. Each call
 // processes at most 20 entries; the caller should invoke this repeatedly (driven
-// by the Settings modal's polling loop) until the response indicates done.
+// by useS3Backfill's polling loop) until the response indicates done.
 export async function continueS3Backfill(): Promise<{ ok: boolean; done?: boolean; remaining?: number }> {
   const { data } = await apiFetch<{ ok: boolean; done?: boolean; remaining?: number }>('/api/s3/backfill-continue', { method: 'POST' })
   return data
