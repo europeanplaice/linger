@@ -215,7 +215,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // AWS S3 backup status for the currently open entry, polled after a save; null
   // means "not checked yet" or "S3 backup isn't enabled" (s3DisabledRef short-circuits
   // further checks once we learn that, to avoid a status request on every save).
-  const [s3Status, setS3Status] = useState<S3EntrySyncStatus | null>(null)
+  // A 'disabled' result from the poll is folded into null below (pollS3Status), so
+  // this state itself never actually holds 'disabled' — narrow the type to match.
+  const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
 

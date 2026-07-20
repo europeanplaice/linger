@@ -10,6 +10,7 @@ import {
   type Milestone,
 } from '../src/types'
 import { I18nProvider } from '../src/i18n'
+import { useS3Backfill } from '../src/hooks/useS3Backfill'
 import '../src/styles.css'
 
 type ExportCall = { hasProgress: boolean }[]
@@ -43,6 +44,9 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
   const [fontSize, setFontSize] = useState<FontSize>(initialFontSize)
   const [holidayCountry, setHolidayCountry] = useState<HolidayCountry>('off')
   const [milestones, setMilestones] = useState(initialMilestones)
+  // Mirrors App.tsx: the harness has no real sign-in flow, so this is always "on" —
+  // matching the real app's App-level (not Settings-modal-level) backfill wiring.
+  const s3Backfill = useS3Backfill(true)
 
   const handleAutoSaveToggle = useCallback(() => {
     setAutoSave(prev => {
@@ -126,6 +130,12 @@ function App({ autoSave: initialAutoSave, modalOpen: initialOpen, themeMode: ini
               a.id === id ? { ...a, showBadge: a.showBadge === false ? undefined : false } : a
             ))
           })}
+          s3BackfillProgress={s3Backfill.backfillProgress}
+          s3LastSyncError={s3Backfill.lastSyncError}
+          s3LastSyncErrorAt={s3Backfill.lastSyncErrorAt}
+          s3BackfillActive={s3Backfill.backfillActive}
+          onS3StartBackfill={s3Backfill.startBackfill}
+          onS3ClearSyncError={s3Backfill.clearSyncError}
         />
       )}
     </>
