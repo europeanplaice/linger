@@ -4714,6 +4714,22 @@ dialog.history-dialog::backdrop {
     padding-bottom: 0.4rem;
   }
 
+  .editor-meta-badge {
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+  }
+
+  .editor-meta-badge-icon-wrapper svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .editor-meta-badge-status {
+    width: 7px;
+    height: 7px;
+  }
+
   .conflict-panel {
     align-items: stretch;
     flex-direction: column;
