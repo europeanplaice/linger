@@ -3,6 +3,8 @@ import { startSignIn, checkSession, revokeSession } from '../api/auth'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
+export type AuthErrorCode = 'no_refresh_token'
+
 export interface AuthState {
   status: AuthStatus
   tokenExpired: boolean
@@ -10,11 +12,15 @@ export interface AuthState {
   email: string | null
   googleSub: string | null
   googleClientId: string | null
+  authError: AuthErrorCode | null
+  clearAuthError: () => void
   signIn: () => void
   signOut: () => void
   handleExpired: () => void
   retryAfterExpired: () => void
 }
+
+const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['no_refresh_token']
 
 export function useAuth(): AuthState {
   const [status, setStatus] = useState<AuthStatus>('initializing')
@@ -25,6 +31,26 @@ export function useAuth(): AuthState {
   const [hadSession] = useState<boolean>(
     () => localStorage.getItem('linger_had_session') === 'true'
   )
+  const [authError, setAuthError] = useState<AuthErrorCode | null>(null)
+
+  // `/auth/callback` redirects here with `?auth_error=<code>` on failure (a real
+  // browser navigation, not a fetch) — pick it up once, then scrub it from the
+  // URL bar so it doesn't linger across reloads or get shared in a copied link.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('auth_error')
+    if (!code) return
+    if ((KNOWN_AUTH_ERROR_CODES as string[]).includes(code)) {
+      setAuthError(code as AuthErrorCode)
+    }
+    params.delete('auth_error')
+    const newSearch = params.toString()
+    window.history.replaceState(null, '', window.location.pathname + (newSearch ? `?${newSearch}` : '') + window.location.hash)
+  }, [])
+
+  const clearAuthError = useCallback(() => {
+    setAuthError(null)
+  }, [])
 
   useEffect(() => {
     // Dev-only: ?preview-auth bypasses the session check for local UI work.
@@ -66,5 +92,5 @@ export function useAuth(): AuthState {
     startSignIn()
   }, [])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, signIn, signOut, handleExpired, retryAfterExpired }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
 }

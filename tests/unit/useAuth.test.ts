@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAuth } from '../../src/hooks/useAuth'
 
@@ -116,5 +116,42 @@ describe('useAuth', () => {
     unmount()
 
     expect(result.current.status).toBe('initializing')
+  })
+
+  describe('authError', () => {
+    afterEach(() => {
+      window.history.pushState(null, '', '/')
+    })
+
+    it('picks up a known auth_error from the URL and strips it from the URL bar', async () => {
+      window.history.pushState(null, '', '/?foo=bar&auth_error=no_refresh_token#2026-01-01')
+
+      const { result } = renderHook(() => useAuth())
+      await waitFor(() => expect(result.current.status).toBe('signedOut'))
+
+      expect(result.current.authError).toBe('no_refresh_token')
+      expect(window.location.search).toBe('?foo=bar')
+      expect(window.location.hash).toBe('#2026-01-01')
+    })
+
+    it('ignores unknown auth_error codes', async () => {
+      window.history.pushState(null, '', '/?auth_error=something_unrecognized')
+
+      const { result } = renderHook(() => useAuth())
+      await waitFor(() => expect(result.current.status).toBe('signedOut'))
+
+      expect(result.current.authError).toBeNull()
+    })
+
+    it('clearAuthError resets authError to null', async () => {
+      window.history.pushState(null, '', '/?auth_error=no_refresh_token')
+
+      const { result } = renderHook(() => useAuth())
+      await waitFor(() => expect(result.current.authError).toBe('no_refresh_token'))
+
+      act(() => result.current.clearAuthError())
+
+      expect(result.current.authError).toBeNull()
+    })
   })
 })

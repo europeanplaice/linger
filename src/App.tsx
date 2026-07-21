@@ -144,6 +144,8 @@ export default function App() {
     email,
     googleSub,
     googleClientId,
+    authError,
+    clearAuthError,
     signIn,
     signOut,
     handleExpired,
@@ -597,7 +599,7 @@ export default function App() {
     // build-time prerendered HTML so there is no flash before React mounts.
     return hadSession
       ? <RestoringScreen selectedDate={selectedDate} />
-      : <Landing onSignIn={signIn} onRetry={retryAfterExpired} />
+      : <Landing onSignIn={signIn} onRetry={retryAfterExpired} authError={authError} onDismissAuthError={clearAuthError} />
   }
 
   if (status === 'signedOut' && !tokenExpired) {
@@ -607,6 +609,8 @@ export default function App() {
         onRetry={retryAfterExpired}
         tokenExpired={tokenExpired}
         authResolved
+        authError={authError}
+        onDismissAuthError={clearAuthError}
       />
     )
   }

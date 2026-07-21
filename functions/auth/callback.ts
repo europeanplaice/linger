@@ -1,6 +1,16 @@
 import type { Env, SessionData } from '../_shared/session'
 import { saveSession, addEmailSessionIndex, getRefreshTokenForEmail, makeSessionCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 
+// Inserts `key=value` before any `#fragment` in `path` (a query string can't
+// follow a fragment), joining with `&` if `path` already has a query string.
+function withQueryParam(path: string, key: string, value: string): string {
+  const hashIdx = path.indexOf('#')
+  const base = hashIdx === -1 ? path : path.slice(0, hashIdx)
+  const hash = hashIdx === -1 ? '' : path.slice(hashIdx)
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}${key}=${encodeURIComponent(value)}${hash}`
+}
+
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
@@ -9,6 +19,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const colonIdx = stateParam.indexOf(':')
   const state = colonIdx === -1 ? stateParam : stateParam.slice(0, colonIdx)
   const returnPath = colonIdx === -1 ? '/' : decodeURIComponent(stateParam.slice(colonIdx + 1))
+  const safeReturnPath = (returnPath.startsWith('/') && !returnPath.startsWith('//')) ? returnPath : '/'
 
   if (!code || !state) {
     return jsonResponse({ error: 'Missing code or state' }, 400)
@@ -65,8 +76,13 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env)) ?? undefined
   }
   if (!refreshToken) {
-    // See note above — avoid 502/503/504, Cloudflare intercepts them at the edge.
-    return jsonResponse({ error: 'No refresh token received. Revoke app access and try again.' }, 500)
+    // Redirect (rather than a raw JSON error page, which is what the browser would
+    // otherwise render for this full-page navigation) so the frontend can show a
+    // friendly explanation with recovery steps — see App.tsx's `auth_error` handling.
+    return new Response(null, {
+      status: 302,
+      headers: { Location: withQueryParam(safeReturnPath, 'auth_error', 'no_refresh_token') },
+    })
   }
 
   const sessionId = crypto.randomUUID()
@@ -83,8 +99,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (email) {
     await addEmailSessionIndex(email, sessionId, env)
   }
-
-  const safeReturnPath = (returnPath.startsWith('/') && !returnPath.startsWith('//')) ? returnPath : '/'
 
   const secure = !env.SESSION_DOMAIN.startsWith('http://')
 

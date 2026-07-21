@@ -81,7 +81,7 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(typeof body.error).toBe('string')
   })
 
-  it('returns 500 when no refresh_token is received', async () => {
+  it('redirects with auth_error=no_refresh_token when no refresh_token is received', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
         status: 200,
@@ -93,9 +93,8 @@ describe('onRequestGet (OAuth callback)', () => {
 
     const response = await onRequestGet({ request, env } as any)
 
-    expect(response.status).toBe(500)
-    const body = await response.json() as Record<string, unknown>
-    expect(body.error).toContain('No refresh token')
+    expect(response.status).toBe(302)
+    expect(response.headers.get('Location')).toBe('/?auth_error=no_refresh_token')
   })
 
   it('reuses stored refresh_token when Google omits it on repeat sign-in, from a session matching the live client', async () => {
@@ -141,9 +140,8 @@ describe('onRequestGet (OAuth callback)', () => {
 
     const response = await onRequestGet({ request, env } as any)
 
-    expect(response.status).toBe(500)
-    const body = await response.json() as Record<string, unknown>
-    expect(body.error).toContain('No refresh token')
+    expect(response.status).toBe(302)
+    expect(response.headers.get('Location')).toBe('/?auth_error=no_refresh_token')
   })
 
   it('returns 302 on success with session cookie', async () => {

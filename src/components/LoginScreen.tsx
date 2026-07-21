@@ -1,20 +1,60 @@
 import { AppIcon } from './AppIcon'
 import { useI18n } from '../i18n'
+import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onSignIn: () => void
   onRetry?: () => void
   tokenExpired?: boolean
   authResolved?: boolean
+  authError?: AuthErrorCode | null
+  onDismissAuthError?: () => void
 }
 
-export function LoginScreen({ onSignIn, onRetry, tokenExpired, authResolved }: Props) {
+const GOOGLE_PERMISSIONS_URL = 'https://myaccount.google.com/permissions'
+
+export function LoginScreen({ onSignIn, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
     <>
         <AppIcon className="login-logo" fetchPriority="high" />
         <h1>{t.documentTitle}</h1>
+        {authError === 'no_refresh_token' && (
+          <div className="auth-error-panel" role="alert">
+            <svg className="auth-error-panel-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <h2>{t.login.authErrorTitle}</h2>
+            <p>{t.login.authErrorBody}</p>
+            <ol className="auth-error-steps">
+              <li>{t.login.authErrorStep1}</li>
+              <li>{t.login.authErrorStep2}</li>
+            </ol>
+            <div className="auth-error-actions">
+              <a
+                className="btn-open-permissions"
+                href={GOOGLE_PERMISSIONS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t.login.openGooglePermissions}
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </a>
+              {onDismissAuthError && (
+                <button type="button" className="btn-dismiss-auth-error" onClick={onDismissAuthError}>
+                  {t.login.dismiss}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <p>{t.login.privateDiary}</p>
         <p className="login-scope-note">{t.login.driveFileScope}</p>
         {tokenExpired && (

@@ -324,6 +324,75 @@ body {
   border-color: var(--border);
 }
 
+.auth-error-panel {
+  text-align: left;
+  background: var(--expired-bg);
+  border: 1px solid var(--expired-border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  margin-bottom: 1.5rem !important;
+}
+.auth-error-panel-icon {
+  display: block;
+  color: var(--danger);
+  margin-bottom: 0.4rem;
+}
+.auth-error-panel h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+  letter-spacing: normal;
+}
+.auth-error-panel p {
+  font-size: 0.82rem !important;
+  color: var(--text-muted);
+  margin: 0 0 0.7rem !important;
+  line-height: 1.45;
+}
+.auth-error-steps {
+  font-size: 0.82rem;
+  color: var(--text);
+  margin: 0 0 0.85rem;
+  padding-left: 1.15rem;
+  line-height: 1.5;
+}
+.auth-error-steps li + li { margin-top: 0.3rem; }
+.auth-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.btn-open-permissions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-open-permissions:hover {
+  background: var(--accent);
+  color: var(--card-bg);
+}
+.btn-dismiss-auth-error {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  padding: 0;
+}
+.btn-dismiss-auth-error:hover {
+  color: var(--text);
+}
+
 /* Google-branded sign-in button (follows Google branding guidelines) */
 .btn-signin-google {
   display: inline-flex;
