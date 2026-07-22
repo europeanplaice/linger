@@ -311,6 +311,14 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }
   }, [s3RoleArn, s3Bucket, s3Region, t])
 
+  // Save, Resync, and Retry all end up overwriting the same server-side
+  // s3_settings.json (see saveS3Settings / resyncS3Backfill / retryS3Backfill) with
+  // no optimistic-concurrency check, so running any two of them at once can corrupt
+  // backfillProgress or (for Save specifically) redirect an in-flight backfill's
+  // remaining chunks to a newly-saved bucket/region mid-run. Gate all three behind
+  // one shared flag rather than each button only guarding its own state.
+  const s3SyncBusy = s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3Retrying || s3BackfillActive
+
   const handleCopy = useCallback((field: 'sub' | 'clientId', value: string | undefined) => {
     if (!value) return
     navigator.clipboard.writeText(value).then(() => {
@@ -996,8 +1004,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 type="button"
                 className="settings-action-btn"
                 onClick={() => { void handleS3SaveClick() }}
-                disabled={s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3BackfillActive}
-                title={(s3Resyncing || s3BackfillActive) ? t.settings.s3SaveDisabledSyncing : undefined}
+                disabled={s3SyncBusy}
+                title={(s3Resyncing || s3Retrying || s3BackfillActive) ? t.settings.s3SaveDisabledSyncing : undefined}
               >
                 {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
               </button>
@@ -1006,7 +1014,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                   type="button"
                   className="settings-action-btn"
                   onClick={() => { void handleS3Resync() }}
-                  disabled={s3Resyncing || s3BackfillActive}
+                  disabled={s3SyncBusy}
+                  title={(!s3Resyncing && !s3BackfillActive && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
                 >
                   {s3Resyncing || s3BackfillActive ? t.settings.s3Resyncing : t.settings.s3Resync}
                 </button>
@@ -1052,7 +1061,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 type="button"
                 className="settings-action-btn"
                 onClick={() => { void handleS3RetryBackfill() }}
-                disabled={s3Retrying}
+                disabled={s3SyncBusy}
+                title={(!s3Retrying && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
               >
                 {s3Retrying ? t.settings.s3BackfillRetrying : t.settings.s3BackfillRetry}
               </button>
