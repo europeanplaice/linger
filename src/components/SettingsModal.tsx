@@ -996,7 +996,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 type="button"
                 className="settings-action-btn"
                 onClick={() => { void handleS3SaveClick() }}
-                disabled={s3SaveState === 'saving' || s3Prechecking}
+                disabled={s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3BackfillActive}
+                title={(s3Resyncing || s3BackfillActive) ? t.settings.s3SaveDisabledSyncing : undefined}
               >
                 {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
               </button>
