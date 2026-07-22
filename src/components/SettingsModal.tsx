@@ -155,6 +155,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3SaveState, setS3SaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [s3TestState, setS3TestState] = useState<'idle' | 'testing' | 'ok' | 'error' | 'invalid'>('idle')
   const [s3TestError, setS3TestError] = useState<string | null>(null)
+  // Populated by handleS3Test alongside a successful connectivity check, but only on the
+  // first-time-enable path — the same case handleS3SaveClick's own precheck guards. Lets
+  // Test answer "is this safe to Save" up front instead of only warning after the fact.
+  const [s3TestCollisions, setS3TestCollisions] = useState<string[] | null>(null)
   const [s3Retrying, setS3Retrying] = useState(false)
   const [s3Resyncing, setS3Resyncing] = useState(false)
   // Tracks the enabled value as of the last load/save, so we know whether the next Save
@@ -198,11 +202,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     setS3SaveState('idle')
     setS3TestState('idle')
     setS3TestError(null)
+    setS3TestCollisions(null)
   }, [])
 
   const handleS3EnabledChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setS3Enabled(e.target.checked)
     setS3SaveState('idle')
+    // Whether collisions matter at all depends on this checkbox (only the first-time-enable
+    // path checks them), so a stale warning from before the toggle would be misleading.
+    setS3TestCollisions(null)
   }, [])
 
   const handleS3Save = useCallback(async () => {
@@ -296,10 +304,23 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     }
     setS3TestState('testing')
     setS3TestError(null)
+    setS3TestCollisions(null)
+    const trimmed = { roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
+    // Collisions only matter on the first-time-enable path (see handleS3SaveClick) — run
+    // it alongside the connectivity check there so Test surfaces the same risk Save would
+    // otherwise only reveal after the fact, without slowing down a routine re-test.
+    const checkCollisions = s3Enabled && !s3InitiallyEnabled
     try {
-      const result = await testS3Settings({ roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() })
+      const [result, precheck] = await Promise.all([
+        testS3Settings(trimmed),
+        checkCollisions ? precheckS3Settings(trimmed).catch(e => {
+          console.error('S3 collision precheck (via Test) failed:', e)
+          return null
+        }) : Promise.resolve(null),
+      ])
       if (result.ok) {
         setS3TestState('ok')
+        if (precheck?.ok) setS3TestCollisions(precheck.collisions ?? [])
       } else {
         setS3TestState('error')
         setS3TestError(result.error ?? null)
@@ -309,15 +330,26 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3TestState('error')
       setS3TestError(null)
     }
-  }, [s3RoleArn, s3Bucket, s3Region, t])
+  }, [s3RoleArn, s3Bucket, s3Region, s3Enabled, s3InitiallyEnabled, t])
 
   // Save, Resync, and Retry all end up overwriting the same server-side
   // s3_settings.json (see saveS3Settings / resyncS3Backfill / retryS3Backfill) with
   // no optimistic-concurrency check, so running any two of them at once can corrupt
   // backfillProgress or (for Save specifically) redirect an in-flight backfill's
-  // remaining chunks to a newly-saved bucket/region mid-run. Gate all three behind
-  // one shared flag rather than each button only guarding its own state.
-  const s3SyncBusy = s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3Retrying || s3BackfillActive
+  // remaining chunks to a newly-saved bucket/region mid-run. Test doesn't touch that
+  // file, but it shares the same role-assumption call path, so it's folded into the
+  // same flag too — gate all four behind one shared flag rather than each button only
+  // guarding its own state.
+  const s3SyncBusy = s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing'
+
+  // The checkbox reading "Enable S3 backup" implies checking it takes effect immediately,
+  // but nothing happens until this button is pressed — name the button after what it will
+  // actually do (turn backup on/off, or just persist an edit to an already-enabled setup)
+  // instead of a generic "Save" that leaves that ambiguous.
+  const s3SaveLabel = s3Enabled && !s3InitiallyEnabled ? t.settings.s3SaveEnable
+    : !s3Enabled && s3InitiallyEnabled ? t.settings.s3SaveDisable
+    : s3Enabled && s3InitiallyEnabled ? t.settings.s3SaveChanges
+    : t.settings.s3Save
 
   const handleCopy = useCallback((field: 'sub' | 'clientId', value: string | undefined) => {
     if (!value) return
@@ -996,7 +1028,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 type="button"
                 className="settings-action-btn"
                 onClick={handleS3Test}
-                disabled={s3TestState === 'testing'}
+                disabled={s3SyncBusy}
+                title={(s3TestState !== 'testing' && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
               >
                 {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
               </button>
@@ -1005,9 +1038,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 className="settings-action-btn"
                 onClick={() => { void handleS3SaveClick() }}
                 disabled={s3SyncBusy}
-                title={(s3Resyncing || s3Retrying || s3BackfillActive) ? t.settings.s3SaveDisabledSyncing : undefined}
+                title={(s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing') ? t.settings.s3SaveDisabledSyncing : undefined}
               >
-                {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : t.settings.s3Save}
+                {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : s3SaveLabel}
               </button>
               {s3InitiallyEnabled && (
                 <button
@@ -1029,6 +1062,17 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           )}
           <div aria-live="polite">
             {s3TestState === 'ok' && <p className="settings-item-success">{t.settings.s3TestOkMsg}</p>}
+            {s3TestState === 'ok' && s3TestCollisions && s3TestCollisions.length > 0 && (
+              <div className="settings-backfill-failed">
+                <p className="settings-item-error">{t.settings.s3OverwriteConfirmDesc(s3TestCollisions.length)}</p>
+                <ul className="export-format-tree s3-overwrite-confirm-list">
+                  {s3TestCollisions.slice(0, 20).map(key => <li key={key} className="export-format-file">{key}</li>)}
+                  {s3TestCollisions.length > 20 && (
+                    <li className="export-format-file">{t.settings.s3OverwriteConfirmMore(s3TestCollisions.length - 20)}</li>
+                  )}
+                </ul>
+              </div>
+            )}
             {s3TestState === 'error' && (
               <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
             )}
