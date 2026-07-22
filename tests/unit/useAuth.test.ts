@@ -153,5 +153,17 @@ describe('useAuth', () => {
 
       expect(result.current.authError).toBeNull()
     })
+
+    it('signOut clears a stale authError so it does not resurface on a later sign-out', async () => {
+      window.history.pushState(null, '', '/?auth_error=no_refresh_token')
+      mockRevokeSession.mockResolvedValue(undefined)
+
+      const { result } = renderHook(() => useAuth())
+      await waitFor(() => expect(result.current.authError).toBe('no_refresh_token'))
+
+      act(() => result.current.signOut())
+
+      expect(result.current.authError).toBeNull()
+    })
   })
 })

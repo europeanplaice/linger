@@ -166,7 +166,9 @@ interface Window {
   loginScreenHarness: {
     render: (opts?: {
       tokenExpired?: boolean
+      authError?: import('../src/hooks/useAuth').AuthErrorCode | null
     }) => void
+    dismissedAuthError: boolean
   }
   recollectionHarness: {
     render: (opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[]; getSimilar?: (date: string, limit?: number) => string[] }) => void

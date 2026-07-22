@@ -7,7 +7,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { tokenExpired?: boolean } = {},
+  opts: { tokenExpired?: boolean; authError?: 'no_refresh_token' | null } = {},
 ) {
   await page.evaluate((opts) => {
     window.loginScreenHarness.render(opts)
@@ -49,6 +49,40 @@ test.describe('LoginScreen — language toggle', () => {
     await expect(page.locator('.btn-signin-google')).toContainText('Google でログイン')
     const jaBtn = page.locator('.login-lang-toggle button', { hasText: '日本語' })
     await expect(jaBtn).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+test.describe('LoginScreen — auth error panel', () => {
+  test('is hidden when there is no auth error', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    await expect(page.locator('.auth-error-panel')).toHaveCount(0)
+  })
+
+  test('shows recovery panel when Google omits a refresh token', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { authError: 'no_refresh_token' })
+
+    const panel = page.locator('.auth-error-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel).toHaveAttribute('role', 'alert')
+    await expect(panel.locator('h2')).toContainText("Google didn't renew access")
+
+    const permissionsLink = panel.locator('.btn-open-permissions')
+    await expect(permissionsLink).toHaveAttribute('href', 'https://myaccount.google.com/permissions')
+    await expect(permissionsLink).toHaveAttribute('target', '_blank')
+    await expect(permissionsLink).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  test('dismiss button calls onDismissAuthError', async ({ page }) => {
+    await loadHarness(page)
+    await render(page, { authError: 'no_refresh_token' })
+
+    await page.locator('.btn-dismiss-auth-error').click()
+
+    const dismissed = await page.evaluate(() => window.loginScreenHarness.dismissedAuthError)
+    expect(dismissed).toBe(true)
   })
 })
 

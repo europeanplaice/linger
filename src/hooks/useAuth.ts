@@ -82,6 +82,7 @@ export function useAuth(): AuthState {
     localStorage.setItem('linger_had_session', 'false')
     setStatus('signedOut')
     setTokenExpired(false)
+    setAuthError(null)
   }, [])
 
   const handleExpired = useCallback(() => {
