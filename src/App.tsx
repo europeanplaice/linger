@@ -276,16 +276,22 @@ export default function App() {
 
     migrationAttemptedRef.current = true
     migrateExtensions()
-      .then(migrated => {
+      .then(({ migrated, s3Resyncing }) => {
         localStorage.setItem('linger_ext_migrated', 'true')
         if (migrated > 0) {
           diary.refreshEntries()
             .then(() => setEntryRefreshSignal(v => v + 1))
             .catch(() => {})
         }
+        // The rename bumped Drive's version on each migrated file, so the server
+        // kicked off a re-mirror of them to S3 (see migrate.ts) — start the backfill
+        // polling loop so a re-mirror spanning more than one chunk actually runs to
+        // completion instead of stopping after the first chunk with nothing left to
+        // drive it forward.
+        if (s3Resyncing) s3Backfill.startBackfill()
       })
       .catch(() => { migrationAttemptedRef.current = false })
-  }, [isSignedIn, initialLoadComplete, diary.hasLegacyMdFiles, diary.refreshEntries])
+  }, [isSignedIn, initialLoadComplete, diary.hasLegacyMdFiles, diary.refreshEntries, s3Backfill.startBackfill])
 
   useEffect(() => {
     if (recollectionOpen) return

@@ -355,16 +355,22 @@ export async function saveEntry(
 }
 
 // One-time migration: rename legacy `diary-YYYY-MM-DD.md` files to `.txt`.
-// Idempotent — returns 0 once no `.md` files remain. fileId/version change but
+// Idempotent — returns [] once no `.md` files remain. fileId/version change but
 // content (and revision history) are preserved by the metadata-only PATCH.
-export async function migrateMdToTxt(token: string, sessionId: string, session: SessionData, env: Env): Promise<number> {
+// Returns the dates that were renamed: the version bump from the rename leaves
+// any S3 mirror of these dates stamped with a now-stale version (see s3.ts's
+// isAtLeast), so callers must re-mirror them or their sync status gets stuck
+// reporting "pending" forever — see migrate.ts.
+export async function migrateMdToTxt(token: string, sessionId: string, session: SessionData, env: Env): Promise<string[]> {
   const files = await listEntries(token, sessionId, session, env)
-  const legacy = files.filter(f => /^diary-\d{4}-\d{2}-\d{2}\.md$/.test(f.name))
+  const legacy = files
+    .map(f => ({ file: f, date: f.name.match(/^diary-(\d{4}-\d{2}-\d{2})\.md$/)?.[1] }))
+    .filter((e): e is { file: DriveFileMeta; date: string } => !!e.date)
   const fields = encodeURIComponent('id')
-  for (const f of legacy) {
-    const name = f.name.replace(/\.md$/, '.txt')
+  for (const { file, date } of legacy) {
+    const name = `diary-${date}.txt`
     await driveWithRetry(
-      () => fetch(`${BASE}/files/${f.id}?fields=${fields}`, {
+      () => fetch(`${BASE}/files/${file.id}?fields=${fields}`, {
         method: 'PATCH',
         headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name }),
@@ -372,7 +378,7 @@ export async function migrateMdToTxt(token: string, sessionId: string, session: 
       r => r.json() as Promise<{ id: string }>,
     )
   }
-  return legacy.length
+  return legacy.map(e => e.date)
 }
 
 export async function deleteEntry(token: string, fileId: string): Promise<void> {
