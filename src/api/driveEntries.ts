@@ -147,7 +147,16 @@ export async function deleteEntry(date: string): Promise<void> {
   await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, { method: 'DELETE' })
 }
 
-export async function migrateExtensions(): Promise<number> {
-  const { data } = await apiFetch<{ migrated: number }>(`${BASE}/migrate`, { method: 'POST' })
-  return data?.migrated ?? 0
+export interface MigrateExtensionsResult {
+  migrated: number
+  // True when the server kicked off a chunked S3 re-mirror of the migrated dates
+  // (their prior mirror, if any, is now stamped with a stale pre-rename Drive
+  // version) — the caller should start backfill-progress polling so it runs to
+  // completion instead of stopping after the first chunk.
+  s3Resyncing: boolean
+}
+
+export async function migrateExtensions(): Promise<MigrateExtensionsResult> {
+  const { data } = await apiFetch<{ migrated: number; s3Resyncing?: boolean }>(`${BASE}/migrate`, { method: 'POST' })
+  return { migrated: data?.migrated ?? 0, s3Resyncing: data?.s3Resyncing ?? false }
 }

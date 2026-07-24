@@ -490,7 +490,7 @@ describe('listEntries pagination', () => {
 })
 
 describe('migrateMdToTxt', () => {
-  it('renames only legacy .md diary files to .txt and returns the count', async () => {
+  it('renames only legacy .md diary files to .txt and returns the migrated dates', async () => {
     const calls: { url: string; method?: string; body?: string }[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: any, init: any) => {
       const url = String(input)
@@ -507,7 +507,7 @@ describe('migrateMdToTxt', () => {
 
     const migrated = await migrateMdToTxt('tok', 'sid', sessionWithFolder(), envStub)
 
-    expect(migrated).toBe(2)
+    expect(migrated).toEqual(['2026-05-01', '2026-05-03'])
     const patches = calls.filter(c => c.method === 'PATCH')
     expect(patches).toHaveLength(2)
     expect(patches[0].url).toContain('/files/f1')
@@ -516,7 +516,7 @@ describe('migrateMdToTxt', () => {
     expect(JSON.parse(patches[1].body!)).toEqual({ name: 'diary-2026-05-03.txt' })
   })
 
-  it('returns 0 and issues no renames when nothing is legacy', async () => {
+  it('returns an empty list and issues no renames when nothing is legacy', async () => {
     const methods: (string | undefined)[] = []
     vi.stubGlobal('fetch', vi.fn(async (_input: any, init: any) => {
       methods.push(init?.method)
@@ -525,7 +525,7 @@ describe('migrateMdToTxt', () => {
 
     const migrated = await migrateMdToTxt('tok', 'sid', sessionWithFolder(), envStub)
 
-    expect(migrated).toBe(0)
+    expect(migrated).toEqual([])
     expect(methods.some(m => m === 'PATCH')).toBe(false)
   })
 })
