@@ -1364,7 +1364,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await fillConnectionFields(page)
     await enabledCheckbox(page).check()
 
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
 
     await expect(page.getByText('✓ Settings saved.')).toBeVisible()
     await expect(overwriteDialog(page)).toBeHidden()
@@ -1382,7 +1382,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await fillConnectionFields(page)
     await enabledCheckbox(page).check()
 
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
 
     const dialog = overwriteDialog(page)
     await expect(dialog).toBeVisible()
@@ -1406,7 +1406,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await render(page)
     await fillConnectionFields(page)
     await enabledCheckbox(page).check()
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
 
     const dialog = overwriteDialog(page)
     await expect(dialog).toBeVisible()
@@ -1433,7 +1433,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await render(page)
     await expect(enabledCheckbox(page)).toBeChecked()
 
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click()
 
     await expect(page.getByText('✓ Settings saved.')).toBeVisible()
     expect(precheckCalled).toBe(false)
