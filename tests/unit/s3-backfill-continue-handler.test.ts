@@ -8,8 +8,8 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ensureFolder: vi.fn().mockResolvedValue('folder-1'),
   findJsonFile: vi.fn().mockResolvedValue('settings-file'),
   readJsonFile: vi.fn(),
-  listEntries: vi.fn().mockResolvedValue([]),
   writeJsonFile: vi.fn().mockResolvedValue({ id: 'settings-file', name: 's3_settings.json' }),
+  listEntries: vi.fn(),
 }))
 
 vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
@@ -54,7 +54,7 @@ describe('POST /api/s3/backfill-continue', () => {
   it('returns done:true when backfillProgress has finishedAt', async () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
-      backfillProgress: { total: 10, done: 10, failed: [], finishedAt: '2026-01-01T00:00:00.000Z' },
+      backfillProgress: { total: 10, done: 10, failed: [], remaining: [], finishedAt: '2026-01-01T00:00:00.000Z' },
     })
     const ctx = makeContext()
 
@@ -66,42 +66,54 @@ describe('POST /api/s3/backfill-continue', () => {
     expect(ctx.waitUntil).not.toHaveBeenCalled()
   })
 
-  it('processes the next chunk when progress shows ongoing backfill', async () => {
+  it('continues with exactly progress.remaining as the next scope, not a re-derived positional slice', async () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
-      backfillProgress: { total: 5, done: 2, failed: [] },
+      backfillProgress: { total: 5, done: 2, failed: [], remaining: ['2026-01-03', '2026-01-04', '2026-01-05'] },
     })
-    vi.mocked(drive.listEntries).mockResolvedValue([
-      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
-      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
-      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' },
-      { id: 'f4', name: 'diary-2026-01-04.txt', version: '4' },
-      { id: 'f5', name: 'diary-2026-01-05.txt', version: '5' },
-    ] as any)
     const ctx = makeContext()
 
     const res = await onRequestPost(ctx as any)
     const body = await res.json() as any
 
     expect(body.ok).toBe(true)
-    expect(body.remaining).toBe(3) // entries 3, 4, 5 remain
+    expect(body.remaining).toBe(3)
     expect(ctx.waitUntil).toHaveBeenCalledOnce()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
       'tok', 'sid', {}, {}, expect.objectContaining(validSettings), 'folder-1', 'settings-file',
       ['2026-01-03', '2026-01-04', '2026-01-05'],
       'Backfill', 20,
     )
+    // Crucially: no Drive listing is consulted here at all — backfillAllEntries owns that.
+    expect(drive.listEntries).not.toHaveBeenCalled()
   })
 
-  it('returns done:true when no remaining dates exist (all entries processed)', async () => {
+  it('preserves a scoped run (e.g. a migration re-sync of >20 dates) across chunked continuation', async () => {
+    // Only the 5 dates still owed by this migration re-sync should ever be passed on,
+    // regardless of how many entries exist in the account overall.
+    const migrationRemaining = ['2020-01-01', '2020-01-02', '2020-01-03', '2020-01-04', '2020-01-05']
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
-      backfillProgress: { total: 2, done: 2, failed: [] },
+      backfillProgress: { total: 25, done: 20, failed: [], remaining: migrationRemaining },
     })
-    vi.mocked(drive.listEntries).mockResolvedValue([
-      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
-      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
-    ] as any)
+    const ctx = makeContext()
+
+    const res = await onRequestPost(ctx as any)
+    const body = await res.json() as any
+
+    expect(body.remaining).toBe(5)
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
+      'tok', 'sid', {}, {}, expect.objectContaining(validSettings), 'folder-1', 'settings-file',
+      migrationRemaining,
+      'Backfill', 20,
+    )
+  })
+
+  it('finalizes when remaining is an empty array (everything already attempted)', async () => {
+    vi.mocked(drive.readJsonFile).mockResolvedValue({
+      ...validSettings,
+      backfillProgress: { total: 2, done: 2, failed: [], remaining: [] },
+    })
     const ctx = makeContext()
 
     const res = await onRequestPost(ctx as any)
@@ -110,30 +122,24 @@ describe('POST /api/s3/backfill-continue', () => {
     expect(body.ok).toBe(true)
     expect(body.done).toBe(true)
     expect(ctx.waitUntil).not.toHaveBeenCalled()
+    expect(s3Settings.finishBackfill).toHaveBeenCalledWith('tok', expect.objectContaining({ folderId: 'folder-1', fileId: 'settings-file' }), 2, [], 'Backfill')
   })
 
-  it('retries only failed entries when previous run finished with failures', async () => {
+  it('finalizes a legacy in-flight record with no `remaining` field rather than resuming positionally', async () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
-      backfillProgress: { total: 3, done: 3, failed: ['2026-01-02'] },
+      backfillProgress: { total: 3, done: 2, failed: ['2026-01-02'] },
     })
-    vi.mocked(drive.listEntries).mockResolvedValue([
-      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
-      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
-      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' },
-    ] as any)
     const ctx = makeContext()
 
     const res = await onRequestPost(ctx as any)
     const body = await res.json() as any
 
     expect(body.ok).toBe(true)
-    expect(body.remaining).toBe(1)
-    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, expect.objectContaining(validSettings), 'folder-1', 'settings-file',
-      ['2026-01-02'],
-      'Backfill', 20,
-    )
+    expect(body.done).toBe(true)
+    expect(ctx.waitUntil).not.toHaveBeenCalled()
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+    expect(s3Settings.finishBackfill).toHaveBeenCalledWith('tok', expect.anything(), 3, ['2026-01-02'], 'Backfill')
   })
 
   it('rejects when S3 backup is not configured', async () => {

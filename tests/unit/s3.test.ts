@@ -30,6 +30,68 @@ describe('assumeRoleWithWebIdentity', () => {
   })
 })
 
+function stsResponse(expiration: string) {
+  return new Response(JSON.stringify({
+    AssumeRoleWithWebIdentityResponse: {
+      AssumeRoleWithWebIdentityResult: {
+        Credentials: { AccessKeyId: 'ak', SecretAccessKey: 'sk', SessionToken: 'st', Expiration: expiration },
+      },
+    },
+  }), { status: 200 })
+}
+
+// Cache keys below are unique per test (distinct role ARN + subject) since the cache
+// is module-scoped and persists across test cases within this file.
+describe('assumeRoleWithWebIdentity credential caching', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reuses cached credentials for the same cache key within the expiry margin', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => stsResponse('2099-01-01T00:00:00Z'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-1', 'us-east-1', 'sub-1:role:region')
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-1', 'us-east-1', 'sub-1:role:region')
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('re-assumes once cached credentials fall within the expiry margin', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockImplementation(async () => stsResponse('2026-01-01T00:10:00.000Z'))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-2', 'us-east-1', 'sub-2:role:region')
+    // Within 5 minutes of the 00:10 expiry — must be treated as expired, not reused.
+    vi.setSystemTime(new Date('2026-01-01T00:06:00.000Z'))
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-2', 'us-east-1', 'sub-2:role:region')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not share cached credentials across different cache keys (no cross-tenant reuse)', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => stsResponse('2099-01-01T00:00:00Z'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-3', 'us-east-1', 'sub-a:role:region')
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-3', 'us-east-1', 'sub-b:role:region')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('never caches when no cache key is given', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => stsResponse('2099-01-01T00:00:00Z'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-4', 'us-east-1')
+    await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/cache-test-4', 'us-east-1')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('putObject', () => {
   it('PUTs to the virtual-hosted-style URL with the given content type', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))

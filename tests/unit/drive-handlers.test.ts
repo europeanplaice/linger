@@ -438,7 +438,7 @@ describe('post entry handler', () => {
 
     await onPostEntry(ctx as any)
 
-    expect(s3Settings.mirrorEntrySave).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01', 'updated', '9')
+    expect(s3Settings.mirrorEntrySave).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01', 'updated', 'entry-1', '9')
   })
 })
 

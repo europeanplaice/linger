@@ -78,6 +78,22 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(await res.json()).toEqual({ status: 'synced' })
   })
 
+  it('passes a per-account credentials cache key when the session has a decoded google_sub', async () => {
+    const res = await onRequestGet(makeContext({ data: { accessToken: 'tok', sessionId: 'sid', session: { google_sub: '112233' } } }) as any)
+    await res.json()
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith(
+      'id-token', enabledSettings.roleArn, enabledSettings.region, `112233:${enabledSettings.roleArn}:${enabledSettings.region}`,
+    )
+  })
+
+  it('omits the cache key when the session has no google_sub', async () => {
+    const res = await onRequestGet(makeContext() as any)
+    await res.json()
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', enabledSettings.roleArn, enabledSettings.region, undefined)
+  })
+
   it('reports pending when the object is behind and there is no recent sync error', async () => {
     vi.mocked(s3.headObjectVersion).mockResolvedValue('3')
 

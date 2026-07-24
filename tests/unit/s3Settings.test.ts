@@ -2,8 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME,
   isValidS3Settings, getS3Settings, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
+  writeBackfillProgress, finishBackfill, credentialsCacheKey,
 } from '../../functions/_shared/s3Settings'
+import type { S3SettingsRecord } from '../../functions/_shared/s3Settings'
 import * as drive from '../../functions/_shared/drive'
+import { DriveError } from '../../functions/_shared/drive'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
 
@@ -15,6 +18,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   writeJsonFile: vi.fn().mockResolvedValue({ id: 'settings-file', name: 's3_settings.json' }),
   listEntries: vi.fn().mockResolvedValue([]),
   getEntryContent: vi.fn(),
+  getDiaryFileMeta: vi.fn(),
 }))
 
 vi.mock('../../functions/_shared/session', async (importOriginal) => ({
@@ -45,6 +49,8 @@ beforeEach(() => {
   vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' })
   vi.mocked(s3.putObjectIfNewer).mockResolvedValue(undefined)
   vi.mocked(s3.deleteObject).mockResolvedValue(undefined)
+  // Default: the entry still exists in Drive post-save (the common case) — no compensating delete.
+  vi.mocked(drive.getDiaryFileMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt' } as any)
 })
 
 describe('S3_BUCKET_RE', () => {
@@ -101,11 +107,36 @@ describe('getS3Settings negative caching', () => {
   })
 })
 
+describe('credentialsCacheKey', () => {
+  it('combines google_sub, roleArn, and region so it is unique per account', () => {
+    const key = credentialsCacheKey(makeSession({ google_sub: '112233' }), baseSettings)
+    expect(key).toBe(`112233:${baseSettings.roleArn}:${baseSettings.region}`)
+  })
+
+  it('omits the key (opts out of caching) when the session has no google_sub', () => {
+    expect(credentialsCacheKey(makeSession(), baseSettings)).toBeUndefined()
+  })
+})
+
 describe('mirrorEntrySave', () => {
+  it('passes a per-account cache key through to assumeRoleWithWebIdentity', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
+    const sess = makeSession({ google_sub: '112233' })
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith(
+      'id-token', baseSettings.roleArn, baseSettings.region, `112233:${baseSettings.roleArn}:${baseSettings.region}`,
+    )
+  })
+})
+
+describe('mirrorEntrySave (mirroring behavior)', () => {
   it('does nothing (and never touches Drive) when negatively cached', async () => {
     const sess = makeSession({ s3_settings_negative_cache_at: Date.now() })
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(drive.findJsonFile).not.toHaveBeenCalled()
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
@@ -113,7 +144,7 @@ describe('mirrorEntrySave', () => {
 
   it('is a no-op when no settings file exists', async () => {
     const sess = makeSession()
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
@@ -121,7 +152,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, enabled: false })
     const sess = makeSession()
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
@@ -130,7 +161,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
       { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
@@ -143,7 +174,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z' })
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', '6')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith('tok', 'folder-1', S3_SETTINGS_FILE_NAME, baseSettings, 'settings-file')
   })
@@ -153,7 +184,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', '6')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
@@ -164,7 +195,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await expect(mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')).resolves.toBeUndefined()
+    await expect(mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')).resolves.toBeUndefined()
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
@@ -179,7 +210,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
@@ -190,7 +221,7 @@ describe('mirrorEntrySave', () => {
     vi.mocked(session.getValidIdToken).mockResolvedValue(null)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', '5')
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
@@ -198,6 +229,49 @@ describe('mirrorEntrySave', () => {
       expect.objectContaining({ lastSyncError: expect.stringContaining('sign out') }),
       'settings-file',
     )
+  })
+})
+
+describe('mirrorEntrySave ghost-object compensation', () => {
+  // A slower save's mirror can complete after a faster concurrent delete's mirror
+  // already removed the object (both fire as independent context.waitUntil tasks
+  // with no ordering guarantee) — that would resurrect a deleted entry in the S3
+  // backup. mirrorEntrySave re-checks Drive after writing and self-heals.
+  it('deletes the just-written mirror when Drive no longer has the entry', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
+    vi.mocked(drive.getDiaryFileMeta).mockRejectedValue(new DriveError(404, 'not_found'))
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    expect(s3.putObjectIfNewer).toHaveBeenCalled()
+    expect(s3.deleteObject).toHaveBeenCalledWith(
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
+    )
+  })
+
+  it('keeps the mirror when Drive still has the entry (happy path)', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
+    vi.mocked(drive.getDiaryFileMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt' } as any)
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    expect(s3.deleteObject).not.toHaveBeenCalled()
+  })
+
+  it('does not delete the mirror when the existence re-check itself fails ambiguously', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
+    vi.mocked(drive.getDiaryFileMeta).mockRejectedValue(new Error('network blip'))
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    expect(s3.deleteObject).not.toHaveBeenCalled()
   })
 })
 
@@ -213,6 +287,66 @@ describe('mirrorEntryDelete', () => {
       { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
     )
+  })
+})
+
+describe('sync-status writes re-read config fresh before merging (Fix 1)', () => {
+  // writeBackfillProgress/finishBackfill/recordMirrorFailure/recordMirrorSuccess run
+  // concurrently with a user's own Save (settings.ts PUT), which can change `enabled`/
+  // roleArn/bucket/region while a chunked backfill is still holding an older in-memory
+  // snapshot. Blindly spreading that stale snapshot as the write's base would silently
+  // resurrect the old config. These writers re-read the file immediately before writing
+  // and merge only their own field(s) onto the fresh read instead.
+  it('writeBackfillProgress merges onto a freshly re-read file, not the stale in-memory snapshot', async () => {
+    const staleRecord: S3SettingsRecord = { settings: { ...baseSettings, enabled: true }, folderId: 'folder-1', fileId: 'settings-file' }
+    // The user disabled S3 backup via Save while this chunk was in flight.
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, enabled: false })
+
+    await writeBackfillProgress('tok', staleRecord, { total: 5, done: 3, failed: [], remaining: ['x'] })
+
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect((written as any).enabled).toBe(false)
+    expect((written as any).backfillProgress).toEqual({ total: 5, done: 3, failed: [], remaining: ['x'] })
+  })
+
+  it('finishBackfill merges onto a freshly re-read file, not the stale in-memory snapshot', async () => {
+    const staleRecord: S3SettingsRecord = { settings: { ...baseSettings, bucket: 'old-bucket' }, folderId: 'folder-1', fileId: 'settings-file' }
+    // The user changed the bucket via Save while this chunk was in flight.
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, bucket: 'new-bucket' })
+
+    await finishBackfill('tok', staleRecord, 5, [], 'Resync')
+
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect((written as any).bucket).toBe('new-bucket')
+  })
+
+  it('falls back to the in-memory snapshot when the fresh re-read fails', async () => {
+    const staleRecord: S3SettingsRecord = { settings: { ...baseSettings }, folderId: 'folder-1', fileId: 'settings-file' }
+    vi.mocked(drive.readJsonFile).mockRejectedValue(new Error('Drive is down'))
+
+    await writeBackfillProgress('tok', staleRecord, { total: 1, done: 1, failed: [], remaining: [] })
+
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect((written as any).bucket).toBe(baseSettings.bucket)
+    expect((written as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [] })
+  })
+
+  it('mirrorEntrySave failure recording also merges onto a freshly re-read file', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    // First read (loadS3SettingsRecord, at the start of mirrorEntrySave) sees the old
+    // config; a second, later read (the re-read-merge inside recordMirrorFailure) sees
+    // what the user just changed it to via a concurrent Save.
+    vi.mocked(drive.readJsonFile)
+      .mockResolvedValueOnce({ ...baseSettings, bucket: 'old-bucket' })
+      .mockResolvedValue({ ...baseSettings, bucket: 'new-bucket' })
+    vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect((written as any).bucket).toBe('new-bucket')
+    expect((written as any).lastSyncError).toEqual(expect.stringContaining('AccessDenied'))
   })
 })
 
@@ -403,6 +537,50 @@ describe('backfillAllEntries', () => {
     expect(progressWrite).toBeDefined()
     const written = progressWrite![3] as any
     expect(written.backfillProgress).toEqual(expect.objectContaining({ total: 3, done: 3 }))
+  })
+
+  it('persists `remaining` as the scope not yet attempted, chunked by chunkSize', async () => {
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
+      { id: 'f2', name: 'diary-2026-01-02.txt', version: '2' },
+      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' },
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, baseSettings, 'folder-1', 'settings-file', undefined, 'Initial backfill', 2)
+
+    // Only the first 2 of 3 dates should have been processed this invocation.
+    expect(s3.putObjectIfNewer).toHaveBeenCalledTimes(2)
+    const lastWrite = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    const updated = lastWrite[3] as any
+    expect(updated.backfillProgress).toEqual(expect.objectContaining({ total: 3, done: 2, remaining: ['2026-01-03'] }))
+  })
+
+  it('does not skip a target date that a concurrent Drive delete removed from a different position (delete-before-cursor regression)', async () => {
+    // Continuation call: onlyDates is exactly the persisted `remaining` from a prior chunk.
+    // 2026-01-02 (mid-scope) was deleted from Drive in between chunks — it must be dropped
+    // from remaining (nothing to back up) WITHOUT shifting/skipping 2026-01-03, which is
+    // what a positional-slice-over-a-refreshed-listing implementation would do.
+    vi.mocked(drive.listEntries).mockResolvedValue([
+      { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' }, // already done, not in this chunk
+      { id: 'f3', name: 'diary-2026-01-03.txt', version: '3' }, // 02 is gone
+    ] as any)
+    vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '', content: 'day' })
+    const sess = makeSession()
+
+    await backfillAllEntries(
+      'tok', 'sid', sess, {} as any,
+      { ...baseSettings, backfillProgress: { total: 3, done: 1, failed: [], remaining: ['2026-01-02', '2026-01-03'] } },
+      'folder-1', 'settings-file', ['2026-01-02', '2026-01-03'], 'Backfill', 20,
+    )
+
+    // 2026-01-03 must still be mirrored despite 02's disappearance shifting Drive's listing.
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3')
+    // The deleted date is not recorded as a failure — there's nothing to back up for it.
+    const lastWrite = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    const updated = lastWrite[3] as any
+    expect(updated.backfillProgress?.failed ?? []).not.toContain('2026-01-02')
   })
 
   it('starts a fresh resync from done=0 even when the previous backfill had failures', async () => {

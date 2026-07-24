@@ -1,7 +1,7 @@
 import type { Env, Data } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
 import { assumeRoleWithWebIdentity, headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
-import { getS3Settings, entryKey } from '../../../_shared/s3Settings'
+import { getS3Settings, entryKey, credentialsCacheKey } from '../../../_shared/s3Settings'
 
 // Polled by the editor right after a Drive save to learn whether the S3 mirror
 // (written asynchronously via context.waitUntil, see drive/entry/[date].ts) has
@@ -30,7 +30,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
 
     let stsError: unknown = null
     try {
-      const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region)
+      const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region, credentialsCacheKey(session, settings))
       const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
       if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
     } catch (e) {

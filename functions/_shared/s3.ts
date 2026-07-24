@@ -13,10 +13,27 @@ interface AssumedCredentials {
   sessionToken: string
 }
 
+// Opportunistic cross-request cache: Cloudflare Workers isolates commonly persist
+// module-scope state across requests while warm (not guaranteed — purely a best-effort
+// optimization, never relied on for correctness). Avoids re-assuming the role on every
+// save/delete mirror and every entry-status poll (up to 4 per save) within the same
+// warm isolate. Keyed by caller-supplied `cacheKey` — callers must key this uniquely
+// per user (e.g. `${google_sub}:${roleArn}:${region}`) so credentials for one account
+// can never be handed out for another; omit the key to opt out of caching entirely.
+const credentialsCache = new Map<string, { creds: AssumedCredentials; expiresAt: number }>()
+// Treat cached credentials as expired this far ahead of their real STS expiry, so a
+// cache hit never hands out credentials that could die mid-operation.
+const CREDENTIALS_EXPIRY_MARGIN_MS = 5 * 60 * 1000
+
 // sts:AssumeRoleWithWebIdentity is unauthenticated (that's the point of web
 // identity federation) — no request signing needed for this call itself, only
 // for the S3 requests made afterwards with the credentials it returns.
-export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string, region: string): Promise<AssumedCredentials> {
+export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string, region: string, cacheKey?: string): Promise<AssumedCredentials> {
+  if (cacheKey) {
+    const cached = credentialsCache.get(cacheKey)
+    if (cached && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) return cached.creds
+  }
+
   const params = new URLSearchParams({
     Action: 'AssumeRoleWithWebIdentity',
     Version: '2011-06-15',
@@ -43,16 +60,24 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
           AccessKeyId: string
           SecretAccessKey: string
           SessionToken: string
+          Expiration: string
         }
       }
     }
   }
-  const creds = data.AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.Credentials
-  return {
-    accessKeyId: creds.AccessKeyId,
-    secretAccessKey: creds.SecretAccessKey,
-    sessionToken: creds.SessionToken,
+  const raw = data.AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.Credentials
+  const creds: AssumedCredentials = {
+    accessKeyId: raw.AccessKeyId,
+    secretAccessKey: raw.SecretAccessKey,
+    sessionToken: raw.SessionToken,
   }
+
+  if (cacheKey) {
+    const expiresAt = Date.parse(raw.Expiration)
+    if (!isNaN(expiresAt)) credentialsCache.set(cacheKey, { creds, expiresAt })
+  }
+
+  return creds
 }
 
 function s3Client(creds: AssumedCredentials, region: string): AwsClient {
