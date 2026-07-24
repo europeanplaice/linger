@@ -86,12 +86,16 @@ describe('SettingsModal S3 backup busy-gating', () => {
 
     fireEvent.click(testBtn)
 
-    expect((screen.getByRole('button', { name: 'Testing…' }) as HTMLButtonElement).disabled).toBe(true)
+    const testingBtn = screen.getByRole('button', { name: 'Testing…' }) as HTMLButtonElement
+    expect(testingBtn.disabled).toBe(true)
     expect(saveBtn.disabled).toBe(true)
     expect(resyncBtn.disabled).toBe(true)
-    // The blocked buttons should explain why, via their title tooltip.
-    expect(saveBtn.title).toBe('Save is disabled while a backup sync is running — wait for it to finish.')
-    expect(resyncBtn.title).toBe('Disabled while another backup sync operation is running — wait for it to finish.')
+    // The active button shows a busy state and spinner...
+    expect(testingBtn.getAttribute('aria-busy')).toBe('true')
+    expect(testingBtn.querySelector('.btn-saving-spinner')).not.toBeNull()
+    // ...and the blocked buttons should explain why, naming the operation, via their title tooltip.
+    expect(saveBtn.title).toBe('Disabled while Test is running — wait for it to finish.')
+    expect(resyncBtn.title).toBe('Disabled while Test is running — wait for it to finish.')
 
     testCall.resolve({ ok: true })
 
@@ -114,7 +118,9 @@ describe('SettingsModal S3 backup busy-gating', () => {
 
     expect(testBtn.disabled).toBe(true)
     expect(resyncBtn.disabled).toBe(true)
-    expect(testBtn.title).toBe('Disabled while another backup sync operation is running — wait for it to finish.')
+    expect(saveBtn.getAttribute('aria-busy')).toBe('true')
+    expect(saveBtn.querySelector('.btn-saving-spinner')).not.toBeNull()
+    expect(testBtn.title).toBe('Disabled while Save is running — wait for it to finish.')
 
     saveCall.resolve()
 
@@ -136,7 +142,9 @@ describe('SettingsModal S3 backup busy-gating', () => {
 
     expect(testBtn.disabled).toBe(true)
     expect(saveBtn.disabled).toBe(true)
-    expect(saveBtn.title).toBe('Save is disabled while a backup sync is running — wait for it to finish.')
+    expect(resyncBtn.getAttribute('aria-busy')).toBe('true')
+    expect(resyncBtn.querySelector('.btn-saving-spinner')).not.toBeNull()
+    expect(saveBtn.title).toBe('Disabled while Resync is running — wait for it to finish.')
 
     resyncCall.resolve()
 

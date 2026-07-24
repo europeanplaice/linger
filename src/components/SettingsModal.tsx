@@ -85,6 +85,22 @@ function InfoTip({ text }: { text: string }) {
   )
 }
 
+function SpinnerIcon() {
+  return <span className="btn-saving-spinner" aria-hidden="true" />
+}
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  )
+}
+
+function ErrorIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  )
+}
+
 interface SettingsModalProps {
   autoSave: boolean
   onAutoSaveToggle: () => void
@@ -341,6 +357,18 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   // same flag too — gate all four behind one shared flag rather than each button only
   // guarding its own state.
   const s3SyncBusy = s3SaveState === 'saving' || s3Prechecking || s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing'
+
+  // Names which of the operations folded into s3SyncBusy is the one actually running, so a
+  // disabled button's tooltip can say what it's waiting on instead of just "something else is
+  // running". s3BackfillActive alone (no local flag set) means the one-shot backfill kicked off
+  // by a first-time-enable Save is what's running — that's not distinguishable from a Resync
+  // once the Resync/Retry click that started it has already reset its own local flag.
+  const s3BusyOpLabel = s3TestState === 'testing' ? t.settings.s3OpTest
+    : s3SaveState === 'saving' || s3Prechecking ? t.settings.s3OpSave
+    : s3Resyncing ? t.settings.s3OpResync
+    : s3Retrying ? t.settings.s3OpRetry
+    : s3BackfillActive ? t.settings.s3OpBackfill
+    : null
 
   // The checkbox reading "Enable S3 backup" implies checking it takes effect immediately,
   // but nothing happens until this button is pressed — name the button after what it will
@@ -1026,30 +1054,36 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <div className="settings-s3-actions">
               <button
                 type="button"
-                className="settings-action-btn"
+                className={`settings-action-btn settings-action-btn--secondary${s3TestState === 'testing' ? ' btn-saving' : ''}`}
                 onClick={handleS3Test}
                 disabled={s3SyncBusy}
-                title={(s3TestState !== 'testing' && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
+                aria-busy={s3TestState === 'testing'}
+                title={(s3TestState !== 'testing' && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
               >
+                {s3TestState === 'testing' && <SpinnerIcon />}
                 {s3TestState === 'testing' ? t.settings.s3Testing : s3TestState === 'ok' ? t.settings.s3TestOk : t.settings.s3Test}
               </button>
               <button
                 type="button"
-                className="settings-action-btn"
+                className={`settings-action-btn${(s3SaveState === 'saving' || s3Prechecking) ? ' btn-saving' : ''}`}
                 onClick={() => { void handleS3SaveClick() }}
                 disabled={s3SyncBusy}
-                title={(s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing') ? t.settings.s3SaveDisabledSyncing : undefined}
+                aria-busy={s3SaveState === 'saving' || s3Prechecking}
+                title={(s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing') ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
               >
+                {(s3SaveState === 'saving' || s3Prechecking) && <SpinnerIcon />}
                 {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : s3SaveLabel}
               </button>
               {s3InitiallyEnabled && (
                 <button
                   type="button"
-                  className="settings-action-btn"
+                  className={`settings-action-btn settings-action-btn--secondary${(s3Resyncing || s3BackfillActive) ? ' btn-saving' : ''}`}
                   onClick={() => { void handleS3Resync() }}
                   disabled={s3SyncBusy}
-                  title={(!s3Resyncing && !s3BackfillActive && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
+                  aria-busy={s3Resyncing || s3BackfillActive}
+                  title={(!s3Resyncing && !s3BackfillActive && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
                 >
+                  {(s3Resyncing || s3BackfillActive) && <SpinnerIcon />}
                   {s3Resyncing || s3BackfillActive ? t.settings.s3Resyncing : t.settings.s3Resync}
                 </button>
               )}
@@ -1061,7 +1095,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </p>
           )}
           <div aria-live="polite">
-            {s3TestState === 'ok' && <p className="settings-item-success">{t.settings.s3TestOkMsg}</p>}
+            {s3TestState === 'ok' && <p className="settings-item-success"><CheckIcon />{t.settings.s3TestOkMsg}</p>}
             {s3TestState === 'ok' && s3TestCollisions && s3TestCollisions.length > 0 && (
               <div className="settings-backfill-failed">
                 <p className="settings-item-error">{t.settings.s3OverwriteConfirmDesc(s3TestCollisions.length)}</p>
@@ -1074,11 +1108,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               </div>
             )}
             {s3TestState === 'error' && (
-              <p className="settings-item-error">{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
+              <p className="settings-item-error"><ErrorIcon />{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
             )}
-            {s3TestState === 'invalid' && <p className="settings-item-error">{s3TestError}</p>}
-            {s3SaveState === 'saved' && <p className="settings-item-success">{t.settings.s3SaveSuccess}</p>}
-            {s3SaveState === 'error' && <p className="settings-item-error">{t.settings.s3SaveError}</p>}
+            {s3TestState === 'invalid' && <p className="settings-item-error"><ErrorIcon />{s3TestError}</p>}
+            {s3SaveState === 'saved' && <p className="settings-item-success"><CheckIcon />{t.settings.s3SaveSuccess}</p>}
+            {s3SaveState === 'error' && <p className="settings-item-error"><ErrorIcon />{t.settings.s3SaveError}</p>}
           </div>
           {s3Enabled && s3BackfillProgress && !s3BackfillProgress.finishedAt && (
             <div className="settings-backfill-progress" aria-live="polite">
@@ -1103,11 +1137,13 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               </ul>
               <button
                 type="button"
-                className="settings-action-btn"
+                className={`settings-action-btn settings-action-btn--secondary${s3Retrying ? ' btn-saving' : ''}`}
                 onClick={() => { void handleS3RetryBackfill() }}
                 disabled={s3SyncBusy}
-                title={(!s3Retrying && s3SyncBusy) ? t.settings.s3ActionDisabledBusy : undefined}
+                aria-busy={s3Retrying}
+                title={(!s3Retrying && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
               >
+                {s3Retrying && <SpinnerIcon />}
                 {s3Retrying ? t.settings.s3BackfillRetrying : t.settings.s3BackfillRetry}
               </button>
             </div>

@@ -1399,16 +1399,26 @@ dialog.settings-dialog::backdrop {
   outline-offset: 1px;
 }
 .settings-item-error {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.78rem;
   color: var(--danger, #b3453a);
   padding: 0 1.35rem 0.6rem;
   margin: 0;
 }
 .settings-item-success {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.78rem;
   color: var(--save-success-flash);
   padding: 0 1.35rem 0.6rem;
   margin: 0;
+}
+.settings-item-error svg,
+.settings-item-success svg {
+  flex-shrink: 0;
 }
 .settings-backfill-progress {
   padding: 0 1.35rem 0.6rem;
@@ -2814,21 +2824,31 @@ dialog.settings-dialog::backdrop {
   white-space: nowrap;
   transition: filter 0.15s, box-shadow 0.15s, transform 0.1s;
 }
-.settings-action-btn:hover,
+.settings-action-btn:hover:not(:disabled),
 .settings-export .btn-export-modern:hover:not(:disabled),
 .settings-import .btn-import-modern:hover:not(:disabled) {
   filter: brightness(1.06);
   box-shadow: 0 2px 8px var(--save-glow);
 }
-.settings-action-btn:active,
+.settings-action-btn:active:not(:disabled),
 .settings-export .btn-export-modern:active:not(:disabled),
 .settings-import .btn-import-modern:active:not(:disabled) {
   transform: scale(0.97);
 }
+.settings-action-btn:disabled,
 .settings-export .btn-export-modern:disabled,
 .settings-import .btn-import-modern:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+.settings-action-btn--secondary {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+.settings-action-btn--secondary.btn-saving .btn-saving-spinner {
+  border-color: var(--border);
+  border-top-color: var(--accent);
 }
 .btn-export-icon,
 .btn-import-icon {
