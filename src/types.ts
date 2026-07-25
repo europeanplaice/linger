@@ -52,8 +52,11 @@ export interface S3Settings {
 }
 
 // Per-entry mirror status for the currently open entry, checked on demand after
-// a save (see src/api/s3Settings.ts getS3EntryStatus) — not persisted anywhere.
-export type S3EntrySyncStatus = 'disabled' | 'pending' | 'synced' | 'failed'
+// a save or on open (see src/api/s3Settings.ts getS3EntryStatus) — not persisted
+// anywhere. 'backfilling' means a server-side backfill is actively working toward
+// this date (keep polling); 'unconfirmed' means nothing is currently working
+// toward mirroring this date and nothing will unless the user retries.
+export type S3EntrySyncStatus = 'disabled' | 'pending' | 'synced' | 'failed' | 'backfilling' | 'unconfirmed'
 
 export interface S3EntryStatusResult {
   status: S3EntrySyncStatus

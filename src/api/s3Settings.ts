@@ -74,3 +74,12 @@ export async function getS3EntryStatus(date: string, version: string, since: str
   )
   return data
 }
+
+// Re-mirrors just one date — the retry action on an entry's sync badge once its
+// status comes back 'unconfirmed' (nothing else is going to attempt this date on
+// its own). Awaited server-side (unlike backfill-retry/resync above), so it
+// resolves once the retry has actually landed rather than leaving the caller to
+// poll for it.
+export async function retryS3EntrySync(date: string): Promise<void> {
+  await apiFetch(`/api/s3/entry-resync/${date}`, { method: 'POST' })
+}

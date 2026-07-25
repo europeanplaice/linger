@@ -3373,11 +3373,13 @@ dialog.milestone-form-dialog::backdrop {
   background: #ef4444;
 }
 
-.editor-meta-badge-status--pending {
+.editor-meta-badge-status--pending,
+.editor-meta-badge-status--backfilling {
   background: #f59e0b;
 }
 
-.editor-meta-badge-status--pending::after {
+.editor-meta-badge-status--pending::after,
+.editor-meta-badge-status--backfilling::after {
   content: '';
   position: absolute;
   top: -1.5px;
@@ -3388,6 +3390,14 @@ dialog.milestone-form-dialog::backdrop {
   border: 1.5px solid #f59e0b;
   animation: badge-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
   opacity: 0;
+}
+
+.editor-meta-badge-status--unconfirmed {
+  background: #9ca3af;
+}
+
+.editor-meta-badge--unconfirmed {
+  cursor: pointer;
 }
 
 @keyframes badge-ping {

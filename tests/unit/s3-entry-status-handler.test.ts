@@ -22,14 +22,28 @@ vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
 
 const enabledSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
 
+const SINCE = '2026-05-01T00:00:00.000Z'
+
 function makeContext(overrides: Record<string, unknown> = {}) {
   return {
-    request: new Request('http://localhost/api/s3/entry-status/2026-05-01?version=5&since=2026-05-01T00%3A00%3A00.000Z'),
+    request: new Request(`http://localhost/api/s3/entry-status/2026-05-01?version=5&since=${encodeURIComponent(SINCE)}`),
     params: { date: '2026-05-01' },
     data: { accessToken: 'tok', sessionId: 'sid', session: {} },
     env: {},
     ...overrides,
   }
+}
+
+// Within the endpoint's PENDING_GRACE_MS window after `since` — a fresh save's
+// mirror is still plausibly in flight.
+function withinGraceWindow() {
+  return vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-05-01T00:00:05.000Z').getTime())
+}
+
+// Past the grace window — nothing found an object, an error, or an active
+// backfill, so nothing is actually working toward this date any more.
+function pastGraceWindow() {
+  return vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-05-01T00:00:25.000Z').getTime())
 }
 
 beforeEach(() => {
@@ -94,20 +108,36 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', enabledSettings.roleArn, enabledSettings.region, undefined)
   })
 
-  it('reports pending when the object is behind and there is no recent sync error', async () => {
+  it('reports pending when the object is behind and the save is still within the grace window', async () => {
     vi.mocked(s3.headObjectVersion).mockResolvedValue('3')
+    const dateSpy = withinGraceWindow()
 
-    const res = await onRequestGet(makeContext() as any)
-
-    expect(await res.json()).toEqual({ status: 'pending' })
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'pending' })
+    } finally {
+      dateSpy.mockRestore()
+    }
   })
 
-  it('reports pending when the object does not exist yet', async () => {
+  it('reports unconfirmed once the grace window elapses with the object still missing and nothing else working on it', async () => {
     vi.mocked(s3.headObjectVersion).mockResolvedValue(null)
+    const dateSpy = pastGraceWindow()
 
-    const res = await onRequestGet(makeContext() as any)
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'unconfirmed' })
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
 
-    expect(await res.json()).toEqual({ status: 'pending' })
+  it('reports unconfirmed immediately (no grace window) when the entry is simply opened with no `since`', async () => {
+    const res = await onRequestGet(makeContext({
+      request: new Request('http://localhost/api/s3/entry-status/2026-05-01?version=5'),
+    }) as any)
+
+    expect(await res.json()).toEqual({ status: 'unconfirmed' })
   })
 
   it('reports failed when a finished backfill explicitly failed on this date, even with no lastSyncErrorAt', async () => {
@@ -124,18 +154,22 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(await res.json()).toEqual({ status: 'failed', error: 'Backfill failed for this entry — retry from Settings.' })
   })
 
-  it('reports pending when backfillProgress lists a different date as failed', async () => {
+  it('reports pending (within grace window) when a finished backfillProgress lists a different date as failed', async () => {
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,
       backfillProgress: { total: 10, done: 10, failed: ['2026-05-02'], finishedAt: '2026-05-01T00:00:05.000Z' },
     })
+    const dateSpy = withinGraceWindow()
 
-    const res = await onRequestGet(makeContext() as any)
-
-    expect(await res.json()).toEqual({ status: 'pending' })
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'pending' })
+    } finally {
+      dateSpy.mockRestore()
+    }
   })
 
-  it('reports pending when backfill is still running (not finished) even if this date is currently in the failed list', async () => {
+  it('reports backfilling when backfill is still running (not finished), even if this date is currently in the failed list', async () => {
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,
       backfillProgress: { total: 10, done: 4, failed: ['2026-05-01'] },
@@ -143,7 +177,22 @@ describe('GET /api/s3/entry-status/[date]', () => {
 
     const res = await onRequestGet(makeContext() as any)
 
-    expect(await res.json()).toEqual({ status: 'pending' })
+    expect(await res.json()).toEqual({ status: 'backfilling' })
+  })
+
+  it('keeps reporting backfilling regardless of elapsed time since the save, so the client keeps polling', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: [] },
+    })
+    const dateSpy = pastGraceWindow()
+
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'backfilling' })
+    } finally {
+      dateSpy.mockRestore()
+    }
   })
 
   it('reports failed when a sync error was recorded after the save attempt started', async () => {
@@ -158,24 +207,48 @@ describe('GET /api/s3/entry-status/[date]', () => {
     expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
   })
 
-  it('does not misattribute a stale sync error recorded before the save attempt started', async () => {
+  it('does not misattribute a stale sync error recorded before the save attempt started (falls through to pending within the grace window)', async () => {
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,
       lastSyncError: 'AccessDenied',
       lastSyncErrorAt: '2026-04-30T00:00:00.000Z',
     })
+    const dateSpy = withinGraceWindow()
 
-    const res = await onRequestGet(makeContext() as any)
-
-    expect(await res.json()).toEqual({ status: 'pending' })
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'pending' })
+    } finally {
+      dateSpy.mockRestore()
+    }
   })
 
-  it('reports pending without calling AWS when there is no valid Google ID token', async () => {
+  it('reports failed (re-auth needed) without calling AWS when there is no valid Google ID token and no error is already recorded', async () => {
     vi.mocked(session.getValidIdToken).mockResolvedValue(null)
 
     const res = await onRequestGet(makeContext() as any)
 
-    expect(await res.json()).toEqual({ status: 'pending' })
+    expect(await res.json()).toEqual({
+      status: 'failed',
+      error: 'No Google ID token in this session — sign out and sign in again',
+    })
+    expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
+  })
+
+  it('surfaces an already-recorded sync error instead of the generic no-token message when there is no valid Google ID token', async () => {
+    // Regression guard: the no-ID-token case used to short-circuit to 'pending'
+    // before the backfillProgress.failed / lastSyncErrorAt checks ever ran,
+    // silently swallowing an already-recorded failure.
+    vi.mocked(session.getValidIdToken).mockResolvedValue(null)
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z',
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
@@ -213,7 +286,7 @@ describe('GET /api/s3/entry-status/[date]', () => {
   })
 
   it('reports failed for persistent errors after the elapsed threshold even if the error timestamp is before the save started', async () => {
-    // Save started at 2026-05-01T00:00:00.000Z (set in makeContext)
+    // Save started at 2026-05-01T00:00:00.000Z (SINCE)
     // Error was recorded before that, at 2026-04-30T00:00:00.000Z
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,

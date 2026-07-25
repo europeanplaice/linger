@@ -6,7 +6,7 @@ import { TokenExpiredError } from '../api/driveEntries'
 import { getDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
-import { getS3EntryStatus } from '../api/s3Settings'
+import { getS3EntryStatus, retryS3EntrySync } from '../api/s3Settings'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
 import { highlightText } from '../utils/highlight'
 import { excerpt } from '../utils/text'
@@ -35,6 +35,11 @@ const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 
 
 // Backoff schedule for polling AWS S3 mirror status after a save (~16.5s total).
 const S3_POLL_DELAYS_MS = [1500, 3000, 5000, 7000]
+// Cadence used once the server reports 'backfilling' — a large diary's initial
+// backfill can take much longer than the bounded schedule above (chunked ~20
+// entries per 2s, driven by useS3Backfill), so keep checking back slowly for as
+// long as it stays 'backfilling' instead of giving up on a fixed retry count.
+const S3_BACKFILL_POLL_INTERVAL_MS = 8000
 
 // Keep the textarea focused (and the mobile keyboard open) when tapping a
 // toolbar button, so the keyboard doesn't collapse and shift the toolbar down.
@@ -160,15 +165,24 @@ function S3BadgeIcon() {
 }
 
 interface SyncBadgeProps {
-  status: 'synced' | 'pending' | 'failed'
+  status: 'synced' | 'pending' | 'failed' | 'backfilling' | 'unconfirmed'
   title: string
   label: string
+  onClick?: () => void
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, children }: SyncBadgeProps) {
   return (
-    <div className={`editor-meta-badge editor-meta-badge--${status}`} title={title} aria-label={label}>
+    <div
+      className={`editor-meta-badge editor-meta-badge--${status}`}
+      title={title}
+      aria-label={label}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+    >
       <div className="editor-meta-badge-icon-wrapper">{children}</div>
       <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
         {status === 'synced' && (
@@ -220,6 +234,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
+  // True while a manual retry of the 'unconfirmed' state is in flight (see
+  // handleS3Retry below).
+  const [s3Retrying, setS3Retrying] = useState(false)
 
   const [previewDate, setPreviewDate] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
@@ -257,7 +274,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const isFuture = date > todayYmd()
   const s3BadgeLabel = s3Status === 'synced' ? t.entry.s3BadgeSynced
     : s3Status === 'failed' ? t.entry.s3BadgeFailed
-    : t.entry.s3BadgePending
+    : s3Status === 'unconfirmed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnconfirmed)
+    : t.entry.s3BadgePending // covers 'pending' and 'backfilling'
   const activeMilestones = useMemo(
     () => (milestones ?? []).filter(a => a.showBadge !== false),
     [milestones],
@@ -328,7 +346,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         return
       }
       setS3Status(result.status)
-      if (retry && result.status === 'pending' && i < S3_POLL_DELAYS_MS.length) {
+      if (!retry) return
+      // 'backfilling' means a server-side process is actively working toward this
+      // date but may take much longer than a single save's mirror — keep checking
+      // back on a slow, unbounded cadence for as long as it stays 'backfilling'
+      // rather than giving up and stranding the badge on a spinner the server will
+      // never update again on its own.
+      if (result.status === 'backfilling') {
+        setTimeout(() => { void attempt(i) }, S3_BACKFILL_POLL_INTERVAL_MS)
+      } else if (result.status === 'pending' && i < S3_POLL_DELAYS_MS.length) {
         setTimeout(() => { void attempt(i + 1) }, S3_POLL_DELAYS_MS[i])
       }
     }
@@ -432,6 +458,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }
   const currentDateRef = useRef(date)
   currentDateRef.current = date
+
+  // Manual retry for the 'unconfirmed' terminal state — nothing server-side is
+  // going to attempt this date on its own, so re-mirror it on demand and re-poll
+  // once that lands.
+  const handleS3Retry = useCallback(async () => {
+    if (s3Retrying) return
+    setS3Retrying(true)
+    try {
+      await retryS3EntrySync(currentDateRef.current)
+    } catch (e) {
+      console.error('Failed to retry S3 sync:', e)
+    } finally {
+      setS3Retrying(false)
+    }
+    if (baseVersionRef.current) pollS3Status(currentDateRef.current, baseVersionRef.current)
+  }, [s3Retrying, pollS3Status])
 
   const isDirty = text !== savedText
 
@@ -1233,6 +1275,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   status={s3Status}
                   title={s3BadgeLabel}
                   label={s3BadgeLabel}
+                  onClick={s3Status === 'unconfirmed' && !s3Retrying ? handleS3Retry : undefined}
                 >
                   <S3BadgeIcon />
                 </SyncBadge>
