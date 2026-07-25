@@ -1511,7 +1511,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
   // getS3EntryStatus (src/api/s3Settings.ts) hits this endpoint directly, so
   // without a route it always fails against the Vite-only dev server — caught
   // and treated as 'pending' (see pollS3Status's .catch in EntryEditor.tsx).
-  function routeS3Status(page: Page, status: 'disabled' | 'pending' | 'synced' | 'failed') {
+  function routeS3Status(page: Page, status: 'disabled' | 'pending' | 'synced' | 'failed' | 'backfilling' | 'unconfirmed') {
     return page.route('**/api/s3/entry-status/**', async route => {
       await route.fulfill({ json: { status } })
     })
@@ -1584,6 +1584,83 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.getByTitle('AWS backup failed')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--failed/)
+  })
+
+  test('shows a backfilling S3 badge (visually a spinner, like pending) while a backfill is actively working toward this date', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'backfilling')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    // Shares the "Syncing to AWS…" title with 'pending' — only the badge class
+    // differs — because both mean "keep waiting", just via different retry logic.
+    const badge = page.getByTitle('Syncing to AWS…')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-badge--backfilling/)
+  })
+
+  test('keeps polling on a slow cadence while backfilling, well past the old bounded pending retry cutoff, until it resolves', async ({ page }) => {
+    // Regression test: entry-status used to return a blind 'pending' while a
+    // backfill was still working toward this date, and the editor gave up
+    // polling after ~16.5s total (S3_POLL_DELAYS_MS: 1500+3000+5000+7000),
+    // stranding the badge on a spinner forever. 'backfilling' now keeps the
+    // editor polling every 8s (S3_BACKFILL_POLL_INTERVAL_MS) indefinitely.
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      await route.fulfill({ json: { status: requestCount < 4 ? 'backfilling' : 'synced' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect(page.locator('.editor-meta-badge--backfilling')).toBeVisible()
+    await expect.poll(() => requestCount).toBe(1)
+
+    await page.clock.fastForward(8000)
+    await expect.poll(() => requestCount).toBe(2)
+    await expect(page.locator('.editor-meta-badge--backfilling')).toBeVisible()
+
+    await page.clock.fastForward(8000)
+    await expect.poll(() => requestCount).toBe(3)
+    // Total elapsed (16000ms) already exceeds the old bounded schedule's
+    // ~16.5s ceiling — still polling, still backfilling, badge unchanged.
+    await expect(page.locator('.editor-meta-badge--backfilling')).toBeVisible()
+
+    await page.clock.fastForward(8000)
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+  })
+
+  test('shows an unconfirmed S3 badge when nothing is actively working toward backing up this date', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'unconfirmed')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.getByTitle('Not backed up yet — tap to retry')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
+  })
+
+  test('clicking the unconfirmed S3 badge retries the mirror and refreshes to synced', async ({ page }) => {
+    await loadHarness(page)
+    let resyncRequests = 0
+    let backedUp = false
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: backedUp ? 'synced' : 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      expect(route.request().method()).toBe('POST')
+      resyncRequests++
+      backedUp = true
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.getByTitle('Not backed up yet — tap to retry')
+    await expect(badge).toBeVisible()
+    await badge.click()
+
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    expect(resyncRequests).toBe(1)
   })
 })
 
