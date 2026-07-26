@@ -1586,25 +1586,36 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--failed/)
   })
 
-  test('clicking the failed S3 badge retries the mirror and refreshes to synced', async ({ page }) => {
+  test('clicking the failed S3 badge shows a spinner while retrying, then refreshes to synced', async ({ page }) => {
     await loadHarness(page)
     let resyncRequests = 0
     let backedUp = false
+    let resolveResync: (() => void) | undefined
+    const resyncGate = new Promise<void>(resolve => { resolveResync = resolve })
     await page.route('**/api/s3/entry-status/**', async route => {
       await route.fulfill({ json: { status: backedUp ? 'synced' : 'failed', error: backedUp ? undefined : 'boom' } })
     })
     await page.route('**/api/s3/entry-resync/**', async route => {
       expect(route.request().method()).toBe('POST')
       resyncRequests++
+      await resyncGate
       backedUp = true
       await route.fulfill({ json: { ok: true } })
     })
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    const badge = page.getByTitle('AWS backup failed — tap to retry')
-    await expect(badge).toBeVisible()
+    // Class-based locator, not title-based: the title changes to the
+    // 'retrying' label once busy, which would leave a getByTitle locator
+    // pointed at a selector that no longer matches anything.
+    const badge = page.locator('.editor-meta-badge--failed')
+    await expect(badge).toHaveAttribute('title', 'AWS backup failed — tap to retry')
     await badge.click()
 
+    await expect(badge).toHaveAttribute('aria-busy', 'true')
+    await expect(badge).toHaveAttribute('title', 'Retrying backup…')
+    await expect(badge.locator('.btn-saving-spinner')).toBeVisible()
+
+    resolveResync!()
     await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
     expect(resyncRequests).toBe(1)
   })
@@ -1663,25 +1674,36 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
   })
 
-  test('clicking the unconfirmed S3 badge retries the mirror and refreshes to synced', async ({ page }) => {
+  test('clicking the unconfirmed S3 badge shows a spinner while retrying, then refreshes to synced', async ({ page }) => {
     await loadHarness(page)
     let resyncRequests = 0
     let backedUp = false
+    let resolveResync: (() => void) | undefined
+    const resyncGate = new Promise<void>(resolve => { resolveResync = resolve })
     await page.route('**/api/s3/entry-status/**', async route => {
       await route.fulfill({ json: { status: backedUp ? 'synced' : 'unconfirmed' } })
     })
     await page.route('**/api/s3/entry-resync/**', async route => {
       expect(route.request().method()).toBe('POST')
       resyncRequests++
+      await resyncGate
       backedUp = true
       await route.fulfill({ json: { ok: true } })
     })
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    const badge = page.getByTitle('Not backed up yet — tap to retry')
-    await expect(badge).toBeVisible()
+    // Class-based locator, not title-based: the title changes to the
+    // 'retrying' label once busy, which would leave a getByTitle locator
+    // pointed at a selector that no longer matches anything.
+    const badge = page.locator('.editor-meta-badge--unconfirmed')
+    await expect(badge).toHaveAttribute('title', 'Not backed up yet — tap to retry')
     await badge.click()
 
+    await expect(badge).toHaveAttribute('aria-busy', 'true')
+    await expect(badge).toHaveAttribute('title', 'Retrying backup…')
+    await expect(badge.locator('.btn-saving-spinner')).toBeVisible()
+
+    resolveResync!()
     await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
     expect(resyncRequests).toBe(1)
   })
