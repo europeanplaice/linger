@@ -3400,6 +3400,15 @@ dialog.milestone-form-dialog::backdrop {
   cursor: pointer;
 }
 
+.editor-meta-badge[aria-busy="true"] {
+  cursor: default;
+}
+
+.editor-meta-badge[aria-busy="true"] .btn-saving-spinner {
+  border-color: var(--spinner-border);
+  border-top-color: var(--accent);
+}
+
 @keyframes badge-ping {
   0% { transform: scale(0.7); opacity: 0.8; }
   100% { transform: scale(1.9); opacity: 0; }

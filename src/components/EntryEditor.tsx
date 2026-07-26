@@ -169,21 +169,23 @@ interface SyncBadgeProps {
   title: string
   label: string
   onClick?: () => void
+  busy?: boolean
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, onClick, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeProps) {
   return (
     <div
       className={`editor-meta-badge editor-meta-badge--${status}`}
       title={title}
       aria-label={label}
+      aria-busy={busy || undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
     >
-      <div className="editor-meta-badge-icon-wrapper">{children}</div>
+      <div className="editor-meta-badge-icon-wrapper">{busy ? <SpinnerIcon /> : children}</div>
       <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
         {status === 'synced' && (
           <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
@@ -1276,6 +1278,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   title={s3BadgeLabel}
                   label={s3BadgeLabel}
                   onClick={s3Status === 'unconfirmed' && !s3Retrying ? handleS3Retry : undefined}
+                  busy={s3Retrying}
                 >
                   <S3BadgeIcon />
                 </SyncBadge>
