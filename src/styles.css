@@ -3396,7 +3396,8 @@ dialog.milestone-form-dialog::backdrop {
   background: #9ca3af;
 }
 
-.editor-meta-badge--unconfirmed {
+.editor-meta-badge--unconfirmed,
+.editor-meta-badge--failed {
   cursor: pointer;
 }
 

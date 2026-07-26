@@ -1581,9 +1581,32 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.keyboard.press('Control+S')
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
 
-    const badge = page.getByTitle('AWS backup failed')
+    const badge = page.getByTitle('AWS backup failed — tap to retry')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--failed/)
+  })
+
+  test('clicking the failed S3 badge retries the mirror and refreshes to synced', async ({ page }) => {
+    await loadHarness(page)
+    let resyncRequests = 0
+    let backedUp = false
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: backedUp ? 'synced' : 'failed', error: backedUp ? undefined : 'boom' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      expect(route.request().method()).toBe('POST')
+      resyncRequests++
+      backedUp = true
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.getByTitle('AWS backup failed — tap to retry')
+    await expect(badge).toBeVisible()
+    await badge.click()
+
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    expect(resyncRequests).toBe(1)
   })
 
   test('shows a backfilling S3 badge (visually a spinner, like pending) while a backfill is actively working toward this date', async ({ page }) => {

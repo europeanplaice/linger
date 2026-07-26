@@ -274,8 +274,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
+  // 'unconfirmed' and 'failed' are both terminal states nothing will resolve on
+  // its own — retrying is offered for both, so both get the 'retrying' label
+  // while a retry is in flight.
+  const s3Retryable = s3Status === 'unconfirmed' || s3Status === 'failed'
   const s3BadgeLabel = s3Status === 'synced' ? t.entry.s3BadgeSynced
-    : s3Status === 'failed' ? t.entry.s3BadgeFailed
+    : s3Status === 'failed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeFailed)
     : s3Status === 'unconfirmed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnconfirmed)
     : t.entry.s3BadgePending // covers 'pending' and 'backfilling'
   const activeMilestones = useMemo(
@@ -461,9 +465,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const currentDateRef = useRef(date)
   currentDateRef.current = date
 
-  // Manual retry for the 'unconfirmed' terminal state — nothing server-side is
-  // going to attempt this date on its own, so re-mirror it on demand and re-poll
-  // once that lands.
+  // Manual retry for the 'unconfirmed'/'failed' terminal states — nothing
+  // server-side is going to attempt this date on its own, so re-mirror it on
+  // demand and re-poll once that lands.
   const handleS3Retry = useCallback(async () => {
     if (s3Retrying) return
     setS3Retrying(true)
@@ -1277,7 +1281,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   status={s3Status}
                   title={s3BadgeLabel}
                   label={s3BadgeLabel}
-                  onClick={s3Status === 'unconfirmed' && !s3Retrying ? handleS3Retry : undefined}
+                  onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
                   busy={s3Retrying}
                 >
                   <S3BadgeIcon />
