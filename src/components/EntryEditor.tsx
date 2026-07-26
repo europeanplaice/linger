@@ -33,8 +33,17 @@ import { Clock3, CloudUpload, ExternalLink, Flag, Lightbulb, MoreHorizontal, Ref
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
 
-// Backoff schedule for polling AWS S3 mirror status after a save (~16.5s total).
-const S3_POLL_DELAYS_MS = [1500, 3000, 5000, 7000]
+// Backoff schedule for polling AWS S3 mirror status after a save (~27s total —
+// deliberately longer than the server's PENDING_GRACE_MS, ~20s in
+// functions/api/s3/entry-status/[date].ts, so the client's last poll always
+// lands after the grace window expires. Otherwise a fast save's last poll can
+// land just inside the grace window, see 'pending', and stop — stranding the
+// badge on a spinner forever since 'pending' offers no retry).
+const S3_POLL_DELAYS_MS = [1000, 2000, 3000, 5000, 7000, 9000]
+// How long after this tab's own save its `since` timestamp is still trusted
+// for a later open-poll of the same date (see lastSaveAtRef) — comfortably
+// longer than the server's ~20s pending grace window.
+const S3_RECENT_SAVE_CARRY_MS = 30_000
 // Cadence used once the server reports 'backfilling' — a large diary's initial
 // backfill can take much longer than the bounded schedule above (chunked ~20
 // entries per 2s, driven by useS3Backfill), so keep checking back slowly for as
@@ -260,6 +269,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const footerRef = useRef<HTMLDivElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
+  // Guards the load effect below against re-running its full reset/reload for a
+  // date it has already loaded — see its dateKnownAbsent dependency comment.
+  const loadedForDateRef = useRef<string | null>(null)
+  // Records when this tab last saved which date, so the load effect's re-poll
+  // (fired if it re-runs for a date this tab just saved — e.g. from a future
+  // trigger like tab sync) can still pass `since` and get the server's pending
+  // grace window, instead of an immediate false 'unconfirmed' verdict.
+  const lastSaveAtRef = useRef<{ date: string; at: string } | null>(null)
   const [hasConflict, setHasConflict] = useState(false)
   const [conflictRemote, setConflictRemote] = useState<LoadedDiaryEntry | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -392,6 +409,17 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const isNewEmptyEntry = dateKnownAbsent && text === '' && savedText === '' && baseVersion === null
 
   useEffect(() => {
+    // dateKnownAbsent flips false→true right after this tab's own save of a
+    // brand-new date (useDiary.save updates the cache before returning), which
+    // re-runs this effect for the *same* date a save() just handled. Without
+    // this guard that re-run would reset s3Status and reissue pollS3Status with
+    // no `since` (see the entry?.meta.version branch below), invalidating the
+    // save-scoped poll started in save() via the s3PollTokenRef bump — the
+    // server treats a since-less check as "nothing is actively working on
+    // this", returning an immediate false 'unconfirmed' instead of 'pending'.
+    if (loadedForDateRef.current === date) return
+    loadedForDateRef.current = date
+
     let cancelled = false
     // If we already know this date has no entry (list is loaded and date absent),
     // skip the skeleton — show the empty editor immediately.
@@ -438,7 +466,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           // No draft, or the draft already made it to Drive — drop it.
           if (draft) deleteDraft(date).catch(() => {})
           applyLoadedEntry(entry)
-          if (entry?.meta.version) pollS3Status(date, entry.meta.version)
+          if (entry?.meta.version) {
+            // Defence in depth alongside the loadedForDateRef guard above: if this
+            // tab just saved this exact date, carry that save's `since` into the
+            // open-poll so a still-in-flight mirror gets the server's pending
+            // grace window instead of an immediate false 'unconfirmed'.
+            const recentSave = lastSaveAtRef.current
+            const since = recentSave?.date === date && Date.now() - Date.parse(recentSave.at) < S3_RECENT_SAVE_CARRY_MS
+              ? recentSave.at : ''
+            pollS3Status(date, entry.meta.version, since)
+          }
         }
       } else if (draft) {
         // Couldn't reach Drive but an offline draft exists — let the user keep
@@ -526,7 +563,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setHasConflict(false)
       setConflictRemote(null)
     }
-    const attemptStartedAt = new Date().toISOString()
     let success = false
     try {
       const currentText = textRef.current
@@ -538,6 +574,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       fileIdRef.current = newId
       setPendingOfflineSave(false)
       setStatus(savedStatus)
+      // Captured only once the Drive save itself has resolved — the mirror is
+      // scheduled server-side after that response, so starting the clock any
+      // earlier would burn part of the poll/grace budget on the Drive round
+      // trip instead of the mirror's own latency.
+      const attemptStartedAt = new Date().toISOString()
+      lastSaveAtRef.current = { date, at: attemptStartedAt }
       pollS3Status(date, newVersion, attemptStartedAt)
       success = true
       if (explicit) haptics.success()

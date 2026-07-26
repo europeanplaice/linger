@@ -319,6 +319,10 @@ window.editorHarness = {
     lastRenderDate = date
     doRender()
   },
+  setKnownDates: (dates: string[]) => {
+    lastRenderKnownDates = dates
+    doRender()
+  },
   setRefreshSignal: (n: number) => {
     currentRefreshSignal = n
     doRender()

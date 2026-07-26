@@ -107,6 +107,39 @@ describe('getS3Settings negative caching', () => {
   })
 })
 
+describe('getS3Settings fileId caching', () => {
+  it('caches the settings fileId on the session so a second call skips the files.list lookup', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
+    const sess = makeSession()
+
+    await getS3Settings('tok', 'sid', sess, {} as any)
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(1)
+    expect(sess).toHaveProperty('s3_settings_file_id', 'settings-file')
+
+    await getS3Settings('tok', 'sid', sess, {} as any)
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(1) // not called again
+    expect(drive.readJsonFile).toHaveBeenCalledTimes(2) // content itself is always re-read fresh, never cached
+  })
+
+  it('re-looks-up the fileId once if the cached one 404s, instead of failing outright', async () => {
+    // Simulates the user deleting s3_settings.json in Drive directly (or it
+    // being recreated under a new id) — the cached fileId this session holds
+    // is now stale.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('fresh-file')
+    vi.mocked(drive.readJsonFile)
+      .mockRejectedValueOnce(new DriveError(404, 'not_found'))
+      .mockResolvedValueOnce(baseSettings)
+    const sess = makeSession({ s3_settings_file_id: 'stale-file' })
+
+    const result = await getS3Settings('tok', 'sid', sess, {} as any)
+
+    expect(result).toEqual(baseSettings)
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(1)
+    expect(sess.s3_settings_file_id).toBe('fresh-file')
+  })
+})
+
 describe('credentialsCacheKey', () => {
   it('combines google_sub, roleArn, and region so it is unique per account', () => {
     const key = credentialsCacheKey(makeSession({ google_sub: '112233' }), baseSettings)

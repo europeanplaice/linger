@@ -22,6 +22,7 @@ export interface SessionData {
   id_token?: string // Google-signed JWT (openid scope) — handed to AWS STS AssumeRoleWithWebIdentity for self-hosted S3
   google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
   s3_settings_negative_cache_at?: number // ms since epoch — last time a save/delete confirmed no s3_settings.json exists, so Drive-only users don't pay a files.list lookup on every save
+  s3_settings_file_id?: string // Drive fileId of s3_settings.json, cached like folder_id so every mirror/poll doesn't pay a files.list lookup just to find the settings file — never the settings *content* itself (see s3Settings.ts's loadS3SettingsRecord), since a stale bucket/roleArn/enabled value could mirror content to a bucket the user just disabled or changed
 }
 
 export interface Data extends Record<string, unknown> {

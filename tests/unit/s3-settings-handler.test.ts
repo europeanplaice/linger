@@ -68,8 +68,10 @@ describe('PUT /api/s3/settings', () => {
 
     expect(res.status).toBe(200)
     expect(ctx.waitUntil).toHaveBeenCalledOnce()
+    // session now carries the freshly-cached settings fileId (see settings.ts's
+    // sessionChanged block, kept in sync with what onRequestPut just wrote).
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file',
+      'tok', 'sid', { s3_settings_file_id: 'settings-file' }, {}, validSettings, 'folder-1', 'settings-file',
       undefined, 'Initial backfill', 20,
     )
   })

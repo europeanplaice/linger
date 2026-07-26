@@ -47,8 +47,19 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
 
     const meta = await writeJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME, body, existingFileId)
 
+    // Keep the session's cached fileId/negative-cache (see s3Settings.ts's
+    // loadS3SettingsRecord) in sync with what was actually just written, rather
+    // than waiting for a later 404/lazy-lookup to notice.
+    let sessionChanged = false
     if (session.s3_settings_negative_cache_at !== undefined) {
       session.s3_settings_negative_cache_at = undefined
+      sessionChanged = true
+    }
+    if (session.s3_settings_file_id !== meta.id) {
+      session.s3_settings_file_id = meta.id
+      sessionChanged = true
+    }
+    if (sessionChanged) {
       await saveSession(sessionId, session, context.env)
     }
 

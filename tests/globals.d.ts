@@ -135,6 +135,7 @@ interface Window {
     setPendingNavDate: (date: string | null) => void
     expiredCalls: () => number
     setDate: (date: string) => void
+    setKnownDates: (dates: string[]) => void
     setRefreshSignal: (n: number) => void
     setContentForDate: (date: string, content: string, version: string | null) => void
     blockGetContent: (date: string) => void

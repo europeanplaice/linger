@@ -1572,6 +1572,46 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--synced/)
   })
 
+  test('does not clobber the save-scoped poll with a false unconfirmed badge when knownDates updates right after saving a brand-new date', async ({ page }) => {
+    // Regression test: saving a date not yet in knownDates (e.g. the first save
+    // of a brand-new entry) causes the parent's knownDates set to gain that date
+    // moments later, which used to re-run EntryEditor's load effect for the same
+    // date (dateKnownAbsent flips false→true→false) — invalidating the good
+    // `since`-scoped poll started by save() and replacing it with a since-less
+    // one, which the server answers with an immediate 'unconfirmed' regardless
+    // of how recently the mirror was kicked off.
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      const since = new URL(route.request().url()).searchParams.get('since')
+      await route.fulfill({ json: { status: since ? 'pending' : 'unconfirmed' } })
+    })
+    await renderEditor(page, {
+      date: '2026-05-01', initialContent: '', version: null, autoSave: false,
+      knownDates: [], diaryListLoaded: true,
+    })
+
+    await page.fill('textarea.editor-textarea', 'brand new entry')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+    await expect.poll(() => requestCount).toBeGreaterThan(0)
+
+    // Simulate the parent's knownDates set updating for this date right after
+    // save, as it would once the cache reflects the newly-saved entry.
+    await page.evaluate(d => window.editorHarness.setKnownDates([d]), '2026-05-01')
+    // Give any (buggy) re-triggered poll a moment to land — asserting only
+    // toBeVisible right after the flip is racy, since Playwright's auto-retry
+    // would pass on transiently observing the correct badge before a later
+    // request flips it to unconfirmed.
+    await page.waitForTimeout(500)
+
+    const badge = page.getByTitle('Syncing to AWS…')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-badge--pending/)
+    await expect(page.locator('.editor-meta-badge--unconfirmed')).toHaveCount(0)
+  })
+
   test('shows a failed S3 badge when the mirror reports a sync error', async ({ page }) => {
     await loadHarness(page)
     await routeS3Status(page, 'failed')
@@ -1708,6 +1748,44 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     await page.clock.fastForward(8000)
     await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+  })
+
+  test('reaches a retryable unconfirmed state instead of a stuck spinner when the mirror outlasts the old poll cutoff', async ({ page }) => {
+    // Regression test: S3_POLL_DELAYS_MS used to sum to ~16.5s while the server's
+    // PENDING_GRACE_MS grace window is ~20s (functions/api/s3/entry-status/[date].ts)
+    // — a fast save's last poll could land inside the still-active grace window,
+    // see 'pending', and give up (pending offers no tap-to-retry), stranding the
+    // badge on a spinner forever. The client schedule now outlasts the server's
+    // grace window (~27s total) so it always reaches a retryable terminal state.
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      // The old schedule's 5th (and final) request landed at t=16500ms, still
+      // inside the grace window — simulate that by staying 'pending' through
+      // the 5th request and only flipping once a later request (only reachable
+      // under the new, longer schedule) arrives.
+      await route.fulfill({ json: { status: requestCount <= 5 ? 'pending' : 'unconfirmed' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect.poll(() => requestCount).toBe(1)
+    await page.clock.fastForward(1000)
+    await expect.poll(() => requestCount).toBe(2)
+    await page.clock.fastForward(2000)
+    await expect.poll(() => requestCount).toBe(3)
+    await page.clock.fastForward(3000)
+    await expect.poll(() => requestCount).toBe(4)
+    await page.clock.fastForward(5000)
+    await expect.poll(() => requestCount).toBe(5)
+    // Matches the old cutoff exactly — under the old schedule, polling would
+    // have already stopped here, forever.
+    await expect(page.locator('.editor-meta-badge--pending')).toBeVisible()
+
+    await page.clock.fastForward(7000)
+    await expect.poll(() => requestCount).toBe(6)
+    await expect(page.locator('.editor-meta-badge--unconfirmed')).toBeVisible()
   })
 
   test('shows an unconfirmed S3 badge when nothing is actively working toward backing up this date', async ({ page }) => {

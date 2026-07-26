@@ -63,11 +63,31 @@ function isNegativelyCached(session: SessionData): boolean {
   return at !== undefined && Date.now() - at < S3_SETTINGS_NEGATIVE_CACHE_MS
 }
 
+// Looks up s3_settings.json's fileId via Drive and caches it on the session (like
+// ensureFolder does for folder_id) — never the settings *content*, only the file's
+// location. A stale fileId is harmlessly self-correcting (readJsonFile 404s and the
+// caller re-looks-up), whereas a stale *content* cache (bucket/roleArn/enabled) would
+// risk mirroring diary content to a bucket the user just disabled or changed elsewhere
+// — see the comment on SessionData.s3_settings_file_id.
+async function findAndCacheSettingsFileId(token: string, sessionId: string, session: SessionData, env: Env, folderId: string): Promise<string | null> {
+  const fileId = await findJsonFile(token, folderId, S3_SETTINGS_FILE_NAME)
+  if (fileId) {
+    session.s3_settings_file_id = fileId
+    try {
+      await saveSession(sessionId, session, env)
+    } catch (e) {
+      // Caching is a pure optimization — a failure to persist it must not fail the caller.
+      console.error('s3Settings.ts: failed to persist settings fileId cache', e)
+    }
+  }
+  return fileId
+}
+
 async function loadS3SettingsRecord(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3SettingsRecord | null> {
   if (isNegativelyCached(session)) return null
 
   const folderId = await ensureFolder(token, sessionId, session, env)
-  const fileId = await findJsonFile(token, folderId, S3_SETTINGS_FILE_NAME)
+  let fileId = session.s3_settings_file_id ?? await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
   if (!fileId) {
     session.s3_settings_negative_cache_at = Date.now()
     try {
@@ -83,8 +103,31 @@ async function loadS3SettingsRecord(token: string, sessionId: string, session: S
   try {
     data = await readJsonFile<unknown>(token, fileId)
   } catch (e) {
-    if (e instanceof SyntaxError) return null
-    throw e
+    if (e instanceof DriveError && e.status === 404) {
+      // Cached fileId is stale (e.g. the user deleted s3_settings.json in Drive and
+      // settings.ts re-created it under a new id) — clear it and look up fresh once.
+      session.s3_settings_file_id = undefined
+      fileId = await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
+      if (!fileId) {
+        session.s3_settings_negative_cache_at = Date.now()
+        try {
+          await saveSession(sessionId, session, env)
+        } catch (e2) {
+          console.error('s3Settings.ts: failed to persist negative cache', e2)
+        }
+        return null
+      }
+      try {
+        data = await readJsonFile<unknown>(token, fileId)
+      } catch (e2) {
+        if (e2 instanceof SyntaxError) return null
+        throw e2
+      }
+    } else if (e instanceof SyntaxError) {
+      return null
+    } else {
+      throw e
+    }
   }
   return isValidS3Settings(data) ? { settings: data, folderId, fileId } : null
 }
