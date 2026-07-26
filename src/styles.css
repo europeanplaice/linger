@@ -3406,7 +3406,7 @@ dialog.milestone-form-dialog::backdrop {
 }
 
 .editor-meta-badge[aria-busy="true"] .btn-saving-spinner {
-  border-color: var(--spinner-border);
+  border-color: var(--border);
   border-top-color: var(--accent);
 }
 

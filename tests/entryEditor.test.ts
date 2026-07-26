@@ -1620,6 +1620,52 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     expect(resyncRequests).toBe(1)
   })
 
+  test('navigating away mid-retry does not leave the new date busy or get its badge stomped once the old retry lands', async ({ page }) => {
+    await loadHarness(page)
+    const statusRequestDates: string[] = []
+    let resolveResync: (() => void) | undefined
+    const resyncGate = new Promise<void>(resolve => { resolveResync = resolve })
+    let resyncDate: string | null = null
+
+    await page.route('**/api/s3/entry-status/**', async route => {
+      const date = new URL(route.request().url()).pathname.split('/').pop()
+      statusRequestDates.push(date ?? '')
+      // 05-01 is mid-retry throughout; 05-02 is already synced.
+      await route.fulfill({ json: { status: date === '2026-05-02' ? 'synced' : 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      resyncDate = new URL(route.request().url()).pathname.split('/').pop() ?? null
+      await resyncGate
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badgeA = page.locator('.editor-meta-badge--unconfirmed')
+    await expect(badgeA).toBeVisible()
+    await badgeA.click()
+    await expect(badgeA).toHaveAttribute('aria-busy', 'true')
+    await expect.poll(() => resyncDate).toBe('2026-05-01')
+
+    // Navigate to a second, already-synced date while the 05-01 retry is
+    // still pending (resyncGate not yet resolved).
+    await page.evaluate(() => window.editorHarness.setContentForDate('2026-05-02', 'other content', '5'))
+    await page.evaluate(() => window.editorHarness.setDate('2026-05-02'))
+
+    const syncedBadge = page.getByTitle('Backed up to AWS')
+    await expect(syncedBadge).toBeVisible()
+    await expect(syncedBadge).not.toHaveAttribute('aria-busy', 'true')
+    await expect(page.locator('.btn-saving-spinner')).toHaveCount(0)
+
+    const statusRequestsBeforeLanding = statusRequestDates.length
+
+    // Let the stale 05-01 retry finally land — it must not re-poll (and thus
+    // must not overwrite) the now-open 05-02 badge.
+    resolveResync!()
+    await page.waitForTimeout(200)
+    await expect(syncedBadge).toBeVisible()
+    expect(statusRequestDates.length).toBe(statusRequestsBeforeLanding)
+  })
+
   test('shows a backfilling S3 badge (visually a spinner, like pending) while a backfill is actively working toward this date', async ({ page }) => {
     await loadHarness(page)
     await routeS3Status(page, 'backfilling')

@@ -236,8 +236,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
-  // True while a manual retry of the 'unconfirmed' state is in flight (see
-  // handleS3Retry below).
+  // True while a manual retry of the 'unconfirmed'/'failed' state is in
+  // flight (see handleS3Retry below).
   const [s3Retrying, setS3Retrying] = useState(false)
 
   const [previewDate, setPreviewDate] = useState<string | null>(null)
@@ -407,6 +407,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setConflictRemote(null)
     setPendingOfflineSave(false)
     setS3Status(null)
+    setS3Retrying(false) // a retry in flight belongs to the date we're leaving, not this one
     s3PollTokenRef.current += 1 // invalidate any in-flight poll for the entry we're leaving
     setDiscardedText(null)
     setIdeaOpen(false)
@@ -467,18 +468,25 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   // Manual retry for the 'unconfirmed'/'failed' terminal states — nothing
   // server-side is going to attempt this date on its own, so re-mirror it on
-  // demand and re-poll once that lands.
+  // demand and re-poll once that lands. Pins the date at call time: if the
+  // user navigates away before the retry lands, the date-change effect above
+  // already reset s3Retrying/s3Status for whatever's now open, and polling
+  // with a stale date here would otherwise stomp that with the retried
+  // date's status under a freshly-issued (and thus "current") poll token.
   const handleS3Retry = useCallback(async () => {
     if (s3Retrying) return
+    const retryDate = currentDateRef.current
     setS3Retrying(true)
     try {
-      await retryS3EntrySync(currentDateRef.current)
+      await retryS3EntrySync(retryDate)
     } catch (e) {
       console.error('Failed to retry S3 sync:', e)
     } finally {
       setS3Retrying(false)
     }
-    if (baseVersionRef.current) pollS3Status(currentDateRef.current, baseVersionRef.current)
+    if (currentDateRef.current === retryDate && baseVersionRef.current) {
+      pollS3Status(retryDate, baseVersionRef.current)
+    }
   }, [s3Retrying, pollS3Status])
 
   const isDirty = text !== savedText
