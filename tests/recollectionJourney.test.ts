@@ -33,7 +33,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[]; getSimilar?: (date: string, limit?: number) => string[] },
+  opts: { dates: string[]; contents?: Record<string, string>; serendipityPrefetch?: string[] },
 ) {
   await page.evaluate(o => window.recollectionHarness.render(o), opts)
   await page.waitForSelector('.recollection-dialog')
