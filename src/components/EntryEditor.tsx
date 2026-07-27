@@ -269,9 +269,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const footerRef = useRef<HTMLDivElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
-  // Guards the load effect below against re-running its full reset/reload for a
-  // date it has already loaded — see its dateKnownAbsent dependency comment.
-  const loadedForDateRef = useRef<string | null>(null)
   // Records when this tab last saved which date, so the load effect's re-poll
   // (fired if it re-runs for a date this tab just saved — e.g. from a future
   // trigger like tab sync) can still pass `since` and get the server's pending
@@ -430,23 +427,28 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   const dateKnownAbsent = diaryListLoaded === true && knownDates !== undefined && !knownDates.has(date)
   const isNewEmptyEntry = dateKnownAbsent && text === '' && savedText === '' && baseVersion === null
+  // Read (not depended on) by the load effect below — see its comment. Kept fresh
+  // every render, same pattern as the other useLatestRef snapshots in this file.
+  const dateKnownAbsentRef = useLatestRef(dateKnownAbsent)
 
   useEffect(() => {
-    // dateKnownAbsent flips false→true right after this tab's own save of a
-    // brand-new date (useDiary.save updates the cache before returning), which
-    // re-runs this effect for the *same* date a save() just handled. Without
-    // this guard that re-run would reset s3Status and reissue pollS3Status with
-    // no `since` (see the entry?.meta.version branch below), invalidating the
-    // save-scoped poll started in save() via the s3PollTokenRef bump — the
-    // server treats a since-less check as "nothing is actively working on
-    // this", returning an immediate false 'unconfirmed' instead of 'pending'.
-    if (loadedForDateRef.current === date) return
-    loadedForDateRef.current = date
-
+    // Deliberately *not* keyed on dateKnownAbsent (read via a ref instead, below) —
+    // only on `date`. dateKnownAbsent flips false→true right after this tab's own
+    // save of a brand-new date (useDiary.save updates the cache before returning);
+    // if it were a dependency, that flip would re-run this whole effect for the
+    // *same* date a save() just handled, resetting s3Status and reissuing
+    // pollS3Status with no `since` — invalidating the save-scoped poll started in
+    // save() via the s3PollTokenRef bump, since the server treats a since-less
+    // check as "nothing is actively working on this" and answers an immediate
+    // false 'unconfirmed' instead of 'pending'. (An earlier fix guarded this with
+    // a "loaded for this date already" ref instead of dropping the dependency —
+    // that ref persisted across React StrictMode's dev-only double-invoke of this
+    // effect on mount, so the second, real invocation saw it already "loaded" and
+    // returned immediately, permanently stranding the editor on its skeleton.)
     let cancelled = false
     // If we already know this date has no entry (list is loaded and date absent),
     // skip the skeleton — show the empty editor immediately.
-    setLoading(!dateKnownAbsent)
+    setLoading(!dateKnownAbsentRef.current)
     setRefreshing(false)
     setText('')
     setSavedTextValue('')
@@ -490,10 +492,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           if (draft) deleteDraft(date).catch(() => {})
           applyLoadedEntry(entry)
           if (entry?.meta.version) {
-            // Defence in depth alongside the loadedForDateRef guard above: if this
-            // tab just saved this exact date, carry that save's `since` into the
-            // open-poll so a still-in-flight mirror gets the server's pending
-            // grace window instead of an immediate false 'unconfirmed'.
+            // Defence in depth alongside dropping dateKnownAbsent from this effect's
+            // dependencies above: if this tab just saved this exact date, carry that
+            // save's `since` into the open-poll so a still-in-flight mirror gets the
+            // server's pending grace window instead of an immediate false
+            // 'unconfirmed'.
             const recentSave = lastSaveAtRef.current
             const since = recentSave?.date === date && Date.now() - Date.parse(recentSave.at) < S3_RECENT_SAVE_CARRY_MS
               ? recentSave.at : ''
@@ -504,7 +507,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         // Couldn't reach Drive but an offline draft exists — let the user keep
         // editing it; it syncs once connectivity returns.
         applyDraft(draft, null)
-      } else if (dateKnownAbsent && typeof navigator !== 'undefined' && !navigator.onLine) {
+      } else if (dateKnownAbsentRef.current && typeof navigator !== 'undefined' && !navigator.onLine) {
         // Offline on a date known to have no entry: writing is safe, the text
         // is preserved as a draft on the first save attempt.
         applyLoadedEntry(null)
@@ -515,7 +518,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [date, applyLoadedEntry, applyDraft, dateKnownAbsent, pollS3Status])
+  }, [date, applyLoadedEntry, applyDraft, pollS3Status])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
