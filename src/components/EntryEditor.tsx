@@ -368,7 +368,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setS3Status(null)
         return
       }
-      setS3Status(result.status)
+      const exhausted = result.status === 'pending' && i >= S3_POLL_DELAYS_MS.length
+      // Ran out of scheduled attempts while still 'pending' — this can happen either
+      // because a genuinely in-flight mirror outlasted the schedule (shouldn't happen
+      // given the schedule's total comfortably exceeds the server's grace window, but
+      // clocks can drift), or because the terminal attempt's own fetch failed and was
+      // synthesized as 'pending' by the .catch above rather than reflecting a real
+      // server answer. Either way nothing is going to move this forward on its own,
+      // and 'pending' offers no retry affordance — surface 'unconfirmed' instead so
+      // the badge can be tapped to retry rather than spinning forever.
+      setS3Status(exhausted ? 'unconfirmed' : result.status)
       if (!retry) return
       // 'backfilling' means a server-side process is actively working toward this
       // date but may take much longer than a single save's mirror — keep checking
@@ -377,12 +386,26 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       // never update again on its own.
       if (result.status === 'backfilling') {
         setTimeout(() => { void attempt(i) }, S3_BACKFILL_POLL_INTERVAL_MS)
-      } else if (result.status === 'pending' && i < S3_POLL_DELAYS_MS.length) {
+      } else if (result.status === 'pending' && !exhausted) {
         setTimeout(() => { void attempt(i + 1) }, S3_POLL_DELAYS_MS[i])
       }
     }
     void attempt(0)
   }, [])
+
+  // Clears the S3 badge and (re)polls for a version that just replaced whatever
+  // s3Status was describing — used anywhere baseVersion changes outside the main
+  // load effect and initial save (a delete, a silent cross-tab/manual refresh, a
+  // conflict overwrite, or a reauth-triggered retry save landing): without this,
+  // s3Status keeps describing the *previous* version/content indefinitely, e.g.
+  // still claiming "Backed up to AWS" for an entry that was just deleted, or for
+  // fresh content pulled in from another device that hasn't actually been
+  // verified as mirrored yet.
+  const resetS3ForVersion = useCallback((forDate: string, newVersion: string | null, since = '') => {
+    setS3Status(null)
+    if (newVersion) pollS3Status(forDate, newVersion, since)
+    else s3PollTokenRef.current += 1 // no new poll to start; just invalidate whatever was in flight
+  }, [pollS3Status])
 
   const applyLoadedEntry = useCallback((entry: LoadedDiaryEntry | null) => {
     const driveText = entry?.entry.content ?? ''
@@ -539,16 +562,25 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const currentText = textRef.current
     const previousSavedText = savedTextRef.current
 
+    const newVersion = reauthSaveResult.meta.version ?? null
     setSavedTextValue(content)
-    setBaseVersionValue(reauthSaveResult.meta.version ?? null)
+    setBaseVersionValue(newVersion)
 
     fileIdRef.current = reauthSaveResult.meta.id
+
+    // This landed via a real Drive write (the retried save), which schedules a
+    // mirror server-side same as any other save — give it the same since-scoped
+    // pending grace window as save()/overwriteRemote instead of an immediate,
+    // possibly-false 'unconfirmed' check.
+    const attemptStartedAt = new Date().toISOString()
+    lastSaveAtRef.current = { date, at: attemptStartedAt }
+    resetS3ForVersion(date, newVersion, attemptStartedAt)
 
     if (currentText === previousSavedText || currentText === content) {
       setText(content)
       setStatus(savedStatus)
     }
-  }, [date, reauthSaveResult, savedStatus, setBaseVersionValue, setSavedTextValue])
+  }, [date, reauthSaveResult, savedStatus, setBaseVersionValue, setSavedTextValue, resetS3ForVersion])
 
   const pendingNavDateRef = useLatestRef(pendingNavDate)
   const onCancelNavigationRef = useLatestRef(onCancelNavigation)
@@ -669,12 +701,19 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     try {
       const currentText = textRef.current
       const saved = await onSaveRef.current(date, currentText, conflictRemote?.meta.version ?? baseVersionRef.current, true)
+      const newVersion = saved.meta.version ?? null
       setSavedTextValue(currentText)
-      setBaseVersionValue(saved.meta.version ?? null)
+      setBaseVersionValue(newVersion)
       setHasConflict(false)
       setConflictRemote(null)
       setPendingOfflineSave(false)
       setStatus(savedStatus)
+      // Same rationale as save() above: this is a genuine write, so give the
+      // mirror it schedules server-side the same since-scoped pending grace
+      // window instead of resetS3ForVersion's default since-less check.
+      const attemptStartedAt = new Date().toISOString()
+      lastSaveAtRef.current = { date, at: attemptStartedAt }
+      resetS3ForVersion(date, newVersion, attemptStartedAt)
     } catch {
       setStatus(t.entry.saveFailed)
     } finally {
@@ -691,6 +730,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       if (currentDateRef.current !== capturedDate) return
       if (silent && textRef.current !== savedTextRef.current) return
       applyLoadedEntry(entry)
+      resetS3ForVersion(capturedDate, entry?.meta.version ?? null)
       setLoadFailed(false)
       setHasConflict(false)
       setConflictRemote(null)
@@ -699,7 +739,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     } finally {
       if (currentDateRef.current === capturedDate && !silent) setRefreshing(false)
     }
-  }, [date, applyLoadedEntry])
+  }, [date, applyLoadedEntry, resetS3ForVersion])
 
   useEffect(() => {
     if (refreshSignal <= 0) return
@@ -764,6 +804,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       await onDelete(date)
       setShowDeleteModal(false)
       applyLoadedEntry(null)
+      resetS3ForVersion(date, null)
       setStatus('')
       haptics.delete()
     } catch {

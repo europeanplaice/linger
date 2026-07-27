@@ -59,6 +59,7 @@ type MilestoneAddCall = { label: string; date: string; emoji?: string; recurring
 let milestoneAddCalls: MilestoneAddCall[] = []
 
 let currentRefreshSignal = 0
+let currentReauthSaveResult: LoadedDiaryEntry | null = null
 const contentByDate: Map<string, { content: string; version: string | null }> = new Map()
 let getContentBlockedForDate: string | null = null
 let getContentBlockResolvers: Array<() => void> = []
@@ -201,7 +202,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         cancelNavigationCalls.push({ date: pendingNavDate })
         setPendingNavDate(null)
       }}
-      reauthSaveResult={null}
+      reauthSaveResult={currentReauthSaveResult}
       isSignedIn={token !== null}
       isOnline={isOnline}
       onExpired={onExpired}
@@ -268,6 +269,7 @@ window.editorHarness = {
     lastRenderEnableMilestoneAdd = opts.enableMilestoneAdd ?? false
     lastRenderRelatedDates = opts.relatedDates
     currentRefreshSignal = 0
+    currentReauthSaveResult = null
     contentByDate.clear()
     getContentBlockedForDate = null
     getContentBlockResolvers = []
@@ -325,6 +327,10 @@ window.editorHarness = {
   },
   setRefreshSignal: (n: number) => {
     currentRefreshSignal = n
+    doRender()
+  },
+  setReauthSaveResult: (entry: LoadedDiaryEntry | null) => {
+    currentReauthSaveResult = entry
     doRender()
   },
   setContentForDate: (date: string, content: string, version: string | null) => {

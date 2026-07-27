@@ -1556,6 +1556,115 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
   })
 
+  test('falls back to a retryable unconfirmed badge instead of spinning forever if every status poll fails', async ({ page }) => {
+    // Regression test: a network failure on a poll attempt is caught and treated the
+    // same as a genuine server 'pending' (see pollS3Status's .catch in EntryEditor.tsx)
+    // so a single hiccup doesn't break the retry schedule — but if that happens on the
+    // *last* scheduled attempt, the old code left the badge on 'pending' with the
+    // schedule exhausted and nothing left to move it forward, and 'pending' offers no
+    // tap-to-retry — a permanent spinner. Every attempt failing here stands in for that
+    // terminal-attempt case deterministically instead of racing a real timer.
+    test.setTimeout(45_000)
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', route => route.abort())
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    // S3_POLL_DELAYS_MS in EntryEditor.tsx sums to 27s; wait past that for the
+    // schedule to exhaust, with slack for request/scheduling overhead.
+    const badge = page.getByTitle('Not backed up yet — tap to retry')
+    await expect(badge).toBeVisible({ timeout: 30_000 })
+    await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
+  })
+
+  test('clears the synced S3 badge after deleting the entry', async ({ page }) => {
+    // Regression test: confirmDelete cleared baseVersion (hiding the Drive badge)
+    // but never touched s3Status, so a synced badge for the now-deleted entry kept
+    // rendering — the S3 badge (unlike the Drive one) had no guard tying it to
+    // baseVersion, and nothing reset it on delete.
+    await loadHarness(page)
+    await routeS3Status(page, 'synced')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.locator('.more-menu-delete').click()
+    await page.locator('.delete-modal-input').fill('confirm')
+    await page.locator('.delete-modal-actions .btn-delete').click()
+    await expect(page.locator('.delete-dialog')).toHaveCount(0)
+
+    await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
+    await expect(page.locator('.editor-meta-badge--synced')).toHaveCount(0)
+  })
+
+  test('re-polls S3 status for freshly-pulled content after a cross-tab refresh, instead of keeping the old version badge', async ({ page }) => {
+    // Regression test: loadFreshEntry (the silent refresh triggered by another tab's
+    // save, via refreshSignal) swapped in the new version's content/baseVersion but
+    // never touched s3Status, so the badge kept showing the *previous* version's
+    // status (e.g. still 'synced') even though the freshly-pulled version had never
+    // actually been checked.
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      const version = new URL(route.request().url()).searchParams.get('version')
+      await route.fulfill({ json: { status: version === '1' ? 'synced' : 'pending' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+
+    // Simulate another tab saving a newer version of this same date, then the
+    // DIARY_UPDATED-driven silent refresh this tab would run in response.
+    await page.evaluate(() => window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2'))
+    await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
+
+    await expect(page.getByTitle('Syncing to AWS…')).toBeVisible()
+    await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
+  })
+
+  test('re-polls S3 status for the new version after overwriting a conflicting remote entry', async ({ page }) => {
+    // Regression test: overwriteRemote saved a new version (force: true) and updated
+    // baseVersion, but — unlike save() — never re-polled S3 status for it, so the
+    // badge kept describing whatever version was current before the conflict.
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      const version = new URL(route.request().url()).searchParams.get('version')
+      await route.fulfill({ json: { status: version === '1' ? 'synced' : 'pending' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+
+    await page.fill('textarea.editor-textarea', 'local edits')
+    await page.locator('button.btn-save').click()
+    await page.waitForSelector('.conflict-panel')
+
+    await page.getByRole('button', { name: 'Overwrite' }).click()
+    await expect(page.locator('.conflict-panel')).toHaveCount(0)
+
+    // The harness's onSave mock always returns version '2' regardless of input.
+    await expect(page.getByTitle('Syncing to AWS…')).toBeVisible()
+    await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
+  })
+
+  test('re-polls S3 status for the new version after a reauth-triggered retry save lands', async ({ page }) => {
+    // Regression test: the reauth effect (fires when a save that failed on session
+    // expiry is retried and lands via reauthSaveResult) updated baseVersion/savedText
+    // but never re-polled S3 status, so the badge kept describing the pre-reauth
+    // version even though a brand-new mirror had just been scheduled server-side.
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      const version = new URL(route.request().url()).searchParams.get('version')
+      await route.fulfill({ json: { status: version === '1' ? 'synced' : 'pending' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+
+    await page.evaluate(() => window.editorHarness.setReauthSaveResult({
+      entry: { date: '2026-05-01', content: 'saved content' },
+      meta: { id: 'file-1', name: 'diary-2026-05-01.txt', version: '2' },
+    }))
+
+    await expect(page.getByTitle('Syncing to AWS…')).toBeVisible()
+    await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
+  })
+
   test('shows a synced S3 badge once the mirror catches up after a save', async ({ page }) => {
     await loadHarness(page)
     // No initial poll fires (no baseVersion yet), so this only governs the

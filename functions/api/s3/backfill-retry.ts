@@ -23,6 +23,18 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     const failed = settings.backfillProgress?.failed ?? []
     if (failed.length === 0) return jsonResponse({ error: 'No failed entries to retry' }, 400)
 
+    // A second chunked run (e.g. a whole-account Resync from another tab, or the
+    // initial backfill) already actively driving backfillProgress must not be allowed
+    // to run concurrently with this one — both share the same total/done/remaining/
+    // finishedAt bookkeeping, and if this run's failed-list scope happens to fit
+    // within one chunk it would reach the terminal finishBackfill and falsely stamp
+    // the other, still-running run as finished, truncating it. SettingsModal already
+    // client-gates its own Retry button while busy; this closes the multi-tab/stale-
+    // UI race that client-side gating alone can't.
+    if (settings.backfillProgress && !settings.backfillProgress.finishedAt) {
+      return jsonResponse({ error: 'A backfill is already running' }, 409)
+    }
+
     context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, failed, 'Retry', 20))
     return jsonResponse({ ok: true, retrying: failed.length })
   } catch (e) {

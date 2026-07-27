@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME,
   isValidS3Settings, getS3Settings, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
-  writeBackfillProgress, finishBackfill, credentialsCacheKey,
+  writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry,
 } from '../../functions/_shared/s3Settings'
 import type { S3SettingsRecord } from '../../functions/_shared/s3Settings'
 import * as drive from '../../functions/_shared/drive'
@@ -19,6 +19,8 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   listEntries: vi.fn().mockResolvedValue([]),
   getEntryContent: vi.fn(),
   getDiaryFileMeta: vi.fn(),
+  getEntryMeta: vi.fn(),
+  findEntryMeta: vi.fn(),
 }))
 
 vi.mock('../../functions/_shared/session', async (importOriginal) => ({
@@ -51,6 +53,10 @@ beforeEach(() => {
   vi.mocked(s3.deleteObject).mockResolvedValue(undefined)
   // Default: the entry still exists in Drive post-save (the common case) — no compensating delete.
   vi.mocked(drive.getDiaryFileMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt' } as any)
+  // Default: a cached settings fileId still points to a live (non-trashed) file.
+  vi.mocked(drive.getEntryMeta).mockResolvedValue({ id: 'settings-file', name: S3_SETTINGS_FILE_NAME, trashed: false } as any)
+  vi.mocked(drive.findEntryMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt', version: '5' } as any)
+  vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '2026-01-01', content: 'hello' })
 })
 
 describe('S3_BUCKET_RE', () => {
@@ -137,6 +143,23 @@ describe('getS3Settings fileId caching', () => {
     expect(result).toEqual(baseSettings)
     expect(drive.findJsonFile).toHaveBeenCalledTimes(1)
     expect(sess.s3_settings_file_id).toBe('fresh-file')
+  })
+
+  it('re-looks-up the fileId when the cached one now points to a trashed file, instead of trusting its content', async () => {
+    // Trashing s3_settings.json via Drive's own UI (the ordinary way to delete a file
+    // there) is a soft delete — unlike a hard delete, reading a trashed file's content
+    // via alt=media still succeeds instead of 404ing, so a cached fileId must be
+    // checked against `trashed` explicitly or it would keep resolving to the old,
+    // supposedly-disabled config indefinitely.
+    vi.mocked(drive.getEntryMeta).mockResolvedValue({ id: 'stale-file', name: S3_SETTINGS_FILE_NAME, trashed: true } as any)
+    vi.mocked(drive.findJsonFile).mockResolvedValue(null) // no other (non-trashed) settings file exists
+    const sess = makeSession({ s3_settings_file_id: 'stale-file' })
+
+    const result = await getS3Settings('tok', 'sid', sess, {} as any)
+
+    expect(result).toBeNull()
+    expect(drive.readJsonFile).not.toHaveBeenCalled()
+    expect(sess.s3_settings_file_id).toBeUndefined()
   })
 })
 
@@ -320,6 +343,90 @@ describe('mirrorEntryDelete', () => {
       { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
     )
+  })
+})
+
+describe('resyncSingleEntry', () => {
+  it('mirrors the entry and clears it from a finished backfill\'s failed list', async () => {
+    const settings = {
+      ...baseSettings,
+      backfillProgress: { total: 5, done: 5, failed: ['2026-01-01'], finishedAt: '2026-01-01T00:00:00.000Z' },
+    }
+    vi.mocked(drive.readJsonFile).mockResolvedValue(settings)
+
+    const result = await resyncSingleEntry('tok', 'sid', makeSession(), {} as any, settings, 'folder-1', 'settings-file', '2026-01-01')
+
+    expect(result).toEqual({ ok: true })
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5',
+    )
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    // Was the only failed date and the run had already finished — fully cleared,
+    // same terminal state finishBackfill leaves when every entry succeeds.
+    expect(written).not.toHaveProperty('backfillProgress')
+  })
+
+  it('does not touch total/done/remaining/finishedAt of a backfill that is still actively running (regression: used to falsely finish it)', async () => {
+    // The exact scenario this fix closes: a 500-entry backfill is 120 done, 380 still
+    // outstanding in `remaining`, when the user retries one specific failed date from
+    // its badge. The old code reused backfillAllEntries for this, which unconditionally
+    // stamped finishedAt (and done: total) over the whole record — truncating the run.
+    const activeProgress = {
+      total: 500, done: 120, failed: ['2026-01-01', '2026-02-14'],
+      remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+    }
+    const settings = { ...baseSettings, backfillProgress: activeProgress }
+    vi.mocked(drive.readJsonFile).mockResolvedValue(settings)
+
+    const result = await resyncSingleEntry('tok', 'sid', makeSession(), {} as any, settings, 'folder-1', 'settings-file', '2026-01-01')
+
+    expect(result).toEqual({ ok: true })
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    const bp = (written as any).backfillProgress
+    expect(bp.finishedAt).toBeUndefined()
+    expect(bp.total).toBe(500)
+    expect(bp.done).toBe(120)
+    expect(bp.remaining).toHaveLength(380)
+    expect(bp.failed).toEqual(['2026-02-14']) // only the retried date was removed
+  })
+
+  it('does not write to Drive at all when the date was never recorded as failed and nothing else changed', async () => {
+    const settings = { ...baseSettings }
+    vi.mocked(drive.readJsonFile).mockResolvedValue(settings)
+
+    await resyncSingleEntry('tok', 'sid', makeSession(), {} as any, settings, 'folder-1', 'settings-file', '2026-01-01')
+
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('treats an entry no longer in Drive as nothing to back up, not a failure', async () => {
+    vi.mocked(drive.findEntryMeta).mockResolvedValue(null)
+    const settings = {
+      ...baseSettings,
+      backfillProgress: { total: 1, done: 1, failed: ['2026-01-01'], finishedAt: '2026-01-01T00:00:00.000Z' },
+    }
+    vi.mocked(drive.readJsonFile).mockResolvedValue(settings)
+
+    const result = await resyncSingleEntry('tok', 'sid', makeSession(), {} as any, settings, 'folder-1', 'settings-file', '2026-01-01')
+
+    expect(result).toEqual({ ok: true })
+    expect(s3.putObjectIfNewer).not.toHaveBeenCalled()
+  })
+
+  it('records a failure and returns ok:false when the mirror fails, without touching an active backfillProgress', async () => {
+    vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
+    const activeProgress = { total: 5, done: 2, failed: ['2026-01-01'], remaining: ['x', 'y'] }
+    const settings = { ...baseSettings, backfillProgress: activeProgress }
+    vi.mocked(drive.readJsonFile).mockResolvedValue(settings)
+
+    const result = await resyncSingleEntry('tok', 'sid', makeSession(), {} as any, settings, 'folder-1', 'settings-file', '2026-01-01')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('AccessDenied')
+    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect((written as any).backfillProgress).toEqual(activeProgress)
+    expect((written as any).lastSyncError).toContain('AccessDenied')
   })
 })
 

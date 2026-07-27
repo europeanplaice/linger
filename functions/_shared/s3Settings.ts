@@ -1,6 +1,6 @@
 import type { Env, SessionData } from './session'
 import { getValidIdToken, saveSession } from './session'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getDiaryFileMeta, DriveError } from './drive'
+import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getDiaryFileMeta, getEntryMeta, findEntryMeta, DriveError } from './drive'
 import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError } from './s3'
 
 export const S3_SETTINGS_FILE_NAME = 's3_settings.json'
@@ -83,11 +83,34 @@ async function findAndCacheSettingsFileId(token: string, sessionId: string, sess
   return fileId
 }
 
+// True if a cached fileId still points to a live (non-trashed) file. Only needed for
+// the cached path below — a freshly-found fileId is already guaranteed live, since
+// findAndCacheSettingsFileId's own lookup query filters trashed=false. Trashing
+// s3_settings.json via Drive's own UI is the ordinary way to delete a file there (a
+// soft delete, unlike files.delete), and — unlike a hard delete — a trashed file's
+// content still reads fine via alt=media instead of 404ing, so an unchecked cache
+// would keep resolving to the old config (and mirroring diary content to whatever
+// bucket/role it named) indefinitely after the user believed they'd disabled it.
+async function isFileLive(token: string, fileId: string): Promise<boolean> {
+  try {
+    const meta = await getEntryMeta(token, fileId)
+    return meta.trashed !== true
+  } catch (e) {
+    if (e instanceof DriveError && e.status === 404) return false
+    throw e
+  }
+}
+
 async function loadS3SettingsRecord(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3SettingsRecord | null> {
   if (isNegativelyCached(session)) return null
 
   const folderId = await ensureFolder(token, sessionId, session, env)
-  let fileId = session.s3_settings_file_id ?? await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
+  let fileId = session.s3_settings_file_id
+  if (fileId && !(await isFileLive(token, fileId))) {
+    session.s3_settings_file_id = undefined
+    fileId = undefined
+  }
+  fileId ??= await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
   if (!fileId) {
     session.s3_settings_negative_cache_at = Date.now()
     try {
@@ -277,6 +300,78 @@ export async function mirrorEntryDelete(
   } catch (e) {
     console.error('s3Settings.ts: mirrorEntryDelete failed', e)
     if (record) await recordMirrorFailure(accessToken, record, describeError(e))
+  }
+}
+
+// Additively removes `date` from backfillProgress.failed on a successful
+// resyncSingleEntry — the only write resyncSingleEntry is allowed to make to
+// backfillProgress. Never touches total/done/remaining/finishedAt: those belong
+// exclusively to the chunked run that's actually tracking them (backfillAllEntries,
+// driven by settings.ts/resync.ts/backfill-retry.ts/backfill-continue.ts), and a run
+// can be genuinely in flight at the same moment a user retries an unrelated single
+// entry from its badge. Only a run that's already finished, with nothing else still
+// outstanding, is fully cleared here — the same terminal state finishBackfill leaves
+// behind when every entry succeeds.
+async function clearBackfillFailedDate(token: string, record: S3SettingsRecord, date: string): Promise<void> {
+  if (!record.settings.backfillProgress?.failed.includes(date)) return // nothing recorded to clear
+  await withFreshS3Settings(token, record, current => {
+    const bp = current.backfillProgress
+    if (!bp || !bp.failed.includes(date)) return current
+    const failed = bp.failed.filter(d => d !== date)
+    if (bp.finishedAt && failed.length === 0 && !bp.remaining?.length) {
+      const rest = { ...current }
+      delete rest.backfillProgress
+      delete rest.lastSyncError
+      delete rest.lastSyncErrorAt
+      return rest
+    }
+    return { ...current, backfillProgress: { ...bp, failed } }
+  })
+}
+
+// Re-mirrors exactly one date — the tap-to-retry action on a single entry's sync
+// badge (see api/s3/entry-resync/[date].ts), once entry-status has given up waiting
+// and reported 'unconfirmed'/'failed'. Deliberately does *not* reuse
+// backfillAllEntries: that function's chunk/finish bookkeeping (total/done/remaining/
+// finishedAt) belongs to whichever chunked run is actually driving it, and this is
+// never one — it's a single ad hoc mirror that can happen at any moment, including
+// while a real chunked backfill/resync is mid-flight. Reusing backfillAllEntries here
+// previously let a single-date retry stamp finishedAt over — and silently truncate —
+// a genuinely in-progress account-wide run. Never throws; failures are recorded via
+// recordMirrorFailure same as mirrorEntrySave, and reported back to the caller so the
+// HTTP response can reflect them.
+export async function resyncSingleEntry(
+  accessToken: string,
+  sessionId: string,
+  session: SessionData,
+  env: Env,
+  settings: S3Settings,
+  folderId: string,
+  fileId: string,
+  date: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const record: S3SettingsRecord = { settings, folderId, fileId }
+  try {
+    const idToken = await getValidIdToken(sessionId, session, env)
+    if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
+
+    const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region, credentialsCacheKey(session, settings))
+    const meta = await findEntryMeta(accessToken, sessionId, session, env, date)
+    // No longer exists in Drive (deleted since it was recorded as failed) — nothing
+    // to back up, not a failure, same as backfillAllEntries's own handling of a date
+    // that disappeared mid-run.
+    if (meta) {
+      const { content } = await getEntryContent(accessToken, meta.id, date)
+      await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+    }
+    await clearBackfillFailedDate(accessToken, record, date)
+    await recordMirrorSuccess(accessToken, record)
+    return { ok: true }
+  } catch (e) {
+    console.error('s3Settings.ts: resyncSingleEntry failed', e)
+    const message = describeError(e)
+    await recordMirrorFailure(accessToken, record, message)
+    return { ok: false, error: message }
   }
 }
 

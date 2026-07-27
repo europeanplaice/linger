@@ -137,6 +137,7 @@ interface Window {
     setDate: (date: string) => void
     setKnownDates: (dates: string[]) => void
     setRefreshSignal: (n: number) => void
+    setReauthSaveResult: (entry: import('../src/types').LoadedDiaryEntry | null) => void
     setContentForDate: (date: string, content: string, version: string | null) => void
     blockGetContent: (date: string) => void
     unblockGetContent: () => void

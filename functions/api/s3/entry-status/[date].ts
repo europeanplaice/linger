@@ -67,6 +67,22 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
       return jsonResponse({ status: 'failed', error: settings.lastSyncError ?? 'Backfill failed for this entry — retry from Settings.' })
     }
 
+    const sinceTime = since ? Date.parse(since) : NaN
+    const elapsedMs = !isNaN(sinceTime) ? Date.now() - sinceTime : 0
+
+    // A running backfill (or a chunk that just hasn't reached this date yet) is a
+    // stronger, more specific "still working on it" signal than a *stale* generic
+    // lastSyncError below — checked first so simply opening (or since-lessly polling)
+    // an untouched date mid-run doesn't wrongly resurface an old error from a
+    // previous, unrelated run instead of 'backfilling'. Only yields to a genuinely
+    // fresh problem: this exact check's own STS/S3 failure (stsError), or an error
+    // recorded after the `since` this specific poll is scoped to (freshSaveError) —
+    // both are signals this run itself, or this save itself, is the one in trouble.
+    const freshSaveError = !!since && !!settings.lastSyncErrorAt && settings.lastSyncErrorAt > since
+    if (settings.backfillProgress && !settings.backfillProgress.finishedAt && !stsError && !freshSaveError) {
+      return jsonResponse({ status: 'backfilling' })
+    }
+
     // Only attribute a failure to this save if it was recorded after the save
     // attempt started — otherwise a stale, unrelated failure (e.g. from a
     // previous outage) would wrongly mark a brand-new, still-in-flight save
@@ -74,8 +90,6 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     // writing to Drive, meaning the timestamp doesn't update. If a significant
     // amount of time has elapsed (e.g., 5 seconds) and we are still not synced,
     // we fallback to reporting the recorded error.
-    const sinceTime = since ? Date.parse(since) : NaN
-    const elapsedMs = !isNaN(sinceTime) ? Date.now() - sinceTime : 0
     if (settings.lastSyncErrorAt) {
       const isPersistentError = elapsedMs > 5000 && elapsedMs < 30000
       if (!since || settings.lastSyncErrorAt > since || isPersistentError) {
@@ -89,14 +103,6 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     // so returning pending would keep the UI stuck in "syncing" forever.
     if (stsError) {
       return jsonResponse({ status: 'failed', error: describeError(stsError) })
-    }
-
-    // A running backfill (or a chunk that just hasn't reached this date yet) is a
-    // stronger, more specific "still working on it" signal than the generic
-    // pending/unconfirmed split below — keep the client polling rather than let it
-    // settle into 'unconfirmed' out from under a run that's still in progress.
-    if (settings.backfillProgress && !settings.backfillProgress.finishedAt) {
-      return jsonResponse({ status: 'backfilling' })
     }
 
     // Nothing above found a reason this date isn't synced yet. Right after a save

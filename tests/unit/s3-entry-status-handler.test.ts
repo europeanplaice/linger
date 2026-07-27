@@ -195,6 +195,54 @@ describe('GET /api/s3/entry-status/[date]', () => {
     }
   })
 
+  it('reports backfilling — not a stale failed error — for an untouched date opened mid-backfill', async () => {
+    // Regression test: a stale lastSyncError/lastSyncErrorAt from a previous run used
+    // to outrank an actively-running backfill whenever the poll had no `since` (e.g.
+    // simply opening an untouched entry mid-run), wrongly surfacing 'failed' with a
+    // tap-to-retry affordance that — before resyncSingleEntry existed — could even
+    // clobber the running backfill if tapped. The active run is a stronger, more
+    // specific "still working on it" signal and must win.
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: [] },
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-04-30T00:00:00.000Z',
+    })
+
+    const res = await onRequestGet(makeContext({
+      request: new Request('http://localhost/api/s3/entry-status/2026-05-01?version=5'),
+    }) as any)
+
+    expect(await res.json()).toEqual({ status: 'backfilling' })
+  })
+
+  it('still reports failed (not backfilling) when the STS/S3 check itself fails, even during an active backfill', async () => {
+    vi.mocked(s3.assumeRoleWithWebIdentity).mockRejectedValue(new Error('network blip'))
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: [] },
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'network blip' })
+  })
+
+  it('still reports failed when this exact save is scoped after a fresh error recorded during an active backfill', async () => {
+    // A save's own since-scoped check must still see its own fresh failure even if an
+    // unrelated backfill happens to be running at the same time.
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: [] },
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z', // after SINCE
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
+  })
+
   it('reports failed when a sync error was recorded after the save attempt started', async () => {
     vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
       ...enabledSettings,

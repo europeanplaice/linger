@@ -1,13 +1,15 @@
 import type { Env, Data } from '../../../_shared/session'
 import { jsonResponse } from '../../../_shared/session'
 import { ensureFolder, findJsonFile, readJsonFile } from '../../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, isValidS3Settings, backfillAllEntries } from '../../../_shared/s3Settings'
+import { S3_SETTINGS_FILE_NAME, isValidS3Settings, resyncSingleEntry } from '../../../_shared/s3Settings'
 
 // Re-mirrors a single date against S3 — triggered by the "retry" affordance on an
 // entry's sync badge once entry-status has given up waiting and reported
-// 'unconfirmed' (nothing else is going to attempt this date on its own). Reuses
-// backfillAllEntries's single-entry path, so it gets the same idempotent
-// putObjectIfNewer guard and failure recording as every other backfill run.
+// 'unconfirmed'/'failed' (nothing else is going to attempt this date on its own).
+// Uses resyncSingleEntry rather than backfillAllEntries: this can run at any moment,
+// including while a real chunked backfill/resync is mid-flight, and must never be
+// able to touch that run's total/done/remaining/finishedAt bookkeeping (see
+// resyncSingleEntry's own comment for the regression this replaced).
 //
 // Unlike backfill-retry.ts/resync.ts (which can cover hundreds of entries and are
 // fired via context.waitUntil so a slow account doesn't blow the request's wall-
@@ -30,7 +32,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
       return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
     }
 
-    await backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, [date], 'Retry')
+    await resyncSingleEntry(accessToken, sessionId, session, context.env, settings, folderId, fileId, date)
     return jsonResponse({ ok: true })
   } catch (e) {
     console.error('s3/entry-resync.ts: POST failed', e)

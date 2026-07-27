@@ -12,7 +12,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
 
 vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
-  backfillAllEntries: vi.fn().mockResolvedValue(undefined),
+  resyncSingleEntry: vi.fn().mockResolvedValue({ ok: true }),
 }))
 
 const validSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
@@ -47,7 +47,7 @@ describe('POST /api/s3/entry-resync/[date]', () => {
     const res = await onRequestPost(makeContext() as any)
 
     expect(res.status).toBe(400)
-    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+    expect(s3Settings.resyncSingleEntry).not.toHaveBeenCalled()
   })
 
   it('rejects when S3 backup is disabled', async () => {
@@ -56,10 +56,10 @@ describe('POST /api/s3/entry-resync/[date]', () => {
     const res = await onRequestPost(makeContext() as any)
 
     expect(res.status).toBe(400)
-    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+    expect(s3Settings.resyncSingleEntry).not.toHaveBeenCalled()
   })
 
-  it('awaits a single-date backfill directly rather than firing it via waitUntil', async () => {
+  it('awaits a single-entry resync directly rather than firing it via waitUntil', async () => {
     const ctx = makeContext()
 
     const res = await onRequestPost(ctx as any)
@@ -67,8 +67,11 @@ describe('POST /api/s3/entry-resync/[date]', () => {
 
     expect(body.ok).toBe(true)
     expect(ctx.waitUntil).not.toHaveBeenCalled()
-    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file', ['2026-05-01'], 'Retry',
+    // Not backfillAllEntries: a single-date retry must never be able to touch the
+    // total/done/remaining/finishedAt bookkeeping of a chunked run that might be
+    // active at the same time — see resyncSingleEntry's own comment.
+    expect(s3Settings.resyncSingleEntry).toHaveBeenCalledWith(
+      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file', '2026-05-01',
     )
   })
 })
