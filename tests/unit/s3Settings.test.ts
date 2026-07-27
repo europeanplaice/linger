@@ -9,6 +9,7 @@ import * as drive from '../../functions/_shared/drive'
 import { DriveError } from '../../functions/_shared/drive'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
+import type { SessionData } from '../../functions/_shared/session'
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
@@ -38,7 +39,7 @@ vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
 
 const baseSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
 
-function makeSession(overrides: Record<string, unknown> = {}) {
+function makeSession(overrides: Partial<SessionData> = {}): SessionData {
   return { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 100_000, ...overrides }
 }
 

@@ -69,7 +69,7 @@ function isNegativelyCached(session: SessionData): boolean {
 // caller re-looks-up), whereas a stale *content* cache (bucket/roleArn/enabled) would
 // risk mirroring diary content to a bucket the user just disabled or changed elsewhere
 // — see the comment on SessionData.s3_settings_file_id.
-async function findAndCacheSettingsFileId(token: string, sessionId: string, session: SessionData, env: Env, folderId: string): Promise<string | null> {
+async function findAndCacheSettingsFileId(token: string, sessionId: string, session: SessionData, env: Env, folderId: string): Promise<string | undefined> {
   const fileId = await findJsonFile(token, folderId, S3_SETTINGS_FILE_NAME)
   if (fileId) {
     session.s3_settings_file_id = fileId
@@ -80,7 +80,7 @@ async function findAndCacheSettingsFileId(token: string, sessionId: string, sess
       console.error('s3Settings.ts: failed to persist settings fileId cache', e)
     }
   }
-  return fileId
+  return fileId ?? undefined
 }
 
 // True if a cached fileId still points to a live (non-trashed) file. Only needed for
