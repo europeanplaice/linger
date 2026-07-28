@@ -145,6 +145,7 @@ interface Window {
     unblockSave: () => void
     setOnline: (online: boolean) => void
     milestoneAddCalls: () => { label: string; date: string; emoji?: string; recurring?: boolean }[]
+    staleEntryDetectedCalls: () => number
   }
   historyHarness: {
     list: (resp: { status: number; body: unknown; delayMs?: number }) => void

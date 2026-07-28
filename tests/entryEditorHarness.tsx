@@ -57,6 +57,7 @@ let lastRenderEnableMilestoneAdd = false
 let lastRenderRelatedDates: string[] | undefined
 type MilestoneAddCall = { label: string; date: string; emoji?: string; recurring?: boolean }
 let milestoneAddCalls: MilestoneAddCall[] = []
+let staleEntryDetectedCalls = 0
 
 let currentRefreshSignal = 0
 let currentReauthSaveResult: LoadedDiaryEntry | null = null
@@ -211,6 +212,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         milestoneAddCalls.push({ label, date, emoji, recurring })
       } : undefined}
       relatedDates={relatedDates}
+      onS3StaleEntryDetected={() => { staleEntryDetectedCalls++ }}
     />
   )
 }
@@ -249,6 +251,7 @@ window.editorHarness = {
     nextDayCount = 0
     selectedDateCalls = []
     dirtyChanges = []
+    staleEntryDetectedCalls = 0
     currentSaveReject = opts.saveReject
     currentGetContentReject = opts.getContentReject
     currentDeleteReject = opts.deleteReject
@@ -360,4 +363,5 @@ window.editorHarness = {
   },
   expiredCalls: () => expiredCount,
   milestoneAddCalls: () => [...milestoneAddCalls],
+  staleEntryDetectedCalls: () => staleEntryDetectedCalls,
 }

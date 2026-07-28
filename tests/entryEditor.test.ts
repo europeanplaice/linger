@@ -1940,6 +1940,165 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
     expect(resyncRequests).toBe(1)
   })
+
+  test('automatically retries once, without any user interaction, when a save-scoped check comes back unconfirmed', async ({ page }) => {
+    await loadHarness(page)
+    let resyncRequests = 0
+    let backedUp = false
+    let resolveResync: (() => void) | undefined
+    const resyncGate = new Promise<void>(resolve => { resolveResync = resolve })
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: backedUp ? 'synced' : 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      expect(route.request().method()).toBe('POST')
+      resyncRequests++
+      await resyncGate
+      backedUp = true
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+
+    // The retry fires on its own — nothing in this test ever clicks a badge —
+    // and while it's gated open the badge must not show the terminal,
+    // tappable 'unconfirmed' state; that would defeat the point of retrying
+    // silently before ever nagging the user.
+    await expect.poll(() => resyncRequests).toBe(1)
+    await expect(page.locator('.editor-meta-badge--unconfirmed')).toHaveCount(0)
+
+    resolveResync!()
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    expect(resyncRequests).toBe(1)
+  })
+
+  test('does not fire a second automatic retry for a save that resolves to the same S3-mirrored version as a prior save', async ({ page }) => {
+    await loadHarness(page)
+    let resyncRequests = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      resyncRequests++
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+    await expect(page.getByTitle('Not backed up yet — tap to retry')).toBeVisible()
+    expect(resyncRequests).toBe(1)
+
+    // The harness's onSave always resolves to version '2' regardless of call
+    // count (see entryEditorHarness.tsx) — so this second save lands on the
+    // exact same Drive version the first save's auto-retry already covered,
+    // and must not spend a second automatic attempt on it.
+    await page.fill('textarea.editor-textarea', 'second edit')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(2)
+    await expect(page.getByTitle('Not backed up yet — tap to retry')).toBeVisible()
+    expect(resyncRequests).toBe(1)
+  })
+
+  test('a failed automatic retry after a save does not fire an extra plain-open stale-entry signal', async ({ page }) => {
+    // Regression test: the since-less re-poll issued right after the automatic
+    // retry (itself triggered by the save-scoped poll coming back unconfirmed)
+    // looks identical — no `since` — to a genuine plain-open poll. Without the
+    // pollS3Status `staleDetect` guard, a *failed* retry landing on
+    // 'unconfirmed' here would wrongly fire the account-wide auto-resync
+    // signal meant only for entries that were simply opened and never had any
+    // save/retry attempt at all.
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', route => route.abort())
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    // The initial plain-open poll on mount already fires the signal once —
+    // that's the legitimate case covered by a separate test below.
+    await expect(page.getByTitle('Not backed up yet — tap to retry')).toBeVisible()
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+    await expect(page.getByTitle('Not backed up yet — tap to retry')).toBeVisible()
+
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+  })
+
+  test('a failed manual retry does not fire an extra plain-open stale-entry signal either', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'unconfirmed')
+    await page.route('**/api/s3/entry-resync/**', route => route.abort())
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.locator('.editor-meta-badge--unconfirmed')
+    await expect(badge).toBeVisible()
+    // The initial plain-open poll on mount already fires the signal once.
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+
+    await badge.click()
+    await expect(badge).toBeVisible()
+
+    // Regression test: same staleDetect guard as the automatic-retry case
+    // above, applied to handleS3Retry's own re-poll.
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+  })
+
+  test('reports a stale entry exactly once when a plain open finds nothing backed up', async ({ page }) => {
+    await loadHarness(page)
+    await routeS3Status(page, 'unconfirmed')
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.getByTitle('Not backed up yet — tap to retry')
+    await expect(badge).toBeVisible()
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+  })
+
+  test('does not report a stale entry when unconfirmed only arises from client-side poll exhaustion, not a genuine server signal', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      // Genuinely, persistently 'pending' — the server never actually says
+      // 'unconfirmed'; only the client's own bounded schedule gives up.
+      await route.fulfill({ json: { status: 'pending' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect.poll(() => requestCount).toBe(1)
+    await page.clock.fastForward(1000)
+    await expect.poll(() => requestCount).toBe(2)
+    await page.clock.fastForward(2000)
+    await expect.poll(() => requestCount).toBe(3)
+    await page.clock.fastForward(3000)
+    await expect.poll(() => requestCount).toBe(4)
+    await page.clock.fastForward(5000)
+    await expect.poll(() => requestCount).toBe(5)
+    await page.clock.fastForward(7000)
+    await expect.poll(() => requestCount).toBe(6)
+    await expect(page.locator('.editor-meta-badge--pending')).toBeVisible()
+
+    // The 7th attempt (i=6) is where S3_POLL_DELAYS_MS's schedule is finally
+    // exhausted, synthesizing 'unconfirmed' locally for the badge.
+    await page.clock.fastForward(9000)
+    await expect.poll(() => requestCount).toBe(7)
+    await expect(page.locator('.editor-meta-badge--unconfirmed')).toBeVisible()
+
+    // Regression check: that client-synthesized 'unconfirmed' must not be
+    // mistaken for the server's genuine "nothing is backing this date up at
+    // all" signal (see the `result.status` vs `effectiveStatus` distinction
+    // in pollS3Status) — that would misfire the account-wide auto-resync for
+    // what's really just a slow/stuck poll.
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(0)
+  })
 })
 
 test.describe('EntryEditor — unsaved indicator', () => {

@@ -97,6 +97,12 @@ interface Props {
   getRecurringTopic?: (forDate: string) => RecurringTopic | null
   backDate?: string
   onGoBack?: () => void
+  // Called (at most meaningfully once per session — throttling is the caller's
+  // job) when the S3 mirror status comes back 'unconfirmed' for an entry that
+  // was simply opened, not just-saved — the strongest signal that this account
+  // has entries that were never backfilled at all, as opposed to one save's
+  // mirror running behind.
+  onS3StaleEntryDetected?: () => void
 }
 
 function SaveIcon() {
@@ -214,7 +220,7 @@ function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeP
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, onS3StaleEntryDetected }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -245,6 +251,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
+  // `${date}|${version}` of the last save-scoped poll that already triggered an
+  // automatic re-mirror attempt (see pollS3Status) — guards against retrying the
+  // same version more than once if it comes back unconfirmed again.
+  const s3AutoRetryKeyRef = useRef<string | null>(null)
   // True while a manual retry of the 'unconfirmed'/'failed' state is in
   // flight (see handleS3Retry below).
   const [s3Retrying, setS3Retrying] = useState(false)
@@ -316,6 +326,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // Latest-value mirrors so debounce timers, listeners, and async save flows can
   // read current props/state without being torn down on every change.
   const onSaveRef = useLatestRef(onSave)
+  const onS3StaleEntryDetectedRef = useLatestRef(onS3StaleEntryDetected)
   const getContentRef = useLatestRef(getContent)
   const textRef = useLatestRef(text)
   const savedTextRef = useLatestRef(savedText)
@@ -349,9 +360,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // against). `token` guards against a stale check (from a previous save/load
   // or a since-abandoned date) clobbering a newer one — see the
   // s3PollTokenRef bump on date change below.
-  const pollS3Status = useCallback((forDate: string, version: string | null, since = '', opts: { retry?: boolean } = {}) => {
+  const pollS3Status = useCallback((forDate: string, version: string | null, since = '', opts: { retry?: boolean; staleDetect?: boolean } = {}) => {
     if (s3DisabledRef.current || !version) return
     const retry = opts.retry ?? true
+    // Off for a since-less re-poll that follows a retry attempt (auto or manual) —
+    // those look identical to a plain open-poll (no `since`) but an 'unconfirmed'
+    // there means *that retry* didn't land, not "this date was never mirrored at
+    // all". Without this, a failed retry would wrongly read as the open-path signal
+    // and kick an account-wide resync (see onS3StaleEntryDetected below) every time.
+    const staleDetect = opts.staleDetect ?? true
     const token = ++s3PollTokenRef.current
 
     const attempt = async (i: number) => {
@@ -374,7 +391,39 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       // server answer. Either way nothing is going to move this forward on its own,
       // and 'pending' offers no retry affordance — surface 'unconfirmed' instead so
       // the badge can be tapped to retry rather than spinning forever.
-      setS3Status(exhausted ? 'unconfirmed' : result.status)
+      const effectiveStatus = exhausted ? 'unconfirmed' : result.status
+
+      // A save-scoped check (since set) that comes back unconfirmed gets one silent,
+      // automatic re-mirror attempt before nagging the user to tap retry themselves —
+      // covers a mirror that silently failed without ever recording an error (e.g. a
+      // context.waitUntil task that didn't run to completion) as well as one that's
+      // simply slower than the server's pending grace window. Guarded to at most once
+      // per date+version (s3AutoRetryKeyRef) so a resync that fails again still lands
+      // on a terminal, user-actionable badge instead of looping. The badge is left
+      // showing 'pending' (not 'unconfirmed') while this runs, so it doesn't flash
+      // unconfirmed-then-synced for what's really still one continuous save flow.
+      if (effectiveStatus === 'unconfirmed' && since) {
+        const autoRetryKey = `${forDate}|${version}`
+        if (s3AutoRetryKeyRef.current !== autoRetryKey) {
+          s3AutoRetryKeyRef.current = autoRetryKey
+          setS3Status('pending')
+          await retryS3EntrySync(forDate).catch(e => console.error('Failed to auto-retry S3 sync:', e))
+          if (s3PollTokenRef.current !== token) return
+          pollS3Status(forDate, version, '', { staleDetect: false })
+          return
+        }
+      }
+
+      // A since-less check (a plain open, not a save, and not a re-poll following a
+      // retry attempt — see staleDetect above) reporting 'unconfirmed' directly from
+      // the server (not via client-side exhaustion) is the strongest signal that this
+      // date was simply never mirrored at all — most often because the account has
+      // entries that predate S3 backup being enabled and a backfill never covered
+      // them. Surfaced once per stale-detection so the caller can offer to resume/run
+      // a backfill instead of only fixing this one date.
+      if (result.status === 'unconfirmed' && !since && staleDetect) onS3StaleEntryDetectedRef.current?.()
+
+      setS3Status(effectiveStatus)
       if (!retry) return
       // 'backfilling' means a server-side process is actively working toward this
       // date but may take much longer than a single save's mirror — keep checking
@@ -462,6 +511,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setS3Status(null)
     setS3Retrying(false) // a retry in flight belongs to the date we're leaving, not this one
     s3PollTokenRef.current += 1 // invalidate any in-flight poll for the entry we're leaving
+    s3AutoRetryKeyRef.current = null
     setDiscardedText(null)
     setIdeaOpen(false)
     setIdeaIndex(0)
@@ -548,7 +598,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setS3Retrying(false)
     }
     if (currentDateRef.current === retryDate && baseVersionRef.current) {
-      pollS3Status(retryDate, baseVersionRef.current)
+      pollS3Status(retryDate, baseVersionRef.current, '', { staleDetect: false })
     }
   }, [s3Retrying, pollS3Status])
 

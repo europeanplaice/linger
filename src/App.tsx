@@ -12,6 +12,7 @@ import { useDeployVersionCheck } from './hooks/useDeployVersionCheck'
 import { useOnline } from './hooks/useOnline'
 import { useTabSync } from './hooks/useTabSync'
 import { useS3Backfill } from './hooks/useS3Backfill'
+import { useS3StaleEntryAutoResync } from './hooks/useS3StaleEntryAutoResync'
 import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -207,6 +208,10 @@ export default function App() {
 
   const isSignedIn = status === 'signedIn'
   const s3Backfill = useS3Backfill(isSignedIn)
+  // Settings' own Save/Test/Resync actions rewrite s3_settings.json with no
+  // concurrency check against each other (see SettingsModal.tsx) — block the
+  // auto-resync while Settings is open to avoid racing one of those.
+  const handleS3StaleEntryDetected = useS3StaleEntryAutoResync(isSignedIn, s3Backfill, settingsOpen)
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
   const loadingSeenRef = useRef(false)
 
@@ -785,6 +790,7 @@ export default function App() {
           getRecurringTopic={getRecurringTopic}
           backDate={previousDate ?? undefined}
           onGoBack={handleGoBack}
+          onS3StaleEntryDetected={handleS3StaleEntryDetected}
         />
       </main>
     </div>
