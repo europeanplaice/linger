@@ -163,8 +163,13 @@ describe('getValidAccessToken', () => {
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     const promise = getValidAccessToken('sid', session, baseEnv as any)
+    // Attach the rejection assertion before letting fake timers advance — awaiting
+    // runAllTimersAsync() first would let the promise reject with no handler attached
+    // yet, which Node flags as an unhandled rejection even though it's handled a tick
+    // later (surfaces as a Vitest "Unhandled Errors" failure despite the test passing).
+    const assertion = expect(promise).rejects.toThrow('Token refresh failed: 503')
     await vi.runAllTimersAsync()
-    await expect(promise).rejects.toThrow('Token refresh failed: 503')
+    await assertion
     expect(fetchSpy).toHaveBeenCalledTimes(4)
   })
 
