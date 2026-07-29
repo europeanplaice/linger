@@ -157,14 +157,61 @@ describe('getValidAccessToken', () => {
     expect(stored.client_id).toBe('id')
   })
 
-  it('throws a generic error (not RefreshTokenInvalidError) on a transient failure', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('Server Error', { status: 503 })
-    ))
+  it('throws a generic error (not RefreshTokenInvalidError) after retries are exhausted on a transient failure', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('Server Error', { status: 503 }))
+    vi.stubGlobal('fetch', fetchSpy)
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
-    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toThrow('Token refresh failed: 503')
-    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.not.toBeInstanceOf(RefreshTokenInvalidError)
+    const promise = getValidAccessToken('sid', session, baseEnv as any)
+    await vi.runAllTimersAsync()
+    await expect(promise).rejects.toThrow('Token refresh failed: 503')
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
+  })
+
+  it('does not treat a 400 invalid_grant as transient — no retries', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    await expect(getValidAccessToken('sid', session, baseEnv as any)).rejects.toBeInstanceOf(RefreshTokenInvalidError)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers from a transient failure that succeeds on retry, instead of forcing re-login', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(new Response('Server Error', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const put = vi.fn()
+    const env = { ...baseEnv, SESSIONS: { put } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    const promise = getValidAccessToken('sid', session, env as any)
+    await vi.runAllTimersAsync()
+    await expect(promise).resolves.toBe('new_at')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a network-level fetch failure (not just a bad status)', async () => {
+    const fetchSpy = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network error'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const env = { ...baseEnv, SESSIONS: { put: vi.fn() } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    const promise = getValidAccessToken('sid', session, env as any)
+    await vi.runAllTimersAsync()
+    await expect(promise).resolves.toBe('new_at')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
   it('throws RefreshTokenInvalidError on a dead refresh_token (400 invalid_grant)', async () => {

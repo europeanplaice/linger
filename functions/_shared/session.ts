@@ -63,23 +63,51 @@ export async function saveSession(sessionId: string, session: SessionData, env: 
 // transient failures (429/5xx) so callers only tear down the session in this case.
 export class RefreshTokenInvalidError extends Error {}
 
+// Retry delays for transient refresh failures (network error, 429, 5xx) — mirrors
+// driveWithRetry's backoff (functions/_shared/drive.ts). Without this, a single Google
+// blip during an access-token refresh (which happens on the order of hourly for an
+// active user) surfaced as a full "session expired, please log in again" instead of
+// self-healing, since callers of getValidSession treat any thrown error alike.
+const REFRESH_RETRY_DELAYS_MS = [250, 500, 1000]
+
 export async function getValidSession(_sessionId: string, session: SessionData, env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
   if (!opts.forceRefresh && session.expires_at > Date.now() + 60_000) {
     return session
   }
-  const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      refresh_token: session.refresh_token,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-    }).toString(),
-  })
+
+  let resp: Response
+  for (let attempt = 0; ; attempt++) {
+    try {
+      resp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          refresh_token: session.refresh_token,
+          client_id: env.GOOGLE_CLIENT_ID,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          grant_type: 'refresh_token',
+        }).toString(),
+      })
+    } catch (err) {
+      if (attempt < REFRESH_RETRY_DELAYS_MS.length) {
+        await new Promise(r => setTimeout(r, REFRESH_RETRY_DELAYS_MS[attempt] * (1 + 0.2 * (Math.random() * 2 - 1))))
+        continue
+      }
+      throw err
+    }
+    // Google returns 400 invalid_grant for a dead/revoked/wrong-client refresh_token —
+    // fails immediately, retrying won't help. Anything else (429, 5xx) is transient —
+    // don't destroy an otherwise-valid session over it, retry a few times first.
+    if (!resp.ok && resp.status !== 400 && attempt < REFRESH_RETRY_DELAYS_MS.length) {
+      let delay = REFRESH_RETRY_DELAYS_MS[attempt]
+      const ra = resp.headers.get('Retry-After')
+      if (ra) { const s = parseFloat(ra); if (!isNaN(s)) delay = s * 1000 }
+      await new Promise(r => setTimeout(r, delay * (1 + 0.2 * (Math.random() * 2 - 1))))
+      continue
+    }
+    break
+  }
   if (!resp.ok) {
-    // Google returns 400 invalid_grant for a dead/revoked/wrong-client refresh_token.
-    // Anything else (429, 5xx) is transient — don't destroy an otherwise-valid session over it.
     if (resp.status === 400) {
       throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status}`)
     }

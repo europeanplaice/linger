@@ -132,7 +132,9 @@ describe('API auth middleware', () => {
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
     })
 
-    const response = await onRequest(ctx as any)
+    const promise = onRequest(ctx as any)
+    await vi.runAllTimersAsync()
+    const response = await promise
 
     expect(response.status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
