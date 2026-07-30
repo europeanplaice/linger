@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestGet } from '../../functions/api/s3/entry-status/[date]'
+import { onRequestGet, __clearEntryStatusSettingsCacheForTests } from '../../functions/api/s3/entry-status/[date]'
 import * as s3Settings from '../../functions/_shared/s3Settings'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
@@ -48,6 +48,7 @@ function pastGraceWindow() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  __clearEntryStatusSettingsCacheForTests()
   vi.mocked(s3Settings.getS3Settings).mockResolvedValue(enabledSettings)
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
   vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' })
@@ -352,5 +353,45 @@ describe('GET /api/s3/entry-status/[date]', () => {
     } finally {
       dateSpy.mockRestore()
     }
+  })
+})
+
+describe('GET /api/s3/entry-status/[date] — settings lookup caching', () => {
+  // A save schedules up to 7 poll attempts (S3_POLL_DELAYS_MS in EntryEditor.tsx),
+  // each of which used to call getS3Settings — and thus loadS3SettingsRecord's Drive
+  // reads — independently. Caching the settings lookup briefly (module-scope, keyed
+  // by session, read-only-path-only) cuts that down without affecting the actual
+  // "has it landed" signal, which is always the live headObjectVersion check below.
+  it('reuses a cached settings lookup across polls for the same session within the TTL', async () => {
+    await (await onRequestGet(makeContext() as any)).json()
+    await (await onRequestGet(makeContext() as any)).json()
+
+    expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(1)
+    // The live "has it landed" check is never cached — every poll still checks S3 directly.
+    expect(s3.headObjectVersion).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-fetches settings once the cache entry has expired', async () => {
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-05-01T00:00:00.000Z').getTime())
+    try {
+      await (await onRequestGet(makeContext() as any)).json()
+      dateSpy.mockReturnValue(new Date('2026-05-01T00:00:06.000Z').getTime()) // past a short TTL
+      await (await onRequestGet(makeContext() as any)).json()
+
+      expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(2)
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
+
+  it('keys the cache per session, so one account never sees another account\'s cached settings', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValueOnce(enabledSettings)
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValueOnce({ ...enabledSettings, enabled: false })
+
+    await (await onRequestGet(makeContext() as any)).json()
+    const res2 = await onRequestGet(makeContext({ data: { accessToken: 'tok2', sessionId: 'sid-2', session: {} } }) as any)
+
+    expect(await res2.json()).toEqual({ status: 'disabled' })
+    expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(2)
   })
 })

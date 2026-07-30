@@ -1,14 +1,45 @@
-import type { Env, Data } from '../../../_shared/session'
+import type { Env, Data, SessionData } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
 import { assumeRoleWithWebIdentity, headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
-import { getS3Settings, entryKey, credentialsCacheKey } from '../../../_shared/s3Settings'
+import { getS3Settings, entryKey, credentialsCacheKey, type S3Settings } from '../../../_shared/s3Settings'
+
+// A single save schedules up to 7 status polls (S3_POLL_DELAYS_MS in
+// EntryEditor.tsx), each of which otherwise calls getS3Settings — and thus
+// loadS3SettingsRecord's Drive reads — independently, purely to answer "is
+// backup enabled and what's the last recorded error", on a hot path that's
+// invoked far more often than settings actually change. Caching that lookup
+// briefly is safe *specifically because* this endpoint is read-only: the one
+// signal that actually resolves the badge (a fresh S3 HEAD via
+// headObjectVersion, below) is never cached and always reflects the live
+// bucket. Module-scope and keyed by session, same pattern as the credentials
+// cache in s3.ts — best-effort, not persisted, never used by any mirror/write
+// path (those must always see current config; see loadS3SettingsRecord).
+const settingsCheckCache = new Map<string, { settings: S3Settings | null; expiresAt: number }>()
+const SETTINGS_CHECK_CACHE_MS = 5_000
+
+export function __clearEntryStatusSettingsCacheForTests(): void {
+  settingsCheckCache.clear()
+}
+
+async function getS3SettingsForStatusCheck(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3Settings | null> {
+  const cached = settingsCheckCache.get(sessionId)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) return cached.settings
+  const settings = await getS3Settings(token, sessionId, session, env)
+  settingsCheckCache.set(sessionId, { settings, expiresAt: now + SETTINGS_CHECK_CACHE_MS })
+  return settings
+}
 
 // How long a fresh save's 'pending' is trusted to mean "the mirror is genuinely
 // still in flight, ask again shortly" before it's treated as "nothing is actually
 // working toward this and won't resolve on its own" (see the pending/unconfirmed
-// split at the bottom of this handler). Comfortably longer than the editor's own
-// bounded retry schedule (S3_POLL_DELAYS_MS in EntryEditor.tsx, ~16.5s total) so
-// a genuinely slow-but-in-flight mirror isn't cut off mid-flight.
+// split at the bottom of this handler). Deliberately *shorter* than the editor's
+// own bounded retry schedule (S3_POLL_DELAYS_MS in EntryEditor.tsx, ~27s total) —
+// the invariant runs the other way from what it looks like: the client's last
+// poll must always land *after* this window has expired, so it gets a real
+// terminal answer from the server instead of exhausting its own schedule while
+// the server would still have said 'pending'. Getting this backwards previously
+// stranded fast saves on a spinner forever (see git history on both constants).
 const PENDING_GRACE_MS = 20_000
 
 // Polled by the editor right after a Drive save, and once when an entry is simply
@@ -30,7 +61,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
   if (!version) return jsonResponse({ error: 'version is required' }, 400)
 
   try {
-    const settings = await getS3Settings(accessToken, sessionId, session, context.env)
+    const settings = await getS3SettingsForStatusCheck(accessToken, sessionId, session, context.env)
     if (!settings || !settings.enabled) return jsonResponse({ status: 'disabled' })
 
     const idToken = await getValidIdToken(sessionId, session, context.env)

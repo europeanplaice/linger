@@ -3392,11 +3392,13 @@ dialog.milestone-form-dialog::backdrop {
   opacity: 0;
 }
 
-.editor-meta-badge-status--unconfirmed {
+.editor-meta-badge-status--unconfirmed,
+.editor-meta-badge-status--unverified {
   background: #9ca3af;
 }
 
 .editor-meta-badge--unconfirmed,
+.editor-meta-badge--unverified,
 .editor-meta-badge--failed {
   cursor: pointer;
 }

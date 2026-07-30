@@ -1556,7 +1556,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
   })
 
-  test('falls back to a retryable unconfirmed badge instead of spinning forever if every status poll fails', async ({ page }) => {
+  test('falls back to a retryable "couldn\'t check" badge instead of spinning forever if every status poll fails at the network level', async ({ page }) => {
     // Regression test: a network failure on a poll attempt is caught and treated the
     // same as a genuine server 'pending' (see pollS3Status's .catch in EntryEditor.tsx)
     // so a single hiccup doesn't break the retry schedule — but if that happens on the
@@ -1564,6 +1564,12 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     // schedule exhausted and nothing left to move it forward, and 'pending' offers no
     // tap-to-retry — a permanent spinner. Every attempt failing here stands in for that
     // terminal-attempt case deterministically instead of racing a real timer.
+    //
+    // Distinct from the server genuinely confirming nothing is backed up (see
+    // 'unconfirmed' tests below): every attempt here fails before ever reaching the
+    // server, so the badge must say "couldn't check" (unverified), not the more
+    // alarming "not backed up" (unconfirmed) — this device never actually learned
+    // that, it just never managed to ask.
     test.setTimeout(45_000)
     await loadHarness(page)
     await page.route('**/api/s3/entry-status/**', route => route.abort())
@@ -1571,9 +1577,34 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     // S3_POLL_DELAYS_MS in EntryEditor.tsx sums to 27s; wait past that for the
     // schedule to exhaust, with slack for request/scheduling overhead.
+    const badge = page.getByTitle('Couldn’t check backup status — tap to check again')
+    await expect(badge).toBeVisible({ timeout: 30_000 })
+    await expect(badge).toHaveClass(/editor-meta-badge--unverified/)
+  })
+
+  test('still shows the more alarming unconfirmed badge (not "couldn\'t check") if at least one poll got a real answer before the schedule exhausted', async ({ page }) => {
+    // A real server 'pending' answer at any point means this device did successfully
+    // ask and learn that nothing is currently syncing — later network hiccups on top
+    // of that don't make that any less true, so exhaustion should still land on
+    // 'unconfirmed', not get downgraded to the weaker 'unverified' just because the
+    // *last* attempt happened to fail at the network level.
+    test.setTimeout(45_000)
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      if (requestCount === 1) {
+        await route.fulfill({ json: { status: 'pending' } })
+      } else {
+        await route.abort()
+      }
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
     const badge = page.getByTitle('Not backed up yet — tap to retry')
     await expect(badge).toBeVisible({ timeout: 30_000 })
     await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
+    expect(requestCount).toBeGreaterThan(1)
   })
 
   test('clears the synced S3 badge after deleting the entry', async ({ page }) => {
@@ -1712,8 +1743,11 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     // Give any (buggy) re-triggered poll a moment to land — asserting only
     // toBeVisible right after the flip is racy, since Playwright's auto-retry
     // would pass on transiently observing the correct badge before a later
-    // request flips it to unconfirmed.
-    await page.waitForTimeout(500)
+    // request flips it to unconfirmed. Long enough to outlast pollS3Status's
+    // one-soft-retry grace for a since-less 'unconfirmed' (one extra ~1s round
+    // trip — see S3_POLL_DELAYS_MS[0]) so a reintroduced regression would still
+    // be caught here rather than being masked by that grace window.
+    await page.waitForTimeout(1600)
 
     const badge = page.getByTitle('Syncing to AWS…')
     await expect(badge).toBeVisible()
@@ -1894,7 +1928,52 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     await page.clock.fastForward(7000)
     await expect.poll(() => requestCount).toBe(6)
+    // A since-less check reporting a real 'unconfirmed' gets one soft retry
+    // before it's treated as terminal (see pollS3Status) — still 'pending'
+    // (not yet the tappable 'unconfirmed' badge) until that retry lands too.
+    await expect(page.locator('.editor-meta-badge--pending')).toBeVisible()
+
+    await page.clock.fastForward(1000)
+    await expect.poll(() => requestCount).toBe(7)
     await expect(page.locator('.editor-meta-badge--unconfirmed')).toBeVisible()
+  })
+
+  test('a since-less open check recovers to synced if a single unconfirmed answer was just a transient blip', async ({ page }) => {
+    // A plain open has no grace window to fall back on server-side (unlike a
+    // save), so a genuine but momentarily-wrong 'unconfirmed' read would
+    // otherwise turn into a permanent, alarming badge on nothing more than one
+    // read's bad luck. pollS3Status gives it one more check before treating it
+    // as terminal.
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      await route.fulfill({ json: { status: requestCount === 1 ? 'unconfirmed' : 'synced' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    await expect(page.locator('.editor-meta-badge--unconfirmed')).toHaveCount(0)
+    expect(requestCount).toBe(2)
+    // Never actually confirmed as missing, so no account-wide resync needed.
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(0)
+  })
+
+  test('a since-less open check still lands on a terminal unconfirmed badge after its one retry also comes back unconfirmed', async ({ page }) => {
+    await loadHarness(page)
+    let requestCount = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      requestCount++
+      await route.fulfill({ json: { status: 'unconfirmed' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const badge = page.getByTitle('Not backed up yet — tap to retry')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
+    expect(requestCount).toBe(2)
+    // Fires once the retry also confirms it, not on the first (possibly-flaky) answer.
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
   })
 
   test('shows an unconfirmed S3 badge when nothing is actively working toward backing up this date', async ({ page }) => {

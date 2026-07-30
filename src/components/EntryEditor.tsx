@@ -180,7 +180,7 @@ function S3BadgeIcon() {
 }
 
 interface SyncBadgeProps {
-  status: 'synced' | 'pending' | 'failed' | 'backfilling' | 'unconfirmed'
+  status: 'synced' | 'pending' | 'failed' | 'backfilling' | 'unconfirmed' | 'unverified'
   title: string
   label: string
   onClick?: () => void
@@ -298,13 +298,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const yearHolidays = useHolidays(holidayCountry, Number(date.slice(0, 4)))
   const isHoliday = !!yearHolidays[date]
   const isFuture = date > todayYmd()
-  // 'unconfirmed' and 'failed' are both terminal states nothing will resolve on
-  // its own — retrying is offered for both, so both get the 'retrying' label
-  // while a retry is in flight.
-  const s3Retryable = s3Status === 'unconfirmed' || s3Status === 'failed'
+  // 'unconfirmed', 'unverified' and 'failed' are all terminal states nothing will
+  // resolve on its own — retrying is offered for all three, so they all get the
+  // 'retrying' label while a retry is in flight.
+  const s3Retryable = s3Status === 'unconfirmed' || s3Status === 'unverified' || s3Status === 'failed'
   const s3BadgeLabel = s3Status === 'synced' ? t.entry.s3BadgeSynced
     : s3Status === 'failed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeFailed)
     : s3Status === 'unconfirmed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnconfirmed)
+    : s3Status === 'unverified' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnverified)
     : t.entry.s3BadgePending // covers 'pending' and 'backfilling'
   const activeMilestones = useMemo(
     () => (milestones ?? []).filter(a => a.showBadge !== false),
@@ -370,28 +371,60 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     // and kick an account-wide resync (see onS3StaleEntryDetected below) every time.
     const staleDetect = opts.staleDetect ?? true
     const token = ++s3PollTokenRef.current
+    // True once any attempt in this polling run got a real reply from the server
+    // (even 'pending') rather than a synthesized one from the .catch below — see
+    // the exhausted branch's unconfirmed/unverified split.
+    let gotRealAnswer = false
+    // Guards the since-less "one soft retry" below to at most once per run — see
+    // its comment.
+    let retriedOpenUnconfirmedOnce = false
 
     const attempt = async (i: number) => {
       if (s3PollTokenRef.current !== token) return
-      const result = await getS3EntryStatus(forDate, version, since).catch(
-        (): S3EntryStatusResult => ({ status: 'pending' }),
-      )
+      let result: S3EntryStatusResult
+      try {
+        result = await getS3EntryStatus(forDate, version, since)
+        gotRealAnswer = true
+      } catch {
+        result = { status: 'pending' }
+      }
       if (s3PollTokenRef.current !== token) return
       if (result.status === 'disabled') {
         s3DisabledRef.current = true
         setS3Status(null)
         return
       }
+
+      // A since-less check (a plain open) getting a real, immediate 'unconfirmed'
+      // straight from the server has no grace window to fall back on (see
+      // entry-status/[date].ts) — unlike a save-scoped check, it gets exactly one
+      // chance. A single stale/inconsistent read (e.g. a HEAD landing on a bucket
+      // read replica a moment behind the mirror's write) would otherwise turn into
+      // an alarming, permanent "not backed up" badge on nothing more than one
+      // read's bad luck. Ask once more, shortly, before treating it as terminal —
+      // bounded to a single retry so a genuinely never-mirrored date still lands
+      // on a terminal badge quickly rather than looping.
+      if (result.status === 'unconfirmed' && !since && !retriedOpenUnconfirmedOnce) {
+        retriedOpenUnconfirmedOnce = true
+        setS3Status('pending')
+        setTimeout(() => { void attempt(i) }, S3_POLL_DELAYS_MS[0])
+        return
+      }
+
       const exhausted = result.status === 'pending' && i >= S3_POLL_DELAYS_MS.length
       // Ran out of scheduled attempts while still 'pending' — this can happen either
       // because a genuinely in-flight mirror outlasted the schedule (shouldn't happen
       // given the schedule's total comfortably exceeds the server's grace window, but
-      // clocks can drift), or because the terminal attempt's own fetch failed and was
-      // synthesized as 'pending' by the .catch above rather than reflecting a real
-      // server answer. Either way nothing is going to move this forward on its own,
-      // and 'pending' offers no retry affordance — surface 'unconfirmed' instead so
-      // the badge can be tapped to retry rather than spinning forever.
-      const effectiveStatus = exhausted ? 'unconfirmed' : result.status
+      // clocks can drift), or because one or more attempts' own fetch failed and was
+      // synthesized as 'pending' above rather than reflecting a real server answer.
+      // Either way nothing is going to move this forward on its own, and 'pending'
+      // offers no retry affordance — surface a terminal status instead of spinning
+      // forever. Which one depends on whether *any* attempt actually reached the
+      // server: if so, we genuinely know nothing is currently syncing
+      // ('unconfirmed'); if every attempt failed before ever getting a reply, this
+      // device simply couldn't check, which is a materially less alarming thing to
+      // tell the user ('unverified') — see S3EntrySyncStatus's doc comment.
+      const effectiveStatus = exhausted ? (gotRealAnswer ? 'unconfirmed' : 'unverified') : result.status
 
       // A save-scoped check (since set) that comes back unconfirmed gets one silent,
       // automatic re-mirror attempt before nagging the user to tap retry themselves —
