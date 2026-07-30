@@ -318,186 +318,200 @@ describe('getValidIdToken', () => {
 })
 
 describe('addEmailSessionIndex', () => {
-  it('creates a new index entry with the session ID', async () => {
-    const get = vi.fn().mockResolvedValue(null)
+  // Each session gets its own KV key under an email-prefixed namespace, instead
+  // of one aggregate key holding a JSON array — so this is a single put with no
+  // preceding read, and thus no read-modify-write race between two concurrent
+  // sign-ins for the same email (see git history: the old aggregate-array design
+  // could silently drop a concurrent sign-in's session ID from the index).
+  it('writes an index entry keyed by session ID under the email prefix, with the session TTL, without reading first', async () => {
+    const get = vi.fn()
     const put = vi.fn()
     const env = { SESSIONS: { get, put } }
     await addEmailSessionIndex('user@example.com', 'sid1', env as any)
-    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid1']), { expirationTtl: SESSION_TTL })
+    expect(get).not.toHaveBeenCalled()
+    expect(put).toHaveBeenCalledWith('esidx:user@example.com:sid1', '', { expirationTtl: SESSION_TTL })
   })
 
-  it('appends to an existing index', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+  it('normalizes email before writing the key', async () => {
     const put = vi.fn()
-    const env = { SESSIONS: { get, put } }
-    await addEmailSessionIndex('user@example.com', 'sid2', env as any)
-    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid1', 'sid2']), { expirationTtl: SESSION_TTL })
+    const env = { SESSIONS: { put } }
+    await addEmailSessionIndex('User@Example.COM', 'sid1', env as any)
+    expect(put).toHaveBeenCalledWith('esidx:user@example.com:sid1', '', { expirationTtl: SESSION_TTL })
   })
 
-  it('does not duplicate an already-indexed session ID', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+  it('is idempotent — calling it again for the same session (e.g. to renew TTL) just re-writes the same key', async () => {
     const put = vi.fn()
-    const env = { SESSIONS: { get, put } }
+    const env = { SESSIONS: { put } }
     await addEmailSessionIndex('user@example.com', 'sid1', env as any)
-    expect(put).not.toHaveBeenCalled()
+    await addEmailSessionIndex('user@example.com', 'sid1', env as any)
+    expect(put).toHaveBeenCalledTimes(2)
+    expect(put).toHaveBeenNthCalledWith(1, 'esidx:user@example.com:sid1', '', { expirationTtl: SESSION_TTL })
+    expect(put).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid1', '', { expirationTtl: SESSION_TTL })
   })
 })
 
 describe('getRefreshTokenForEmail', () => {
-  it('returns null when no index exists for the email', async () => {
-    const get = vi.fn().mockResolvedValue(null)
-    const env = { SESSIONS: { get } }
+  it('returns null when no sessions are indexed for the email', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
+    const env = { SESSIONS: { list } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
+    expect(list).toHaveBeenCalledWith({ prefix: 'esidx:user@example.com:' })
   })
 
   it('returns the refresh_token from the first session matching the current client', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid1']))
       if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
       return Promise.resolve(null)
     })
-    const env = { SESSIONS: { get } }
+    const env = { SESSIONS: { list, get } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt1')
   })
 
   it('skips sessions without a refresh_token and returns the first one that has it', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid1', 'sid2']))
       if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a' }))
       if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
       return Promise.resolve(null)
     })
-    const env = { SESSIONS: { get } }
+    const env = { SESSIONS: { list, get } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt2')
   })
 
   it('returns null when all indexed sessions have no refresh_token', async () => {
-    const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid1']))
-      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a' }))
-      return Promise.resolve(null)
-    })
-    const env = { SESSIONS: { get } }
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a' }))
+    const env = { SESSIONS: { list, get } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
   })
 
   it('skips a refresh_token minted by a different (e.g. retired Blue/Green) client', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid1', 'sid2']))
       if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-old', access_token: 'at', expires_at: 0, client_id: 'client-old' }))
       if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-current', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
       return Promise.resolve(null)
     })
-    const env = { SESSIONS: { get } }
+    const env = { SESSIONS: { list, get } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt-current')
   })
 
   it('returns null when the only matching session predates client_id tracking', async () => {
-    const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid1']))
-      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0 }))
-      return Promise.resolve(null)
-    })
-    const env = { SESSIONS: { get } }
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0 }))
+    const env = { SESSIONS: { list, get } }
     expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
   })
 
-  it('normalizes email (uppercase) before looking up index', async () => {
-    const get = vi.fn().mockResolvedValue(null)
-    const env = { SESSIONS: { get } }
+  it('normalizes email (uppercase) before listing the index', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
+    const env = { SESSIONS: { list } }
     await getRefreshTokenForEmail('User@Example.COM', 'client-a', env as any)
-    expect(get).toHaveBeenCalledWith('email_sessions:user@example.com')
+    expect(list).toHaveBeenCalledWith({ prefix: 'esidx:user@example.com:' })
+  })
+
+  it('follows the cursor across multiple pages of indexed sessions', async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: false, cursor: 'c1' })
+      .mockResolvedValueOnce({ keys: [{ name: 'esidx:user@example.com:sid2' }], list_complete: true })
+    const get = vi.fn().mockImplementation((key: string) =>
+      key === 'session:sid2' ? Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a' })) : Promise.resolve(null)
+    )
+    const env = { SESSIONS: { list, get } }
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt2')
+    expect(list).toHaveBeenNthCalledWith(1, { prefix: 'esidx:user@example.com:', cursor: undefined })
+    expect(list).toHaveBeenNthCalledWith(2, { prefix: 'esidx:user@example.com:', cursor: 'c1' })
   })
 })
 
 describe('invalidateSession', () => {
-  it('removes the session record and the email index entry', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
-    const put = vi.fn()
+  // Deletes the session record *first*: if only one of the two deletes can land,
+  // a dangling index entry (harmless — getSession returns null for it and every
+  // caller already skips null sessions) is far preferable to a live session left
+  // silently unreachable via the email index.
+  it('deletes the session record before removing the email index entry', async () => {
     const del = vi.fn()
-    const env = { SESSIONS: { get, put, delete: del } }
+    const env = { SESSIONS: { delete: del } }
     await invalidateSession('sid1', 'user@example.com', env as any)
-    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid2']), { expirationTtl: SESSION_TTL })
-    expect(del).toHaveBeenCalledWith('session:sid1')
+    expect(del).toHaveBeenNthCalledWith(1, 'session:sid1')
+    expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid1')
   })
 
   it('deletes the session record without touching the index when email is unknown', async () => {
-    const get = vi.fn()
     const del = vi.fn()
-    const env = { SESSIONS: { get, delete: del } }
+    const env = { SESSIONS: { delete: del } }
     await invalidateSession('sid1', undefined, env as any)
-    expect(get).not.toHaveBeenCalled()
+    expect(del).toHaveBeenCalledTimes(1)
     expect(del).toHaveBeenCalledWith('session:sid1')
   })
 })
 
 describe('removeEmailSessionIndex', () => {
-  it('removes a session ID from the index', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
-    const put = vi.fn()
-    const del = vi.fn()
-    const env = { SESSIONS: { get, put, delete: del } }
-    await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
-    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid2']), { expirationTtl: SESSION_TTL })
-    expect(del).not.toHaveBeenCalled()
-  })
-
-  it('deletes the index key when the last session is removed', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1']))
+  it('deletes the index entry for that one session, without reading or touching any other session', async () => {
+    const get = vi.fn()
     const del = vi.fn()
     const env = { SESSIONS: { get, delete: del } }
     await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
-    expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+    expect(get).not.toHaveBeenCalled()
+    expect(del).toHaveBeenCalledTimes(1)
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid1')
   })
 
-  it('does nothing when no index exists', async () => {
-    const get = vi.fn().mockResolvedValue(null)
-    const put = vi.fn()
+  it('normalizes email before deleting the key', async () => {
     const del = vi.fn()
-    const env = { SESSIONS: { get, put, delete: del } }
-    await removeEmailSessionIndex('user@example.com', 'sid1', env as any)
-    expect(put).not.toHaveBeenCalled()
-    expect(del).not.toHaveBeenCalled()
+    const env = { SESSIONS: { delete: del } }
+    await removeEmailSessionIndex('User@Example.COM', 'sid1', env as any)
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid1')
   })
 })
 
 describe('deleteAllSessionsForEmail', () => {
-  it('deletes all sessions and removes the index key', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
+  it('deletes every indexed session record and its own index entry', async () => {
+    const list = vi.fn().mockResolvedValue({
+      keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }],
+      list_complete: true,
+    })
     const del = vi.fn().mockResolvedValue(undefined)
-    const env = { SESSIONS: { get, delete: del } }
+    const env = { SESSIONS: { list, delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
-    expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid1')
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
   })
 
-  it('normalizes email (uppercase) before looking up index', async () => {
-    const get = vi.fn().mockResolvedValue(null)
-    const env = { SESSIONS: { get, delete: vi.fn() } }
+  it('normalizes email (uppercase) before listing the index', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
+    const env = { SESSIONS: { list, delete: vi.fn() } }
     await deleteAllSessionsForEmail('User@Example.COM', env as any)
-    expect(get).toHaveBeenCalledWith('email_sessions:user@example.com')
+    expect(list).toHaveBeenCalledWith({ prefix: 'esidx:user@example.com:' })
   })
 
-  it('keeps failed session IDs in the index when a delete fails', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2']))
+  it('still deletes the other indexed sessions when one session record fails to delete', async () => {
+    // Regression guard: each session's index entry is independent (see
+    // addEmailSessionIndex), so one KV failure must not abort or corrupt the
+    // others — unlike the old shared-array design, there is no combined state
+    // to "keep the failed ones in" any more; a session that fails to delete
+    // here simply lingers until its own pre-existing TTL, same residual risk
+    // as before.
+    const list = vi.fn().mockResolvedValue({
+      keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }],
+      list_complete: true,
+    })
     const del = vi.fn().mockImplementation((key: string) =>
       key === 'session:sid1' ? Promise.reject(new Error('KV error')) : Promise.resolve(undefined)
     )
-    const put = vi.fn()
-    const env = { SESSIONS: { get, delete: del, put } }
+    const env = { SESSIONS: { list, delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
-    expect(put).toHaveBeenCalledWith(
-      'email_sessions:user@example.com',
-      JSON.stringify(['sid1']),
-      expect.objectContaining({ expirationTtl: expect.any(Number) }),
-    )
+    expect(del).toHaveBeenCalledWith('session:sid2')
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
   })
 
-  it('does nothing when no index exists', async () => {
-    const get = vi.fn().mockResolvedValue(null)
+  it('does nothing when no sessions are indexed', async () => {
+    const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
     const del = vi.fn()
-    const env = { SESSIONS: { get, delete: del } }
+    const env = { SESSIONS: { list, delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
     expect(del).not.toHaveBeenCalled()
   })

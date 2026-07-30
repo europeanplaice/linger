@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 interface Env {
-  SESSIONS: { get: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; put: ReturnType<typeof vi.fn> }
+  SESSIONS: { get: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; put: ReturnType<typeof vi.fn>; list?: ReturnType<typeof vi.fn> }
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   SESSION_DOMAIN: string
@@ -23,7 +23,7 @@ interface Env {
 
 function makeEnv(overrides?: Partial<Env>): Env {
   return {
-    SESSIONS: { get: vi.fn(), delete: vi.fn(), put: vi.fn() },
+    SESSIONS: { get: vi.fn(), delete: vi.fn(), put: vi.fn(), list: vi.fn().mockResolvedValue({ keys: [], list_complete: true }) },
     GOOGLE_CLIENT_ID: 'client-id',
     GOOGLE_CLIENT_SECRET: 'client-secret',
     SESSION_DOMAIN: 'https://example.com',
@@ -106,18 +106,19 @@ describe('onRequestGet (OAuth callback)', () => {
       }),
     ))
     const put = vi.fn()
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:old-session' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['old-session']))
       if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'client-id' }))
       return Promise.resolve('verifier')
     })
-    const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put } })
+    const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put } })
     const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
 
     const response = await onRequestGet({ request, env } as any)
 
     expect(response.status).toBe(302)
-    const savedSession = JSON.parse(put.mock.calls[0][1] as string)
+    const sessionCall = put.mock.calls.find(call => (call[0] as string).startsWith('session:'))
+    const savedSession = JSON.parse(sessionCall![1] as string)
     expect(savedSession.refresh_token).toBe('stored-rt')
     expect(savedSession.client_id).toBe('client-id')
   })
@@ -130,12 +131,12 @@ describe('onRequestGet (OAuth callback)', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
+    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:old-session' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['old-session']))
       if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'retired-client' }))
       return Promise.resolve('verifier')
     })
-    const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put: vi.fn() } })
+    const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put: vi.fn() } })
     const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
 
     const response = await onRequestGet({ request, env } as any)
@@ -178,15 +179,14 @@ describe('onRequestGet (OAuth callback)', () => {
       }),
     ))
     const put = vi.fn()
-    const get = vi.fn().mockImplementation((key: string) =>
-      Promise.resolve(key.startsWith('email_sessions:') ? null : 'verifier')
-    )
+    const get = vi.fn().mockResolvedValue('verifier')
     const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put } })
     const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
 
     await onRequestGet({ request, env } as any)
 
-    const savedSession = JSON.parse(put.mock.calls[0][1] as string)
+    const sessionCall = put.mock.calls.find(call => (call[0] as string).startsWith('session:'))
+    const savedSession = JSON.parse(sessionCall![1] as string)
     expect(savedSession.email).toBe('user@example.com')
   })
 

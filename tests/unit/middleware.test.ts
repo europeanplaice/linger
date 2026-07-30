@@ -102,23 +102,21 @@ describe('API auth middleware', () => {
     const expiredSession = makeSession({ expires_at: Date.now() - 60_000, email: 'user@example.com' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
     const del = vi.fn()
-    const put = vi.fn()
     const get = vi.fn().mockImplementation((key: string) => {
       if (key === 'session:sid123') return Promise.resolve(JSON.stringify(expiredSession))
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid123', 'sid456']))
       return Promise.resolve(null)
     })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
         headers: { Cookie: 'linger_session=sid123' },
       }),
-      env: { SESSIONS: { get, put, delete: del } },
+      env: { SESSIONS: { get, put: vi.fn(), delete: del } },
     })
 
     await onRequest(ctx as any)
 
-    expect(put).toHaveBeenCalledWith('email_sessions:user@example.com', JSON.stringify(['sid456']), { expirationTtl: 60 * 60 * 24 * 30 })
-    expect(del).toHaveBeenCalledWith('session:sid123')
+    expect(del).toHaveBeenNthCalledWith(1, 'session:sid123')
+    expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid123')
   })
 
   it('returns 401 on a transient refresh failure (503) but does NOT invalidate the session', async () => {
@@ -194,6 +192,58 @@ describe('API auth middleware', () => {
     await onRequest(ctx as any)
 
     expect(put).toHaveBeenCalledOnce()
+  })
+
+  it('renews the email index TTL alongside the session record when renewal fires and an email is on file', async () => {
+    // Regression guard: the index key (esidx:{email}:{sessionId}, see
+    // session.ts) carries its own TTL, separate from the session record's. If
+    // it isn't re-stamped every time the session's sliding TTL renews, an
+    // actively-used session would still silently fall out of the email index
+    // (and out of /auth/risc's reach) after the *original* login's 30 days,
+    // even though the session itself lives on indefinitely via renewal.
+    const session = makeSession({ email: 'user@example.com' })
+    const put = vi.fn()
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
+    })
+
+    await onRequest(ctx as any)
+
+    expect(put).toHaveBeenCalledWith('esidx:user@example.com:sid123', '', { expirationTtl: 60 * 60 * 24 * 30 })
+  })
+
+  it('does not touch the email index when the session has no email on file', async () => {
+    const session = makeSession()
+    const put = vi.fn()
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
+    })
+
+    await onRequest(ctx as any)
+
+    expect(put).toHaveBeenCalledTimes(1) // only the session record itself
+    expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
+  })
+
+  it('does not renew the email index when renewal is skipped (recent renewed_at)', async () => {
+    const session = makeSession({ email: 'user@example.com', renewed_at: Date.now() - 60_000 })
+    const put = vi.fn()
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
+    })
+
+    await onRequest(ctx as any)
+
+    expect(put).not.toHaveBeenCalled()
   })
 
   it('sets X-Deploy-Version header when CF_PAGES_COMMIT_SHA is present in env', async () => {

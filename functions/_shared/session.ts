@@ -169,14 +169,53 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
 }
 
+// Each session gets its own KV key under an email-prefixed namespace, rather than
+// one aggregate key holding a JSON array of session IDs. That aggregate design
+// required a read-modify-write on every add/remove with no locking — two devices
+// signing in for the same email at close to the same time (or even ~60s apart,
+// given KV's edge-cache/propagation delay) could both read the same stale array
+// and each append their own session ID, silently dropping the other's from the
+// index on whichever `put` landed last. The dropped session's own `session:{id}`
+// record stayed valid — it just became unreachable via the index, so it survived
+// deleteAllSessionsForEmail (used by /auth/risc's revocation) and was invisible to
+// getRefreshTokenForEmail. Keying by session ID makes every add/remove a single
+// put/delete with nothing to read first, so this class of lost update can't happen.
+function emailSessionIndexPrefix(email: string): string {
+  return `esidx:${normalizeEmail(email)}:`
+}
+
+function emailSessionIndexKey(email: string, sessionId: string): string {
+  return `${emailSessionIndexPrefix(email)}${sessionId}`
+}
+
+// Also called on every sliding TTL renewal (see _middleware.ts) to re-stamp this
+// key's own TTL in step with the session record's — otherwise an actively-used,
+// renewed session would still fall out of the index (and out of RISC's reach)
+// after the *original* login's TTL, even though the session itself lives on.
 export async function addEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
-  const key = `email_sessions:${normalizeEmail(email)}`
-  const raw = await env.SESSIONS.get(key)
-  const ids: string[] = raw ? (JSON.parse(raw) as string[]) : []
-  if (!ids.includes(sessionId)) {
-    ids.push(sessionId)
-    await env.SESSIONS.put(key, JSON.stringify(ids), { expirationTtl: SESSION_TTL })
+  await env.SESSIONS.put(emailSessionIndexKey(email, sessionId), '', { expirationTtl: SESSION_TTL })
+}
+
+export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
+  await env.SESSIONS.delete(emailSessionIndexKey(email, sessionId))
+}
+
+// Caps list() pagination — no real account will ever approach this many
+// concurrent sessions; it only bounds worst-case latency against a very long-
+// lived account's index.
+const MAX_INDEX_LIST_PAGES = 10
+
+async function listSessionIdsForEmail(email: string, env: Env): Promise<string[]> {
+  const prefix = emailSessionIndexPrefix(email)
+  const ids: string[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < MAX_INDEX_LIST_PAGES; page++) {
+    const result = await env.SESSIONS.list({ prefix, cursor })
+    ids.push(...result.keys.map(k => k.name.slice(prefix.length)))
+    if (result.list_complete) break
+    cursor = result.cursor
   }
+  return ids
 }
 
 // Only reuses a refresh_token minted by the currently-live OAuth client — after a
@@ -184,10 +223,7 @@ export async function addEmailSessionIndex(email: string, sessionId: string, env
 // (invalid_grant) on every refresh, so blindly reusing the oldest surviving session
 // forces the user into a repeated fail-then-relogin loop instead of a single relogin.
 export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env): Promise<string | null> {
-  const key = `email_sessions:${normalizeEmail(email)}`
-  const raw = await env.SESSIONS.get(key)
-  if (!raw) return null
-  const ids = JSON.parse(raw) as string[]
+  const ids = await listSessionIdsForEmail(email, env)
   for (const id of ids) {
     const session = await getSession(id, env)
     if (session?.refresh_token && session.client_id === clientId) return session.refresh_token
@@ -195,40 +231,32 @@ export async function getRefreshTokenForEmail(email: string, clientId: string, e
   return null
 }
 
-export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
-  const key = `email_sessions:${normalizeEmail(email)}`
-  const raw = await env.SESSIONS.get(key)
-  if (!raw) return
-  const ids = (JSON.parse(raw) as string[]).filter(id => id !== sessionId)
-  if (ids.length === 0) {
-    await env.SESSIONS.delete(key)
-  } else {
-    await env.SESSIONS.put(key, JSON.stringify(ids), { expirationTtl: SESSION_TTL })
-  }
-}
-
 // Removes a single dead session (e.g. refresh failed) from both the session record
 // and the email index, so it stops being offered as a reuse candidate by
-// getRefreshTokenForEmail while it waits out its KV TTL.
+// getRefreshTokenForEmail while it waits out its KV TTL. Deletes the session record
+// first: if only one of the two deletes can land, a dangling index entry (harmless
+// — getSession returns null for it and every caller already skips null sessions)
+// is far preferable to a live session left silently unreachable via the index.
 export async function invalidateSession(sessionId: string, email: string | undefined, env: Env): Promise<void> {
+  await env.SESSIONS.delete(`session:${sessionId}`)
   if (email) {
     await removeEmailSessionIndex(email, sessionId, env)
   }
-  await env.SESSIONS.delete(`session:${sessionId}`)
 }
 
+// Each session's index entry is independent (see addEmailSessionIndex), so unlike
+// the old shared-array design there's no combined state that a partial failure
+// could corrupt — one session's delete failing can't affect another's. A session
+// whose KV delete fails here simply lingers until its own pre-existing TTL, the
+// same bounded residual risk this function already carried before this change.
 export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {
-  const key = `email_sessions:${normalizeEmail(email)}`
-  const raw = await env.SESSIONS.get(key)
-  if (!raw) return
-  const ids = JSON.parse(raw) as string[]
-  const results = await Promise.allSettled(ids.map(id => env.SESSIONS.delete(`session:${id}`)))
-  const failedIds = ids.filter((_, i) => results[i].status === 'rejected')
-  if (failedIds.length === 0) {
-    await env.SESSIONS.delete(key)
-  } else {
-    await env.SESSIONS.put(key, JSON.stringify(failedIds), { expirationTtl: SESSION_TTL })
-  }
+  const ids = await listSessionIdsForEmail(email, env)
+  await Promise.allSettled(ids.map(async id => {
+    await Promise.allSettled([
+      env.SESSIONS.delete(`session:${id}`),
+      removeEmailSessionIndex(email, id, env),
+    ])
+  }))
 }
 
 export function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {

@@ -95,10 +95,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
     ...(googleSub ? { google_sub: googleSub } : {}),
   }
-  await saveSession(sessionId, session, env)
+  // Written before saveSession: if the index write fails, no session was ever
+  // created (fails the login, visibly and retryably); if saveSession instead
+  // failed *after* a successful index write, the only trace left is a dangling
+  // index entry pointing at a session that doesn't exist — harmless, since
+  // getSession/getRefreshTokenForEmail already treat a missing session record
+  // as absent. The other order risks the opposite and worse case: a live
+  // session with no index entry, invisible to /auth/risc's revocation.
   if (email) {
     await addEmailSessionIndex(email, sessionId, env)
   }
+  await saveSession(sessionId, session, env)
 
   const secure = !env.SESSION_DOMAIN.startsWith('http://')
 

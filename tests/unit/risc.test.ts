@@ -102,7 +102,13 @@ function mockCrypto(verifyResult: boolean) {
 
 function makeEnv(sessionsOverrides?: object) {
   return {
-    SESSIONS: { get: vi.fn().mockResolvedValue(null), delete: vi.fn(), put: vi.fn(), ...sessionsOverrides },
+    SESSIONS: {
+      get: vi.fn().mockResolvedValue(null),
+      delete: vi.fn(),
+      put: vi.fn(),
+      list: vi.fn().mockResolvedValue({ keys: [], list_complete: true }),
+      ...sessionsOverrides,
+    },
     GOOGLE_CLIENT_ID: 'client-id',
     GOOGLE_CLIENT_SECRET: 'secret',
     SESSION_DOMAIN: 'https://example.com',
@@ -261,7 +267,10 @@ describe('onRequestPost (RISC webhook)', () => {
     mockJwks()
     const del = vi.fn()
     const env = makeEnv({
-      get: vi.fn().mockResolvedValue(JSON.stringify(['sid1', 'sid2'])),
+      list: vi.fn().mockResolvedValue({
+        keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }],
+        list_complete: true,
+      }),
       delete: del,
     })
     const jwt = makeJwt(VALID_HEADER, validPayload())
@@ -273,7 +282,8 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(body).toMatchObject({ ok: true, handled: 1, revoked: 1 })
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
-    expect(del).toHaveBeenCalledWith('email_sessions:user@example.com')
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid1')
+    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
   })
 
   it('uses cached JWKS and skips fetch on cache hit', async () => {
@@ -362,7 +372,7 @@ describe('onRequestPost (RISC webhook)', () => {
     mockJwks()
     const del = vi.fn()
     const env = makeEnv({
-      get: vi.fn().mockResolvedValue(JSON.stringify(['sid1'])),
+      list: vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true }),
       delete: del,
     })
     const payload = validPayload({

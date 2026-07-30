@@ -27,24 +27,18 @@ describe('logout handler', () => {
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 9999999999999, email: 'user@example.com' }
     const get = vi.fn().mockImplementation((key: string) => {
       if (key === 'session:sid123') return Promise.resolve(JSON.stringify(session))
-      if (key === 'email_sessions:user@example.com') return Promise.resolve(JSON.stringify(['sid123', 'sid456']))
       return Promise.resolve(null)
     })
     const del = vi.fn()
-    const put = vi.fn()
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid123' },
     })
-    const env = { SESSIONS: { get, delete: del, put }, SESSION_DOMAIN: 'https://example.com' }
+    const env = { SESSIONS: { get, delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
     await onLogout({ request, env } as any)
 
-    expect(put).toHaveBeenCalledWith(
-      'email_sessions:user@example.com',
-      JSON.stringify(['sid456']),
-      expect.objectContaining({ expirationTtl: expect.any(Number) }),
-    )
-    expect(del).toHaveBeenCalledWith('session:sid123')
+    expect(del).toHaveBeenNthCalledWith(1, 'session:sid123')
+    expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid123')
   })
 
   it('works without a session cookie', async () => {
