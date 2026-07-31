@@ -49,21 +49,15 @@ function driveHeaders(token: string, extra?: Record<string, string>): Record<str
   }
 }
 
-// Bounds every outbound Drive request so a stalled connection can't block a Workers
-// invocation indefinitely (e.g. a backfill chunk stuck on one date, silently killed
-// by the platform's CPU/wall-clock limit with no error ever recorded) — instead it
-// fails after this long, which the caller can catch and skip past like any other error.
+// Bounds every outbound Drive request (headers *and* body — an AbortSignal cancels
+// the whole exchange, unlike racing a wrapper promise around just the fetch() call)
+// so a stalled connection can't block a Workers invocation indefinitely (e.g. a
+// backfill chunk stuck reading one entry's body, silently killed by the platform's
+// CPU/wall-clock limit with no error ever recorded) — instead it fails after this
+// long, which the caller can catch and skip past like any other error. Every fetch()
+// call site below passes this as `signal`; a fresh one is created per call so each
+// retry attempt gets its own full budget.
 const DRIVE_FETCH_TIMEOUT_MS = 20_000
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new DriveError(0, `Drive request timed out after ${ms}ms`)), ms)
-    promise.then(
-      v => { clearTimeout(timer); resolve(v) },
-      e => { clearTimeout(timer); reject(e) },
-    )
-  })
-}
 
 async function driveWithRetry<T>(
   fetcher: () => Promise<Response>,
@@ -72,7 +66,7 @@ async function driveWithRetry<T>(
 ): Promise<T> {
   const delays = [250, 500, 1000]
   for (let attempt = 0; ; attempt++) {
-    const res = await withTimeout(fetcher(), DRIVE_FETCH_TIMEOUT_MS)
+    const res = await fetcher()
     if (res.ok || (accept204 && res.status === 204)) return parse(res)
 
     if (res.status === 412) throw new DriveConflictError()
@@ -98,7 +92,7 @@ export async function ensureFolder(token: string, sessionId: string, session: Se
   const folderName = getFolderName(env.SESSION_DOMAIN)
   const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`)
   const list = await driveWithRetry(
-    () => fetch(`${BASE}/files?q=${q}&fields=files(id,name)`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files?q=${q}&fields=files(id,name)`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<{ files: { id: string }[] }>,
   )
 
@@ -111,6 +105,7 @@ export async function ensureFolder(token: string, sessionId: string, session: Se
         method: 'POST',
         headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder' }),
+        signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
       }),
       r => r.json() as Promise<{ id: string }>,
     )
@@ -154,7 +149,7 @@ async function listAllFiles(token: string, baseUrl: string): Promise<DriveFileMe
   do {
     const url = pageToken ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}` : baseUrl
     const res = await driveWithRetry(
-      () => fetch(url, { headers: driveHeaders(token) }),
+      () => fetch(url, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
       r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
     )
     if (res.files) files.push(...res.files)
@@ -194,7 +189,7 @@ export interface ChangesResult {
 // Gets the initial start page token (used after a full listEntries call).
 export async function getStartPageToken(token: string): Promise<string> {
   const res = await driveWithRetry(
-    () => fetch(`${BASE}/changes/startPageToken?supportsAllDrives=false`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/changes/startPageToken?supportsAllDrives=false`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<{ startPageToken: string }>,
   )
   return res.startPageToken
@@ -215,7 +210,7 @@ export async function getChanges(token: string, pageToken: string): Promise<Chan
   for (;;) {
     const url = `${BASE}/changes?pageToken=${encodeURIComponent(cursor)}&spaces=drive&restrictToMyDrive=true&includeRemoved=true&includeItemsFromAllDrives=false&fields=${fields}`
     const res = await driveWithRetry(
-      () => fetch(url, { headers: driveHeaders(token) }),
+      () => fetch(url, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
       r => r.json() as Promise<{ changes?: RawChange[]; nextPageToken?: string; newStartPageToken?: string }>,
     )
     for (const c of res.changes ?? []) {
@@ -238,7 +233,7 @@ export async function findEntryMeta(token: string, sessionId: string, session: S
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and (name='diary-${date}.md' or name='diary-${date}.txt')`)
     const fields = encodeURIComponent('files(id,name,modifiedTime,version)')
     const res = await driveWithRetry(
-      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token) }),
+      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
       r => r.json() as Promise<{ files: DriveFileMeta[] }>,
     )
     return res.files[0] ?? null
@@ -248,7 +243,7 @@ export async function findEntryMeta(token: string, sessionId: string, session: S
 export async function getEntryMeta(token: string, fileId: string): Promise<DriveFileMeta> {
   const fields = encodeURIComponent('id,name,modifiedTime,version,mimeType,parents,trashed')
   return driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}?fields=${fields}`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}?fields=${fields}`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<DriveFileMeta>,
   )
 }
@@ -313,7 +308,7 @@ function parseEntry(text: string, date: string): DiaryEntry {
 
 export async function getEntryContent(token: string, fileId: string, date: string): Promise<DiaryEntry> {
   return driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     async r => parseEntry(await r.text(), date),
   )
 }
@@ -352,6 +347,7 @@ export async function saveEntry(
         method: 'PATCH',
         headers: driveHeaders(token, extra),
         body,
+        signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
       }),
       r => r.json() as Promise<DriveFileMeta>,
     )
@@ -365,6 +361,7 @@ export async function saveEntry(
       method: 'POST',
       headers: driveHeaders(token, { 'Content-Type': contentType }),
       body: data,
+      signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
     }),
     r => r.json() as Promise<DriveFileMeta>,
   )
@@ -390,6 +387,7 @@ export async function migrateMdToTxt(token: string, sessionId: string, session: 
         method: 'PATCH',
         headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name }),
+        signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
       }),
       r => r.json() as Promise<{ id: string }>,
     )
@@ -399,7 +397,7 @@ export async function migrateMdToTxt(token: string, sessionId: string, session: 
 
 export async function deleteEntry(token: string, fileId: string): Promise<void> {
   await driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}`, { method: 'DELETE', headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}`, { method: 'DELETE', headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     () => Promise.resolve(),
     true,
   )
@@ -408,7 +406,7 @@ export async function deleteEntry(token: string, fileId: string): Promise<void> 
 export async function listRevisions(token: string, fileId: string): Promise<DriveRevisionMeta[]> {
   const fields = encodeURIComponent('revisions(id,modifiedTime,size)')
   const res = await driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}/revisions?fields=${fields}`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}/revisions?fields=${fields}`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<{ revisions: DriveRevisionMeta[] }>,
   )
   return (res.revisions ?? []).slice().reverse()
@@ -418,14 +416,14 @@ export async function getRevisionContent(token: string, fileId: string, revision
   // The date is not available here; old revisions carry it in frontmatter and
   // new revisions have none. An empty date is acceptable for revision display.
   return driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}/revisions/${revisionId}?alt=media`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}/revisions/${revisionId}?alt=media`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     async r => parseEntry(await r.text(), ''),
   )
 }
 
 export async function readJsonFile<T>(token: string, fileId: string): Promise<T> {
   return driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     async r => JSON.parse(await r.text()) as T,
   )
 }
@@ -435,7 +433,7 @@ export async function findJsonFile(token: string, folderId: string, fileName: st
   const q = encodeURIComponent(`name='${escapedName}' and '${folderId}' in parents and trashed=false`)
   const fields = encodeURIComponent('files(id)')
   const res = await driveWithRetry(
-    () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token) }),
+    () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<{ files?: { id: string }[] }>,
   )
   return res.files?.[0]?.id ?? null
@@ -458,6 +456,7 @@ export async function writeJsonFile(
         method: 'PATCH',
         headers: driveHeaders(token, { 'Content-Type': contentType }),
         body: data,
+        signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
       }),
       r => r.json() as Promise<DriveFileMeta>,
     )
@@ -473,6 +472,7 @@ export async function writeJsonFile(
       method: 'POST',
       headers: driveHeaders(token, { 'Content-Type': contentType }),
       body: data,
+      signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
     }),
     r => r.json() as Promise<DriveFileMeta>,
   )
