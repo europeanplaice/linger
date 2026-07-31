@@ -140,6 +140,16 @@ export async function headObjectVersion(creds: AssumedCredentials, bucket: strin
 // object. Compares against the version already stored in the object's metadata rather
 // than relying on request arrival order, which is not guaranteed under concurrent waitUntil
 // calls.
+//
+// The pre-write HEAD check alone only narrows that window, it doesn't close it: S3 has no
+// compare-and-swap, so two concurrent callers can both pass the check before either PUTs,
+// and whichever PUT physically lands second becomes the object's "current" version — even
+// if it's the older one. So after our own PUT, we re-HEAD to confirm our version (or a
+// still-newer one from another writer) actually won; if a stale write landed after ours, we
+// retry to reassert. Bounded and best-effort like every other write path in this file — a
+// loss after all attempts self-heals on the next mirror/resync of this date.
+const PUT_IF_NEWER_MAX_ATTEMPTS = 3
+
 export async function putObjectIfNewer(
   creds: AssumedCredentials,
   bucket: string,
@@ -149,11 +159,16 @@ export async function putObjectIfNewer(
   version?: string,
   contentType?: string,
 ): Promise<void> {
-  if (version) {
-    const existing = await headObjectVersion(creds, bucket, region, key)
-    if (existing && isAtLeast(existing, version)) return
+  for (let attempt = 0; attempt < PUT_IF_NEWER_MAX_ATTEMPTS; attempt++) {
+    if (version) {
+      const existing = await headObjectVersion(creds, bucket, region, key)
+      if (existing && isAtLeast(existing, version)) return
+    }
+    await putObject(creds, bucket, region, key, body, contentType, version)
+    if (!version) return
+    const landed = await headObjectVersion(creds, bucket, region, key)
+    if (landed && isAtLeast(landed, version)) return
   }
-  await putObject(creds, bucket, region, key, body, contentType, version)
 }
 
 function unescapeXmlEntities(s: string): string {

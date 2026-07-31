@@ -136,13 +136,15 @@ describe('putObjectIfNewer', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD
       .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // verify HEAD
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect((fetchMock.mock.calls[0][0] as Request).method).toBe('HEAD')
     expect((fetchMock.mock.calls[1][0] as Request).method).toBe('PUT')
+    expect((fetchMock.mock.calls[2][0] as Request).method).toBe('HEAD')
   })
 
   it('skips the write when the existing object is already at least as new', async () => {
@@ -159,22 +161,52 @@ describe('putObjectIfNewer', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 404 })) // HEAD: not found
       .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '1' } })) // verify HEAD
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('writes when the existing version metadata is not a parseable number', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': 'not-a-number' } }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '1' } })) // verify HEAD
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries the write when a concurrent stale write lands after ours', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 404 })) // HEAD (attempt 1): not found
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT (attempt 1): version 7
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // verify: a slower concurrent write (version 5) landed after ours and won
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD (attempt 2): still stale
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT (attempt 2): reassert version 7
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // verify: our write won this time
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
+
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'HEAD', 'HEAD', 'PUT', 'HEAD'])
+  })
+
+  it('gives up silently after exhausting retries against a persistently stale write', async () => {
+    const fetchMock = vi.fn().mockImplementation((req: Request) =>
+      Promise.resolve(req.method === 'HEAD'
+        ? new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })
+        : new Response(null, { status: 200 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenCalledTimes(9) // 3 attempts × (HEAD + PUT + verify HEAD)
   })
 })
 
