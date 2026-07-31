@@ -49,6 +49,22 @@ function driveHeaders(token: string, extra?: Record<string, string>): Record<str
   }
 }
 
+// Bounds every outbound Drive request so a stalled connection can't block a Workers
+// invocation indefinitely (e.g. a backfill chunk stuck on one date, silently killed
+// by the platform's CPU/wall-clock limit with no error ever recorded) — instead it
+// fails after this long, which the caller can catch and skip past like any other error.
+const DRIVE_FETCH_TIMEOUT_MS = 20_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new DriveError(0, `Drive request timed out after ${ms}ms`)), ms)
+    promise.then(
+      v => { clearTimeout(timer); resolve(v) },
+      e => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
 async function driveWithRetry<T>(
   fetcher: () => Promise<Response>,
   parse: (r: Response) => Promise<T>,
@@ -56,7 +72,7 @@ async function driveWithRetry<T>(
 ): Promise<T> {
   const delays = [250, 500, 1000]
   for (let attempt = 0; ; attempt++) {
-    const res = await fetcher()
+    const res = await withTimeout(fetcher(), DRIVE_FETCH_TIMEOUT_MS)
     if (res.ok || (accept204 && res.status === 204)) return parse(res)
 
     if (res.status === 412) throw new DriveConflictError()

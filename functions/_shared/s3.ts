@@ -25,6 +25,22 @@ const credentialsCache = new Map<string, { creds: AssumedCredentials; expiresAt:
 // cache hit never hands out credentials that could die mid-operation.
 const CREDENTIALS_EXPIRY_MARGIN_MS = 5 * 60 * 1000
 
+// Bounds every outbound STS/S3 request so a stalled connection can't block a Workers
+// invocation indefinitely (e.g. a backfill chunk stuck on one date, silently killed
+// by the platform's CPU/wall-clock limit with no error ever recorded) — instead it
+// fails after this long, which the caller can catch and skip past like any other error.
+const S3_FETCH_TIMEOUT_MS = 20_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new S3Error(0, `S3/STS request timed out after ${ms}ms`)), ms)
+    promise.then(
+      v => { clearTimeout(timer); resolve(v) },
+      e => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
 // sts:AssumeRoleWithWebIdentity is unauthenticated (that's the point of web
 // identity federation) — no request signing needed for this call itself, only
 // for the S3 requests made afterwards with the credentials it returns.
@@ -43,10 +59,10 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     DurationSeconds: '3600',
   })
 
-  const resp = await fetch(`https://sts.${region}.amazonaws.com/?${params.toString()}`, {
+  const resp = await withTimeout(fetch(`https://sts.${region}.amazonaws.com/?${params.toString()}`, {
     method: 'POST',
     headers: { Accept: 'application/json' },
-  })
+  }), S3_FETCH_TIMEOUT_MS)
 
   if (!resp.ok) {
     const body = await resp.text()
@@ -108,11 +124,11 @@ export async function putObject(
   const client = s3Client(creds, region)
   const headers: Record<string, string> = { 'Content-Type': contentType }
   if (version) headers['x-amz-meta-linger-version'] = version
-  const resp = await client.fetch(objectUrl(bucket, region, key), {
+  const resp = await withTimeout(client.fetch(objectUrl(bucket, region, key), {
     method: 'PUT',
     headers,
     body,
-  })
+  }), S3_FETCH_TIMEOUT_MS)
   if (!resp.ok) {
     throw new S3Error(resp.status, `S3 PutObject failed: ${await resp.text()}`)
   }
@@ -130,7 +146,7 @@ export function isAtLeast(existing: string, incoming: string): boolean {
 // null if the object doesn't exist (or carries no version metadata).
 export async function headObjectVersion(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<string | null> {
   const client = s3Client(creds, region)
-  const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD' })
+  const head = await withTimeout(client.fetch(objectUrl(bucket, region, key), { method: 'HEAD' }), S3_FETCH_TIMEOUT_MS)
   if (!head.ok) return null
   return head.headers.get('x-amz-meta-linger-version')
 }
@@ -199,7 +215,7 @@ export async function listObjectKeys(creds: AssumedCredentials, bucket: string, 
   for (let page = 0; page < MAX_LIST_PAGES; page++) {
     const params = new URLSearchParams({ 'list-type': '2', prefix, 'max-keys': '1000' })
     if (continuationToken) params.set('continuation-token', continuationToken)
-    const resp = await client.fetch(`https://${bucket}.s3.${region}.amazonaws.com/?${params.toString()}`, { method: 'GET' })
+    const resp = await withTimeout(client.fetch(`https://${bucket}.s3.${region}.amazonaws.com/?${params.toString()}`, { method: 'GET' }), S3_FETCH_TIMEOUT_MS)
     if (!resp.ok) {
       throw new S3Error(resp.status, `S3 ListObjectsV2 failed: ${await resp.text()}`)
     }
@@ -217,7 +233,7 @@ export async function listObjectKeys(creds: AssumedCredentials, bucket: string, 
 
 export async function deleteObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<void> {
   const client = s3Client(creds, region)
-  const resp = await client.fetch(objectUrl(bucket, region, key), { method: 'DELETE' })
+  const resp = await withTimeout(client.fetch(objectUrl(bucket, region, key), { method: 'DELETE' }), S3_FETCH_TIMEOUT_MS)
   if (!resp.ok && resp.status !== 404) {
     throw new S3Error(resp.status, `S3 DeleteObject failed: ${await resp.text()}`)
   }

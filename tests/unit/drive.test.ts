@@ -228,7 +228,10 @@ describe('getEntryContent', () => {
       await vi.runAllTimersAsync()
       await promise
 
-      const delayArg = setTimeoutSpy.mock.calls[0][1] as number
+      // Look up the retry-delay timer by value rather than call order: the request
+      // timeout guard (see withTimeout in drive.ts) also schedules a setTimeout on
+      // every attempt, so the retry delay isn't necessarily the first call recorded.
+      const delayArg = setTimeoutSpy.mock.calls.map(call => call[1]).find(delay => delay === 1000)
       expect(delayArg).toBe(1000)
     } finally {
       vi.mocked(Math.random).mockRestore()
