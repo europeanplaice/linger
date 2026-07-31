@@ -23,6 +23,8 @@ export interface SessionData {
   google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
   s3_settings_negative_cache_at?: number // ms since epoch — last time a save/delete confirmed no s3_settings.json exists, so Drive-only users don't pay a files.list lookup on every save
   s3_settings_file_id?: string // Drive fileId of s3_settings.json, cached like folder_id so every mirror/poll doesn't pay a files.list lookup just to find the settings file — never the settings *content* itself (see s3Settings.ts's loadS3SettingsRecord), since a stale bucket/roleArn/enabled value could mirror content to a bucket the user just disabled or changed
+  s3_status_file_id?: string // Drive fileId of s3_sync_status.json (see s3Settings.ts) — split out of s3_settings.json so background sync-status writes never share a file (and thus a last-write-wins overwrite) with the user's own config saves. Cached the same way and for the same reason as s3_settings_file_id
+  s3_status_negative_cache_at?: number // ms since epoch — mirrors s3_settings_negative_cache_at, but for "no s3_sync_status.json exists yet". Without this, every mirror on an account that syncs cleanly (recordMirrorSuccess is a no-op when there's no error to clear, so the status file may never even get created) would pay a files.list lookup on every single save, forever
 }
 
 export interface Data extends Record<string, unknown> {

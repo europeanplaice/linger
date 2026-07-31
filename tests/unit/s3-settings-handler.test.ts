@@ -38,7 +38,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
   vi.mocked(drive.findJsonFile).mockResolvedValue(null)
-  vi.mocked(drive.writeJsonFile).mockResolvedValue({ id: 'settings-file', name: 's3_settings.json', version: '1' })
+  // Config and status are separate Drive files now (see s3Settings.ts) — resolve each
+  // write to the id matching whichever file it's writing, defaulting to a fresh id
+  // when there's no existing one to reuse (mirrors what a real Drive create returns).
+  vi.mocked(drive.writeJsonFile).mockImplementation(async (_token, _folderId, fileName, _body, existingFileId) => ({
+    id: existingFileId ?? (fileName === 's3_settings.json' ? 'settings-file' : 'status-file'),
+    name: fileName,
+    version: '1',
+  }))
 })
 
 describe('GET /api/s3/settings', () => {
@@ -71,7 +78,8 @@ describe('PUT /api/s3/settings', () => {
     // session now carries the freshly-cached settings fileId (see settings.ts's
     // sessionChanged block, kept in sync with what onRequestPut just wrote).
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', { s3_settings_file_id: 'settings-file' }, {}, validSettings, 'folder-1', 'settings-file',
+      'tok', 'sid', expect.objectContaining({ s3_settings_file_id: 'settings-file' }), {},
+      { config: validSettings, status: {}, folderId: 'folder-1', configFileId: 'settings-file', statusFileId: 'status-file' },
       undefined, 'Initial backfill', 20,
     )
   })

@@ -62,7 +62,8 @@ describe('POST /api/s3/backfill-retry', () => {
     expect(body.retrying).toBe(2)
     expect(ctx.waitUntil).toHaveBeenCalled()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, expect.objectContaining({ enabled: true }), 'folder-1', 'settings-file',
+      'tok', 'sid', expect.anything(), {},
+      expect.objectContaining({ config: expect.objectContaining({ enabled: true }), folderId: 'folder-1', configFileId: 'settings-file' }),
       ['2026-01-01', '2026-01-02'], 'Retry', 20,
     )
   })

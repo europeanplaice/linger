@@ -1,7 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile } from '../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, isValidS3Settings, backfillAllEntries } from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
 
 // Re-mirrors every existing entry against S3 (backfillAllEntries with no `onlyDates`
 // filter) — putObjectIfNewer skips anything already at least as new as Drive, so this is
@@ -14,16 +13,11 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const fileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME)
-    if (!fileId) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+    if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
 
-    const settings = await readJsonFile<unknown>(accessToken, fileId)
-    if (!isValidS3Settings(settings) || !settings.enabled) {
-      return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
-    }
-
-    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, undefined, 'Resync', 20))
+    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Resync', 20))
     return jsonResponse({ ok: true })
   } catch (e) {
     console.error('s3/resync.ts: POST failed', e)

@@ -80,7 +80,8 @@ describe('POST /api/s3/backfill-continue', () => {
     expect(body.remaining).toBe(3)
     expect(ctx.waitUntil).toHaveBeenCalledOnce()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, expect.objectContaining(validSettings), 'folder-1', 'settings-file',
+      'tok', 'sid', expect.anything(), {},
+      expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
       ['2026-01-03', '2026-01-04', '2026-01-05'],
       'Backfill', 20,
     )
@@ -103,7 +104,8 @@ describe('POST /api/s3/backfill-continue', () => {
 
     expect(body.remaining).toBe(5)
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, expect.objectContaining(validSettings), 'folder-1', 'settings-file',
+      'tok', 'sid', expect.anything(), {},
+      expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
       migrationRemaining,
       'Backfill', 20,
     )
@@ -122,7 +124,7 @@ describe('POST /api/s3/backfill-continue', () => {
     expect(body.ok).toBe(true)
     expect(body.done).toBe(true)
     expect(ctx.waitUntil).not.toHaveBeenCalled()
-    expect(s3Settings.finishBackfill).toHaveBeenCalledWith('tok', expect.objectContaining({ folderId: 'folder-1', fileId: 'settings-file' }), 2, [], 'Backfill')
+    expect(s3Settings.finishBackfill).toHaveBeenCalledWith('tok', expect.objectContaining({ folderId: 'folder-1', configFileId: 'settings-file' }), 2, [], 'Backfill')
   })
 
   it('finalizes a legacy in-flight record with no `remaining` field rather than resuming positionally', async () => {

@@ -4,6 +4,14 @@ import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, g
 import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError } from './s3'
 
 export const S3_SETTINGS_FILE_NAME = 's3_settings.json'
+// Sync status (lastSyncError*/backfillProgress) lives in its own file, separate from
+// config (enabled/roleArn/bucket/region) in S3_SETTINGS_FILE_NAME. They used to share
+// one file, written by very different actors at very different frequencies — the
+// user's own rare Settings-form saves, and every background mirror/backfill write —
+// with no concurrency control, so one could silently clobber the other (see
+// S3SettingsRecord and withFreshS3Status below). Splitting them means a config save
+// can never again lose an in-flight backfill's progress, or vice versa.
+export const S3_SYNC_STATUS_FILE_NAME = 's3_sync_status.json'
 
 export const S3_ROLE_ARN_RE = /^arn:aws:iam::\d{12}:role\/[\w+=,.@-]{1,64}$/
 // No dots: virtual-hosted-style URLs (bucket.s3.region.amazonaws.com) break TLS
@@ -33,11 +41,18 @@ export interface BackfillProgress {
   finishedAt?: string // ISO timestamp
 }
 
-export interface S3Settings {
+// The part of S3 backup state the user edits directly via Settings — stored in
+// S3_SETTINGS_FILE_NAME, written only by api/s3/settings.ts's PUT handler.
+export interface S3Config {
   enabled: boolean
   roleArn: string
   bucket: string
   region: string
+}
+
+// The part of S3 backup state background sync writes — stored in
+// S3_SYNC_STATUS_FILE_NAME, written only via withFreshS3Status below.
+export interface S3SyncStatus {
   lastSyncError?: string
   lastSyncErrorAt?: string // ISO timestamp
   // The date this error was recorded for (see recordMirrorFailure) — absent for a
@@ -50,6 +65,13 @@ export interface S3Settings {
   backfillProgress?: BackfillProgress
 }
 
+// The public shape every API response and frontend consumer has always worked
+// with — config and status merged into one object, regardless of how they're
+// stored (see S3SettingsRecord). Keeping this combined type means the frontend
+// (src/types.ts's S3Settings, useS3Backfill.ts, SettingsModal.tsx) needed no
+// changes for the storage split.
+export type S3Settings = S3Config & S3SyncStatus
+
 export function isValidS3Settings(body: unknown): body is S3Settings {
   if (!body || typeof body !== 'object') return false
   const b = body as Record<string, unknown>
@@ -59,10 +81,23 @@ export function isValidS3Settings(body: unknown): body is S3Settings {
     && typeof b.region === 'string' && S3_REGION_RE.test(b.region)
 }
 
+// Sync status has no required fields (a freshly-created or never-written status
+// file is legitimately `{}`) — anything object-shaped is accepted, same
+// permissiveness isValidS3Settings already affords status fields tagging along.
+function isValidS3SyncStatus(body: unknown): body is S3SyncStatus {
+  return !!body && typeof body === 'object'
+}
+
+// config/status plus enough Drive bookkeeping (folderId, each file's id) for
+// callers to write back to either file. `statusFileId` is null until the first
+// sync-status write ever happens for this account — withFreshS3Status creates it
+// on demand.
 export interface S3SettingsRecord {
-  settings: S3Settings
+  config: S3Config
+  status: S3SyncStatus
   folderId: string
-  fileId: string
+  configFileId: string
+  statusFileId: string | null
 }
 
 function isNegativelyCached(session: SessionData): boolean {
@@ -70,34 +105,18 @@ function isNegativelyCached(session: SessionData): boolean {
   return at !== undefined && Date.now() - at < S3_SETTINGS_NEGATIVE_CACHE_MS
 }
 
-// Looks up s3_settings.json's fileId via Drive and caches it on the session (like
-// ensureFolder does for folder_id) — never the settings *content*, only the file's
-// location. A stale fileId is harmlessly self-correcting (readJsonFile 404s and the
-// caller re-looks-up), whereas a stale *content* cache (bucket/roleArn/enabled) would
-// risk mirroring diary content to a bucket the user just disabled or changed elsewhere
-// — see the comment on SessionData.s3_settings_file_id.
-async function findAndCacheSettingsFileId(token: string, sessionId: string, session: SessionData, env: Env, folderId: string): Promise<string | undefined> {
-  const fileId = await findJsonFile(token, folderId, S3_SETTINGS_FILE_NAME)
-  if (fileId) {
-    session.s3_settings_file_id = fileId
-    try {
-      await saveSession(sessionId, session, env)
-    } catch (e) {
-      // Caching is a pure optimization — a failure to persist it must not fail the caller.
-      console.error('s3Settings.ts: failed to persist settings fileId cache', e)
-    }
-  }
-  return fileId ?? undefined
+function isStatusNegativelyCached(session: SessionData): boolean {
+  const at = session.s3_status_negative_cache_at
+  return at !== undefined && Date.now() - at < S3_SETTINGS_NEGATIVE_CACHE_MS
 }
 
-// True if a cached fileId still points to a live (non-trashed) file. Only needed for
-// the cached path below — a freshly-found fileId is already guaranteed live, since
-// findAndCacheSettingsFileId's own lookup query filters trashed=false. Trashing
-// s3_settings.json via Drive's own UI is the ordinary way to delete a file there (a
-// soft delete, unlike files.delete), and — unlike a hard delete — a trashed file's
-// content still reads fine via alt=media instead of 404ing, so an unchecked cache
-// would keep resolving to the old config (and mirroring diary content to whatever
-// bucket/role it named) indefinitely after the user believed they'd disabled it.
+// True if a cached fileId still points to a live (non-trashed) file. A freshly-found
+// fileId is already guaranteed live, since findJsonFile's own lookup query filters
+// trashed=false — this is only needed for a fileId trusted from the session cache.
+// Trashing a file via Drive's own UI is the ordinary way to delete it there (a soft
+// delete, unlike files.delete), and — unlike a hard delete — a trashed file's content
+// still reads fine via alt=media instead of 404ing, so an unchecked cache would keep
+// resolving to stale content indefinitely after the user believed they'd deleted it.
 async function isFileLive(token: string, fileId: string): Promise<boolean> {
   try {
     const meta = await getEntryMeta(token, fileId)
@@ -108,106 +127,188 @@ async function isFileLive(token: string, fileId: string): Promise<boolean> {
   }
 }
 
-async function loadS3SettingsRecord(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3SettingsRecord | null> {
+// Resolves fileName's parsed content + fileId within folderId, using `cachedFileId`
+// as a hint (validated live before trusting it) and re-finding once if it's stale,
+// missing, or 404s on read. Never throws for a missing/corrupt/invalid file — that's
+// treated the same as "doesn't exist yet", since both config and status are
+// best-effort-recoverable (a corrupt config is reported as "not configured"; a
+// corrupt status file just starts fresh).
+async function resolveDriveJson<T>(
+  token: string, folderId: string, fileName: string, cachedFileId: string | undefined,
+  isValid: (v: unknown) => v is T,
+): Promise<{ value: T | null; fileId: string | null }> {
+  let fileId = cachedFileId
+  if (fileId && !(await isFileLive(token, fileId))) fileId = undefined
+  fileId ??= (await findJsonFile(token, folderId, fileName)) ?? undefined
+  if (!fileId) return { value: null, fileId: null }
+
+  const read = async (id: string): Promise<T | null> => {
+    try {
+      const data = await readJsonFile<unknown>(token, id)
+      return isValid(data) ? data : null
+    } catch (e) {
+      if (e instanceof SyntaxError) return null
+      throw e
+    }
+  }
+
+  try {
+    return { value: await read(fileId), fileId }
+  } catch (e) {
+    if (e instanceof DriveError && e.status === 404) {
+      // Cached fileId was stale (e.g. the file was deleted and later re-created under
+      // a new id) — look up fresh once.
+      const refound = (await findJsonFile(token, folderId, fileName)) ?? undefined
+      if (!refound) return { value: null, fileId: null }
+      return { value: await read(refound), fileId: refound }
+    }
+    throw e
+  }
+}
+
+// Loads the config file (required — absence means S3 backup isn't configured at all,
+// same as before the split) and the status file (optional — absence just means no
+// sync activity has happened yet). Caches both files' ids on the session like
+// folder_id, and negatively caches a missing config file, so repeated calls (every
+// mirror/poll) don't each pay a files.list lookup — see S3_SETTINGS_NEGATIVE_CACHE_MS.
+export async function loadS3SettingsRecord(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3SettingsRecord | null> {
   if (isNegativelyCached(session)) return null
 
   const folderId = await ensureFolder(token, sessionId, session, env)
-  let fileId = session.s3_settings_file_id
-  if (fileId && !(await isFileLive(token, fileId))) {
-    session.s3_settings_file_id = undefined
-    fileId = undefined
+  let sessionChanged = false
+
+  const { value: configData, fileId: configFileId } = await resolveDriveJson(token, folderId, S3_SETTINGS_FILE_NAME, session.s3_settings_file_id, isValidS3Settings)
+  if (session.s3_settings_file_id !== (configFileId ?? undefined)) {
+    session.s3_settings_file_id = configFileId ?? undefined
+    sessionChanged = true
   }
-  fileId ??= await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
-  if (!fileId) {
+
+  if (!configData || !configFileId) {
     session.s3_settings_negative_cache_at = Date.now()
     try {
       await saveSession(sessionId, session, env)
     } catch (e) {
-      // Caching is a pure optimization — a failure to persist it must not fail the caller.
       console.error('s3Settings.ts: failed to persist negative cache', e)
     }
     return null
   }
 
-  let data: unknown
-  try {
-    data = await readJsonFile<unknown>(token, fileId)
-  } catch (e) {
-    if (e instanceof DriveError && e.status === 404) {
-      // Cached fileId is stale (e.g. the user deleted s3_settings.json in Drive and
-      // settings.ts re-created it under a new id) — clear it and look up fresh once.
-      session.s3_settings_file_id = undefined
-      fileId = await findAndCacheSettingsFileId(token, sessionId, session, env, folderId)
-      if (!fileId) {
-        session.s3_settings_negative_cache_at = Date.now()
-        try {
-          await saveSession(sessionId, session, env)
-        } catch (e2) {
-          console.error('s3Settings.ts: failed to persist negative cache', e2)
-        }
-        return null
-      }
-      try {
-        data = await readJsonFile<unknown>(token, fileId)
-      } catch (e2) {
-        if (e2 instanceof SyntaxError) return null
-        throw e2
-      }
-    } else if (e instanceof SyntaxError) {
-      return null
-    } else {
-      throw e
+  // Note: withFreshS3Status (below) can create the status file for the first time
+  // without going through this function again, so this session's negative cache can
+  // stay stale for up to S3_SETTINGS_NEGATIVE_CACHE_MS after that happens — e.g. a
+  // just-recorded error might not get picked up by the very next recordMirrorSuccess
+  // dedup check on this same session. Self-heals once the cache expires; same
+  // accepted staleness bound as the config negative cache above.
+  let statusData: S3SyncStatus | null = null
+  let statusFileId: string | null = null
+  if (isStatusNegativelyCached(session)) {
+    statusFileId = null
+  } else {
+    ({ value: statusData, fileId: statusFileId } = await resolveDriveJson(token, folderId, S3_SYNC_STATUS_FILE_NAME, session.s3_status_file_id, isValidS3SyncStatus))
+    if (!statusFileId && session.s3_status_negative_cache_at === undefined) {
+      session.s3_status_negative_cache_at = Date.now()
+      sessionChanged = true
+    } else if (statusFileId && session.s3_status_negative_cache_at !== undefined) {
+      session.s3_status_negative_cache_at = undefined
+      sessionChanged = true
     }
   }
-  return isValidS3Settings(data) ? { settings: data, folderId, fileId } : null
+  if (session.s3_status_file_id !== (statusFileId ?? undefined)) {
+    session.s3_status_file_id = statusFileId ?? undefined
+    sessionChanged = true
+  }
+
+  if (sessionChanged) {
+    try {
+      await saveSession(sessionId, session, env)
+    } catch (e) {
+      console.error('s3Settings.ts: failed to persist settings/status fileId cache', e)
+    }
+  }
+
+  return {
+    config: { enabled: configData.enabled, roleArn: configData.roleArn, bucket: configData.bucket, region: configData.region },
+    status: statusData ?? {},
+    folderId,
+    configFileId,
+    statusFileId,
+  }
 }
 
 export async function getS3Settings(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3Settings | null> {
   const record = await loadS3SettingsRecord(token, sessionId, session, env)
-  return record?.settings ?? null
+  return record ? { ...record.config, ...record.status } : null
 }
 
 // Cache key for assumeRoleWithWebIdentity's opportunistic cross-request credential
 // cache (see s3.ts) — unique per Google account so cached credentials can never be
 // handed out across accounts. Omitted (no caching, just no optimization) when the
 // session has no decoded google_sub, e.g. an older session predating that field.
-export function credentialsCacheKey(session: SessionData, settings: Pick<S3Settings, 'roleArn' | 'region'>): string | undefined {
-  return session.google_sub ? `${session.google_sub}:${settings.roleArn}:${settings.region}` : undefined
+export function credentialsCacheKey(session: SessionData, config: Pick<S3Config, 'roleArn' | 'region'>): string | undefined {
+  return session.google_sub ? `${session.google_sub}:${config.roleArn}:${config.region}` : undefined
 }
 
 export function entryKey(date: string): string {
   return `diary-${date}.txt`
 }
 
-// s3_settings.json has several concurrent writers (this device's own mirror/backfill
-// status updates, another device's, and the user's own Save overwriting config fields
-// via settings.ts's PUT) with no optimistic-concurrency check on the Drive file itself.
-// Rather than build full conflict detection around that (unverified whether Drive even
-// honors If-Match on this endpoint — see saveEntry's ifMatch, which no caller actually
-// uses), sync-status writers re-read the file immediately before writing and apply
-// `mutate` to that fresh copy instead of a `record.settings` snapshot that may be
-// minutes stale — so a concurrent config change (e.g. the user disabling backup mid-
-// backfill) never gets silently overwritten back to its old value. Falls back to the
-// in-memory snapshot if the fresh read itself fails, same as every other best-effort
-// step in this file. Keeps `record.settings` current so later calls in the same run
-// (e.g. the next chunk's writeBackfillProgress) start from what was actually written.
-async function withFreshS3Settings(
-  token: string, record: S3SettingsRecord, mutate: (current: S3Settings) => S3Settings,
+// How many times a sync-status write retries onto a fresh copy after detecting a
+// concurrent writer, before giving up (best-effort, same as every other failure mode
+// in this file — a lost status update is cosmetic, self-healing on the next mirror).
+const S3_STATUS_WRITE_MAX_ATTEMPTS = 3
+
+// Every background sync-status writer (mirrorEntrySave/mirrorEntryDelete/
+// resyncSingleEntry/backfillAllEntries, via recordMirrorFailure/recordMirrorSuccess/
+// clearBackfillFailedDate/writeBackfillProgress/finishBackfill) funnels through here
+// to update S3_SYNC_STATUS_FILE_NAME. Splitting status into its own file already
+// keeps this from colliding with the user's own config saves; this closes the
+// remaining race *among concurrent status writers themselves* (e.g. two devices
+// mirroring different dates at once, or a backfill chunk racing a single-entry
+// retry) with a real optimistic-concurrency check instead of the old "re-read
+// right before writing" heuristic, which only narrowed the window rather than
+// closing it: Drive's `version` is a monotonic per-file counter, so if our write
+// doesn't land as exactly fresh+1, some other write slipped in between our read and
+// ours — we re-read onto its result and retry the mutate, rather than silently
+// clobbering it. `record.statusFileId` starts null until the first status write
+// ever happens for this account, at which point it's created and cached.
+async function withFreshS3Status(
+  token: string, record: S3SettingsRecord, mutate: (current: S3SyncStatus) => S3SyncStatus,
 ): Promise<void> {
-  let base = record.settings
-  try {
-    const fresh = await readJsonFile<unknown>(token, record.fileId)
-    if (isValidS3Settings(fresh)) base = fresh
-  } catch (e) {
-    console.error('s3Settings.ts: fresh re-read before sync-status update failed, using in-memory snapshot', e)
+  for (let attempt = 0; attempt < S3_STATUS_WRITE_MAX_ATTEMPTS; attempt++) {
+    let base: S3SyncStatus = record.status
+    let baseVersion: string | undefined
+    if (record.statusFileId) {
+      try {
+        const [content, meta] = await Promise.all([
+          readJsonFile<unknown>(token, record.statusFileId),
+          getEntryMeta(token, record.statusFileId),
+        ])
+        if (isValidS3SyncStatus(content)) base = content
+        baseVersion = meta.version
+      } catch (e) {
+        console.error('s3Settings.ts: fresh re-read before sync-status update failed, using in-memory snapshot', e)
+      }
+    }
+
+    const updated = mutate(base)
+    try {
+      const meta = await writeJsonFile(token, record.folderId, S3_SYNC_STATUS_FILE_NAME, updated, record.statusFileId ?? undefined)
+      record.statusFileId = meta.id
+      record.status = updated
+      // No prior version to compare against (brand-new file, or the fresh re-read
+      // above failed) — nothing to detect a conflict against, so trust the write.
+      // Otherwise: landing exactly one version past what we read means nothing raced
+      // us. Anything else means a concurrent writer's update landed in between ours
+      // — retry onto its result instead of leaving it silently overwritten.
+      if (baseVersion === undefined || meta.version === undefined || Number(meta.version) === Number(baseVersion) + 1) {
+        return
+      }
+    } catch (e) {
+      console.error('s3Settings.ts: failed to write sync-status update', e)
+      return
+    }
   }
-  const updated = mutate(base)
-  try {
-    await writeJsonFile(token, record.folderId, S3_SETTINGS_FILE_NAME, updated, record.fileId)
-    record.settings = updated
-  } catch (e) {
-    console.error('s3Settings.ts: failed to write sync-status update', e)
-  }
+  console.error('s3Settings.ts: gave up on sync-status update after repeated concurrent writes')
 }
 
 // `date` is the specific date this failure occurred for, when there is one
@@ -218,8 +319,8 @@ async function withFreshS3Settings(
 // error recurring for a *different* date silently keep lastSyncErrorDate
 // pointing at the first, stale date instead of updating it.
 async function recordMirrorFailure(token: string, record: S3SettingsRecord, message: string, date?: string): Promise<void> {
-  if (record.settings.lastSyncError === message && record.settings.lastSyncErrorDate === date) return
-  await withFreshS3Settings(token, record, current => {
+  if (record.status.lastSyncError === message && record.status.lastSyncErrorDate === date) return
+  await withFreshS3Status(token, record, current => {
     const updated = { ...current, lastSyncError: message, lastSyncErrorAt: new Date().toISOString() }
     if (date === undefined) delete updated.lastSyncErrorDate
     else updated.lastSyncErrorDate = date
@@ -232,9 +333,9 @@ async function recordMirrorFailure(token: string, record: S3SettingsRecord, mess
 // (a run-level failure, or settings predating lastSyncErrorDate) is cleared by
 // any success, same as before this field existed.
 async function recordMirrorSuccess(token: string, record: S3SettingsRecord, date?: string): Promise<void> {
-  if (!record.settings.lastSyncError) return // already clear — nothing to do
-  if (record.settings.lastSyncErrorDate !== undefined && record.settings.lastSyncErrorDate !== date) return
-  await withFreshS3Settings(token, record, current => {
+  if (!record.status.lastSyncError) return // already clear — nothing to do
+  if (record.status.lastSyncErrorDate !== undefined && record.status.lastSyncErrorDate !== date) return
+  await withFreshS3Status(token, record, current => {
     const rest = { ...current }
     delete rest.lastSyncError
     delete rest.lastSyncErrorAt
@@ -277,13 +378,13 @@ export async function mirrorEntrySave(
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
-    if (!record || !record.settings.enabled) return
+    if (!record || !record.config.enabled) return
 
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.settings.roleArn, record.settings.region, credentialsCacheKey(session, record.settings))
-    await putObjectIfNewer(creds, record.settings.bucket, record.settings.region, entryKey(date), content, driveVersion)
+    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, driveVersion)
 
     // mirrorEntrySave and mirrorEntryDelete are independent context.waitUntil tasks
     // with no ordering guarantee, so a slower save can land after a faster concurrent
@@ -294,7 +395,7 @@ export async function mirrorEntrySave(
     // checking before the put, which only narrows the window.
     const stillExists = await entryStillExistsInDrive(accessToken, sessionId, session, env, fileId, date)
     if (!stillExists) {
-      await deleteObject(creds, record.settings.bucket, record.settings.region, entryKey(date))
+      await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
     }
 
     await recordMirrorSuccess(accessToken, record, date)
@@ -314,13 +415,13 @@ export async function mirrorEntryDelete(
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
-    if (!record || !record.settings.enabled) return
+    if (!record || !record.config.enabled) return
 
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.settings.roleArn, record.settings.region, credentialsCacheKey(session, record.settings))
-    await deleteObject(creds, record.settings.bucket, record.settings.region, entryKey(date))
+    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
     await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
     console.error('s3Settings.ts: mirrorEntryDelete failed', e)
@@ -338,8 +439,8 @@ export async function mirrorEntryDelete(
 // outstanding, is fully cleared here — the same terminal state finishBackfill leaves
 // behind when every entry succeeds.
 async function clearBackfillFailedDate(token: string, record: S3SettingsRecord, date: string): Promise<void> {
-  if (!record.settings.backfillProgress?.failed.includes(date)) return // nothing recorded to clear
-  await withFreshS3Settings(token, record, current => {
+  if (!record.status.backfillProgress?.failed.includes(date)) return // nothing recorded to clear
+  await withFreshS3Status(token, record, current => {
     const bp = current.backfillProgress
     if (!bp || !bp.failed.includes(date)) return current
     const failed = bp.failed.filter(d => d !== date)
@@ -370,24 +471,21 @@ export async function resyncSingleEntry(
   sessionId: string,
   session: SessionData,
   env: Env,
-  settings: S3Settings,
-  folderId: string,
-  fileId: string,
+  record: S3SettingsRecord,
   date: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const record: S3SettingsRecord = { settings, folderId, fileId }
   try {
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region, credentialsCacheKey(session, settings))
+    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
     const meta = await findEntryMeta(accessToken, sessionId, session, env, date)
     // No longer exists in Drive (deleted since it was recorded as failed) — nothing
     // to back up, not a failure, same as backfillAllEntries's own handling of a date
     // that disappeared mid-run.
     if (meta) {
       const { content } = await getEntryContent(accessToken, meta.id, date)
-      await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+      await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, meta.version)
     }
     await clearBackfillFailedDate(accessToken, record, date)
     await recordMirrorSuccess(accessToken, record, date)
@@ -402,7 +500,7 @@ export async function resyncSingleEntry(
 
 // Diary filenames only ever look like diary-YYYY-MM-DD.txt (legacy .md files are migrated
 // to .txt long before this can run); anything else in the folder (e.g. s3_settings.json,
-// milestones.json) is skipped.
+// s3_sync_status.json, milestones.json) is skipped.
 export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 
 // How often (at most) backfill progress is written back to Drive while running — writing
@@ -412,12 +510,12 @@ export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 const BACKFILL_PROGRESS_WRITE_INTERVAL_MS = 2000
 
 export async function writeBackfillProgress(token: string, record: S3SettingsRecord, progress: BackfillProgress): Promise<void> {
-  await withFreshS3Settings(token, record, current => ({ ...current, backfillProgress: progress }))
+  await withFreshS3Status(token, record, current => ({ ...current, backfillProgress: progress }))
 }
 
 export async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[], runLabel: string): Promise<void> {
   const finishedAt = new Date().toISOString()
-  await withFreshS3Settings(token, record, current => {
+  await withFreshS3Status(token, record, current => {
     if (failed.length === 0) {
       const rest = { ...current }
       delete rest.backfillProgress
@@ -462,19 +560,16 @@ export async function backfillAllEntries(
   sessionId: string,
   session: SessionData,
   env: Env,
-  settings: S3Settings,
-  folderId: string,
-  fileId: string,
+  record: S3SettingsRecord,
   onlyDates?: string[],
   runLabel = 'Initial backfill',
   chunkSize?: number,
 ): Promise<void> {
-  const record: S3SettingsRecord = { settings, folderId, fileId }
   try {
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region, credentialsCacheKey(session, settings))
+    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
     // Looked up by date (never by array position) below, so an entry added or removed
     // elsewhere in the account between chunks can't shift which dates this chunk covers.
     const driveByDate = new Map(
@@ -491,7 +586,7 @@ export async function backfillAllEntries(
     // counter race ahead of the actual work and cause finishBackfill to fire
     // prematurely (or a later parallel chunk to overwrite a higher done with a
     // lower value, making the progress bar jump backwards).
-    const existingProgress = settings.backfillProgress
+    const existingProgress = record.status.backfillProgress
     const freshStart = !onlyDates
     // `scope` is this run's exact target date list, established once (a fresh run's
     // scope is every diary date that currently exists; a scoped/continuing run's
@@ -514,7 +609,7 @@ export async function backfillAllEntries(
       if (meta) {
         try {
           const { content } = await getEntryContent(accessToken, meta.id, date)
-          await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
+          await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, meta.version)
           // A previously-failed entry that now succeeded — remove from the failed list.
           const failedIdx = failed.indexOf(date)
           if (failedIdx !== -1) failed.splice(failedIdx, 1)

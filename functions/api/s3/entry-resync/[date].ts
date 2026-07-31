@@ -1,7 +1,6 @@
 import type { Env, Data } from '../../../_shared/session'
 import { jsonResponse } from '../../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile } from '../../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, isValidS3Settings, resyncSingleEntry } from '../../../_shared/s3Settings'
+import { loadS3SettingsRecord, resyncSingleEntry } from '../../../_shared/s3Settings'
 
 // Re-mirrors a single date against S3 — triggered by the "retry" affordance on an
 // entry's sync badge once entry-status has given up waiting and reported
@@ -23,16 +22,11 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const fileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME)
-    if (!fileId) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+    if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
 
-    const settings = await readJsonFile<unknown>(accessToken, fileId)
-    if (!isValidS3Settings(settings) || !settings.enabled) {
-      return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
-    }
-
-    await resyncSingleEntry(accessToken, sessionId, session, context.env, settings, folderId, fileId, date)
+    await resyncSingleEntry(accessToken, sessionId, session, context.env, record, date)
     return jsonResponse({ ok: true })
   } catch (e) {
     console.error('s3/entry-resync.ts: POST failed', e)

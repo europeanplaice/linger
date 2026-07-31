@@ -1,7 +1,7 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile, migrateMdToTxt } from '../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, isValidS3Settings, backfillAllEntries } from '../../_shared/s3Settings'
+import { migrateMdToTxt } from '../../_shared/drive'
+import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
 
 // One-time migration endpoint: renames legacy `.md` diary files to `.txt`.
 // Idempotent and safe to call repeatedly; returns the number of files renamed.
@@ -28,14 +28,10 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   let s3Resyncing = false
   if (migratedDates.length > 0) {
     try {
-      const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-      const fileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME)
-      if (fileId) {
-        const settings = await readJsonFile<unknown>(accessToken, fileId)
-        if (isValidS3Settings(settings) && settings.enabled) {
-          context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, migratedDates, 'Migration re-sync', 20))
-          s3Resyncing = true
-        }
+      const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+      if (record?.config.enabled) {
+        context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, migratedDates, 'Migration re-sync', 20))
+        s3Resyncing = true
       }
     } catch (e) {
       console.error('migrate.ts: Failed to start S3 re-mirror for migrated entries', e)

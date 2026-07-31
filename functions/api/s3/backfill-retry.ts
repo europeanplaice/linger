@@ -1,7 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile } from '../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, isValidS3Settings, backfillAllEntries } from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
 
 // Re-runs the initial backfill for just the dates it failed on last time (see
 // backfillAllEntries's `onlyDates` param) — triggered by the "Retry" button
@@ -11,16 +10,11 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const fileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME)
-    if (!fileId) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+    if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
 
-    const settings = await readJsonFile<unknown>(accessToken, fileId)
-    if (!isValidS3Settings(settings) || !settings.enabled) {
-      return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
-    }
-
-    const failed = settings.backfillProgress?.failed ?? []
+    const failed = record.status.backfillProgress?.failed ?? []
     if (failed.length === 0) return jsonResponse({ error: 'No failed entries to retry' }, 400)
 
     // A second chunked run (e.g. a whole-account Resync from another tab, or the
@@ -31,11 +25,11 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     // the other, still-running run as finished, truncating it. SettingsModal already
     // client-gates its own Retry button while busy; this closes the multi-tab/stale-
     // UI race that client-side gating alone can't.
-    if (settings.backfillProgress && !settings.backfillProgress.finishedAt) {
+    if (record.status.backfillProgress && !record.status.backfillProgress.finishedAt) {
       return jsonResponse({ error: 'A backfill is already running' }, 409)
     }
 
-    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, settings, folderId, fileId, failed, 'Retry', 20))
+    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, failed, 'Retry', 20))
     return jsonResponse({ ok: true, retrying: failed.length })
   } catch (e) {
     console.error('s3/backfill-retry.ts: POST failed', e)

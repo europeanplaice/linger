@@ -6,7 +6,11 @@ import * as s3Settings from '../../functions/_shared/s3Settings'
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
   ensureFolder: vi.fn().mockResolvedValue('folder-1'),
-  findJsonFile: vi.fn().mockResolvedValue('settings-file'),
+  // Config (s3_settings.json) and status (s3_sync_status.json) are separate Drive
+  // files (see s3Settings.ts) — keyed by filename here, same as the real Drive API,
+  // so resolving one can't bleed into the other. These tests only ever set up a
+  // config file; status is always absent (empty {}).
+  findJsonFile: vi.fn().mockImplementation(async (_t, _f, fileName) => (fileName === 's3_settings.json' ? 'settings-file' : null)),
   readJsonFile: vi.fn(),
   migrateMdToTxt: vi.fn(),
 }))
@@ -31,7 +35,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
-  vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+  vi.mocked(drive.findJsonFile).mockImplementation(async (_t, _f, fileName) => (fileName === 's3_settings.json' ? 'settings-file' : null))
 })
 
 describe('POST /api/drive/migrate', () => {
@@ -50,7 +54,8 @@ describe('POST /api/drive/migrate', () => {
     expect(body.s3Resyncing).toBe(true)
     expect(ctx.waitUntil).toHaveBeenCalledOnce()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file',
+      'tok', 'sid', expect.objectContaining({ s3_settings_file_id: 'settings-file' }), {},
+      { config: validSettings, status: {}, folderId: 'folder-1', configFileId: 'settings-file', statusFileId: null },
       ['2026-05-01', '2026-05-03'],
       'Migration re-sync', 20,
     )

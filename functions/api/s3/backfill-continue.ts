@@ -1,10 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile } from '../../_shared/drive'
-import {
-  S3_SETTINGS_FILE_NAME, isValidS3Settings, backfillAllEntries, finishBackfill,
-  type S3SettingsRecord,
-} from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries, finishBackfill } from '../../_shared/s3Settings'
 
 const BACKFILL_CHUNK_SIZE = 20
 
@@ -21,17 +17,11 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const fileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME)
-    if (!fileId) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+    if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
+    if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
 
-    const settings = await readJsonFile<unknown>(accessToken, fileId)
-    if (!isValidS3Settings(settings) || !settings.enabled) {
-      return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
-    }
-
-    const progress = settings.backfillProgress
-    const record: S3SettingsRecord = { settings, folderId, fileId }
+    const progress = record.status.backfillProgress
 
     // Nothing to do: backfill already finished.
     if (progress?.finishedAt) {
@@ -60,7 +50,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     // whatever's left afterward — the client's polling loop calls this endpoint again for it.
     context.waitUntil(backfillAllEntries(
       accessToken, sessionId, session, context.env,
-      settings, folderId, fileId, progress.remaining, 'Backfill', BACKFILL_CHUNK_SIZE,
+      record, progress.remaining, 'Backfill', BACKFILL_CHUNK_SIZE,
     ))
 
     return jsonResponse({ ok: true, remaining: progress.remaining.length })

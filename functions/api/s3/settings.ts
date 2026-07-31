@@ -1,7 +1,10 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse, saveSession } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile } from '../../_shared/drive'
-import { S3_SETTINGS_FILE_NAME, getS3Settings, isValidS3Settings, backfillAllEntries } from '../../_shared/s3Settings'
+import { ensureFolder, writeJsonFile } from '../../_shared/drive'
+import {
+  S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME, getS3Settings, isValidS3Settings, loadS3SettingsRecord, backfillAllEntries,
+  type S3Config, type S3SettingsRecord,
+} from '../../_shared/s3Settings'
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
@@ -32,20 +35,12 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
   }
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const existingFileId = await findJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME) ?? undefined
+    const existing = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+    const folderId = existing?.folderId ?? await ensureFolder(accessToken, sessionId, session, context.env)
+    const previouslyEnabled = existing?.config.enabled ?? false
 
-    let previouslyEnabled = false
-    if (existingFileId) {
-      try {
-        const existing = await readJsonFile<unknown>(accessToken, existingFileId)
-        previouslyEnabled = isValidS3Settings(existing) && existing.enabled
-      } catch {
-        // Corrupt or legacy settings file — treat as not previously enabled.
-      }
-    }
-
-    const meta = await writeJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME, body, existingFileId)
+    const config: S3Config = { enabled: body.enabled, roleArn: body.roleArn, bucket: body.bucket, region: body.region }
+    const meta = await writeJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME, config, existing?.configFileId)
 
     // Keep the session's cached fileId/negative-cache (see s3Settings.ts's
     // loadS3SettingsRecord) in sync with what was actually just written, rather
@@ -63,12 +58,26 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       await saveSession(sessionId, session, context.env)
     }
 
+    // A plain settings save has always implicitly reset sync status — it used to be
+    // an accidental side effect of overwriting the one shared file with a body that
+    // never carried status fields (see useS3Backfill.ts's clearSyncError and
+    // SettingsModal.tsx's handleS3Save). Now that config and status are separate
+    // files, do the same reset explicitly instead.
+    let statusFileId = existing?.statusFileId ?? null
+    try {
+      const statusMeta = await writeJsonFile(accessToken, folderId, S3_SYNC_STATUS_FILE_NAME, {}, statusFileId ?? undefined)
+      statusFileId = statusMeta.id
+    } catch (e) {
+      console.error('s3/settings.ts: failed to clear sync status after settings save', e)
+    }
+
     // Mirror every existing entry the first time backup is enabled — otherwise only
     // entries saved/deleted after this point would ever reach the bucket.
     // Uses chunkSize so the backfill completes within Cloudflare's execution timeout;
     // the client's polling loop will call /api/s3/backfill-continue for the rest.
-    if (body.enabled && !previouslyEnabled) {
-      context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, body, folderId, meta.id, undefined, 'Initial backfill', 20))
+    if (config.enabled && !previouslyEnabled) {
+      const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
+      context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Initial backfill', 20))
     }
 
     return jsonResponse(meta)

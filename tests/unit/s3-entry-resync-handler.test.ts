@@ -71,7 +71,9 @@ describe('POST /api/s3/entry-resync/[date]', () => {
     // total/done/remaining/finishedAt bookkeeping of a chunked run that might be
     // active at the same time — see resyncSingleEntry's own comment.
     expect(s3Settings.resyncSingleEntry).toHaveBeenCalledWith(
-      'tok', 'sid', {}, {}, validSettings, 'folder-1', 'settings-file', '2026-05-01',
+      'tok', 'sid', expect.anything(), {},
+      expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
+      '2026-05-01',
     )
   })
 })
