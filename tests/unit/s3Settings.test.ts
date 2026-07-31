@@ -246,7 +246,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
 
-  it('records a sync error when the mirror fails, without throwing', async () => {
+  it('records a sync error (stamped with the failing date) when the mirror fails, without throwing', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue(baseSettings)
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
@@ -256,12 +256,44 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
-      expect.objectContaining({ ...baseSettings, lastSyncError: expect.stringContaining('AccessDenied') }),
+      expect.objectContaining({ ...baseSettings, lastSyncError: expect.stringContaining('AccessDenied'), lastSyncErrorDate: '2026-01-01' }),
       'settings-file',
     )
   })
 
-  it('does not rewrite the settings file when the same failure repeats', async () => {
+  it('does not rewrite the settings file when the same failure repeats for the same date', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'AccessDenied', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
+    vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('rewrites (updating lastSyncErrorDate) when the same error message recurs for a different date', async () => {
+    // Regression guard: the dedup check must compare date *and* message — comparing
+    // message alone would let a second date's identical failure silently keep
+    // pointing lastSyncErrorDate at the first, stale date.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'AccessDenied', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
+    vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '5')
+
+    expect(drive.writeJsonFile).toHaveBeenCalledWith(
+      'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
+      expect.objectContaining({ lastSyncError: expect.stringContaining('AccessDenied'), lastSyncErrorDate: '2026-01-02' }),
+      'settings-file',
+    )
+  })
+
+  it('attaches the failing date to a legacy dateless error on the next occurrence, even if the message is unchanged', async () => {
+    // Transitional case: settings written before lastSyncErrorDate existed have no
+    // date attached. The very next failure should stamp one on, so future
+    // entry-status checks can correctly scope it — a one-time rewrite, not a bug.
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'AccessDenied', lastSyncErrorAt: '2026-01-01T00:00:00.000Z' })
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
@@ -269,7 +301,31 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
 
     await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
+    expect(drive.writeJsonFile).toHaveBeenCalledWith(
+      'tok', 'folder-1', S3_SETTINGS_FILE_NAME,
+      expect.objectContaining({ lastSyncError: expect.stringContaining('AccessDenied'), lastSyncErrorDate: '2026-01-01' }),
+      'settings-file',
+    )
+  })
+
+  it('does not clear a different date\'s recorded sync error when this date\'s mirror succeeds', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
+
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
+  })
+
+  it('clears this date\'s own recorded sync error once its mirror succeeds', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...baseSettings, lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
+    const sess = makeSession()
+
+    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '6')
+
+    expect(drive.writeJsonFile).toHaveBeenCalledWith('tok', 'folder-1', S3_SETTINGS_FILE_NAME, baseSettings, 'settings-file')
   })
 
   it('records a sync error when there is no valid Google ID token', async () => {
@@ -604,6 +660,25 @@ describe('backfillAllEntries', () => {
     expect(updated).not.toHaveProperty('backfillProgress')
     expect(updated).not.toHaveProperty('lastSyncError')
     expect(updated).not.toHaveProperty('lastSyncErrorAt')
+    expect(updated).not.toHaveProperty('lastSyncErrorDate')
+  })
+
+  it('does not leave a stale single-date lastSyncErrorDate behind when finishing with failures across multiple dates', async () => {
+    // finishBackfill's own error is an account-wide summary of potentially many
+    // failed dates, not any one of them — a lastSyncErrorDate left over from an
+    // earlier single-entry failure must not survive and get misattributed.
+    vi.mocked(drive.listEntries).mockRejectedValue(new Error('Drive is down'))
+    const sess = makeSession()
+
+    await backfillAllEntries('tok', 'sid', sess, {} as any, {
+      ...baseSettings,
+      lastSyncError: 'old single-entry failure',
+      lastSyncErrorAt: '2026-01-01T00:00:00.000Z',
+      lastSyncErrorDate: '2026-01-01',
+    }, 'folder-1', 'settings-file')
+
+    const [, , , updated] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
+    expect(updated).not.toHaveProperty('lastSyncErrorDate')
   })
 
   it('resets baseDone to 0 on a full resync (onlyDates undefined) even with stale progress', async () => {

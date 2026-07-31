@@ -40,6 +40,13 @@ export interface S3Settings {
   region: string
   lastSyncError?: string
   lastSyncErrorAt?: string // ISO timestamp
+  // The date this error was recorded for (see recordMirrorFailure) — absent for a
+  // run-level failure not tied to one date (e.g. backfillAllEntries's own summary
+  // error, or its own top-level catch-all) and for settings written before this
+  // field existed. entry-status/[date].ts only attributes a dated error to the
+  // exact date it names, so an unrelated date's error can no longer bleed into a
+  // different entry's badge.
+  lastSyncErrorDate?: string
   backfillProgress?: BackfillProgress
 }
 
@@ -203,17 +210,35 @@ async function withFreshS3Settings(
   }
 }
 
-async function recordMirrorFailure(token: string, record: S3SettingsRecord, message: string): Promise<void> {
-  if (record.settings.lastSyncError === message) return // unchanged — avoid a needless Drive write
-  await withFreshS3Settings(token, record, current => ({ ...current, lastSyncError: message, lastSyncErrorAt: new Date().toISOString() }))
+// `date` is the specific date this failure occurred for, when there is one
+// (mirrorEntrySave/mirrorEntryDelete/resyncSingleEntry all operate on exactly one
+// date); absent for a run-level failure not tied to any single date
+// (backfillAllEntries's own top-level catch-all). Compares both date *and*
+// message for the dedup check — comparing message alone would let an identical
+// error recurring for a *different* date silently keep lastSyncErrorDate
+// pointing at the first, stale date instead of updating it.
+async function recordMirrorFailure(token: string, record: S3SettingsRecord, message: string, date?: string): Promise<void> {
+  if (record.settings.lastSyncError === message && record.settings.lastSyncErrorDate === date) return
+  await withFreshS3Settings(token, record, current => {
+    const updated = { ...current, lastSyncError: message, lastSyncErrorAt: new Date().toISOString() }
+    if (date === undefined) delete updated.lastSyncErrorDate
+    else updated.lastSyncErrorDate = date
+    return updated
+  })
 }
 
-async function recordMirrorSuccess(token: string, record: S3SettingsRecord): Promise<void> {
+// Only clears an error recorded for a *different* date — a success for date A
+// must never launder away date B's still-unresolved failure. A dateless error
+// (a run-level failure, or settings predating lastSyncErrorDate) is cleared by
+// any success, same as before this field existed.
+async function recordMirrorSuccess(token: string, record: S3SettingsRecord, date?: string): Promise<void> {
   if (!record.settings.lastSyncError) return // already clear — nothing to do
+  if (record.settings.lastSyncErrorDate !== undefined && record.settings.lastSyncErrorDate !== date) return
   await withFreshS3Settings(token, record, current => {
     const rest = { ...current }
     delete rest.lastSyncError
     delete rest.lastSyncErrorAt
+    delete rest.lastSyncErrorDate
     return rest
   })
 }
@@ -272,10 +297,10 @@ export async function mirrorEntrySave(
       await deleteObject(creds, record.settings.bucket, record.settings.region, entryKey(date))
     }
 
-    await recordMirrorSuccess(accessToken, record)
+    await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
     console.error('s3Settings.ts: mirrorEntrySave failed', e)
-    if (record) await recordMirrorFailure(accessToken, record, describeError(e))
+    if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
   }
 }
 
@@ -296,10 +321,10 @@ export async function mirrorEntryDelete(
 
     const creds = await assumeRoleWithWebIdentity(idToken, record.settings.roleArn, record.settings.region, credentialsCacheKey(session, record.settings))
     await deleteObject(creds, record.settings.bucket, record.settings.region, entryKey(date))
-    await recordMirrorSuccess(accessToken, record)
+    await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
     console.error('s3Settings.ts: mirrorEntryDelete failed', e)
-    if (record) await recordMirrorFailure(accessToken, record, describeError(e))
+    if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
   }
 }
 
@@ -365,12 +390,12 @@ export async function resyncSingleEntry(
       await putObjectIfNewer(creds, settings.bucket, settings.region, entryKey(date), content, meta.version)
     }
     await clearBackfillFailedDate(accessToken, record, date)
-    await recordMirrorSuccess(accessToken, record)
+    await recordMirrorSuccess(accessToken, record, date)
     return { ok: true }
   } catch (e) {
     console.error('s3Settings.ts: resyncSingleEntry failed', e)
     const message = describeError(e)
-    await recordMirrorFailure(accessToken, record, message)
+    await recordMirrorFailure(accessToken, record, message, date)
     return { ok: false, error: message }
   }
 }
@@ -398,10 +423,16 @@ export async function finishBackfill(token: string, record: S3SettingsRecord, to
       delete rest.backfillProgress
       delete rest.lastSyncError
       delete rest.lastSyncErrorAt
+      delete rest.lastSyncErrorDate
       return rest
     }
+    // This error summarizes potentially many failed dates at once, not any single
+    // one — a lastSyncErrorDate left over from an earlier single-entry failure
+    // must not survive and get misattributed to just one of them.
+    const rest = { ...current }
+    delete rest.lastSyncErrorDate
     return {
-      ...current,
+      ...rest,
       backfillProgress: { total, done: total, failed, finishedAt },
       lastSyncError: `${runLabel}: ${failed.length} of ${total} entr${failed.length === 1 ? 'y' : 'ies'} failed to back up`,
       lastSyncErrorAt: finishedAt,

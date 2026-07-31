@@ -272,6 +272,69 @@ describe('GET /api/s3/entry-status/[date]', () => {
     }
   })
 
+  it('attributes a date-scoped sync error to this date unconditionally, even though it is stale and within the grace window', async () => {
+    // A dated error (see recordMirrorFailure's `date` param) is the outcome of the
+    // most recent mirror attempt for exactly this date — real evidence, not a
+    // timing guess — so none of the since/elapsed heuristics apply to it.
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-04-30T00:00:00.000Z',
+      lastSyncErrorDate: '2026-05-01', // matches makeContext's date
+    })
+    const dateSpy = withinGraceWindow()
+
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
+
+  it('does not attribute a sync error recorded for a different date, even if it is fresh', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z', // after SINCE — would otherwise qualify as "fresh"
+      lastSyncErrorDate: '2026-05-02', // a different date than makeContext's
+    })
+    const dateSpy = pastGraceWindow()
+
+    try {
+      const res = await onRequestGet(makeContext() as any)
+      expect(await res.json()).toEqual({ status: 'unconfirmed' })
+    } finally {
+      dateSpy.mockRestore()
+    }
+  })
+
+  it('still reports backfilling (not a different date\'s failure) when a running backfill has a fresh error recorded for another date', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      backfillProgress: { total: 10, done: 4, failed: [] },
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z', // after SINCE
+      lastSyncErrorDate: '2026-05-02', // a different date than makeContext's
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'backfilling' })
+  })
+
+  it('treats a dateless sync error (predating lastSyncErrorDate, or a run-level failure) the same as before', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({
+      ...enabledSettings,
+      lastSyncError: 'AccessDenied',
+      lastSyncErrorAt: '2026-05-01T00:00:05.000Z', // after SINCE
+    })
+
+    const res = await onRequestGet(makeContext() as any)
+
+    expect(await res.json()).toEqual({ status: 'failed', error: 'AccessDenied' })
+  })
+
   it('reports failed (re-auth needed) without calling AWS when there is no valid Google ID token and no error is already recorded', async () => {
     vi.mocked(session.getValidIdToken).mockResolvedValue(null)
 

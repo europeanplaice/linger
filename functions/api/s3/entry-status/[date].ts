@@ -101,6 +101,14 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     const sinceTime = since ? Date.parse(since) : NaN
     const elapsedMs = !isNaN(sinceTime) ? Date.now() - sinceTime : 0
 
+    // An account-level lastSyncError is only relevant to *this* date if it's either
+    // dateless (a run-level failure not tied to any single date — e.g.
+    // backfillAllEntries's own top-level catch-all or summary — or settings
+    // written before lastSyncErrorDate existed) or was recorded for this exact
+    // date (see recordMirrorFailure's `date` param). An error recorded for a
+    // different date must never be attributed here, however fresh it is.
+    const errorAppliesToDate = settings.lastSyncErrorDate === undefined || settings.lastSyncErrorDate === date
+
     // A running backfill (or a chunk that just hasn't reached this date yet) is a
     // stronger, more specific "still working on it" signal than a *stale* generic
     // lastSyncError below — checked first so simply opening (or since-lessly polling)
@@ -109,19 +117,29 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     // fresh problem: this exact check's own STS/S3 failure (stsError), or an error
     // recorded after the `since` this specific poll is scoped to (freshSaveError) —
     // both are signals this run itself, or this save itself, is the one in trouble.
-    const freshSaveError = !!since && !!settings.lastSyncErrorAt && settings.lastSyncErrorAt > since
+    const freshSaveError = !!since && !!settings.lastSyncErrorAt && settings.lastSyncErrorAt > since && errorAppliesToDate
     if (settings.backfillProgress && !settings.backfillProgress.finishedAt && !stsError && !freshSaveError) {
       return jsonResponse({ status: 'backfilling' })
     }
 
-    // Only attribute a failure to this save if it was recorded after the save
-    // attempt started — otherwise a stale, unrelated failure (e.g. from a
-    // previous outage) would wrongly mark a brand-new, still-in-flight save
-    // as failed. However, if the error is persistent and unchanged, we avoid
-    // writing to Drive, meaning the timestamp doesn't update. If a significant
-    // amount of time has elapsed (e.g., 5 seconds) and we are still not synced,
-    // we fallback to reporting the recorded error.
-    if (settings.lastSyncErrorAt) {
+    if (settings.lastSyncErrorAt && errorAppliesToDate) {
+      // A date-scoped error is the outcome of the most recent mirror attempt for
+      // exactly this date — real evidence, not a timing guess — so it's attributed
+      // unconditionally regardless of `since`/elapsed time. This also covers a
+      // persistent, recurring failure whose timestamp wasn't bumped
+      // (recordMirrorFailure skips the write when the message is unchanged),
+      // which used to rely on the isPersistentError heuristic below.
+      if (settings.lastSyncErrorDate === date) {
+        return jsonResponse({ status: 'failed', error: settings.lastSyncError })
+      }
+      // Dateless (backward-compatible) fallback: only attribute a failure to this
+      // save if it was recorded after the save attempt started — otherwise a
+      // stale, unrelated failure (e.g. from a previous outage) would wrongly mark
+      // a brand-new, still-in-flight save as failed. However, if the error is
+      // persistent and unchanged, we avoid writing to Drive, meaning the
+      // timestamp doesn't update. If a significant amount of time has elapsed
+      // (e.g., 5 seconds) and we are still not synced, we fallback to reporting
+      // the recorded error.
       const isPersistentError = elapsedMs > 5000 && elapsedMs < 30000
       if (!since || settings.lastSyncErrorAt > since || isPersistentError) {
         return jsonResponse({ status: 'failed', error: settings.lastSyncError })
