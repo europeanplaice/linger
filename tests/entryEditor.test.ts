@@ -1712,6 +1712,34 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge).toHaveClass(/editor-meta-badge--synced/)
   })
 
+  test('anchors the save-scoped poll\'s `since` to the server-reported modifiedTime, not the local clock (immune to client clock skew)', async ({ page }) => {
+    // Regression test: attemptStartedAt used to be captured via new Date().toISOString()
+    // right after the Drive save resolved — a client clock reading. If the browser's
+    // clock is skewed relative to the server (a real-world occurrence, not hypothetical),
+    // `since` would be anchored to the wrong instant, throwing off both the
+    // PENDING_GRACE_MS window and freshSaveError's timestamp comparison on the server
+    // (functions/api/s3/entry-status/[date].ts). saved.meta.modifiedTime is stamped by
+    // Drive itself server-side, so anchoring `since` to it instead is immune to
+    // whatever the browser's own clock happens to read.
+    await page.clock.install({ time: new Date('2030-01-01T00:00:00.000Z') })
+    await loadHarness(page)
+
+    const sinceValues: (string | null)[] = []
+    await page.route('**/api/s3/entry-status/**', async route => {
+      sinceValues.push(new URL(route.request().url()).searchParams.get('since'))
+      await route.fulfill({ json: { status: 'pending' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'draft', version: null, autoSave: false })
+    await page.evaluate(() => window.editorHarness.setSaveModifiedTime('2020-06-15T09:30:00.000Z'))
+
+    await page.fill('textarea.editor-textarea', 'draft saved under a skewed client clock')
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+    await expect.poll(() => sinceValues.length).toBeGreaterThan(0)
+
+    expect(sinceValues[0]).toBe('2020-06-15T09:30:00.000Z')
+  })
+
   test('does not clobber the save-scoped poll with a false unconfirmed badge when knownDates updates right after saving a brand-new date', async ({ page }) => {
     // Regression test: saving a date not yet in knownDates (e.g. the first save
     // of a brand-new entry) causes the parent's knownDates set to gain that date

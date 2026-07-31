@@ -118,6 +118,7 @@ interface Window {
     }[]
     getContentCalls: () => { date: string }[]
     setRemoteEntry: (content: string, version: string | null) => void
+    setSaveModifiedTime: (modifiedTime: string) => void
     deleteCalls: () => { date: string }[]
     pendingNavigateCalls: () => { date: string | null }[]
     cancelNavigationCalls: () => { date: string | null }[]

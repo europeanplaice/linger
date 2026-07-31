@@ -657,8 +657,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     // This landed via a real Drive write (the retried save), which schedules a
     // mirror server-side same as any other save — give it the same since-scoped
     // pending grace window as save()/overwriteRemote instead of an immediate,
-    // possibly-false 'unconfirmed' check.
-    const attemptStartedAt = new Date().toISOString()
+    // possibly-false 'unconfirmed' check. Anchored to Drive's own modifiedTime
+    // rather than the local clock — see save()'s identical comment below.
+    const attemptStartedAt = reauthSaveResult.meta.modifiedTime ?? new Date().toISOString()
     lastSaveAtRef.current = { date, at: attemptStartedAt }
     resetS3ForVersion(date, newVersion, attemptStartedAt)
 
@@ -695,8 +696,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       // Captured only once the Drive save itself has resolved — the mirror is
       // scheduled server-side after that response, so starting the clock any
       // earlier would burn part of the poll/grace budget on the Drive round
-      // trip instead of the mirror's own latency.
-      const attemptStartedAt = new Date().toISOString()
+      // trip instead of the mirror's own latency. Anchored to Drive's own
+      // modifiedTime (a server-side timestamp) rather than the local clock —
+      // a skewed browser clock would otherwise throw off the server's
+      // PENDING_GRACE_MS/freshSaveError comparisons against `since`.
+      const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
       lastSaveAtRef.current = { date, at: attemptStartedAt }
       pollS3Status(date, newVersion, attemptStartedAt)
       success = true
@@ -796,8 +800,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setStatus(savedStatus)
       // Same rationale as save() above: this is a genuine write, so give the
       // mirror it schedules server-side the same since-scoped pending grace
-      // window instead of resetS3ForVersion's default since-less check.
-      const attemptStartedAt = new Date().toISOString()
+      // window instead of resetS3ForVersion's default since-less check, and
+      // anchor it to Drive's own modifiedTime for the same clock-skew reason.
+      const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
       lastSaveAtRef.current = { date, at: attemptStartedAt }
       resetS3ForVersion(date, newVersion, attemptStartedAt)
     } catch {

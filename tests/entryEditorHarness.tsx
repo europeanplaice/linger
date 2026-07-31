@@ -43,6 +43,7 @@ let currentToken: string | null = null
 let currentSaveDelayMs = 0
 let currentRemoteContent = ''
 let currentRemoteVersion: string | null = null
+let currentSaveModifiedTime: string | undefined = undefined
 
 let lastRenderDate = '2026-05-01'
 let lastRenderAutoSave = true
@@ -180,7 +181,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         currentRemoteVersion = '2'
         return {
           entry: { date: d, content },
-          meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion, modifiedTime: new Date().toISOString() },
+          meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion, modifiedTime: currentSaveModifiedTime ?? new Date().toISOString() },
         }
       }}
       onDelete={async (d) => {
@@ -262,6 +263,7 @@ window.editorHarness = {
     saveBlockResolvers = []
     currentRemoteContent = opts.initialContent ?? ''
     currentRemoteVersion = opts.version ?? null
+    currentSaveModifiedTime = undefined
     lastRenderDate = opts.date ?? '2026-05-01'
     lastRenderAutoSave = opts.autoSave ?? true
     lastRenderGetContentDelayMs = opts.getContentDelayMs ?? 0
@@ -284,6 +286,9 @@ window.editorHarness = {
   setRemoteEntry: (content, version) => {
     currentRemoteContent = content
     currentRemoteVersion = version
+  },
+  setSaveModifiedTime: (modifiedTime: string) => {
+    currentSaveModifiedTime = modifiedTime
   },
   deleteCalls: () => [...deleteCalls],
   pendingNavigateCalls: () => [...pendingNavigateCalls],
