@@ -29,7 +29,15 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (migratedDates.length > 0) {
     try {
       const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
-      if (record?.config.enabled) {
+      // Skip if a chunked run (initial backfill, a resync, a failed-entries retry) is
+      // already driving backfillProgress — this scoped run shares the same total/done/
+      // remaining/finishedAt bookkeeping (see resync.ts's identical guard) and could
+      // truncate a genuinely in-progress broader run. Not starting this one isn't a
+      // regression: these dates' now-stale-versioned mirrors will report 'unconfirmed'
+      // once opened, which useS3StaleEntryAutoResync already catches with an
+      // account-wide resync, and the in-progress run's own listing may well cover them.
+      const alreadyRunning = record?.status.backfillProgress && !record.status.backfillProgress.finishedAt
+      if (record?.config.enabled && !alreadyRunning) {
         context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, migratedDates, 'Migration re-sync', 20))
         s3Resyncing = true
       }

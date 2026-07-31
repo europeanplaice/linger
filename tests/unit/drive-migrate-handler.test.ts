@@ -61,6 +61,31 @@ describe('POST /api/drive/migrate', () => {
     )
   })
 
+  it('does not attempt a re-mirror when a backfill/resync is already active', async () => {
+    // Regression guard: this scoped re-sync shares backfillAllEntries's total/done/
+    // remaining/finishedAt bookkeeping with whatever broader run might already be
+    // driving it (initial backfill, a Resync, a failed-entries retry) — starting a
+    // second one here could truncate it (same class of bug guarded against in
+    // resync.ts/settings.ts). Skipping isn't a regression: these dates' now-stale-
+    // versioned mirrors will report 'unconfirmed' once opened, which
+    // useS3StaleEntryAutoResync already catches with an account-wide resync.
+    vi.mocked(drive.migrateMdToTxt).mockResolvedValue(['2026-05-01'])
+    vi.mocked(drive.findJsonFile).mockImplementation(async (_t, _f, fileName) =>
+      (fileName === 's3_settings.json' ? 'settings-file' : 'status-file'))
+    vi.mocked(drive.readJsonFile).mockImplementation(async (_t, fileId) => (fileId === 'status-file'
+      ? { backfillProgress: { total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`) } }
+      : validSettings))
+    const ctx = makeContext()
+
+    const res = await onRequestPost(ctx as any)
+    const body = await res.json() as any
+
+    expect(body.migrated).toBe(1)
+    expect(body.s3Resyncing).toBe(false)
+    expect(ctx.waitUntil).not.toHaveBeenCalled()
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
   it('does not attempt a re-mirror when nothing was migrated', async () => {
     vi.mocked(drive.migrateMdToTxt).mockResolvedValue([])
     const ctx = makeContext()

@@ -75,9 +75,20 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // entries saved/deleted after this point would ever reach the bucket.
     // Uses chunkSize so the backfill completes within Cloudflare's execution timeout;
     // the client's polling loop will call /api/s3/backfill-continue for the rest.
+    //
+    // Skip starting a *new* freshStart run if one is already in flight — e.g. disabling
+    // mid-backfill (backfill-continue.ts refuses to continue while disabled, stranding
+    // backfillProgress unfinished) and re-enabling shortly after would otherwise race a
+    // second freshStart backfillAllEntries against the still-unfinished one, both sharing
+    // the same total/done/remaining/finishedAt bookkeeping (see resync.ts's identical
+    // guard). Re-enabling alone is enough: backfill-continue.ts will resume driving the
+    // existing run now that config.enabled is true again.
     if (config.enabled && !previouslyEnabled) {
-      const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
-      context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Initial backfill', 20))
+      const alreadyRunning = existing?.status.backfillProgress && !existing.status.backfillProgress.finishedAt
+      if (!alreadyRunning) {
+        const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
+        context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Initial backfill', 20))
+      }
     }
 
     return jsonResponse(meta)

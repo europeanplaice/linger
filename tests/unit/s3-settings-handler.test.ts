@@ -96,6 +96,28 @@ describe('PUT /api/s3/settings', () => {
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
+  it('does not start a second freshStart backfill when re-enabling while one is still unfinished', async () => {
+    // Regression guard: disabling mid-backfill strands backfillProgress unfinished
+    // (backfill-continue.ts refuses to continue while disabled) — re-enabling shortly
+    // after must not race a second freshStart backfillAllEntries against the still-
+    // unfinished one (same class of bug guarded against in resync.ts/backfill-retry.ts).
+    // Re-enabling alone is enough: backfill-continue.ts resumes driving the existing run.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({
+      ...validSettings,
+      enabled: false,
+      backfillProgress: { total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`) },
+    })
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
+    })
+
+    const res = await onRequestPut(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
   it('does not trigger a backfill when already enabled and settings are merely edited', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
