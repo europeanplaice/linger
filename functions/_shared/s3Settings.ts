@@ -39,6 +39,35 @@ export interface BackfillProgress {
   failed: string[]
   remaining?: string[]
   finishedAt?: string // ISO timestamp
+  // Stamped fresh on every write (see writeBackfillProgress/finishBackfill) — lets
+  // isBackfillRunActive tell a genuinely still-running run from one that was
+  // orphaned mid-flight (e.g. the isolate driving it died, or the client that would
+  // have kept polling backfill-continue.ts never came back) and would otherwise
+  // block every future resync/retry with "already running" forever, since nothing
+  // else ever sets finishedAt on an abandoned run. Absent on records written before
+  // this field existed — treated as stale, same as any other unwritten value.
+  updatedAt?: string // ISO timestamp
+}
+
+// How long a backfillProgress with no finishedAt is still trusted to mean "genuinely
+// still running" before the resync/retry/migrate guards below treat it as abandoned
+// and allow a new run to start. Comfortably longer than one chunk should ever take
+// (backfillAllEntries's own chunk size is tuned to finish well within a single
+// invocation's timeout — see its chunkSize doc comment) so a run that's actually
+// still healthy is never second-guessed, while a truly orphaned one doesn't block
+// every future attempt indefinitely.
+const STALE_BACKFILL_MS = 10 * 60 * 1000
+
+// Whether `progress` represents a chunked run a new resync/retry/migrate-resync must
+// not be started alongside (see backfill-retry.ts's original guard for why: two runs
+// sharing this same total/done/remaining/finishedAt bookkeeping race, and whichever
+// finishes its own scope first truncates the other). A run with no recent write is
+// treated as abandoned rather than active, so an orphaned run can never permanently
+// block every future attempt.
+export function isBackfillRunActive(progress: BackfillProgress | undefined): boolean {
+  if (!progress || progress.finishedAt) return false
+  if (!progress.updatedAt) return false
+  return Date.now() - Date.parse(progress.updatedAt) < STALE_BACKFILL_MS
 }
 
 // The part of S3 backup state the user edits directly via Settings — stored in
@@ -510,7 +539,7 @@ export const DIARY_FILENAME_RE = /^diary-(\d{4}-\d{2}-\d{2})\.txt$/
 const BACKFILL_PROGRESS_WRITE_INTERVAL_MS = 2000
 
 export async function writeBackfillProgress(token: string, record: S3SettingsRecord, progress: BackfillProgress): Promise<void> {
-  await withFreshS3Status(token, record, current => ({ ...current, backfillProgress: progress }))
+  await withFreshS3Status(token, record, current => ({ ...current, backfillProgress: { ...progress, updatedAt: new Date().toISOString() } }))
 }
 
 export async function finishBackfill(token: string, record: S3SettingsRecord, total: number, failed: string[], runLabel: string): Promise<void> {
@@ -531,7 +560,7 @@ export async function finishBackfill(token: string, record: S3SettingsRecord, to
     delete rest.lastSyncErrorDate
     return {
       ...rest,
-      backfillProgress: { total, done: total, failed, finishedAt },
+      backfillProgress: { total, done: total, failed, finishedAt, updatedAt: finishedAt },
       lastSyncError: `${runLabel}: ${failed.length} of ${total} entr${failed.length === 1 ? 'y' : 'ies'} failed to back up`,
       lastSyncErrorAt: finishedAt,
     }

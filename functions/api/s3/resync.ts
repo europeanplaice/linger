@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries, isBackfillRunActive } from '../../_shared/s3Settings'
 
 // Re-mirrors every existing entry against S3 (backfillAllEntries with no `onlyDates`
 // filter) — putObjectIfNewer skips anything already at least as new as Drive, so this is
@@ -23,7 +23,9 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     // whichever finishes its own scope first calls finishBackfill and truncates the
     // other. Client-side gating (SettingsModal disables the button while busy) can't
     // close the multi-tab/stale-UI version of this, so it's enforced here too.
-    if (record.status.backfillProgress && !record.status.backfillProgress.finishedAt) {
+    // isBackfillRunActive treats a run with no recent progress write as abandoned
+    // rather than active, so an orphaned run can't permanently 409 every future resync.
+    if (isBackfillRunActive(record.status.backfillProgress)) {
       return jsonResponse({ error: 'A backfill is already running' }, 409)
     }
 

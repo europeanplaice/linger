@@ -72,13 +72,35 @@ describe('POST /api/s3/resync', () => {
     // and truncates the other.
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
-      backfillProgress: { total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`) },
+      backfillProgress: {
+        total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+        updatedAt: new Date().toISOString(),
+      },
     })
 
     const res = await onRequestPost(makeContext() as any)
 
     expect(res.status).toBe(409)
     expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('starts anyway when the existing run is stale (orphaned, no recent progress write)', async () => {
+    // isBackfillRunActive treats a run with no update in the last ~10 minutes as
+    // abandoned rather than active, so an orphaned run can't permanently 409 every
+    // future Resync click.
+    vi.mocked(drive.readJsonFile).mockResolvedValue({
+      ...validSettings,
+      backfillProgress: {
+        total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+        updatedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      },
+    })
+    const ctx = makeContext()
+
+    const res = await onRequestPost(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
   it('starts a new resync once the previous run has finished', async () => {

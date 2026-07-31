@@ -106,7 +106,10 @@ describe('PUT /api/s3/settings', () => {
     vi.mocked(drive.readJsonFile).mockResolvedValue({
       ...validSettings,
       enabled: false,
-      backfillProgress: { total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`) },
+      backfillProgress: {
+        total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+        updatedAt: new Date().toISOString(),
+      },
     })
     const ctx = makeContext({
       request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
@@ -116,6 +119,29 @@ describe('PUT /api/s3/settings', () => {
 
     expect(res.status).toBe(200)
     expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('starts a fresh backfill on re-enable when the stranded run is stale (orphaned, no recent progress write)', async () => {
+    // isBackfillRunActive treats a run with no update in the last ~10 minutes as
+    // abandoned rather than active, so an orphaned run can't permanently block every
+    // future re-enable from starting a fresh backfill.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({
+      ...validSettings,
+      enabled: false,
+      backfillProgress: {
+        total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+        updatedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      },
+    })
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
+    })
+
+    const res = await onRequestPut(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
   it('does not trigger a backfill when already enabled and settings are merely edited', async () => {

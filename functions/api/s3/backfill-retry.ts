@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries, isBackfillRunActive } from '../../_shared/s3Settings'
 
 // Re-runs the initial backfill for just the dates it failed on last time (see
 // backfillAllEntries's `onlyDates` param) — triggered by the "Retry" button
@@ -24,8 +24,12 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     // within one chunk it would reach the terminal finishBackfill and falsely stamp
     // the other, still-running run as finished, truncating it. SettingsModal already
     // client-gates its own Retry button while busy; this closes the multi-tab/stale-
-    // UI race that client-side gating alone can't.
-    if (record.status.backfillProgress && !record.status.backfillProgress.finishedAt) {
+    // UI race that client-side gating alone can't. isBackfillRunActive (rather than
+    // just checking finishedAt) treats a run with no recent progress write as
+    // abandoned instead of active, so an orphaned run (e.g. the isolate driving it
+    // died, or nothing ever came back to poll backfill-continue.ts for it) can't
+    // permanently 409 every future retry.
+    if (isBackfillRunActive(record.status.backfillProgress)) {
       return jsonResponse({ error: 'A backfill is already running' }, 409)
     }
 

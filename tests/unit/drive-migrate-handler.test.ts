@@ -73,7 +73,12 @@ describe('POST /api/drive/migrate', () => {
     vi.mocked(drive.findJsonFile).mockImplementation(async (_t, _f, fileName) =>
       (fileName === 's3_settings.json' ? 'settings-file' : 'status-file'))
     vi.mocked(drive.readJsonFile).mockImplementation(async (_t, fileId) => (fileId === 'status-file'
-      ? { backfillProgress: { total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`) } }
+      ? {
+        backfillProgress: {
+          total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+          updatedAt: new Date().toISOString(),
+        },
+      }
       : validSettings))
     const ctx = makeContext()
 
@@ -84,6 +89,32 @@ describe('POST /api/drive/migrate', () => {
     expect(body.s3Resyncing).toBe(false)
     expect(ctx.waitUntil).not.toHaveBeenCalled()
     expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('re-mirrors anyway when the existing run is stale (orphaned, no recent progress write)', async () => {
+    // isBackfillRunActive treats a run with no update in the last ~10 minutes as
+    // abandoned rather than active, so an orphaned run can't permanently block the
+    // migration re-sync either.
+    vi.mocked(drive.migrateMdToTxt).mockResolvedValue(['2026-05-01'])
+    vi.mocked(drive.findJsonFile).mockImplementation(async (_t, _f, fileName) =>
+      (fileName === 's3_settings.json' ? 'settings-file' : 'status-file'))
+    vi.mocked(drive.readJsonFile).mockImplementation(async (_t, fileId) => (fileId === 'status-file'
+      ? {
+        backfillProgress: {
+          total: 500, done: 120, failed: [], remaining: Array.from({ length: 380 }, (_, i) => `date-${i}`),
+          updatedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+        },
+      }
+      : validSettings))
+    const ctx = makeContext()
+
+    const res = await onRequestPost(ctx as any)
+    const body = await res.json() as any
+
+    expect(body.migrated).toBe(1)
+    expect(body.s3Resyncing).toBe(true)
+    expect(ctx.waitUntil).toHaveBeenCalledOnce()
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
   it('does not attempt a re-mirror when nothing was migrated', async () => {

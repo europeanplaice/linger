@@ -2,7 +2,7 @@ import type { Env, Data } from '../../_shared/session'
 import { jsonResponse, saveSession } from '../../_shared/session'
 import { ensureFolder, writeJsonFile } from '../../_shared/drive'
 import {
-  S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME, getS3Settings, isValidS3Settings, loadS3SettingsRecord, backfillAllEntries,
+  S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME, getS3Settings, isValidS3Settings, loadS3SettingsRecord, backfillAllEntries, isBackfillRunActive,
   type S3Config, type S3SettingsRecord,
 } from '../../_shared/s3Settings'
 
@@ -82,9 +82,11 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // second freshStart backfillAllEntries against the still-unfinished one, both sharing
     // the same total/done/remaining/finishedAt bookkeeping (see resync.ts's identical
     // guard). Re-enabling alone is enough: backfill-continue.ts will resume driving the
-    // existing run now that config.enabled is true again.
+    // existing run now that config.enabled is true again. isBackfillRunActive treats a
+    // run with no recent progress write as abandoned rather than active, so an orphaned
+    // run can't permanently block every future re-enable from starting a fresh one.
     if (config.enabled && !previouslyEnabled) {
-      const alreadyRunning = existing?.status.backfillProgress && !existing.status.backfillProgress.finishedAt
+      const alreadyRunning = isBackfillRunActive(existing?.status.backfillProgress)
       if (!alreadyRunning) {
         const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
         context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Initial backfill', 20))

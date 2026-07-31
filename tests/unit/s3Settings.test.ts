@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME,
   isValidS3Settings, getS3Settings, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
-  writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry,
+  writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry, isBackfillRunActive,
 } from '../../functions/_shared/s3Settings'
 import type { S3SettingsRecord, S3Config, S3SyncStatus } from '../../functions/_shared/s3Settings'
 import * as drive from '../../functions/_shared/drive'
@@ -542,7 +542,7 @@ describe('withFreshS3Status re-reads fresh before merging', () => {
 
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     expect((written as any).lastSyncError).toBeUndefined()
-    expect((written as any).backfillProgress).toEqual({ total: 5, done: 3, failed: [], remaining: ['x'] })
+    expect((written as any).backfillProgress).toEqual({ total: 5, done: 3, failed: [], remaining: ['x'], updatedAt: expect.any(String) })
   })
 
   it('finishBackfill merges onto a freshly re-read file, not the stale in-memory snapshot', async () => {
@@ -567,7 +567,7 @@ describe('withFreshS3Status re-reads fresh before merging', () => {
 
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     expect((written as any).lastSyncError).toBe('in-memory error')
-    expect((written as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [] })
+    expect((written as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [], updatedAt: expect.any(String) })
   })
 
   it('mirrorEntrySave failure recording also merges onto a freshly re-read status file', async () => {
@@ -627,7 +627,7 @@ describe('withFreshS3Status concurrency (optimistic-concurrency retry)', () => {
     // The retry's write preserved the concurrent writer's error field instead of
     // clobbering it with the stale first-read base.
     expect((finalWrite as any).lastSyncError).toBe('concurrent writer error')
-    expect((finalWrite as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [] })
+    expect((finalWrite as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [], updatedAt: expect.any(String) })
   })
 
   it('gives up after repeated concurrent writes without throwing', async () => {
@@ -659,6 +659,35 @@ describe('withFreshS3Status concurrency (optimistic-concurrency retry)', () => {
     expect(drive.readJsonFile).not.toHaveBeenCalled()
     expect(drive.getEntryMeta).not.toHaveBeenCalled()
     expect(drive.writeJsonFile).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('isBackfillRunActive', () => {
+  it('is false when there is no progress at all', () => {
+    expect(isBackfillRunActive(undefined)).toBe(false)
+  })
+
+  it('is false once finishedAt is set, regardless of updatedAt', () => {
+    expect(isBackfillRunActive({
+      total: 5, done: 5, failed: [], finishedAt: '2026-01-01T00:00:00.000Z', updatedAt: new Date().toISOString(),
+    })).toBe(false)
+  })
+
+  it('is false when updatedAt was never stamped (a record from before this field existed)', () => {
+    expect(isBackfillRunActive({ total: 5, done: 2, failed: [], remaining: ['x'] })).toBe(false)
+  })
+
+  it('is true for a run with a recent update and no finishedAt', () => {
+    expect(isBackfillRunActive({
+      total: 5, done: 2, failed: [], remaining: ['x'], updatedAt: new Date().toISOString(),
+    })).toBe(true)
+  })
+
+  it('is false for a run whose last update is older than the staleness window — an orphaned run', () => {
+    const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    expect(isBackfillRunActive({
+      total: 5, done: 2, failed: [], remaining: ['x'], updatedAt: elevenMinutesAgo,
+    })).toBe(false)
   })
 })
 

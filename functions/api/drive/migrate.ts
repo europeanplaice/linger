@@ -1,7 +1,7 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
 import { migrateMdToTxt } from '../../_shared/drive'
-import { loadS3SettingsRecord, backfillAllEntries } from '../../_shared/s3Settings'
+import { loadS3SettingsRecord, backfillAllEntries, isBackfillRunActive } from '../../_shared/s3Settings'
 
 // One-time migration endpoint: renames legacy `.md` diary files to `.txt`.
 // Idempotent and safe to call repeatedly; returns the number of files renamed.
@@ -36,7 +36,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
       // regression: these dates' now-stale-versioned mirrors will report 'unconfirmed'
       // once opened, which useS3StaleEntryAutoResync already catches with an
       // account-wide resync, and the in-progress run's own listing may well cover them.
-      const alreadyRunning = record?.status.backfillProgress && !record.status.backfillProgress.finishedAt
+      const alreadyRunning = isBackfillRunActive(record?.status.backfillProgress)
       if (record?.config.enabled && !alreadyRunning) {
         context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, migratedDates, 'Migration re-sync', 20))
         s3Resyncing = true
