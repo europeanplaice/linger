@@ -15,7 +15,8 @@ import {
 
 // KV writes are capped at 1000/day on the free tier. Writing on every request
 // would exhaust the quota quickly, so we throttle TTL renewal to once per day.
-// Only bypass this when the token itself changed (tokenRefreshed).
+// A token refresh (roughly hourly) is persisted separately by getValidSession
+// itself and doesn't bypass this throttle.
 const RENEW_INTERVAL = 60 * 60 * 24 * 1000 // 24 hours
 
 export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
@@ -47,9 +48,12 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
 
   const response = await context.next()
 
-  const tokenRefreshed = validSession !== session
+  // getValidSession above already persisted a refreshed token itself (mutating and
+  // saving `session` in place — see its own doc comment), so this block only needs to
+  // handle the sliding-TTL renewal stamp; it doesn't also need to detect and re-persist
+  // a refresh that already happened.
   const needsRenew = !validSession.renewed_at || Date.now() - validSession.renewed_at > RENEW_INTERVAL
-  if (tokenRefreshed || needsRenew) {
+  if (needsRenew) {
     await saveSession(sessionId, { ...validSession, renewed_at: Date.now() }, context.env)
     // The email index entry (esidx:{email}:{sessionId} — see session.ts) carries its
     // own TTL, separate from the session record's. Re-stamp it in step with the

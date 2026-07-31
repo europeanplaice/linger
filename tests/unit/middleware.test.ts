@@ -231,6 +231,40 @@ describe('API auth middleware', () => {
     expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
   })
 
+  it('persists a refreshed token even when renewed_at is recent, via getValidSession itself', async () => {
+    // Regression guard: getValidSession now persists a refresh itself rather than
+    // relying on this middleware's own post-next() block to notice and re-save it
+    // (see getValidSession's doc comment) — a session that both needs a token refresh
+    // and has a recent renewed_at (so the renewal block below is skipped) must still
+    // get its fresh token durably written to KV, not lost at the end of the request.
+    const recentRenewal = Date.now() - 60_000
+    const expiredSession = makeSession({ expires_at: Date.now() - 60_000, renewed_at: recentRenewal })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+    const put = vi.fn()
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put } },
+    })
+
+    const response = await onRequest(ctx as any)
+
+    expect(response.status).toBe(200)
+    expect(ctx.data.accessToken).toBe('new_at')
+    expect(put).toHaveBeenCalledOnce()
+    const stored = JSON.parse(put.mock.calls[0][1])
+    expect(stored.access_token).toBe('new_at')
+    // The renewal block itself was skipped (renewed_at is recent) — this write came
+    // from getValidSession, so it does NOT carry a freshly-stamped renewed_at.
+    expect(stored.renewed_at).toBe(recentRenewal)
+  })
+
   it('does not renew the email index when renewal is skipped (recent renewed_at)', async () => {
     const session = makeSession({ email: 'user@example.com', renewed_at: Date.now() - 60_000 })
     const put = vi.fn()

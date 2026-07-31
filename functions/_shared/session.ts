@@ -25,6 +25,21 @@ export interface SessionData {
   s3_settings_file_id?: string // Drive fileId of s3_settings.json, cached like folder_id so every mirror/poll doesn't pay a files.list lookup just to find the settings file — never the settings *content* itself (see s3Settings.ts's loadS3SettingsRecord), since a stale bucket/roleArn/enabled value could mirror content to a bucket the user just disabled or changed
   s3_status_file_id?: string // Drive fileId of s3_sync_status.json (see s3Settings.ts) — split out of s3_settings.json so background sync-status writes never share a file (and thus a last-write-wins overwrite) with the user's own config saves. Cached the same way and for the same reason as s3_settings_file_id
   s3_status_negative_cache_at?: number // ms since epoch — mirrors s3_settings_negative_cache_at, but for "no s3_sync_status.json exists yet". Without this, every mirror on an account that syncs cleanly (recordMirrorSuccess is a no-op when there's no error to clear, so the status file may never even get created) would pay a files.list lookup on every single save, forever
+  // Assumed AWS credentials for self-hosted S3 mirroring, persisted here (see
+  // s3Settings.ts's getAssumedCredentials) so they survive across requests — the
+  // in-isolate Map cache in s3.ts rarely helps a low-traffic personal account, since
+  // Workers isolates go cold between sparse requests far more often than that cache
+  // gets reused. `cacheKey` matches credentialsCacheKey(session, config) — a
+  // roleArn/region change invalidates the cache by no longer matching it. Same
+  // security posture as id_token/refresh_token already stored in this same record:
+  // scoped to the user's own bucket via their own IAM role, and short-lived (1hr).
+  s3_assumed_credentials?: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+    expiresAt: number // ms since epoch
+    cacheKey: string
+  }
 }
 
 export interface Data extends Record<string, unknown> {
@@ -72,7 +87,15 @@ export class RefreshTokenInvalidError extends Error {}
 // self-healing, since callers of getValidSession treat any thrown error alike.
 const REFRESH_RETRY_DELAYS_MS = [250, 500, 1000]
 
-export async function getValidSession(_sessionId: string, session: SessionData, env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
+// Mutates `session` in place (rather than returning a disconnected copy) and persists
+// it to KV itself whenever it refreshes, so every caller holding this same object
+// reference — including ones further down the call stack that read it well after this
+// call returns — sees the refreshed tokens immediately, and none of them can undo the
+// refresh by later saving their own stale snapshot over it. Previously returned a new
+// object on refresh; a caller (or anything called after it, e.g. a mirror's own
+// saveSession) that kept using its original `session` variable would silently save back
+// the pre-refresh tokens, clobbering the fresh ones this function had just persisted.
+export async function getValidSession(sessionId: string, session: SessionData, env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
   if (!opts.forceRefresh && session.expires_at > Date.now() + 60_000) {
     return session
   }
@@ -116,8 +139,7 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     throw new Error(`Token refresh failed: ${resp.status}`)
   }
   const tokens = await resp.json() as { access_token: string; expires_in: number; id_token?: string }
-  const updated: SessionData = {
-    ...session,
+  Object.assign(session, {
     access_token: tokens.access_token,
     expires_at: Date.now() + tokens.expires_in * 1000,
     // A successful refresh proves refresh_token is valid for the current client —
@@ -128,15 +150,13 @@ export async function getValidSession(_sessionId: string, session: SessionData, 
     // issued one; otherwise drop it rather than handing callers a dead token that would
     // make every subsequent STS AssumeRoleWithWebIdentity call fail silently.
     id_token: tokens.id_token,
-  }
-  return updated
+  })
+  await saveSession(sessionId, session, env)
+  return session
 }
 
 export async function getValidAccessToken(sessionId: string, session: SessionData, env: Env): Promise<string> {
   const validSession = await getValidSession(sessionId, session, env)
-  if (validSession !== session) {
-    await saveSession(sessionId, validSession, env)
-  }
   return validSession.access_token
 }
 
@@ -151,9 +171,6 @@ export async function getValidAccessToken(sessionId: string, session: SessionDat
 // reason to pay for an early refresh just because id_token happens to be absent.
 export async function getValidIdToken(sessionId: string, session: SessionData, env: Env): Promise<string | null> {
   const validSession = await getValidSession(sessionId, session, env, { forceRefresh: !session.id_token })
-  if (validSession !== session) {
-    await saveSession(sessionId, validSession, env)
-  }
   return validSession.id_token ?? null
 }
 

@@ -315,6 +315,51 @@ describe('getValidIdToken', () => {
     const stored = JSON.parse(put.mock.calls[0][1])
     expect(stored.id_token).toBeUndefined()
   })
+
+  // Regression guard: getValidSession/getValidIdToken/getValidAccessToken used to
+  // return a *new* object on refresh instead of mutating the caller's `session` in
+  // place. Any caller that kept using its own `session` variable after the call (e.g.
+  // s3Settings.ts's mirrorEntrySave, which reads `session` again for
+  // assumeRoleWithWebIdentity/credentialsCacheKey, or would save it again itself for a
+  // future credentials cache) would silently keep seeing pre-refresh values — and if
+  // anything downstream ever called saveSession(session) again, it would clobber the
+  // fresh tokens this function had just persisted with the stale ones it started with.
+  it('mutates the caller-provided session object in place, not just KV, so later readers of the same reference see the refreshed tokens', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600, id_token: 'new_idtok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    const env = { ...baseEnv, SESSIONS: { put: vi.fn() } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
+
+    await getValidIdToken('sid', session, env as any)
+
+    expect(session.access_token).toBe('new_at')
+    expect(session.id_token).toBe('new_idtok')
+  })
+
+  it('a later saveSession of the same object cannot clobber the refresh with stale data', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600, id_token: 'new_idtok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    const store = new Map<string, string>()
+    const env = { ...baseEnv, SESSIONS: { put: vi.fn((key: string, value: string) => { store.set(key, value) }) } }
+    const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
+
+    await getValidIdToken('sid', session, env as any)
+    // Some other code, further down the same call stack, saves the same `session`
+    // reference again for an unrelated reason (e.g. caching something else onto it).
+    await saveSession('sid', session, env as any)
+
+    const stored = JSON.parse(store.get('session:sid')!)
+    expect(stored.access_token).toBe('new_at')
+    expect(stored.id_token).toBe('new_idtok')
+  })
 })
 
 describe('addEmailSessionIndex', () => {
