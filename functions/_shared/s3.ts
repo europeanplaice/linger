@@ -7,10 +7,16 @@ export class S3Error extends Error {
   }
 }
 
-interface AssumedCredentials {
+// `expiresAt` (ms since epoch, from STS's own Expiration) is exposed to callers so a
+// longer-lived cache than this module's own in-isolate one (see s3Settings.ts's
+// getAssumedCredentials, which persists this in the user's KV session — isolates for a
+// low-traffic app go cold between requests far more often than this in-memory Map ever
+// gets to help) can also tell a still-good credential from an expired one.
+export interface AssumedCredentials {
   accessKeyId: string
   secretAccessKey: string
   sessionToken: string
+  expiresAt: number
 }
 
 // Opportunistic cross-request cache: Cloudflare Workers isolates commonly persist
@@ -20,10 +26,13 @@ interface AssumedCredentials {
 // warm isolate. Keyed by caller-supplied `cacheKey` — callers must key this uniquely
 // per user (e.g. `${google_sub}:${roleArn}:${region}`) so credentials for one account
 // can never be handed out for another; omit the key to opt out of caching entirely.
-const credentialsCache = new Map<string, { creds: AssumedCredentials; expiresAt: number }>()
+const credentialsCache = new Map<string, AssumedCredentials>()
 // Treat cached credentials as expired this far ahead of their real STS expiry, so a
-// cache hit never hands out credentials that could die mid-operation.
-const CREDENTIALS_EXPIRY_MARGIN_MS = 5 * 60 * 1000
+// cache hit never hands out credentials that could die mid-operation. Generous enough
+// that backfillAllEntries — which assumes a role once and then runs a multi-minute
+// chunked operation on those same credentials — never starts a chunk with too little
+// runway left on them.
+export const CREDENTIALS_EXPIRY_MARGIN_MS = 15 * 60 * 1000
 
 // Bounds every outbound STS/S3 request (headers *and* body — an AbortSignal cancels
 // the whole exchange, unlike racing a wrapper promise around just the fetch() call)
@@ -41,7 +50,7 @@ const S3_FETCH_TIMEOUT_MS = 20_000
 export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string, region: string, cacheKey?: string): Promise<AssumedCredentials> {
   if (cacheKey) {
     const cached = credentialsCache.get(cacheKey)
-    if (cached && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) return cached.creds
+    if (cached && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) return cached
   }
 
   const params = new URLSearchParams({
@@ -77,16 +86,19 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     }
   }
   const raw = data.AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.Credentials
+  // Falls back to a conservative estimate (DurationSeconds requested above) if STS ever
+  // returns an unparseable Expiration — the fixed 3600s duration was requested, so this
+  // is exact in practice, just defensive against an unexpected format ever making a
+  // caller cache/persist a NaN expiry and treat these credentials as eternally valid.
+  const parsedExpiration = Date.parse(raw.Expiration)
   const creds: AssumedCredentials = {
     accessKeyId: raw.AccessKeyId,
     secretAccessKey: raw.SecretAccessKey,
     sessionToken: raw.SessionToken,
+    expiresAt: isNaN(parsedExpiration) ? Date.now() + 3600 * 1000 : parsedExpiration,
   }
 
-  if (cacheKey) {
-    const expiresAt = Date.parse(raw.Expiration)
-    if (!isNaN(expiresAt)) credentialsCache.set(cacheKey, { creds, expiresAt })
-  }
+  if (cacheKey) credentialsCache.set(cacheKey, creds)
 
   return creds
 }

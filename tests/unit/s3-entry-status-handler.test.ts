@@ -16,7 +16,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 
 vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3')>()),
-  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }),
+  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: Date.now() + 3600 * 1000 }),
   headObjectVersion: vi.fn().mockResolvedValue(null),
 }))
 
@@ -51,7 +51,7 @@ beforeEach(() => {
   __clearEntryStatusSettingsCacheForTests()
   vi.mocked(s3Settings.getS3Settings).mockResolvedValue(enabledSettings)
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
-  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' })
+  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: Date.now() + 3600 * 1000 })
   vi.mocked(s3.headObjectVersion).mockResolvedValue(null)
 })
 

@@ -1,7 +1,7 @@
 import type { Env, SessionData } from './session'
 import { getValidIdToken, saveSession } from './session'
 import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getDiaryFileMeta, getEntryMeta, findEntryMeta, DriveError } from './drive'
-import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError } from './s3'
+import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError, CREDENTIALS_EXPIRY_MARGIN_MS, type AssumedCredentials } from './s3'
 
 export const S3_SETTINGS_FILE_NAME = 's3_settings.json'
 // Sync status (lastSyncError*/backfillProgress) lives in its own file, separate from
@@ -206,7 +206,18 @@ export async function loadS3SettingsRecord(token: string, sessionId: string, ses
   const folderId = await ensureFolder(token, sessionId, session, env)
   let sessionChanged = false
 
-  const { value: configData, fileId: configFileId } = await resolveDriveJson(token, folderId, S3_SETTINGS_FILE_NAME, session.s3_settings_file_id, isValidS3Settings)
+  // Config and status live in two independent Drive files — resolving them
+  // concurrently instead of one-after-another saves a full round trip off every
+  // mirror/poll. The status fetch is occasionally wasted work on the (uncommon)
+  // "S3 backup isn't configured at all" path below, traded for that saving on the
+  // common path where config is present.
+  const statusNegativelyCached = isStatusNegativelyCached(session)
+  const [{ value: configData, fileId: configFileId }, statusResult] = await Promise.all([
+    resolveDriveJson(token, folderId, S3_SETTINGS_FILE_NAME, session.s3_settings_file_id, isValidS3Settings),
+    statusNegativelyCached
+      ? Promise.resolve({ value: null as S3SyncStatus | null, fileId: null as string | null })
+      : resolveDriveJson(token, folderId, S3_SYNC_STATUS_FILE_NAME, session.s3_status_file_id, isValidS3SyncStatus),
+  ])
   if (session.s3_settings_file_id !== (configFileId ?? undefined)) {
     session.s3_settings_file_id = configFileId ?? undefined
     sessionChanged = true
@@ -228,12 +239,8 @@ export async function loadS3SettingsRecord(token: string, sessionId: string, ses
   // just-recorded error might not get picked up by the very next recordMirrorSuccess
   // dedup check on this same session. Self-heals once the cache expires; same
   // accepted staleness bound as the config negative cache above.
-  let statusData: S3SyncStatus | null = null
-  let statusFileId: string | null = null
-  if (isStatusNegativelyCached(session)) {
-    statusFileId = null
-  } else {
-    ({ value: statusData, fileId: statusFileId } = await resolveDriveJson(token, folderId, S3_SYNC_STATUS_FILE_NAME, session.s3_status_file_id, isValidS3SyncStatus))
+  const { value: statusData, fileId: statusFileId } = statusResult
+  if (!statusNegativelyCached) {
     if (!statusFileId && session.s3_status_negative_cache_at === undefined) {
       session.s3_status_negative_cache_at = Date.now()
       sessionChanged = true
@@ -275,6 +282,34 @@ export async function getS3Settings(token: string, sessionId: string, session: S
 // session has no decoded google_sub, e.g. an older session predating that field.
 export function credentialsCacheKey(session: SessionData, config: Pick<S3Config, 'roleArn' | 'region'>): string | undefined {
   return session.google_sub ? `${session.google_sub}:${config.roleArn}:${config.region}` : undefined
+}
+
+// Wraps assumeRoleWithWebIdentity with a cache in the user's own durable KV session
+// record (session.s3_assumed_credentials), on top of s3.ts's own in-isolate Map cache.
+// The in-isolate cache rarely helps here: a low-traffic personal account's requests
+// tend to land on cold isolates, so nearly every save and every entry-status poll (up
+// to 7 per save, see EntryEditor.tsx's S3_POLL_DELAYS_MS) was paying a full STS
+// round trip. The session is already loaded into memory by the request middleware
+// before this ever runs, so a cache hit here costs nothing — not even a KV read.
+export async function getAssumedCredentials(
+  idToken: string, sessionId: string, session: SessionData, env: Env, config: Pick<S3Config, 'roleArn' | 'region'>,
+): Promise<AssumedCredentials> {
+  const cacheKey = credentialsCacheKey(session, config)
+  const cached = session.s3_assumed_credentials
+  if (cached && cacheKey && cached.cacheKey === cacheKey && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) {
+    return cached
+  }
+
+  const creds = await assumeRoleWithWebIdentity(idToken, config.roleArn, config.region, cacheKey)
+  if (cacheKey) {
+    session.s3_assumed_credentials = { ...creds, cacheKey }
+    try {
+      await saveSession(sessionId, session, env)
+    } catch (e) {
+      console.error('s3Settings.ts: failed to persist assumed-credentials cache', e)
+    }
+  }
+  return creds
 }
 
 export function entryKey(date: string): string {
@@ -412,7 +447,7 @@ export async function mirrorEntrySave(
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
     await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, driveVersion)
 
     // mirrorEntrySave and mirrorEntryDelete are independent context.waitUntil tasks
@@ -449,7 +484,7 @@ export async function mirrorEntryDelete(
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
     await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
     await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
@@ -507,7 +542,7 @@ export async function resyncSingleEntry(
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
     const meta = await findEntryMeta(accessToken, sessionId, session, env, date)
     // No longer exists in Drive (deleted since it was recorded as failed) — nothing
     // to back up, not a failure, same as backfillAllEntries's own handling of a date
@@ -598,7 +633,7 @@ export async function backfillAllEntries(
     const idToken = await getValidIdToken(sessionId, session, env)
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
-    const creds = await assumeRoleWithWebIdentity(idToken, record.config.roleArn, record.config.region, credentialsCacheKey(session, record.config))
+    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
     // Looked up by date (never by array position) below, so an entry added or removed
     // elsewhere in the account between chunks can't shift which dates this chunk covers.
     const driveByDate = new Map(

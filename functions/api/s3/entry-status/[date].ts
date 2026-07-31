@@ -1,7 +1,7 @@
 import type { Env, Data, SessionData } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
-import { assumeRoleWithWebIdentity, headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
-import { getS3Settings, entryKey, credentialsCacheKey, type S3Settings } from '../../../_shared/s3Settings'
+import { headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
+import { getS3Settings, entryKey, getAssumedCredentials, type S3Settings } from '../../../_shared/s3Settings'
 
 // A single save schedules up to 7 status polls (S3_POLL_DELAYS_MS in
 // EntryEditor.tsx), each of which otherwise calls getS3Settings — and thus
@@ -69,7 +69,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     let stsError: unknown = null
     if (idToken) {
       try {
-        const creds = await assumeRoleWithWebIdentity(idToken, settings.roleArn, settings.region, credentialsCacheKey(session, settings))
+        const creds = await getAssumedCredentials(idToken, sessionId, session, context.env, settings)
         const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
         if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
       } catch (e) {

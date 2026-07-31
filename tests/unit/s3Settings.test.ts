@@ -3,6 +3,7 @@ import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME,
   isValidS3Settings, getS3Settings, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
   writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry, isBackfillRunActive,
+  getAssumedCredentials,
 } from '../../functions/_shared/s3Settings'
 import type { S3SettingsRecord, S3Config, S3SyncStatus } from '../../functions/_shared/s3Settings'
 import * as drive from '../../functions/_shared/drive'
@@ -10,6 +11,12 @@ import { DriveError } from '../../functions/_shared/drive'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
 import type { SessionData } from '../../functions/_shared/session'
+
+// A fixed value rather than Date.now()-derived so the mock setup (beforeEach) and
+// assertions that check what assumeRoleWithWebIdentity's caller passed downstream
+// (toHaveBeenCalledWith) always agree, instead of drifting by whatever milliseconds
+// elapsed between the two Date.now() calls.
+const { MOCK_CREDS_EXPIRES_AT } = vi.hoisted(() => ({ MOCK_CREDS_EXPIRES_AT: Date.parse('2026-06-01T00:00:00.000Z') }))
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
@@ -32,7 +39,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 
 vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3')>()),
-  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }),
+  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT }),
   putObjectIfNewer: vi.fn().mockResolvedValue(undefined),
   deleteObject: vi.fn().mockResolvedValue(undefined),
 }))
@@ -90,7 +97,7 @@ beforeEach(() => {
     name: fileName,
   }))
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
-  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' })
+  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
   vi.mocked(s3.putObjectIfNewer).mockResolvedValue(undefined)
   vi.mocked(s3.deleteObject).mockResolvedValue(undefined)
   // Default: the entry still exists in Drive post-save (the common case) — no compensating delete.
@@ -129,14 +136,15 @@ describe('getS3Settings negative caching', () => {
 
     const first = await getS3Settings('tok', 'sid', sess, {} as any)
     expect(first).toBeNull()
-    // Only the config lookup happens — a missing config short-circuits before status
-    // is ever checked.
-    expect(drive.findJsonFile).toHaveBeenCalledTimes(1)
+    // Config and status are resolved concurrently (see loadS3SettingsRecord) rather
+    // than status only being looked up once config is known to exist — so both
+    // findJsonFile calls happen even though config turns out to be missing.
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(2)
     expect(sess).toHaveProperty('s3_settings_negative_cache_at')
 
     const second = await getS3Settings('tok', 'sid', sess, {} as any)
     expect(second).toBeNull()
-    expect(drive.findJsonFile).toHaveBeenCalledTimes(1) // not called again
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(2) // not called again — short-circuited by the negative cache
   })
 
   it('re-checks Drive once the negative cache has expired', async () => {
@@ -145,7 +153,7 @@ describe('getS3Settings negative caching', () => {
 
     await getS3Settings('tok', 'sid', sess, {} as any)
 
-    expect(drive.findJsonFile).toHaveBeenCalledTimes(1)
+    expect(drive.findJsonFile).toHaveBeenCalledTimes(2)
   })
 
   it('does not cache negatively when a settings file is found', async () => {
@@ -235,6 +243,71 @@ describe('credentialsCacheKey', () => {
   })
 })
 
+describe('getAssumedCredentials', () => {
+  const cacheKey = `112233:${baseSettings.roleArn}:${baseSettings.region}`
+
+  it('assumes fresh and persists to the session when nothing is cached yet', async () => {
+    const sess = makeSession({ google_sub: '112233' })
+
+    const result = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', baseSettings.roleArn, baseSettings.region, cacheKey)
+    expect(result).toEqual({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
+    expect(sess.s3_assumed_credentials).toEqual({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT, cacheKey })
+    expect(session.saveSession).toHaveBeenCalledWith('sid', sess, {})
+  })
+
+  it('reuses a cached credential without calling STS or writing the session again', async () => {
+    const sess = makeSession({
+      google_sub: '112233',
+      s3_assumed_credentials: { accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st', expiresAt: Date.now() + 3600_000, cacheKey },
+    })
+
+    const result = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+
+    expect(result).toEqual({ accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st', expiresAt: expect.any(Number), cacheKey })
+    expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
+    expect(session.saveSession).not.toHaveBeenCalled()
+  })
+
+  it('re-assumes when the cached credential is within the expiry margin', async () => {
+    const sess = makeSession({
+      google_sub: '112233',
+      s3_assumed_credentials: {
+        accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st',
+        expiresAt: Date.now() + s3.CREDENTIALS_EXPIRY_MARGIN_MS - 1000, cacheKey,
+      },
+    })
+
+    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledOnce()
+  })
+
+  it('re-assumes when the cached credential belongs to a different role/region (stale cacheKey)', async () => {
+    const sess = makeSession({
+      google_sub: '112233',
+      s3_assumed_credentials: {
+        accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st',
+        expiresAt: Date.now() + 3600_000, cacheKey: 'stale:different-role:different-region',
+      },
+    })
+
+    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledOnce()
+  })
+
+  it('does not cache when the session has no google_sub (no cache key)', async () => {
+    const sess = makeSession()
+
+    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+
+    expect(sess.s3_assumed_credentials).toBeUndefined()
+    expect(session.saveSession).not.toHaveBeenCalled()
+  })
+})
+
 describe('mirrorEntrySave', () => {
   it('passes a per-account cache key through to assumeRoleWithWebIdentity', async () => {
     mockS3Files(baseSettings, null)
@@ -279,7 +352,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5',
     )
   })
@@ -408,7 +481,7 @@ describe('mirrorEntrySave ghost-object compensation', () => {
 
     expect(s3.putObjectIfNewer).toHaveBeenCalled()
     expect(s3.deleteObject).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
     )
   })
@@ -442,7 +515,7 @@ describe('mirrorEntryDelete', () => {
     await mirrorEntryDelete('tok', 'sid', sess, {} as any, '2026-01-01')
 
     expect(s3.deleteObject).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
     )
   })
@@ -458,7 +531,7 @@ describe('resyncSingleEntry', () => {
 
     expect(result).toEqual({ ok: true })
     expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
       'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5',
     )
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!

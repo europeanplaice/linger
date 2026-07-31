@@ -4,6 +4,11 @@ import * as drive from '../../functions/_shared/drive'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
 
+// A fixed value rather than Date.now()-derived so mock setup and toHaveBeenCalledWith
+// assertions always agree, instead of drifting by whatever milliseconds elapsed
+// between two separate Date.now() calls.
+const { MOCK_CREDS_EXPIRES_AT } = vi.hoisted(() => ({ MOCK_CREDS_EXPIRES_AT: Date.parse('2026-06-01T00:00:00.000Z') }))
+
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
   listEntries: vi.fn().mockResolvedValue([]),
@@ -16,7 +21,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 
 vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3')>()),
-  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }),
+  assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT }),
   listObjectKeys: vi.fn().mockResolvedValue([]),
 }))
 
@@ -35,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(drive.listEntries).mockResolvedValue([])
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
-  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' })
+  vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
   vi.mocked(s3.listObjectKeys).mockResolvedValue([])
 })
 
@@ -87,7 +92,7 @@ describe('POST /api/s3/precheck', () => {
     await onRequestPost(makeContext() as any)
 
     expect(s3.listObjectKeys).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' },
+      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
       'my-bucket', 'us-east-1', 'diary-',
     )
   })

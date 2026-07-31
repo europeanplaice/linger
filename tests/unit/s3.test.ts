@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { assumeRoleWithWebIdentity, putObject, putObjectIfNewer, headObjectVersion, deleteObject, listObjectKeys, S3Error, describeError } from '../../functions/_shared/s3'
 
-const creds = { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st' }
+const creds = { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: Date.now() + 3600 * 1000 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -12,6 +12,22 @@ describe('assumeRoleWithWebIdentity', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       AssumeRoleWithWebIdentityResponse: {
         AssumeRoleWithWebIdentityResult: {
+          Credentials: { AccessKeyId: 'ak', SecretAccessKey: 'sk', SessionToken: 'st', Expiration: '2026-06-01T00:00:00.000Z' },
+        },
+      },
+    }), { status: 200 })))
+
+    const result = await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/linger-s3', 'us-east-1')
+
+    expect(result).toEqual({ ...creds, expiresAt: Date.parse('2026-06-01T00:00:00.000Z') })
+  })
+
+  it('falls back to a conservative estimate when Expiration is missing or unparseable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      AssumeRoleWithWebIdentityResponse: {
+        AssumeRoleWithWebIdentityResult: {
           Credentials: { AccessKeyId: 'ak', SecretAccessKey: 'sk', SessionToken: 'st' },
         },
       },
@@ -19,7 +35,8 @@ describe('assumeRoleWithWebIdentity', () => {
 
     const result = await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/linger-s3', 'us-east-1')
 
-    expect(result).toEqual(creds)
+    expect(result.expiresAt).toBe(Date.now() + 3600 * 1000)
+    vi.useRealTimers()
   })
 
   it('throws S3Error with the response body on failure', async () => {
