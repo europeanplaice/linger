@@ -131,12 +131,13 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
 
         const targetBatches = chunk(currentChunk, BATCH_SIZE).map(batch => batch.map(date => ({ date, fileId: '' })))
         for (const [batchIndex, batch] of targetBatches.entries()) {
-          const result = await processBatch(this.env, params, batch, step, `scope-${batchIndex}`)
-          await countedStep(this.env, step, `record-progress-scope-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
-            await index.recordProgress(params.jobId, `scope-${batchIndex}`, result.processed, result.failedDates)
+          const batchKey = `scope-c${chunkIdx}-b${batchIndex}`
+          const result = await processBatch(this.env, params, batch, step, batchKey)
+          await countedStep(this.env, step, `record-progress-${batchKey}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+            await index.recordProgress(params.jobId, batchKey, result.processed, result.failedDates)
             return null
           })
-          await step.sleep(`sleep-scope-${batchIndex}`, '1 second')
+          await step.sleep(`sleep-${batchKey}`, '1 second')
         }
 
         if (remainingScope.length > 0) {
