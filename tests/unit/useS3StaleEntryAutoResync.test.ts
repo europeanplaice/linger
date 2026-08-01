@@ -19,49 +19,10 @@ beforeEach(() => {
 })
 
 describe('useS3StaleEntryAutoResync', () => {
-  it('kicks off a resync and starts the backfill poll on the first call', async () => {
-    const call = deferred<void>()
-    vi.mocked(s3Api.resyncS3Backfill).mockReturnValue(call.promise)
+  it('does not auto-trigger resyncS3Backfill on stale entry detection', () => {
     const startBackfill = vi.fn()
-
     const { result } = renderHook(() => useS3StaleEntryAutoResync(true, { backfillActive: false, startBackfill }, false))
     act(() => { result.current() })
-
-    expect(s3Api.resyncS3Backfill).toHaveBeenCalledTimes(1)
-    expect(startBackfill).not.toHaveBeenCalled() // not until resyncS3Backfill resolves
-
-    await act(async () => { call.resolve(); await call.promise })
-    expect(startBackfill).toHaveBeenCalledTimes(1)
-  })
-
-  it('never fires a second time in the same session, even after the first resync settles', async () => {
-    vi.mocked(s3Api.resyncS3Backfill).mockResolvedValue(undefined)
-    const startBackfill = vi.fn()
-
-    const { result } = renderHook(() => useS3StaleEntryAutoResync(true, { backfillActive: false, startBackfill }, false))
-    await act(async () => { result.current() })
-    expect(s3Api.resyncS3Backfill).toHaveBeenCalledTimes(1)
-
-    act(() => { result.current() })
-    act(() => { result.current() })
-    expect(s3Api.resyncS3Backfill).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not fire while a backfill is already active', () => {
-    const startBackfill = vi.fn()
-    const { result } = renderHook(() => useS3StaleEntryAutoResync(true, { backfillActive: true, startBackfill }, false))
-
-    act(() => { result.current() })
-
-    expect(s3Api.resyncS3Backfill).not.toHaveBeenCalled()
-  })
-
-  it('does not fire while blocked (e.g. Settings modal open)', () => {
-    const startBackfill = vi.fn()
-    const { result } = renderHook(() => useS3StaleEntryAutoResync(true, { backfillActive: false, startBackfill }, true))
-
-    act(() => { result.current() })
-
     expect(s3Api.resyncS3Backfill).not.toHaveBeenCalled()
   })
 
