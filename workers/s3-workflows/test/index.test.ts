@@ -246,3 +246,77 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     )
   })
 })
+
+describe('getEntryStatus lazy mirror-on-read', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function lazyEnv() {
+    return {
+      ...(env as unknown as WorkflowEnv),
+      S3_MIRROR_WORKFLOW: {
+        create: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('not found')),
+      },
+    } as unknown as WorkflowEnv
+  }
+
+  it('starts a mirror workflow and reports pending when a plain open finds no index record', async () => {
+    const accountKey = 'lazy-open-1'
+    await seedSession(accountKey)
+    const workflowEnv = lazyEnv()
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    await svc.setBackupEnabled({ sessionId: sessionIdFor(accountKey), accountKey, enabled: true })
+
+    const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-05', requestedVersion: '7' })
+    expect(status.status).toBe('pending')
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-01-05', kind: 'mirror' }),
+      }),
+    )
+
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-05'))
+    expect(entry?.state).toBe('pending')
+  })
+
+  it('does not auto-mirror on a since-scoped check past its grace window (the client auto-retries)', async () => {
+    const accountKey = 'lazy-open-2'
+    await seedSession(accountKey)
+    const workflowEnv = lazyEnv()
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    await svc.setBackupEnabled({ sessionId: sessionIdFor(accountKey), accountKey, enabled: true })
+
+    const status = await svc.getEntryStatus({
+      sessionId: sessionIdFor(accountKey),
+      accountKey,
+      date: '2026-01-06',
+      requestedVersion: '7',
+      since: new Date(Date.now() - 60 * 1000).toISOString(),
+    })
+    expect(status.status).toBe('unconfirmed')
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+  })
+
+  it('re-arms the mirror and reports pending when a plain open finds a stale pending record', async () => {
+    const accountKey = 'lazy-open-3'
+    await seedSession(accountKey)
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      instance.markPending('2026-01-07', '3', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    })
+    const workflowEnv = lazyEnv()
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+
+    const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-07', requestedVersion: '3' })
+    expect(status.status).toBe('pending')
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-01-07', kind: 'mirror' }),
+      }),
+    )
+  })
+})

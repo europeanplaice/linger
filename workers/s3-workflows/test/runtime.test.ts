@@ -144,9 +144,19 @@ describe('entryStatusForAuth stale-pending aging', () => {
     expect(status.status).toBe('pending')
   })
 
-  it('ages an old pending record (e.g. a never-started workflow) to unconfirmed', async () => {
+  it('ages an old pending record to unconfirmed on a since-scoped check past the grace window', async () => {
+    // A plain open (no `since`) of a stale pending record now re-arms the mirror
+    // instead (see index.test.ts's lazy mirror-on-read tests); the aging still
+    // surfaces for a since-scoped poll past its grace window, where the client's
+    // save-scoped auto-retry owns the recovery.
     await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-    const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-old-1', accountKey: 'stale-old-1', date: '2026-01-01', requestedVersion: '5' })
+    const status = await entryStatusForAuth(workflowEnv, {
+      sessionId: 'stale-old-1',
+      accountKey: 'stale-old-1',
+      date: '2026-01-01',
+      requestedVersion: '5',
+      since: new Date(Date.now() - 60 * 1000).toISOString(),
+    })
     expect(status.status).toBe('unconfirmed')
   })
 

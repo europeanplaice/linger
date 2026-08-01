@@ -232,6 +232,19 @@ export async function getJobForAuth(env: WorkflowEnv, input: GetJobInput) {
   return indexFor(env, input.accountKey).getJob(input.jobId)
 }
 
+// Lazy mirror-on-read: a plain open (no `since`) of a date with no index record —
+// or only a stale 'pending' record nothing is driving — fires a fire-and-forget
+// S3MirrorWorkflow (mirrorEntryForAuth) instead of leaving a 'not backed up'
+// badge that needs a manual retry, so simply opening a never-backfilled entry
+// backs it up. Concurrency-safe: markPending lands synchronously before the
+// workflow is created, so follow-up polls in the same run see a fresh pending
+// record and never re-fire; a rare racing pair of opens schedules two idempotent
+// mirrors (putObjectIfNewer's conditional write plus the DO's monotonic
+// markSynced make the duplicate harmless).
+async function scheduleLazyMirror(env: WorkflowEnv, input: GetEntryStatusInput): Promise<void> {
+  await mirrorEntryForAuth(env, { sessionId: input.sessionId, accountKey: input.accountKey, date: input.date })
+}
+
 export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatusInput) {
   await authorizedSession(env, input)
   const index = indexFor(env, input.accountKey)
@@ -242,25 +255,38 @@ export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatus
   if (record?.syncedVersion && isAtLeast(record.syncedVersion, input.requestedVersion)) {
     return { status: 'synced' as const }
   }
+  const since = input.since ? Date.parse(input.since) : NaN
   if (record?.state === 'pending') {
-    const since = input.since ? Date.parse(input.since) : NaN
     const withinSaveGrace = !Number.isNaN(since) && Date.now() - since < PENDING_GRACE_MS
     const recordAge = Number.isFinite(record.updatedAt ? Date.parse(record.updatedAt) : NaN) ? Date.now() - Date.parse(record.updatedAt) : NaN
     // A fresh save's short grace window, plus the workflow's own retry budget
     // above — either means something is (or very recently was) actively working
     // toward this date, so keep reporting 'pending'. Once both have elapsed, the
     // pending record is stale (a never-started workflow, or one whose create
-    // failed) — surface 'unconfirmed' so the client stops spinning and offers a
-    // retry instead of leaving the badge stuck forever.
+    // failed): a plain open re-arms the mirror so the entry self-heals, while a
+    // since-scoped check leaves that to the client's save-scoped auto-retry.
     if (withinSaveGrace || (Number.isFinite(recordAge) && recordAge < MIRROR_STALE_PENDING_MS)) {
+      return { status: 'pending' as const }
+    }
+    if (Number.isNaN(since)) {
+      await scheduleLazyMirror(env, input)
       return { status: 'pending' as const }
     }
     return { status: 'unconfirmed' as const }
   }
   if (record?.state === 'failed') return { status: 'failed' as const, error: record.lastError }
 
-  const since = input.since ? Date.parse(input.since) : NaN
   if (!Number.isNaN(since) && Date.now() - since < PENDING_GRACE_MS) return { status: 'pending' as const }
+  // No record at all: this date was never mirrored (it predates S3 backup, was
+  // created on another device after the last backfill, or the index was reset).
+  // A plain open starts a mirror workflow on the spot so the entry lands on
+  // 'synced' (or 'failed') as its steps run; a since-scoped check past its grace
+  // window still reports 'unconfirmed' so the client's save-scoped auto-retry
+  // handles it rather than the read path guessing.
+  if (Number.isNaN(since)) {
+    await scheduleLazyMirror(env, input)
+    return { status: 'pending' as const }
+  }
   return { status: 'unconfirmed' as const }
 }
 
