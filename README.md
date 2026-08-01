@@ -193,14 +193,36 @@ npm run dev &             # Start Vite in the background
 npm run workers:dev       # Wrangler Pages dev server at http://localhost:8788
 ```
 
+#### Running the S3 Workflows Worker locally
+
+S3 backfills run in a separate Worker (`workers/s3-workflows/`), reached from Pages
+Functions via the `S3_WORKFLOW_SERVICE` service binding in `wrangler.toml`. That
+binding only resolves if the Workflows Worker also has a `wrangler dev` session
+running locally — otherwise S3 backup/backfill features are unreachable in dev, even
+though the rest of the app works fine. Run it in a second terminal alongside
+`workers:dev`:
+
+```bash
+npx wrangler dev --config workers/s3-workflows/wrangler.jsonc
+```
+
+Wrangler auto-connects same-named local dev sessions, so once both are running,
+`workers:dev`'s binding table shows `env.S3_WORKFLOW_SERVICE ... local [connected]` —
+start order doesn't matter, it reconnects automatically either way. This worker also
+warns about missing `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`SESSION_DOMAIN`
+secrets — harmless if the session's Google token is still fresh, but it needs the
+same values as your root `.dev.vars` to refresh an expired one (which any real
+backfill run will eventually hit): copy `.dev.vars` to `workers/s3-workflows/.dev.vars`.
+
 Other commands:
 ```bash
-npm run ci:local     # run the local merge-check suite (build + lint + unit + e2e)
+npm run ci:local     # run the local merge-check suite (build + lint + unit + workers + e2e)
 npm run build        # type-check + production build → dist/
 npm run lint         # ESLint on src/ and tests/
 npm run preview      # serve the production build with Wrangler locally
 npm test             # run the Playwright e2e test suite
 npm run test:unit    # run Vitest unit tests
+npm run test:workers # run the S3 Workflows Worker's test suite (@cloudflare/vitest-pool-workers)
 ```
 
 #### UI preview params
