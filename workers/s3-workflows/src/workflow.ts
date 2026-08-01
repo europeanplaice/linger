@@ -6,7 +6,13 @@ import { deleteObject, putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
 
-const BATCH_SIZE = 20
+// Each entry in a batch costs ~6 subrequests (getDiaryFileMeta, getEntryContent,
+// putObjectIfNewer's HEAD+PUT+HEAD, the post-write getDiaryFileMeta verify), plus one
+// AssumeRoleWithWebIdentity call per batch — all inside the same step.do() invocation,
+// which counts against the Workers subrequest limit (50 on the Free plan) as a single
+// invocation. 20 pushed that past 120 subrequests and failed with "Too many
+// subrequests"; 6 keeps a full batch under 40 with headroom for the occasional retry.
+const BATCH_SIZE = 6
 const MAX_BACKFILL_ENTRIES = 10_000
 const STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
