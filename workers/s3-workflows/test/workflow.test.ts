@@ -10,16 +10,11 @@ vi.mock('../../../functions/_shared/drive', () => ({
   readJsonFile: vi.fn(async () => ({ enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' })),
   // A scope-based backfill (this file only exercises that path) looks up each date's
   // current fileId via findEntryMeta — it never knows a fileId up front, unlike the
-  // paging-discovery path which passes one straight to getDiaryFileMeta.
+  // paging-discovery path which carries one straight from the listing.
   findEntryMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, date: string) => {
     if (date === 'missing') return null
     if (date === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
     return { id: date, name: `diary-${date}.txt`, version: `${date}-v1` }
-  }),
-  getDiaryFileMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, fileId: string) => {
-    if (fileId === 'missing') throw Object.assign(new Error('not_found'), { status: 404 })
-    if (fileId === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
-    return { id: fileId, name: `diary-${fileId}.txt`, version: `${fileId}-v1` }
   }),
   getEntryContent: vi.fn(async (_token: string, fileId: string) => ({ date: fileId, content: `content for ${fileId}` })),
   listEntryPage: vi.fn(async () => ({ files: [], nextPageToken: undefined })),

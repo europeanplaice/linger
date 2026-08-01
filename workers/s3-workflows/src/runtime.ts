@@ -5,7 +5,6 @@ import {
   ensureFolder,
   findEntryMeta,
   findJsonFile,
-  getDiaryFileMeta,
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
@@ -298,37 +297,38 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub
     return
   }
   const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
-  let meta
+  const key = entryKey(input.date)
   try {
-    meta = input.fileId
-      ? await getDiaryFileMeta(accessToken, input.sessionId, session, env, input.fileId, input.date)
+    // fileId present: the Drive save already supplied the id + version, so skip the
+    // metadata round-trip — the content fetch below doubles as the existence check.
+    // Name-only input still searches Drive for the current file.
+    const meta = input.fileId
+      ? { id: input.fileId, version: input.driveVersion }
       : await findCurrentEntry(accessToken, input.sessionId, session, env, input.date)
     if (!meta) {
-      await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
+      await deleteObject(creds, config.bucket, config.region, key)
       await index.markDeleted(input.date)
       return
     }
+    const version = meta.version ?? input.driveVersion
+    const { content } = await getEntryContent(accessToken, meta.id, input.date)
+    // expectExisting=true: a save mirrors an object this account has almost certainly
+    // written before (its first mirror of a brand-new date resolves the same way — HEAD
+    // 404 then If-None-Match PUT, still two requests, see s3.ts).
+    await putObjectIfNewer(creds, config.bucket, config.region, key, content, version, undefined, { expectExisting: true })
+    await index.markSynced(input.date, version, new Date().toISOString())
   } catch (error) {
     if (isMissingEntryError(error)) {
-      await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
+      // The file vanished after the mirror started (deleted in Drive, e.g. a concurrent
+      // delete racing this save's mirror) — remove the now-orphaned object and record
+      // the delete rather than failing the entry. The old post-write getDiaryFileMeta
+      // recheck existed for this; the content fetch catches it one step earlier.
+      await deleteObject(creds, config.bucket, config.region, key)
       await index.markDeleted(input.date)
       return
     }
     throw error
   }
-  const { content } = await getEntryContent(accessToken, meta.id, input.date)
-  await putObjectIfNewer(creds, config.bucket, config.region, entryKey(input.date), content, meta.version)
-  try {
-    await getDiaryFileMeta(accessToken, input.sessionId, session, env, meta.id, input.date)
-  } catch (error) {
-    if (isMissingEntryError(error)) {
-      await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
-      await index.markDeleted(input.date)
-      return
-    }
-    throw error
-  }
-  await index.markSynced(input.date, meta.version, new Date().toISOString())
 }
 
 // Mirror one date to S3 and await the outcome — used by api/s3/entry-resync's

@@ -1,30 +1,34 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
-import { getDiaryFileMeta, getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
+import { getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
 import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurrentEntry, indexFor, isAtLeast, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
 
-// A new (not-yet-synced) entry costs up to 6 external subrequests in the worst case:
-// STS AssumeRoleWithWebIdentity (only on a credential-cache miss — see
-// assumeS3Credentials's KV-backed cache), Drive metadata, Drive content, and
-// putObjectIfNewer's S3 HEAD + PUT + post-write HEAD (s3.ts — the second HEAD
-// confirms the write actually landed, since S3 has no compare-and-swap). An entry
-// already synced at the version a listing/scope already knows about short-circuits
-// to a single internal DO lookup instead (see the DO-index check in processBatch),
-// so a Resync of a mostly-already-synced account costs far less than this bounds.
-// WORKFLOW_CHUNK_SIZE keeps a worst-case chunk (every entry new, every STS call a
-// cache miss) to 8 x 6 = 48 subrequests — real headroom under Cloudflare Workers
-// Free plan's 50-subrequests-per-Workflow-instance pool, which (unlike step
-// retries) is never reset mid-instance, including across step.sleep/hibernation.
-// When more entries remain, the Workflow instance chains a fresh Workflow instance
-// with the remaining scope, guaranteeing a brand-new Worker invocation and a
-// fresh 50-subrequest pool. The pool also bounds BATCH_SIZE implicitly: a batch's
-// 4 entries cost ~4 x 5 (Drive meta + content, S3 HEAD + PUT + HEAD) plus one
-// STS call, so both batch and chunk stay comfortably inside the pool.
-const BATCH_SIZE = 4
-const WORKFLOW_CHUNK_SIZE = 8
+// A new (not-yet-synced) entry costs up to 2 external subrequests: Drive content and a
+// single S3 If-None-Match PUT (see s3.ts's putObjectIfNewer — conditional writes made
+// the old Drive-meta + S3 HEAD + PUT + post-write HEAD sequence unnecessary, and
+// listing-derived targets carry their fileId/version straight from the listing). An
+// update to an already-mirrored date costs 3: Drive content + S3 HEAD + If-Match PUT.
+// STS AssumeRoleWithWebIdentity is only a subrequest on a credential-cache miss (the
+// KV-backed cache in assumeS3Credentials usually absorbs it). An entry already synced at
+// the version a listing/scope already knows about short-circuits to a single internal DO
+// lookup instead (see the DO-index check in processBatch), so a Resync of a mostly-
+// already-synced account costs far less than this bounds.
+// WORKFLOW_CHUNK_SIZE keeps a worst-case chunk (every entry an update: 3 each) to
+// 12 x 3 = 36 subrequests — real headroom under Cloudflare Workers Free plan's
+// 50-subrequests-per-Workflow-instance pool, which (unlike step retries) is never reset
+// mid-instance, including across step.sleep/hibernation. The rare 412-downgrade race (a
+// concurrent mirror writing the same date) adds at most one request per affected entry;
+// the pool absorbs a few of those before the batch step's own retry takes over. When more
+// entries remain, the Workflow instance chains a fresh Workflow instance with the
+// remaining scope, guaranteeing a brand-new Worker invocation and a fresh 50-subrequest
+// pool. BATCH_SIZE keeps a single batch (plus its step retry, which re-runs the whole
+// idempotent batch) inside the same pool: 6 x 3 = 18, doubled to 36 on a retry, with the
+// one-off STS call still fitting.
+const BATCH_SIZE = 6
+const WORKFLOW_CHUNK_SIZE = 12
 const MAX_BACKFILL_ENTRIES = 10_000
 // Steps that only touch the Durable Object / Workflow-binding (not the external
 // Drive/S3 subrequest budget) can retry generously — those calls don't compete
@@ -109,28 +113,35 @@ async function processBatch(
       const failedDates: string[] = []
 
       for (const target of targets) {
-        let meta
+        let version: string | undefined
         try {
-          // Already mirrored at this exact Drive version (known from a listing, not
-          // a stale guess) — confirm against the DO index with one internal call
-          // instead of the usual Drive-meta + Drive-content + S3 HEAD/PUT/HEAD, so a
-          // Resync that mostly rediscovers already-synced entries doesn't re-pay
-          // full cost for every one of them.
+          // The DO index short-circuit: already mirrored at this exact Drive version
+          // (known from a listing, not a stale guess) confirms with one internal call
+          // instead of any Drive/S3 subrequest at all, so a Resync that mostly
+          // rediscovers already-synced entries doesn't re-pay cost for every one of
+          // them. The same record also tells us expectExisting for the S3 write.
+          const known = await index.getEntry(target.date)
           if (target.version) {
-            const known = await index.getEntry(target.date)
             if (known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
+            version = target.version
           }
-          meta = target.fileId
-            ? await getDiaryFileMeta(accessToken, params.sessionId, session, env, target.fileId, target.date)
+          // Listing-derived targets (fileId + version known) skip the Drive metadata
+          // round-trip: the content fetch below still catches a mid-run deletion (404),
+          // and a Drive version bumped after the listing is caught by the next
+          // listing/resync, since putObjectIfNewer's conditional write stamps only the
+          // version we know. findCurrentEntry remains for name-only scope targets.
+          const meta = target.fileId
+            ? { id: target.fileId, version: target.version }
             : await findCurrentEntry(accessToken, params.sessionId, session, env, target.date)
           if (!meta) {
             await index.markDeleted(target.date)
             continue
           }
-          await index.markPending(target.date, meta.version ?? target.version, new Date().toISOString())
+          version = meta.version ?? version
+          await index.markPending(target.date, version, new Date().toISOString())
           const { content } = await getEntryContent(accessToken, meta.id, target.date)
-          await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, meta.version)
-          await index.markSynced(target.date, meta.version, new Date().toISOString())
+          await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: known?.state === 'synced' })
+          await index.markSynced(target.date, version, new Date().toISOString())
         } catch (error) {
           if (isMissingEntryError(error)) {
             await index.markDeleted(target.date)
@@ -141,7 +152,7 @@ async function processBatch(
           if (!isPermanentEntryError(error)) throw error
           const message = safeError(error)
           failedDates.push(target.date)
-          await index.markFailed(target.date, meta?.version ?? target.version, message, new Date().toISOString())
+          await index.markFailed(target.date, version, message, new Date().toISOString())
         }
       }
       const result = { processed: targets.length, failedDates }
