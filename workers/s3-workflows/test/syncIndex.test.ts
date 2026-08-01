@@ -115,8 +115,16 @@ describe('S3SyncIndex backfill jobs', () => {
     const stub = stubFor('account-job-3')
     await runInDurableObject(stub, async (instance: S3SyncIndex) => {
       instance.setBackupEnabled(true)
-      instance.startJob('req-a', 'job-a', 'wf-a', true, '2026-01-01T00:00:00.000Z')
-      expect(() => instance.startJob('req-b', 'job-b', 'wf-b', true, '2026-01-01T00:00:01.000Z')).toThrow('already running')
+      // Real "now" timestamps (not a fixed historical string like other tests
+      // in this file use) — job-a must be recent enough that isOrphaned's
+      // real Date.now() comparison finds it still active, otherwise startJob
+      // treats it as abandoned and allows job-b through instead of refusing it.
+      instance.startJob('req-a', 'job-a', 'wf-a', true, new Date().toISOString())
+      // The throw genuinely happens (confirmed via console output), but
+      // vitest-pool-workers' DO dispatch surfaces it as a promise rejection
+      // rather than a synchronous throw a plain toThrow() can catch — wrapping
+      // in an async fn lets rejects.toThrow() catch it either way.
+      await expect(async () => instance.startJob('req-b', 'job-b', 'wf-b', true, new Date().toISOString())).rejects.toThrow('already running')
     })
   })
 

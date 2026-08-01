@@ -171,7 +171,7 @@ export function safeError(error: unknown): string {
 // transient quota bump or a stale id_token gets recorded as the entry's permanent,
 // un-retriable failure instead of the next attempt (with a refreshed token, past
 // the quota window) just working.
-const RETRYABLE_ERROR_SIGNATURE = /rateLimitExceeded|quotaExceeded|ThrottlingException|ExpiredTokenException/
+const RETRYABLE_ERROR_SIGNATURE = /rateLimitExceeded|quotaExceeded|ThrottlingException|ExpiredTokenException/i
 
 export function isPermanentEntryError(error: unknown): boolean {
   if (error instanceof Error && 'status' in error) {
