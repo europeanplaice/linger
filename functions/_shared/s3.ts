@@ -193,6 +193,14 @@ export async function putObjectIfNewer(
     const landed = await headObjectVersion(creds, bucket, region, key)
     if (landed && isAtLeast(landed, version)) return
   }
+  // Every attempt's post-write HEAD came back showing a version that isn't ours
+  // (a persistently-losing race against another concurrent writer, or HEAD
+  // returning stale/eventually-consistent data) — callers must not treat this as
+  // success: markSynced on a version the bucket doesn't actually hold would make
+  // the DO index permanently claim "synced" for content that was never written,
+  // and nothing would ever revisit it since entryStatusForAuth short-circuits on
+  // a synced record.
+  throw new S3Error(409, `S3 PutObjectIfNewer: write did not land as version ${version} after ${PUT_IF_NEWER_MAX_ATTEMPTS} attempts`)
 }
 
 function unescapeXmlEntities(s: string): string {

@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
-import { resyncS3Backfill } from '../api/s3Settings'
+import { useCallback } from 'react'
 
 export interface S3BackfillTrigger {
   backfillActive: boolean

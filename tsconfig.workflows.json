@@ -11,6 +11,7 @@
     "functions/_shared/s3Workflow.ts",
     "functions/_shared/drive.ts",
     "functions/_shared/s3.ts",
+    "functions/_shared/s3Settings.ts",
     "src/utils/folderName.ts"
   ],
   "exclude": ["workers/s3-workflows/test", "workers/s3-workflows/vitest.config.ts"]

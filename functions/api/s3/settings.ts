@@ -124,11 +124,15 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
         return jsonResponse({ error: 'Settings saved, but backfill could not be started' }, 502)
       }
     } else if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      // Not a first-time enable (that's the branch above, which does reset) — just
+      // keep the DO's enabled flag in sync with this save. resetEntries must stay
+      // false here: this branch also runs on a plain re-save of already-enabled
+      // settings and on disabling, neither of which should wipe sync history or
+      // (per resetAllData's own guard) be allowed to kill an in-flight backfill.
       await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({
         sessionId,
         accountKey: session.google_sub,
         enabled: config.enabled,
-        resetEntries: true,
       })
     } else if (config.enabled && !previouslyEnabled) {
       const alreadyRunning = isBackfillRunActive(existing?.status.backfillProgress)

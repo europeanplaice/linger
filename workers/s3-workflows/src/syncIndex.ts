@@ -49,7 +49,16 @@ function parseFailedDates(value: string): string[] {
   }
 }
 
-const JOB_ORPHAN_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes with no progress write
+// Must exceed the worst-case time a single *live* Workflow step can spend before
+// its next DO write (markRunning/recordProgress/finishJob/failJob all bump
+// updated_at) — otherwise a step that's still legitimately retrying gets its job
+// declared orphaned and failed out from under it while the Workflow instance is
+// still going to resume writing. Worst case, per workflow.ts: STEP_TIMEOUT (2 min)
+// x (BOOKKEEPING_STEP_RETRIES.limit + 1) attempts plus exponential backoff between
+// them — bookkeeping steps are DO-only and effectively instant in practice, but
+// this is sized against the theoretical bound, not the common case. 10 minutes
+// leaves comfortable margin above that.
+const JOB_ORPHAN_TIMEOUT_MS = 10 * 60 * 1000
 
 function isOrphaned(row: JobRow): boolean {
   const lastActiveStr = (row.updated_at as string | null) ?? (row.started_at as string)
@@ -233,7 +242,19 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return row ? this.jobFromRow(row) : null
   }
 
+  // Guards against a concurrent in-flight job: without this, a caller that resets
+  // right before starting a fresh backfill (see resync.ts) could delete an active
+  // job's row out from under it, and startJob's own "already running" check
+  // (which only looks at what's currently in the jobs table) would then see
+  // nothing there and let a second Workflow chain start alongside the still-live
+  // first one. DO method calls are serialized against each other, so this
+  // check-then-delete is atomic — no separate lock needed.
   resetAllData(): void {
+    const active = this.ctx.storage.sql.exec<JobRow>(
+      "SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE state IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
+    ).toArray()[0]
+    if (active && !isOrphaned(active)) throw new Error('A backfill is already running')
+
     this.ctx.storage.sql.exec('DELETE FROM entries')
     this.ctx.storage.sql.exec('DELETE FROM jobs')
     this.ctx.storage.sql.exec('DELETE FROM processed_batches')

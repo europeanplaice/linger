@@ -58,6 +58,15 @@ describe('isPermanentEntryError / isMissingEntryError', () => {
     expect(isPermanentEntryError(httpError(500))).toBe(false)
   })
 
+  it('treats Drive quota and STS throttling/expiry 4xx bodies as retryable, not permanent', () => {
+    expect(isPermanentEntryError(Object.assign(new Error('{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}'), { status: 403 }))).toBe(false)
+    expect(isPermanentEntryError(Object.assign(new Error('{"error":{"errors":[{"reason":"rateLimitExceeded"}]}}'), { status: 403 }))).toBe(false)
+    expect(isPermanentEntryError(Object.assign(new Error('<Error><Code>ThrottlingException</Code></Error>'), { status: 400 }))).toBe(false)
+    expect(isPermanentEntryError(Object.assign(new Error('<Error><Code>ExpiredTokenException</Code></Error>'), { status: 400 }))).toBe(false)
+    // A plain 403/400 without one of those signatures stays permanent.
+    expect(isPermanentEntryError(Object.assign(new Error('{"error":{"errors":[{"reason":"forbidden"}]}}'), { status: 403 }))).toBe(true)
+  })
+
   it('identifies exactly 404 as a missing entry', () => {
     expect(isMissingEntryError(httpError(404))).toBe(true)
     expect(isMissingEntryError(httpError(403))).toBe(false)

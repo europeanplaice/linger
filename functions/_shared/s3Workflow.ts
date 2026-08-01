@@ -86,6 +86,7 @@ export interface WorkflowUsage {
 /** RPC surface exposed by the dedicated Workflow Worker. */
 export interface S3WorkflowService {
   startBackfill(input: StartBackfillInput): Promise<StartBackfillResult>
+  resetAllData(input: S3WorkflowAuth): Promise<void>
   getJob(input: GetJobInput): Promise<BackfillJob | null>
   getEntryStatus(input: GetEntryStatusInput): Promise<EntryStatusResult>
   setBackupEnabled(input: SetBackupEnabledInput): Promise<void>
