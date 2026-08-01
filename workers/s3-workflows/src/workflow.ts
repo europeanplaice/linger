@@ -6,13 +6,10 @@ import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
 
-// Each entry in a batch costs ~3-4 subrequests (getDiaryFileMeta, getEntryContent,
-// putObjectIfNewer's HEAD+PUT). Initial setup uses cached config from params and
-// AssumeRoleWithWebIdentity (1 subrequest). With BATCH_SIZE = 3, a batch uses ~13
-// subrequests total (well under the 50 limit). step.sleep('1 second') between
-// batches forces Cloudflare Workflows to start a fresh Worker invocation for each
-// batch, resetting the 50 subrequest limit to zero.
-const BATCH_SIZE = 3
+// Processing 1 entry per batch step costs ~4-5 subrequests (Drive metadata, Drive content,
+// S3 HEAD, S3 PUT). Even under retries, a 1-entry step uses at most ~15 subrequests,
+// staying far below Cloudflare Workers Free plan 50 subrequests limit.
+const BATCH_SIZE = 1
 const MAX_BACKFILL_ENTRIES = 10_000
 const STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const

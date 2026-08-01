@@ -67,7 +67,7 @@ describe('S3BackfillWorkflow', () => {
     vi.clearAllMocks()
   })
 
-  it('processes a scoped backfill in batches and marks the job complete', { timeout: 15_000 }, async () => {
+  it('processes a scoped backfill in batches and marks the job complete', { timeout: 40_000 }, async () => {
     const accountKey = '1111111111'
     const scope = Array.from({ length: 25 }, (_, i) => `2026-01-${String(i + 1).padStart(2, '0')}`)
     const index = await runScopedWorkflow(accountKey, 'job-scope-1', 'wf-scope-1', scope)
