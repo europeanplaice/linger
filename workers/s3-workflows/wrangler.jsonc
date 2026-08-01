@@ -10,7 +10,7 @@
   },
   "workflows": [
     {
-      "name": "s3-backfill-workflow",
+      "name": "s3-backfill-workflow-production",
       "binding": "S3_BACKFILL_WORKFLOW",
       "class_name": "S3BackfillWorkflow"
     }

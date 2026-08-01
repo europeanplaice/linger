@@ -1,6 +1,7 @@
 .wrangler
 node_modules
 dist
+artifacts
 .env.local
 .env
 .dev.vars
