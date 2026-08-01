@@ -1,0 +1,20 @@
+name = "linger-staging"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Used only by the `deploy-staging` CI job, which copies this over the root
+# wrangler.toml (in its own throwaway checkout) right before `wrangler pages
+# deploy` — Pages rejects `--config <path>` outright ("Pages does not support
+# custom paths for the Wrangler configuration file"), and a plain deploy from
+# the real wrangler.toml bakes production's bindings into every deployment
+# regardless of --project-name/--branch, overriding whatever the Cloudflare
+# dashboard/Terraform has configured for that Pages project.
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "9a4b27aaea734b8592480dc029ef86bd"
+preview_id = "9a4b27aaea734b8592480dc029ef86bd"
+
+[[services]]
+binding = "S3_WORKFLOW_SERVICE"
+service = "linger-s3-workflows-staging"

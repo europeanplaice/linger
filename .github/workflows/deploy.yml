@@ -142,6 +142,14 @@ jobs:
         env:
           DEPLOY_VERSION: ${{ github.sha }}
 
+      # `wrangler pages deploy` rejects `--config <path>` ("Pages does not
+      # support custom paths for the Wrangler configuration file"), so the
+      # only way to give this deploy staging's own bindings is to overwrite
+      # the default wrangler.toml in this job's own throwaway checkout —
+      # otherwise it silently bakes in production's S3_WORKFLOW_SERVICE/
+      # SESSIONS bindings, regardless of --project-name/--branch.
+      - run: cp wrangler.staging.toml wrangler.toml
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
