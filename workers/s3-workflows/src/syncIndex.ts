@@ -49,6 +49,14 @@ function parseFailedDates(value: string): string[] {
   }
 }
 
+const JOB_ORPHAN_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes with no progress write
+
+function isOrphaned(row: JobRow): boolean {
+  if (!row.updated_at) return false
+  const lastActive = new Date(row.updated_at).getTime()
+  return Number.isFinite(lastActive) && Date.now() - lastActive > JOB_ORPHAN_TIMEOUT_MS
+}
+
 export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   constructor(ctx: DurableObjectState, env: WorkflowEnv) {
     super(ctx, env)
@@ -85,6 +93,11 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
         value TEXT NOT NULL
       );
     `)
+    try {
+      this.ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN updated_at TEXT')
+    } catch {
+      // Column already exists
+    }
   }
 
   private jobFromRow(row: JobRow): BackfillJob {
@@ -104,7 +117,7 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
 
   private findJob(jobId: string): JobRow | null {
     const rows = this.ctx.storage.sql.exec<JobRow>(
-      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs WHERE job_id = ?',
+      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE job_id = ?',
       jobId,
     ).toArray()
     return rows[0] ?? null
@@ -112,22 +125,29 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
 
   startJob(requestId: string, jobId: string, workflowId: string, enabled: boolean, startedAt: string): JobReservation {
     const existingRequest = this.ctx.storage.sql.exec<JobRow>(
-      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs WHERE request_id = ?',
+      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE request_id = ?',
       requestId,
     ).toArray()[0]
     if (existingRequest) return { job: this.jobFromRow(existingRequest), created: false }
     if (!enabled) throw new Error('S3 backup is not enabled')
 
-    const active = this.ctx.storage.sql.exec<{ job_id: string }>(
-      "SELECT job_id FROM jobs WHERE state IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
+    const active = this.ctx.storage.sql.exec<JobRow>(
+      "SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE state IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
     ).toArray()[0]
-    if (active) throw new Error('A backfill is already running')
+    if (active) {
+      if (isOrphaned(active)) {
+        this.failJob(active.job_id, 'Job abandoned or superseded', new Date().toISOString())
+      } else {
+        throw new Error('A backfill is already running')
+      }
+    }
 
     this.ctx.storage.sql.exec(
-      "INSERT INTO jobs (job_id, request_id, state, started_at, workflow_id) VALUES (?, ?, 'queued', ?, ?)",
+      "INSERT INTO jobs (job_id, request_id, state, started_at, updated_at, workflow_id) VALUES (?, ?, 'queued', ?, ?, ?)",
       jobId,
       requestId,
       startedAt,
+      null,
       workflowId,
     )
     const row = this.findJob(jobId)
@@ -145,11 +165,13 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   markRunning(jobId: string): void {
-    this.ctx.storage.sql.exec("UPDATE jobs SET state = 'running' WHERE job_id = ? AND state = 'queued'", jobId)
+    const now = new Date().toISOString()
+    this.ctx.storage.sql.exec("UPDATE jobs SET state = 'running', updated_at = ? WHERE job_id = ? AND state = 'queued'", now, jobId)
   }
 
   setTotal(jobId: string, total: number): void {
-    this.ctx.storage.sql.exec('UPDATE jobs SET total = MAX(total, ?) WHERE job_id = ?', total, jobId)
+    const now = new Date().toISOString()
+    this.ctx.storage.sql.exec('UPDATE jobs SET total = MAX(total, ?), updated_at = ? WHERE job_id = ?', total, now, jobId)
   }
 
   recordProgress(jobId: string, batchKey: string, completed: number, failedDates: string[]): void {
@@ -164,11 +186,13 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     if (!row) throw new Error('Backfill job not found')
     const failed = new Set(row.failed_dates ? parseFailedDates(row.failed_dates) : [])
     for (const date of failedDates) failed.add(date)
+    const now = new Date().toISOString()
     this.ctx.storage.sql.exec(
-      'UPDATE jobs SET completed = completed + ?, failed = ?, failed_dates = ? WHERE job_id = ?',
+      'UPDATE jobs SET completed = completed + ?, failed = ?, failed_dates = ?, updated_at = ? WHERE job_id = ?',
       completed,
       failed.size,
       JSON.stringify([...failed].sort()),
+      now,
       jobId,
     )
   }
@@ -195,11 +219,17 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   getJob(jobId?: string): BackfillJob | null {
-    const row = jobId
+    let row = jobId
       ? this.findJob(jobId)
       : this.ctx.storage.sql.exec<JobRow>(
-        'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs ORDER BY started_at DESC LIMIT 1',
+        'SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs ORDER BY started_at DESC LIMIT 1',
       ).toArray()[0] ?? null
+    if (row && (row.state === 'running' || row.state === 'queued') && isOrphaned(row)) {
+      this.failJob(row.job_id, 'Job abandoned or superseded', new Date().toISOString())
+      row = jobId ? this.findJob(jobId) : this.ctx.storage.sql.exec<JobRow>(
+        'SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs ORDER BY started_at DESC LIMIT 1',
+      ).toArray()[0] ?? null
+    }
     return row ? this.jobFromRow(row) : null
   }
 
