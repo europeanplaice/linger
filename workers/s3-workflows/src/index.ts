@@ -11,6 +11,7 @@ import type {
 import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
 import { S3BackfillWorkflow } from './workflow'
 import { S3SyncIndex } from './syncIndex'
+import { runWorkerFirstPass } from './workerFirstPass'
 import type { WorkflowEnv } from './types'
 
 export { S3BackfillWorkflow, S3SyncIndex }
@@ -34,7 +35,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     validateRequestId(input.requestId)
     const scope = validateScope(input.scope)
     const session = await authorizedSession(this.env, input)
-    const { accessToken } = await freshGoogleTokens(input.sessionId, session, this.env)
+    const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, this.env)
     const config = await loadS3Config(accessToken, input.sessionId, session, this.env)
     if (!config || !config.enabled) throw new Error('S3 backup is not enabled')
     await assertWithinDailyStepBudget(this.env)
@@ -46,6 +47,32 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     const reservation = await index.startJob(input.requestId, jobId, workflowId, config.enabled, new Date().toISOString())
     if (!reservation.created) return reservation
 
+    let remainingScope: string[] | undefined = scope
+    if (scope && scope.length > 0) {
+      try {
+        const firstPassResult = await runWorkerFirstPass(
+          this.env,
+          input.sessionId,
+          session,
+          input.accountKey,
+          jobId,
+          config,
+          accessToken,
+          idToken,
+          scope,
+        )
+        remainingScope = firstPassResult.remainingScope
+
+        if (firstPassResult.isFinished) {
+          await index.finishJob(jobId, new Date().toISOString())
+          const finishedJob = await index.getJob(jobId)
+          return { job: finishedJob!, created: true }
+        }
+      } catch (e) {
+        console.warn('Worker first pass encountered non-fatal error, delegating to Workflow:', e)
+      }
+    }
+
     try {
       await this.env.S3_BACKFILL_WORKFLOW.create({
         id: workflowId,
@@ -54,7 +81,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
           accountKey: input.accountKey,
           jobId,
           config,
-          ...(scope ? { scope } : {}),
+          ...(remainingScope ? { scope: remainingScope } : {}),
         },
       })
       return reservation
