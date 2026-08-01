@@ -49,11 +49,11 @@ function parseFailedDates(value: string): string[] {
   }
 }
 
-const JOB_ORPHAN_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes with no progress write
+const JOB_ORPHAN_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes with no progress write
 
 function isOrphaned(row: JobRow): boolean {
-  if (!row.updated_at) return false
-  const lastActive = new Date(row.updated_at).getTime()
+  const lastActiveStr = (row.updated_at as string | null) ?? (row.started_at as string)
+  const lastActive = new Date(lastActiveStr).getTime()
   return Number.isFinite(lastActive) && Date.now() - lastActive > JOB_ORPHAN_TIMEOUT_MS
 }
 
