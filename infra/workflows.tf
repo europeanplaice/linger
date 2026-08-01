@@ -83,9 +83,7 @@ resource "cloudflare_workflow" "s3_backfill" {
   script_name   = each.value.script_name
 
   lifecycle {
-    replace_triggered_by = [
-      cloudflare_workers_script.s3_workflows[each.key].content_sha256
-    ]
+    prevent_destroy = true
   }
 }
 
@@ -98,8 +96,6 @@ resource "cloudflare_workflow" "s3_mirror" {
   script_name   = each.value.script_name
 
   lifecycle {
-    replace_triggered_by = [
-      cloudflare_workers_script.s3_workflows[each.key].content_sha256
-    ]
+    prevent_destroy = true
   }
 }
