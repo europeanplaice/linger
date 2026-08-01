@@ -219,6 +219,29 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return row.value === '1'
   }
 
+  // Called only on the single well-known instance returned by usageTrackerStub()
+  // (see runtime.ts) — never on a real per-account instance — so this reuses the
+  // generic account_config table as a global daily counter rather than needing a
+  // second Durable Object class (and the SQLite migration that would require).
+  // A single DO instance handles requests one at a time, so this increment can't
+  // race across concurrent Workflow steps the way a KV read-modify-write would.
+  recordWorkflowStep(date: string): number {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO account_config (key, value) VALUES (?, '1')
+       ON CONFLICT(key) DO UPDATE SET value = CAST(account_config.value AS INTEGER) + 1`,
+      `usage:${date}`,
+    )
+    return this.getWorkflowStepUsage(date)
+  }
+
+  getWorkflowStepUsage(date: string): number {
+    const row = this.ctx.storage.sql.exec<{ value: string }>(
+      'SELECT value FROM account_config WHERE key = ?',
+      `usage:${date}`,
+    ).toArray()[0]
+    return row ? Number(row.value) : 0
+  }
+
   getEntry(date: string): EntrySyncStatus | null {
     const row = this.ctx.storage.sql.exec<EntryRow>(
       'SELECT date, drive_version, synced_version, state, updated_at, last_error FROM entries WHERE date = ?',

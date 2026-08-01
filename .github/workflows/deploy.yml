@@ -41,6 +41,26 @@ jobs:
 
       - run: npm run test:unit
 
+  # Tests/builds the s3-workflows Worker only — it does not deploy it. That Worker is
+  # deployed separately via `terraform apply` in infra/ (content_file points at the
+  # locally-built artifacts/s3-workflows bundle), which stays a manual step since
+  # infra/ manages Terraform state locally with no remote backend for CI to use.
+  workers-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build:workflows
+
+      - run: npm run test:workers
+
   e2e-test:
     runs-on: ubuntu-latest
     steps:
@@ -81,7 +101,7 @@ jobs:
       - run: npm run audit
 
   deploy:
-    needs: [lint, unit-test, e2e-test, npm-audit]
+    needs: [lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -105,7 +125,7 @@ jobs:
           command: pages deploy dist --project-name=linger --commit-hash=${{ github.sha }}
 
   deploy-staging:
-    needs: [lint, unit-test, e2e-test, npm-audit]
+    needs: [lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:

@@ -45,6 +45,54 @@ export function indexFor(env: WorkflowEnv, accountKey: string): DurableObjectStu
   return env.S3_SYNC_INDEX.getByName(accountKey)
 }
 
+// Google `sub` values (used as accountKey) are always numeric strings, so this
+// name can never collide with a real account and can safely reuse the
+// S3SyncIndex class as a singleton, account-wide counter — see
+// recordWorkflowStep's comment in syncIndex.ts for why that's safe.
+const USAGE_TRACKER_KEY = '__workflow_usage__'
+
+// Cloudflare's Free plan includes 3,000 Workflow steps/day per account
+// (https://developers.cloudflare.com/workflows/reference/pricing/). Budgeted
+// below that so a runaway backfill can't silently consume the account's
+// entire daily allowance for other Workers too; new backfills are refused
+// once crossed, but jobs already running are left to finish.
+export const DAILY_WORKFLOW_STEP_BUDGET = 2500
+
+export function usageTrackerStub(env: WorkflowEnv): DurableObjectStub<S3SyncIndex> {
+  return env.S3_SYNC_INDEX.getByName(USAGE_TRACKER_KEY)
+}
+
+export function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export interface WorkflowUsage {
+  date: string
+  steps: number
+  budget: number
+  remaining: number
+}
+
+export async function getWorkflowUsage(env: WorkflowEnv): Promise<WorkflowUsage> {
+  const date = todayUTC()
+  const steps = await usageTrackerStub(env).getWorkflowStepUsage(date)
+  return { date, steps, budget: DAILY_WORKFLOW_STEP_BUDGET, remaining: Math.max(0, DAILY_WORKFLOW_STEP_BUDGET - steps) }
+}
+
+export async function assertWithinDailyStepBudget(env: WorkflowEnv): Promise<void> {
+  const usage = await getWorkflowUsage(env)
+  if (usage.steps >= usage.budget) {
+    throw new Error(`Daily Workflow step budget (${usage.budget}) reached — try again after 00:00 UTC`)
+  }
+}
+
+// Called from inside a Workflow step.do() callback only, so it runs exactly once
+// per step even across replays (step.do memoizes a successful callback) — see
+// workflow.ts's `tracked()` wrapper, which every step.do callback goes through.
+export async function recordWorkflowStep(env: WorkflowEnv): Promise<void> {
+  await usageTrackerStub(env).recordWorkflowStep(todayUTC())
+}
+
 function parseS3Config(value: unknown): S3Config | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
@@ -93,7 +141,15 @@ export async function assumeS3Credentials(
 
 export function safeError(error: unknown): string {
   const message = describeError(error)
-  return message.replace(/(Bearer|Authorization|token|secret|access.?key)[^\s]*/gi, '$1 redacted').slice(0, 200)
+  // Two passes: the first strips "Bearer <value>" specifically, since "Bearer" is
+  // itself one of the second pass's trigger words and would otherwise be consumed
+  // as if it were the *value* of a preceding "Authorization:" (leaving the actual
+  // token untouched right after it). The second pass then handles the remaining
+  // "keyword[:=]? value" shapes (Authorization:, secret=, access_key ...).
+  return message
+    .replace(/\bBearer\s+\S+/gi, 'Bearer redacted')
+    .replace(/(Authorization|token|secret|access.?key)\s*[:=]?\s*\S*/gi, '$1 redacted')
+    .slice(0, 200)
 }
 
 export function isPermanentEntryError(error: unknown): boolean {

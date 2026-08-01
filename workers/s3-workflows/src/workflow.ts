@@ -1,15 +1,43 @@
-import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type WorkflowStepConfig } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
 import { getDiaryFileMeta, getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
 import { deleteObject, putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
-import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
+import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
 
 const BATCH_SIZE = 20
 const MAX_BACKFILL_ENTRIES = 10_000
 const STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
+
+// Every step.do() call the Workflow makes goes through here instead of calling
+// step.do() directly, so the account-wide daily step counter (see
+// recordWorkflowStep in runtime.ts) tracks the same "step" unit Cloudflare bills
+// against. Counting happens inside the callback — which step.do only ever runs
+// once per step, even across replays — rather than around step.do itself, which
+// re-executes on every replay and would overcount.
+function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, fn: () => Promise<T>): Promise<T>
+function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, config: WorkflowStepConfig, fn: () => Promise<T>): Promise<T>
+function countedStep<T extends Rpc.Serializable<T>>(
+  env: WorkflowEnv,
+  step: WorkflowStep,
+  name: string,
+  configOrFn: WorkflowStepConfig | (() => Promise<T>),
+  maybeFn?: () => Promise<T>,
+): Promise<T> {
+  if (typeof configOrFn === 'function') {
+    return step.do(name, async () => {
+      await recordWorkflowStep(env)
+      return configOrFn()
+    })
+  }
+  const fn = maybeFn as () => Promise<T>
+  return step.do(name, configOrFn, async () => {
+    await recordWorkflowStep(env)
+    return fn()
+  })
+}
 
 function targetsFromPage(page: EntryPage): DiaryTarget[] {
   return page.entries.filter(target => /^\d{4}-\d{2}-\d{2}$/.test(target.date))
@@ -28,7 +56,9 @@ async function processBatch(
   step: WorkflowStep,
   batchKey: string,
 ): Promise<EntryProcessResult> {
-  return step.do(
+  return countedStep(
+    env,
+    step,
     `backup-batch-${batchKey}`,
     { retries: STEP_RETRIES, timeout: STEP_TIMEOUT },
     async () => {
@@ -87,20 +117,20 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
     const params = event.payload
     const index = indexFor(this.env, params.accountKey)
     try {
-      await step.do('mark-job-running', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+      await countedStep(this.env, step, 'mark-job-running', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
         await index.markRunning(params.jobId)
         return null
       })
 
       if (params.scope) {
-        await step.do('set-scope-total', async () => {
+        await countedStep(this.env, step, 'set-scope-total', async () => {
           await index.setTotal(params.jobId, params.scope?.length ?? 0)
           return null
         })
         const targetBatches = chunk(params.scope, BATCH_SIZE).map(batch => batch.map(date => ({ date, fileId: '' })))
         for (const [batchIndex, batch] of targetBatches.entries()) {
           const result = await processBatch(this.env, params, batch, step, `scope-${batchIndex}`)
-          await step.do(`record-progress-scope-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+          await countedStep(this.env, step, `record-progress-scope-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
             await index.recordProgress(params.jobId, `scope-${batchIndex}`, result.processed, result.failedDates)
             return null
           })
@@ -110,7 +140,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
         let pageIndex = 0
         let discoveredCount = 0
         do {
-          const page = await step.do(`discover-page-${pageIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+          const page = await countedStep(this.env, step, `discover-page-${pageIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
             const session = await authorizedSession(this.env, params)
             const accessToken = await getValidAccessToken(params.sessionId, session, this.env)
             const entries = await listEntryPage(accessToken, params.sessionId, session, this.env, pageToken)
@@ -126,13 +156,13 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
           if (discoveredCount > MAX_BACKFILL_ENTRIES) {
             throw new NonRetryableError('Backfill target limit exceeded')
           }
-          await step.do(`set-page-total-${pageIndex}`, async () => {
+          await countedStep(this.env, step, `set-page-total-${pageIndex}`, async () => {
             await index.setTotal(params.jobId, discoveredCount)
             return null
           })
           for (const [batchIndex, batch] of chunk(pageTargets, BATCH_SIZE).entries()) {
             const result = await processBatch(this.env, params, batch, step, `page-${pageIndex}-batch-${batchIndex}`)
-            await step.do(`record-progress-page-${pageIndex}-batch-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+            await countedStep(this.env, step, `record-progress-page-${pageIndex}-batch-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
               await index.recordProgress(params.jobId, `page-${pageIndex}-batch-${batchIndex}`, result.processed, result.failedDates)
               return null
             })
@@ -142,13 +172,13 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
         } while (pageToken)
       }
 
-      await step.do('mark-job-finished', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+      await countedStep(this.env, step, 'mark-job-finished', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
         await index.finishJob(params.jobId, new Date().toISOString())
         return null
       })
     } catch (error) {
       const message = safeError(error)
-      await step.do('mark-job-failed', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+      await countedStep(this.env, step, 'mark-job-failed', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
         await index.failJob(params.jobId, message, new Date().toISOString())
         return null
       })

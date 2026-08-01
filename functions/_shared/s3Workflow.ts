@@ -76,6 +76,13 @@ export interface MirrorResult {
   error?: string
 }
 
+export interface WorkflowUsage {
+  date: string
+  steps: number
+  budget: number
+  remaining: number
+}
+
 /** RPC surface exposed by the dedicated Workflow Worker. */
 export interface S3WorkflowService {
   startBackfill(input: StartBackfillInput): Promise<StartBackfillResult>
@@ -84,4 +91,5 @@ export interface S3WorkflowService {
   setBackupEnabled(input: SetBackupEnabledInput): Promise<void>
   mirrorEntry(input: MirrorEntryInput): Promise<MirrorResult>
   deleteEntry(input: DeleteEntryInput): Promise<MirrorResult>
+  getWorkflowUsage(): Promise<WorkflowUsage>
 }

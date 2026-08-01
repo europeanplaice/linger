@@ -8,7 +8,7 @@ import type {
   StartBackfillResult,
   SetBackupEnabledInput,
 } from '../../../functions/_shared/s3Workflow'
-import { authorizedSession, entryStatusForAuth, getJobForAuth, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
+import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
 import { S3BackfillWorkflow } from './workflow'
 import { S3SyncIndex } from './syncIndex'
 import type { WorkflowEnv } from './types'
@@ -37,6 +37,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     const { accessToken } = await freshGoogleTokens(input.sessionId, session, this.env)
     const config = await loadS3Config(accessToken, input.sessionId, session, this.env)
     if (!config || !config.enabled) throw new Error('S3 backup is not enabled')
+    await assertWithinDailyStepBudget(this.env)
 
     const jobId = crypto.randomUUID()
     const workflowId = crypto.randomUUID()
@@ -64,6 +65,12 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
 
   async getJob(input: GetJobInput) {
     return getJobForAuth(this.env, input)
+  }
+
+  // No account scoping — this account-wide throttle isn't per-user data, and every
+  // caller is an already-authenticated Pages Function, not an end user directly.
+  async getWorkflowUsage() {
+    return getWorkflowUsage(this.env)
   }
 
   async getEntryStatus(input: GetEntryStatusInput) {
