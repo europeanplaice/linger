@@ -1,7 +1,6 @@
 import type { SessionData } from '../../../functions/_shared/session'
 import {
   findEntryMeta,
-  getDiaryFileMeta,
   getEntryContent,
   listEntryPage,
 } from '../../../functions/_shared/drive'
@@ -15,12 +14,17 @@ export interface FirstPassResult {
   remainingScope: DiaryTarget[]
 }
 
-// Kept low because this runs inside a single plain Worker invocation (no chunk
-// reset like the Workflow path gets) that also has to fit loadS3Config's Drive
-// calls, token refresh, and the STS assume-role in the *same* 50-subrequest
-// Free-plan budget as this batch — see workflow.ts's WORKFLOW_CHUNK_SIZE comment
-// for the per-entry subrequest accounting this is sized against.
-const WORKER_FIRST_PASS_BATCH_SIZE = 5
+// Sized for a single plain Worker invocation (no chunk reset like the Workflow path
+// gets) that also has to fit loadS3Config's Drive calls, token refresh, and the STS
+// assume-role in the *same* 50-subrequest Free-plan budget as this batch — see
+// workflow.ts's WORKFLOW_CHUNK_SIZE comment for the per-entry subrequest accounting
+// this is sized against: up to 3 per entry (Drive content + S3 HEAD + If-Match PUT
+// for an update, 2 for a first mirror), so 10 entries cap the batch at ~30. The
+// caller's startBackfill has already spent loadS3Config's Drive reads plus up to two
+// Google token-endpoint refreshes in this same budget before this runs, so the
+// realistic worst case sits closer to ~36/50 — still under budget, but with less
+// slack than the per-entry arithmetic alone suggests.
+const WORKER_FIRST_PASS_BATCH_SIZE = 10
 
 export async function runWorkerFirstPass(
   env: WorkflowEnv,
@@ -76,19 +80,23 @@ export async function runWorkerFirstPass(
       try {
         // Already mirrored at this exact Drive version (known from a listing, not
         // a stale guess) — the DO index can confirm that with one internal call
-        // instead of the usual Drive-meta + Drive-content + S3 HEAD/PUT/HEAD, so a
-        // Resync that mostly rediscovers already-synced entries doesn't re-pay
-        // full cost for every one of them.
+        // instead of any Drive/S3 subrequest, so a Resync that mostly rediscovers
+        // already-synced entries doesn't re-pay cost for every one of them. The
+        // same record also tells us expectExisting for the S3 write below.
+        const known = await index.getEntry(target.date)
         if (target.version) {
-          const known = await index.getEntry(target.date)
           if (known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) {
             processed++
             continue
           }
         }
 
+        // Listing-derived targets (fileId + version known) skip the Drive metadata
+        // round-trip — the content fetch below still catches a mid-run deletion
+        // (404), and a newer Drive version is caught by the next listing/resync,
+        // since putObjectIfNewer's conditional write stamps only what we know.
         const meta = target.fileId
-          ? await getDiaryFileMeta(accessToken, sessionId, session, env, target.fileId, target.date)
+          ? { id: target.fileId, version: target.version }
           : await findEntryMeta(accessToken, sessionId, session, env, target.date)
 
         if (!meta) {
@@ -97,10 +105,11 @@ export async function runWorkerFirstPass(
           continue
         }
 
-        await index.markPending(target.date, meta.version ?? '1', new Date().toISOString())
+        const version = meta.version ?? target.version
+        await index.markPending(target.date, version, new Date().toISOString())
         const { content } = await getEntryContent(accessToken, meta.id, target.date)
-        await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, meta.version)
-        await index.markSynced(target.date, meta.version, new Date().toISOString())
+        await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: known?.state === 'synced' })
+        await index.markSynced(target.date, version, new Date().toISOString())
         processed++
       } catch (e) {
         console.warn(`Worker first pass failed for date ${target.date}, delegating to Workflow retry:`, e)

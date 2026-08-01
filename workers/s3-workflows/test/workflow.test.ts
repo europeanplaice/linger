@@ -1,5 +1,6 @@
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv, S3BackfillParams } from '../src/types'
@@ -10,16 +11,11 @@ vi.mock('../../../functions/_shared/drive', () => ({
   readJsonFile: vi.fn(async () => ({ enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' })),
   // A scope-based backfill (this file only exercises that path) looks up each date's
   // current fileId via findEntryMeta — it never knows a fileId up front, unlike the
-  // paging-discovery path which passes one straight to getDiaryFileMeta.
+  // paging-discovery path which carries one straight from the listing.
   findEntryMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, date: string) => {
     if (date === 'missing') return null
     if (date === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
     return { id: date, name: `diary-${date}.txt`, version: `${date}-v1` }
-  }),
-  getDiaryFileMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, fileId: string) => {
-    if (fileId === 'missing') throw Object.assign(new Error('not_found'), { status: 404 })
-    if (fileId === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
-    return { id: fileId, name: `diary-${fileId}.txt`, version: `${fileId}-v1` }
   }),
   getEntryContent: vi.fn(async (_token: string, fileId: string) => ({ date: fileId, content: `content for ${fileId}` })),
   listEntryPage: vi.fn(async () => ({ files: [], nextPageToken: undefined })),
@@ -147,6 +143,35 @@ describe('S3BackfillWorkflow', () => {
     const dump = JSON.stringify({ job, entry1, entryBroken })
     for (const secret of ['id-token', 'access', 'refresh', 'AKIA_FAKE', 'fake-secret', 'fake-session-token']) {
       expect(dump).not.toContain(secret)
+    }
+  })
+
+  it('derives expectExisting=false from a DO index that has never seen the date (first mirror)', async () => {
+    // Fresh account: the index has no synced record for any scope date, so the S3
+    // write must be told expectExisting=false (an If-None-Match create) rather than
+    // paying an unnecessary HEAD.
+    await runScopedWorkflow('8888888888', 'job-scope-8', 'wf-scope-8', ['2026-05-01', '2026-05-02'])
+
+    const optionsArgs = vi.mocked(putObjectIfNewer).mock.calls.map(c => c[7])
+    expect(optionsArgs.length).toBeGreaterThan(0)
+    for (const options of optionsArgs) {
+      expect(options).toEqual({ expectExisting: false })
+    }
+  })
+
+  it('derives expectExisting=true for dates the DO index already knows are synced', async () => {
+    const accountKey = '9999999999'
+    const workflowEnv = env as unknown as WorkflowEnv
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.markSynced('2026-06-01', '2026-06-01-v1', new Date().toISOString())
+    })
+    await runScopedWorkflow(accountKey, 'job-scope-9', 'wf-scope-9', ['2026-06-01'])
+
+    const thisDateCalls = vi.mocked(putObjectIfNewer).mock.calls.filter(c => String(c[3]).includes('2026-06-01'))
+    expect(thisDateCalls.length).toBeGreaterThan(0)
+    for (const call of thisDateCalls) {
+      expect(call[7]).toEqual({ expectExisting: true })
     }
   })
 })

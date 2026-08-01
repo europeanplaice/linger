@@ -131,6 +131,19 @@ describe('putObject', () => {
     expect(request.headers.get('x-amz-meta-linger-version')).toBe('7')
   })
 
+  it('adds conditional-write headers when options are provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObject(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', 'text/plain', '7', { ifMatch: 'etag-1' })
+    await putObject(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'hello', 'text/plain', '7', { ifNoneMatch: '*' })
+
+    expect((fetchMock.mock.calls[0][0] as Request).headers.get('if-match')).toBe('etag-1')
+    expect((fetchMock.mock.calls[0][0] as Request).headers.get('if-none-match')).toBeNull()
+    expect((fetchMock.mock.calls[1][0] as Request).headers.get('if-none-match')).toBe('*')
+    expect((fetchMock.mock.calls[1][0] as Request).headers.get('if-match')).toBeNull()
+  })
+
   it('throws S3Error on a non-ok response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Forbidden', { status: 403 })))
 
@@ -149,24 +162,24 @@ describe('putObjectIfNewer', () => {
     expect((fetchMock.mock.calls[0][0] as Request).method).toBe('PUT')
   })
 
-  it('writes when the existing object is older than the incoming version', async () => {
+  it('updates an existing object with a single HEAD + If-Match PUT (no post-write verification)', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD
-      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // verify HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-Match PUT
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect((fetchMock.mock.calls[0][0] as Request).method).toBe('HEAD')
-    expect((fetchMock.mock.calls[1][0] as Request).method).toBe('PUT')
-    expect((fetchMock.mock.calls[2][0] as Request).method).toBe('HEAD')
+    const put: Request = fetchMock.mock.calls[1][0]
+    expect(put.method).toBe('PUT')
+    expect(put.headers.get('if-match')).toBe('"e1"')
   })
 
   it('skips the write when the existing object is already at least as new', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '9' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '9' } })) // HEAD
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
@@ -174,56 +187,144 @@ describe('putObjectIfNewer', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1) // HEAD only, no PUT
   })
 
-  it('writes when the HEAD comes back without an object (first mirror of this key)', async () => {
+  it('creates on the first mirror with a single If-None-Match PUT when expectExisting is explicitly false', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7', undefined, { expectExisting: false })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const put: Request = fetchMock.mock.calls[0][0]
+    expect(put.method).toBe('PUT')
+    expect(put.headers.get('if-none-match')).toBe('*')
+  })
+
+  it('first mirror resolves via the default update path by falling back to a conditional create when the HEAD 404s', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 404 })) // HEAD: not found
-      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '1' } })) // verify HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-None-Match PUT
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const put: Request = fetchMock.mock.calls[1][0]
+    expect(put.method).toBe('PUT')
+    expect(put.headers.get('if-none-match')).toBe('*')
   })
 
   it('writes when the existing version metadata is not a parseable number', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': 'not-a-number' } }))
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '1' } })) // verify HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': 'not-a-number' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-Match PUT
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('retries the write when a concurrent stale write lands after ours', async () => {
+  it('downgrades from the create path to the update path when a concurrent writer already owns the key (412)', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 404 })) // HEAD (attempt 1): not found
-      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT (attempt 1): version 7
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // verify: a slower concurrent write (version 5) landed after ours and won
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD (attempt 2): still stale
-      .mockResolvedValueOnce(new Response(null, { status: 200 })) // PUT (attempt 2): reassert version 7
-      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // verify: our write won this time
+      .mockResolvedValueOnce(new Response(null, { status: 412 })) // If-None-Match PUT: another writer got there first
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-Match PUT
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7', undefined, { expectExisting: false })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const put: Request = fetchMock.mock.calls[2][0]
+    expect(put.headers.get('if-match')).toBe('"e1"')
+  })
+
+  it('re-creates the object when it is deleted between the update HEAD and the If-Match PUT (404)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 404 })) // If-Match PUT: object vanished in between
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-None-Match PUT: re-create
     vi.stubGlobal('fetch', fetchMock)
 
     await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
 
-    expect(fetchMock).toHaveBeenCalledTimes(6)
-    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'HEAD', 'HEAD', 'PUT', 'HEAD'])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'PUT'])
+    expect((fetchMock.mock.calls[1][0] as Request).headers.get('if-match')).toBe('"e1"')
+    expect((fetchMock.mock.calls[2][0] as Request).headers.get('if-none-match')).toBe('*')
+  })
+
+  it('falls back to the legacy path when the HEAD omits the ETag, rather than doing a non-atomic PUT', async () => {
+    // No etag header on HEAD — If-Match would be a no-op and the update would lose
+    // its atomicity. putObjectIfNewer must not silently degrade to a plain PUT.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD (no etag)
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // legacy HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // legacy PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // legacy verify HEAD
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'HEAD', 'PUT', 'HEAD'])
+    const put: Request = fetchMock.mock.calls[2][0]
+    expect(put.headers.get('if-match')).toBeNull()
+    expect(put.headers.get('if-none-match')).toBeNull()
+  })
+
+  it('upgrades to the update path on a 412 and skips when the concurrent object is already at least as new', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 412 })) // If-None-Match PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '9' } })) // HEAD: newer than ours
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7', undefined, { expectExisting: false })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2) // PUT(412) + HEAD, no write
+  })
+
+  it('retries when a concurrent stale write lands between our HEAD and the If-Match PUT', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })) // HEAD (attempt 1)
+      .mockResolvedValueOnce(new Response(null, { status: 412 })) // If-Match PUT: object moved under us
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e2"', 'x-amz-meta-linger-version': '5' } })) // HEAD (attempt 2): fresh etag
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-Match PUT: our write wins
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'HEAD', 'PUT'])
+    expect((fetchMock.mock.calls[3][0] as Request).headers.get('if-match')).toBe('"e2"')
   })
 
   it('throws after exhausting retries against a persistently stale write, rather than silently reporting success', async () => {
     const fetchMock = vi.fn().mockImplementation((req: Request) =>
       Promise.resolve(req.method === 'HEAD'
-        ? new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })
-        : new Response(null, { status: 200 })))
+        ? new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })
+        : new Response(null, { status: 412 })))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')).rejects.toThrow(S3Error)
 
-    expect(fetchMock).toHaveBeenCalledTimes(9) // 3 attempts × (HEAD + PUT + verify HEAD)
+    expect(fetchMock).toHaveBeenCalledTimes(6) // 3 attempts × (HEAD + 412 PUT)
+  })
+
+  it('falls back to the legacy HEAD/PUT/HEAD path when conditional writes are unsupported', async () => {
+    // 400, not 501: aws4fetch's AwsClient retries 5xx internally with backoff, which
+    // would turn this assertion into a many-second retry loop. Both statuses are
+    // treated as "conditional writes not supported here" (see s3.ts).
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 400 })) // If-None-Match PUT: rejected
+      .mockResolvedValueOnce(new Response(null, { status: 404 })) // legacy HEAD: not found
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // legacy PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '1' } })) // legacy verify HEAD
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1', undefined, { expectExisting: false })
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['PUT', 'HEAD', 'PUT', 'HEAD'])
   })
 })
 
