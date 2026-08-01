@@ -238,6 +238,40 @@ describe('putObjectIfNewer', () => {
     expect(put.headers.get('if-match')).toBe('"e1"')
   })
 
+  it('re-creates the object when it is deleted between the update HEAD and the If-Match PUT (404)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { etag: '"e1"', 'x-amz-meta-linger-version': '5' } })) // HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 404 })) // If-Match PUT: object vanished in between
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // If-None-Match PUT: re-create
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'PUT'])
+    expect((fetchMock.mock.calls[1][0] as Request).headers.get('if-match')).toBe('"e1"')
+    expect((fetchMock.mock.calls[2][0] as Request).headers.get('if-none-match')).toBe('*')
+  })
+
+  it('falls back to the legacy path when the HEAD omits the ETag, rather than doing a non-atomic PUT', async () => {
+    // No etag header on HEAD — If-Match would be a no-op and the update would lose
+    // its atomicity. putObjectIfNewer must not silently degrade to a plain PUT.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // HEAD (no etag)
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })) // legacy HEAD
+      .mockResolvedValueOnce(new Response(null, { status: 200 })) // legacy PUT
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '7' } })) // legacy verify HEAD
+    vi.stubGlobal('fetch', fetchMock)
+
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'HEAD', 'PUT', 'HEAD'])
+    const put: Request = fetchMock.mock.calls[2][0]
+    expect(put.headers.get('if-match')).toBeNull()
+    expect(put.headers.get('if-none-match')).toBeNull()
+  })
+
   it('upgrades to the update path on a 412 and skips when the concurrent object is already at least as new', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 412 })) // If-None-Match PUT

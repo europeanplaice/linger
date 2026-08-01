@@ -11,6 +11,7 @@ vi.mock('../../../functions/_shared/drive', () => ({
   findJsonFile: vi.fn(async () => 'settings-file-1'),
   readJsonFile: vi.fn(async () => ({ enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' })),
   findEntryMeta: vi.fn(async () => ({ id: 'file-1', name: 'diary-2026-01-01.txt', version: '1' })),
+  getDiaryFileMeta: vi.fn(async (_t: string, _s: string, _sess: unknown, _e: unknown, fileId: string) => ({ id: fileId, name: `diary-${fileId}.txt`, version: '1' })),
   getEntryContent: vi.fn(async () => ({ date: '2026-01-01', content: 'hello' })),
   listEntryPage: vi.fn(async () => ({ files: [], nextPageToken: undefined })),
 }))

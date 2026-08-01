@@ -1,5 +1,6 @@
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv, S3BackfillParams } from '../src/types'
@@ -142,6 +143,35 @@ describe('S3BackfillWorkflow', () => {
     const dump = JSON.stringify({ job, entry1, entryBroken })
     for (const secret of ['id-token', 'access', 'refresh', 'AKIA_FAKE', 'fake-secret', 'fake-session-token']) {
       expect(dump).not.toContain(secret)
+    }
+  })
+
+  it('derives expectExisting=false from a DO index that has never seen the date (first mirror)', async () => {
+    // Fresh account: the index has no synced record for any scope date, so the S3
+    // write must be told expectExisting=false (an If-None-Match create) rather than
+    // paying an unnecessary HEAD.
+    await runScopedWorkflow('8888888888', 'job-scope-8', 'wf-scope-8', ['2026-05-01', '2026-05-02'])
+
+    const optionsArgs = vi.mocked(putObjectIfNewer).mock.calls.map(c => c[7])
+    expect(optionsArgs.length).toBeGreaterThan(0)
+    for (const options of optionsArgs) {
+      expect(options).toEqual({ expectExisting: false })
+    }
+  })
+
+  it('derives expectExisting=true for dates the DO index already knows are synced', async () => {
+    const accountKey = '9999999999'
+    const workflowEnv = env as unknown as WorkflowEnv
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.markSynced('2026-06-01', '2026-06-01-v1', new Date().toISOString())
+    })
+    await runScopedWorkflow(accountKey, 'job-scope-9', 'wf-scope-9', ['2026-06-01'])
+
+    const thisDateCalls = vi.mocked(putObjectIfNewer).mock.calls.filter(c => String(c[3]).includes('2026-06-01'))
+    expect(thisDateCalls.length).toBeGreaterThan(0)
+    for (const call of thisDateCalls) {
+      expect(call[7]).toEqual({ expectExisting: true })
     }
   })
 })

@@ -120,6 +120,10 @@ function objectUrl(bucket: string, region: string, key: string): string {
 // S3 conditional-write headers (see putObjectIfNewer's comment for why they make
 // the create/update atomic): If-Match pins an update to the exact etag a preceding
 // HEAD just read, and If-None-Match: * lets at most one concurrent create win.
+// Both assume an unversioned bucket — under S3 bucket versioning a create always
+// succeeds (as a new version) and never 412s, which would break the create/update
+// flip logic below. DeleteObject has the same assumption, so nothing here opts
+// into versioning; self-hosters should leave the bucket unversioned.
 export interface PutObjectOptions {
   ifMatch?: string
   ifNoneMatch?: string
@@ -282,6 +286,13 @@ export async function putObjectIfNewer(
       const head = await headObject(creds, bucket, region, key)
       if (head) {
         if (head.version && isAtLeast(head.version, version)) return
+        if (!head.etag) {
+          // The endpoint omitted ETag on HEAD — an If-Match PUT would carry no
+          // precondition (putObject only sets the header for a non-empty value),
+          // silently degrading this update to a non-atomic PUT. Use the legacy
+          // sequence, which re-reads and verifies the version after the write.
+          return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType)
+        }
         try {
           await putObject(creds, bucket, region, key, body, contentType, version, { ifMatch: head.etag })
           return

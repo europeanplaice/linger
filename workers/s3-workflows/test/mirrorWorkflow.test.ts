@@ -13,6 +13,10 @@ vi.mock('../../../functions/_shared/drive', () => ({
     if (date === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
     return { id: `file-${date}`, name: `diary-${date}.txt`, version: '7' }
   }),
+  getDiaryFileMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, fileId: string) => {
+    if (fileId === 'missing') throw Object.assign(new Error('not_found'), { status: 404 })
+    return { id: fileId, name: `diary-${fileId}.txt`, version: '7' }
+  }),
   getEntryContent: vi.fn(async (_token: string, fileId: string) => ({ date: fileId.replace('file-', ''), content: 'hello' })),
   listEntryPage: vi.fn(async () => ({ files: [], nextPageToken: undefined })),
 }))

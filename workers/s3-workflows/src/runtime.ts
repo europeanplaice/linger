@@ -5,6 +5,7 @@ import {
   ensureFolder,
   findEntryMeta,
   findJsonFile,
+  getDiaryFileMeta,
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
@@ -316,13 +317,30 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub
     // written before (its first mirror of a brand-new date resolves the same way — HEAD
     // 404 then If-None-Match PUT, still two requests, see s3.ts).
     await putObjectIfNewer(creds, config.bucket, config.region, key, content, version, undefined, { expectExisting: true })
+    // Reconfirm the entry still exists in Drive before recording it synced. A concurrent
+    // delete-mirror that commits between our content fetch and this point would otherwise
+    // leave a phantom S3 object plus a 'synced' record for a deleted date, which nothing
+    // ever revisits (backfills only touch dates still listed in Drive, and
+    // entryStatusForAuth short-circuits on a synced record). The content fetch alone
+    // can't close this window — it only catches deletions that landed before it.
+    try {
+      await getDiaryFileMeta(accessToken, input.sessionId, session, env, meta.id, input.date)
+    } catch (error) {
+      if (isMissingEntryError(error)) {
+        await deleteObject(creds, config.bucket, config.region, key)
+        await index.markDeleted(input.date)
+        return
+      }
+      throw error
+    }
     await index.markSynced(input.date, version, new Date().toISOString())
   } catch (error) {
     if (isMissingEntryError(error)) {
       // The file vanished after the mirror started (deleted in Drive, e.g. a concurrent
       // delete racing this save's mirror) — remove the now-orphaned object and record
-      // the delete rather than failing the entry. The old post-write getDiaryFileMeta
-      // recheck existed for this; the content fetch catches it one step earlier.
+      // the delete rather than failing the entry. This covers deletions that landed
+      // before the content fetch (a 404 from it); deletions racing the markSynced above
+      // are handled by the post-write recheck just added.
       await deleteObject(creds, config.bucket, config.region, key)
       await index.markDeleted(input.date)
       return

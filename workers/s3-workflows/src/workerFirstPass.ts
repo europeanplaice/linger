@@ -19,8 +19,11 @@ export interface FirstPassResult {
 // assume-role in the *same* 50-subrequest Free-plan budget as this batch — see
 // workflow.ts's WORKFLOW_CHUNK_SIZE comment for the per-entry subrequest accounting
 // this is sized against: up to 3 per entry (Drive content + S3 HEAD + If-Match PUT
-// for an update, 2 for a first mirror), so 10 entries cap the batch at ~30 plus the
-// one-off STS call and loadS3Config's Drive reads.
+// for an update, 2 for a first mirror), so 10 entries cap the batch at ~30. The
+// caller's startBackfill has already spent loadS3Config's Drive reads plus up to two
+// Google token-endpoint refreshes in this same budget before this runs, so the
+// realistic worst case sits closer to ~36/50 — still under budget, but with less
+// slack than the per-entry arithmetic alone suggests.
 const WORKER_FIRST_PASS_BATCH_SIZE = 10
 
 export async function runWorkerFirstPass(

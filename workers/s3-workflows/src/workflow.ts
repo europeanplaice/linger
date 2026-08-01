@@ -20,13 +20,13 @@ import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurr
 // 12 x 3 = 36 subrequests — real headroom under Cloudflare Workers Free plan's
 // 50-subrequests-per-Workflow-instance pool, which (unlike step retries) is never reset
 // mid-instance, including across step.sleep/hibernation. The rare 412-downgrade race (a
-// concurrent mirror writing the same date) adds at most one request per affected entry;
-// the pool absorbs a few of those before the batch step's own retry takes over. When more
-// entries remain, the Workflow instance chains a fresh Workflow instance with the
-// remaining scope, guaranteeing a brand-new Worker invocation and a fresh 50-subrequest
-// pool. BATCH_SIZE keeps a single batch (plus its step retry, which re-runs the whole
-// idempotent batch) inside the same pool: 6 x 3 = 18, doubled to 36 on a retry, with the
-// one-off STS call still fitting.
+// concurrent mirror writing the same date) costs extra requests — up to 3 per affected
+// entry (create 412 then HEAD + If-Match PUT) — but the pool absorbs a few of those before
+// the batch step's own retry takes over. When more entries remain, the Workflow instance
+// chains a fresh Workflow instance with the remaining scope, guaranteeing a brand-new
+// Worker invocation and a fresh 50-subrequest pool. BATCH_SIZE keeps a single batch (plus
+// its step retry, which re-runs the whole idempotent batch) inside the same pool:
+// 6 x 3 = 18, doubled to 36 on a retry, with the one-off STS call still fitting.
 const BATCH_SIZE = 6
 const WORKFLOW_CHUNK_SIZE = 12
 const MAX_BACKFILL_ENTRIES = 10_000
@@ -129,7 +129,10 @@ async function processBatch(
           // round-trip: the content fetch below still catches a mid-run deletion (404),
           // and a Drive version bumped after the listing is caught by the next
           // listing/resync, since putObjectIfNewer's conditional write stamps only the
-          // version we know. findCurrentEntry remains for name-only scope targets.
+          // version we know. That stamp can lag the content by a version if Drive bumps
+          // between the listing and the fetch — harmless, because the DO index's
+          // monotonic markSynced never regresses and a later save at the newer version
+          // re-mirrors. findCurrentEntry remains for name-only scope targets.
           const meta = target.fileId
             ? { id: target.fileId, version: target.version }
             : await findCurrentEntry(accessToken, params.sessionId, session, env, target.date)
