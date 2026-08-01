@@ -53,6 +53,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
           sessionId: input.sessionId,
           accountKey: input.accountKey,
           jobId,
+          config,
           ...(scope ? { scope } : {}),
         },
       })

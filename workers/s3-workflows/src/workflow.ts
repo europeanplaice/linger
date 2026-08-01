@@ -2,17 +2,17 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type Workflo
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
 import { getDiaryFileMeta, getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
-import { deleteObject, putObjectIfNewer } from '../../../functions/_shared/s3'
+import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
 
-// Each entry in a batch costs ~6-8 subrequests (getDiaryFileMeta, getEntryContent,
-// putObjectIfNewer's HEAD+PUT+HEAD, the post-write getDiaryFileMeta verify), plus
-// initial setup subrequests (loadS3Config, AssumeRoleWithWebIdentity) — all inside
-// the same step.do() invocation, which counts against the Workers subrequest limit
-// (50 on the Free plan) as a single invocation. 6 pushed total subrequests to ~52
-// and failed; 3 keeps a full batch at ~25 subrequests with ample safety headroom.
-const BATCH_SIZE = 3
+// Each entry in a batch costs ~3-4 subrequests (getDiaryFileMeta, getEntryContent,
+// putObjectIfNewer's HEAD+PUT). Initial setup uses cached config from params and
+// AssumeRoleWithWebIdentity (1 subrequest). With BATCH_SIZE = 5, a batch uses ~20
+// subrequests total. step.sleep('1 second') between batches forces Cloudflare
+// Workflows to start a fresh Worker invocation for each batch, resetting the
+// 50 subrequest limit to zero.
+const BATCH_SIZE = 5
 const MAX_BACKFILL_ENTRIES = 10_000
 const STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
@@ -72,7 +72,7 @@ async function processBatch(
       const accessToken = await getValidAccessToken(params.sessionId, session, env)
       const idToken = await getValidIdToken(params.sessionId, session, env)
       if (!idToken) throw new NonRetryableError('Google identity token unavailable')
-      const config = await loadS3Config(accessToken, params.sessionId, session, env)
+      const config = params.config ?? await loadS3Config(accessToken, params.sessionId, session, env)
       if (!config || !config.enabled) throw new NonRetryableError('S3 backup is not enabled')
       const credentials = await assumeS3Credentials(idToken, params.accountKey, config)
       const index = indexFor(env, params.accountKey)
@@ -91,14 +91,6 @@ async function processBatch(
           await index.markPending(target.date, meta.version ?? target.version, new Date().toISOString())
           const { content } = await getEntryContent(accessToken, meta.id, target.date)
           await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, meta.version)
-          try {
-            await getDiaryFileMeta(accessToken, params.sessionId, session, env, meta.id, target.date)
-          } catch (error) {
-            if (!isMissingEntryError(error)) throw error
-            await deleteObject(credentials, config.bucket, config.region, entryKey(target.date))
-            await index.markDeleted(target.date)
-            continue
-          }
           await index.markSynced(target.date, meta.version, new Date().toISOString())
         } catch (error) {
           if (isMissingEntryError(error)) {
@@ -140,6 +132,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
             await index.recordProgress(params.jobId, `scope-${batchIndex}`, result.processed, result.failedDates)
             return null
           })
+          await step.sleep(`sleep-scope-${batchIndex}`, '1 second')
         }
       } else {
         let pageToken: string | undefined
@@ -172,6 +165,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
               await index.recordProgress(params.jobId, `page-${pageIndex}-batch-${batchIndex}`, result.processed, result.failedDates)
               return null
             })
+            await step.sleep(`sleep-page-${pageIndex}-batch-${batchIndex}`, '1 second')
           }
           pageToken = page.nextPageToken
           pageIndex += 1

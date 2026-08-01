@@ -6,10 +6,13 @@ export interface WorkflowEnv extends PagesEnv {
   S3_SYNC_INDEX: DurableObjectNamespace<S3SyncIndex>
 }
 
+import type { S3Config } from './runtime'
+
 export interface S3BackfillParams {
   sessionId: string
   accountKey: string
   jobId: string
+  config?: S3Config
   scope?: string[]
 }
 
