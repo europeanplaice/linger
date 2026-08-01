@@ -28,6 +28,10 @@ data "aws_iam_policy_document" "trust" {
 resource "aws_iam_role" "linger_s3" {
   name               = "linger-s3-self-hosted"
   assume_role_policy = data.aws_iam_policy_document.trust.json
+  # Match the 43200s DurationSeconds the app requests from
+  # AssumeRoleWithWebIdentity (functions/_shared/s3.ts). The role-level maximum
+  # must be at least the requested duration or STS clamps the session short.
+  max_session_duration = 43200
 }
 
 data "aws_iam_policy_document" "s3_access" {

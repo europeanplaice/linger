@@ -105,10 +105,14 @@ export async function recordWorkflowStep(env: WorkflowEnv): Promise<void> {
 
 // Every step.do() call either Workflow makes goes through here instead of calling
 // step.do() directly, so the account-wide daily step counter (see
-// recordWorkflowStep above) tracks the same "step" unit Cloudflare bills against.
-// Counting happens inside the callback — which step.do only ever runs once per
-// step, even across replays — rather than around step.do itself, which
-// re-executes on every replay and would overcount.
+// recordWorkflowStep above) has a single choke point. Note it is NOT a mirror of
+// what Cloudflare bills: CF's step billing excludes retries, while this counter
+// increments inside the callback — which step.do re-runs on every retry — so the
+// local count over-counts vs the real bill. That's deliberate: the budget is a
+// self-imposed cap (assertWithinDailyStepBudget) sized under the Free allowance,
+// and over-counting makes it strictly conservative. Counting inside the callback
+// (rather than around step.do itself) still matters because step.do's wrapper
+// re-executes on every replay and would overcount even more wildly.
 export function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, fn: () => Promise<T>): Promise<T>
 export function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, config: WorkflowStepConfig, fn: () => Promise<T>): Promise<T>
 export function countedStep<T extends Rpc.Serializable<T>>(
@@ -345,10 +349,17 @@ export async function mirrorEntryForAuthNow(env: WorkflowEnv, input: MirrorEntry
 
 // create() throws if `id` already exists within the retention period — which
 // here means a previous attempt's create actually succeeded but its response was
-// lost. Confirm via get() before treating that as a genuine failure.
+// lost. Confirm via get() before treating that as a genuine failure. Retention is
+// kept short: mirror instances carry only one date's params (trivial), but a
+// failed instance lingering at the default 3-day Free retention just wastes
+// storage for no debugging value beyond a day.
 async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: MirrorWorkflowParams): Promise<void> {
   try {
-    await env.S3_MIRROR_WORKFLOW.create({ id, params })
+    await env.S3_MIRROR_WORKFLOW.create({
+      id,
+      params,
+      retention: { successRetention: '1 hour', errorRetention: '1 day' },
+    })
   } catch (error) {
     try {
       await env.S3_MIRROR_WORKFLOW.get(id)

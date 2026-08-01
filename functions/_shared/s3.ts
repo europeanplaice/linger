@@ -59,7 +59,7 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     RoleArn: roleArn,
     RoleSessionName: 'linger',
     WebIdentityToken: idToken,
-    DurationSeconds: '3600',
+    DurationSeconds: '43200',
   })
 
   const resp = await fetch(`https://sts.${region}.amazonaws.com/?${params.toString()}`, {
@@ -87,15 +87,15 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
   }
   const raw = data.AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.Credentials
   // Falls back to a conservative estimate (DurationSeconds requested above) if STS ever
-  // returns an unparseable Expiration — the fixed 3600s duration was requested, so this
-  // is exact in practice, just defensive against an unexpected format ever making a
+  // returns an unparseable Expiration — the fixed 12h (43200s) duration was requested, so
+  // this is exact in practice, just defensive against an unexpected format ever making a
   // caller cache/persist a NaN expiry and treat these credentials as eternally valid.
   const parsedExpiration = Date.parse(raw.Expiration)
   const creds: AssumedCredentials = {
     accessKeyId: raw.AccessKeyId,
     secretAccessKey: raw.SecretAccessKey,
     sessionToken: raw.SessionToken,
-    expiresAt: isNaN(parsedExpiration) ? Date.now() + 3600 * 1000 : parsedExpiration,
+    expiresAt: isNaN(parsedExpiration) ? Date.now() + 43200 * 1000 : parsedExpiration,
   }
 
   if (cacheKey) credentialsCache.set(cacheKey, creds)
@@ -151,11 +151,17 @@ export function isAtLeast(existing: string, incoming: string): boolean {
 }
 
 // Reads the linger-stamped version off an object without fetching its body, or
-// null if the object doesn't exist (or carries no version metadata).
+// null if the object doesn't exist (or carries no version metadata). Only a 404
+// means "no object" — any other error (403, network failure, …) is thrown rather
+// than treated as a miss, so a caller can't mistake "can't tell" for "absent"
+// and clobber an object it actually can't read.
 export async function headObjectVersion(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<string | null> {
   const client = s3Client(creds, region)
   const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD', signal: AbortSignal.timeout(S3_FETCH_TIMEOUT_MS) })
-  if (!head.ok) return null
+  if (head.status === 404) return null
+  if (!head.ok) {
+    throw new S3Error(head.status, `S3 HeadObject failed: ${await head.text()}`)
+  }
   return head.headers.get('x-amz-meta-linger-version')
 }
 

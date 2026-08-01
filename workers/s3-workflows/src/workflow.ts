@@ -15,13 +15,16 @@ import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurr
 // to a single internal DO lookup instead (see the DO-index check in processBatch),
 // so a Resync of a mostly-already-synced account costs far less than this bounds.
 // WORKFLOW_CHUNK_SIZE keeps a worst-case chunk (every entry new, every STS call a
-// cache miss) to 5 x 6 = 30 subrequests — real headroom under Cloudflare Workers
+// cache miss) to 8 x 6 = 48 subrequests — real headroom under Cloudflare Workers
 // Free plan's 50-subrequests-per-Workflow-instance pool, which (unlike step
 // retries) is never reset mid-instance, including across step.sleep/hibernation.
 // When more entries remain, the Workflow instance chains a fresh Workflow instance
-// with the remaining scope, guaranteeing a brand-new Worker invocation and 0 subrequests counter.
-const BATCH_SIZE = 1
-const WORKFLOW_CHUNK_SIZE = 5
+// with the remaining scope, guaranteeing a brand-new Worker invocation and a
+// fresh 50-subrequest pool. The pool also bounds BATCH_SIZE implicitly: a batch's
+// 4 entries cost ~4 x 5 (Drive meta + content, S3 HEAD + PUT + HEAD) plus one
+// STS call, so both batch and chunk stay comfortably inside the pool.
+const BATCH_SIZE = 4
+const WORKFLOW_CHUNK_SIZE = 8
 const MAX_BACKFILL_ENTRIES = 10_000
 // Steps that only touch the Durable Object / Workflow-binding (not the external
 // Drive/S3 subrequest budget) can retry generously — those calls don't compete
@@ -50,9 +53,19 @@ function chunk<T>(values: T[], size: number): T[][] {
 // success. Confirm via get() before treating that as a genuine failure: without
 // this, a transient blip here would fail the whole job and orphan an
 // already-running successor chunk instead of just finishing quietly.
+// successRetention must stay well above the chain step's worst-case retry window
+// (see the chain-chunk step config): if a created successor were GC'd before a
+// retried chain step could get() it, the retry's create() would succeed and spawn
+// a duplicate successor chunk. It's also kept short because every chained
+// instance's params carry the whole remaining scope — default 3-day retention
+// would hold ~1GB of scope state across a large backfill (see cloudflare-workflows-plan.md).
 async function createChainedInstance(env: WorkflowEnv, id: string, params: S3BackfillParams): Promise<void> {
   try {
-    await env.S3_BACKFILL_WORKFLOW.create({ id, params })
+    await env.S3_BACKFILL_WORKFLOW.create({
+      id,
+      params,
+      retention: { successRetention: '1 hour', errorRetention: '1 day' },
+    })
   } catch (error) {
     try {
       await env.S3_BACKFILL_WORKFLOW.get(id)
@@ -82,8 +95,17 @@ async function processBatch(
       if (!idToken) throw new NonRetryableError('Google identity token unavailable')
       const config = params.config ?? await loadS3Config(accessToken, params.sessionId, session, env)
       if (!config || !config.enabled) throw new NonRetryableError('S3 backup is not enabled')
-      const credentials = await assumeS3Credentials(idToken, params.sessionId, session, env, config)
       const index = indexFor(env, params.accountKey)
+      // params.config is frozen at backfill start and carried through every chained
+      // instance, so the DO's account_config flag is the only live authority on
+      // whether the user still wants backup on. A user who disables S3 mid-backfill
+      // (setBackupEnabledForAuth writes the flag) would otherwise have this job keep
+      // syncing to a bucket they just switched off. Abort the whole job — the
+      // NonRetryableError escapes the batch so step retry can't resurrect it.
+      if (await index.getBackupEnabled() === false) {
+        throw new NonRetryableError('S3 backup was disabled during the backfill')
+      }
+      const credentials = await assumeS3Credentials(idToken, params.sessionId, session, env, config)
       const failedDates: string[] = []
 
       for (const target of targets) {
@@ -162,7 +184,11 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
         if (remainingScope.length > 0) {
           const nextChunkIdx = chunkIdx + 1
           const nextWorkflowId = `${params.jobId}-chunk-${nextChunkIdx}`
-          await countedStep(this.env, step, `chain-chunk-${nextChunkIdx}`, async () => {
+          // Bookkeeping retries (Workflow-binding create/get only — no external
+          // subrequests). Worst-case retry window is a handful of minutes, which
+          // createChainedInstance's '1 hour' successRetention must exceed so a
+          // created-but-unrecorded successor is still findable via get() on retry.
+          await countedStep(this.env, step, `chain-chunk-${nextChunkIdx}`, { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
             await createChainedInstance(this.env, nextWorkflowId, { ...params, scope: remainingScope, chunkIndex: nextChunkIdx })
             return null
           })
@@ -203,7 +229,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
         if (allTargets.length > 0) {
           const scope = allTargets
           const nextWorkflowId = `${params.jobId}-chunk-1`
-          await countedStep(this.env, step, 'chain-first-chunk', async () => {
+          await countedStep(this.env, step, 'chain-first-chunk', { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
             await createChainedInstance(this.env, nextWorkflowId, { ...params, scope, chunkIndex: 1 })
             return null
           })

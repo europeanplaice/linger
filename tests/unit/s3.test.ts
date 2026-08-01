@@ -35,7 +35,7 @@ describe('assumeRoleWithWebIdentity', () => {
 
     const result = await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/linger-s3', 'us-east-1')
 
-    expect(result.expiresAt).toBe(Date.now() + 3600 * 1000)
+    expect(result.expiresAt).toBe(Date.now() + 43200 * 1000)
     vi.useRealTimers()
   })
 
@@ -246,6 +246,15 @@ describe('headObjectVersion', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
 
     expect(await headObjectVersion(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt')).toBeNull()
+  })
+
+  it('throws instead of reporting a miss on any non-404 HEAD error', async () => {
+    // A 403 means "can't tell", not "absent" — a caller must never mistake it for
+    // a missing object and go ahead and overwrite an object it can't even read.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('AccessDenied', { status: 403 })))
+
+    await expect(headObjectVersion(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt'))
+      .rejects.toMatchObject({ status: 403 })
   })
 })
 

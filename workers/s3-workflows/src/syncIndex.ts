@@ -69,44 +69,50 @@ function isOrphaned(row: JobRow): boolean {
 export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   constructor(ctx: DurableObjectState, env: WorkflowEnv) {
     super(ctx, env)
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS entries (
-        date TEXT PRIMARY KEY,
-        drive_version TEXT,
-        synced_version TEXT,
-        state TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        last_error TEXT
-      );
-      CREATE TABLE IF NOT EXISTS jobs (
-        job_id TEXT PRIMARY KEY,
-        request_id TEXT NOT NULL UNIQUE,
-        state TEXT NOT NULL,
-        total INTEGER NOT NULL DEFAULT 0,
-        completed INTEGER NOT NULL DEFAULT 0,
-        failed INTEGER NOT NULL DEFAULT 0,
-        failed_dates TEXT NOT NULL DEFAULT '[]',
-        started_at TEXT NOT NULL,
-        finished_at TEXT,
-        workflow_id TEXT NOT NULL,
-        error TEXT
-      );
-      CREATE INDEX IF NOT EXISTS jobs_started_at_idx ON jobs(started_at);
-      CREATE TABLE IF NOT EXISTS processed_batches (
-        job_id TEXT NOT NULL,
-        batch_key TEXT NOT NULL,
-        PRIMARY KEY (job_id, batch_key)
-      );
-      CREATE TABLE IF NOT EXISTS account_config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `)
-    try {
-      this.ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN updated_at TEXT')
-    } catch {
-      // Column already exists
-    }
+    // Schema creation must not interleave with an already-queued method call (the
+    // CREATE TABLE/ALTER batch is a one-time startup cost, but a request that races
+    // ahead of the ALTER could query a table missing updated_at). blockConcurrencyWhile
+    // defers every event until the callback completes — the standard DO startup pattern.
+    this.ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS entries (
+          date TEXT PRIMARY KEY,
+          drive_version TEXT,
+          synced_version TEXT,
+          state TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS jobs (
+          job_id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL,
+          total INTEGER NOT NULL DEFAULT 0,
+          completed INTEGER NOT NULL DEFAULT 0,
+          failed INTEGER NOT NULL DEFAULT 0,
+          failed_dates TEXT NOT NULL DEFAULT '[]',
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          workflow_id TEXT NOT NULL,
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS jobs_started_at_idx ON jobs(started_at);
+        CREATE TABLE IF NOT EXISTS processed_batches (
+          job_id TEXT NOT NULL,
+          batch_key TEXT NOT NULL,
+          PRIMARY KEY (job_id, batch_key)
+        );
+        CREATE TABLE IF NOT EXISTS account_config (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `)
+      try {
+        this.ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN updated_at TEXT')
+      } catch {
+        // Column already exists
+      }
+    })
   }
 
   private jobFromRow(row: JobRow): BackfillJob {

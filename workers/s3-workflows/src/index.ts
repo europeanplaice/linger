@@ -84,6 +84,11 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
           config,
           ...(remainingScope ? { scope: remainingScope } : {}),
         },
+        // Matches createChainedInstance in workflow.ts — a job's scope is carried in
+        // every chained instance's params, so the default 3-day Free retention would
+        // hold it all for days after the job finishes; an hour on success (still well
+        // above any chain-step retry window) is enough for duplicate-create detection.
+        retention: { successRetention: '1 hour', errorRetention: '1 day' },
       })
       return reservation
     } catch (error) {
