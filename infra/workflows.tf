@@ -72,4 +72,10 @@ resource "cloudflare_workflow" "s3_backfill" {
   workflow_name = local.s3_workflow_targets[each.key].workflow_name
   class_name    = "S3BackfillWorkflow"
   script_name   = each.value.script_name
+
+  lifecycle {
+    replace_triggered_by = [
+      cloudflare_workers_script.s3_workflows[each.key].content_sha256
+    ]
+  }
 }
