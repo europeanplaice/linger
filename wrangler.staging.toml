@@ -1,0 +1,19 @@
+name = "linger-staging"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Used only by the `deploy-staging` CI job (`wrangler pages deploy --config
+# wrangler.staging.toml`) so the staging Pages deployment gets staging's own
+# bindings baked in, instead of `wrangler.toml`'s production ones — a plain
+# `wrangler pages deploy` without --config always reads the root wrangler.toml
+# regardless of --project-name/--branch, silently overriding whatever the
+# Cloudflare dashboard/Terraform has configured for that Pages project.
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "9a4b27aaea734b8592480dc029ef86bd"
+preview_id = "9a4b27aaea734b8592480dc029ef86bd"
+
+[[services]]
+binding = "S3_WORKFLOW_SERVICE"
+service = "linger-s3-workflows-staging"
