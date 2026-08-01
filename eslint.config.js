@@ -14,6 +14,10 @@ export default [
     },
     rules: {
       ...reactHooks.configs.flat.rules,
+      // Underscore-prefixed params/vars are the established convention for
+      // intentionally-unused values kept to satisfy a signature/interface
+      // (e.g. a temporarily disabled hook's params — see useS3StaleEntryAutoResync.ts).
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
   {
