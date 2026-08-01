@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "workers:dev": "wrangler pages dev --proxy 5173 --port 8788",
+    "workers:dev": "wrangler pages dev --proxy 5173 --port 8788 --persist-to .wrangler/local-state",
     "build": "tsc -b && tsc -p tsconfig.functions.json --noEmit && npm run build:workflows:bundle && vite build",
     "build:workflows": "tsc -p tsconfig.workflows.json --noEmit",
     "build:workflows:bundle": "npm run build:workflows && mkdir -p artifacts/s3-workflows && wrangler deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc --dry-run --outdir artifacts/s3-workflows",

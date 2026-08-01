@@ -203,7 +203,7 @@ though the rest of the app works fine. Run it in a second terminal alongside
 `workers:dev`:
 
 ```bash
-npx wrangler dev --config workers/s3-workflows/wrangler.jsonc
+npx wrangler dev --config workers/s3-workflows/wrangler.jsonc --persist-to .wrangler/local-state
 ```
 
 Wrangler auto-connects same-named local dev sessions, so once both are running,
@@ -213,6 +213,12 @@ warns about missing `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`SESSION_DOMAIN`
 secrets — harmless if the session's Google token is still fresh, but it needs the
 same values as your root `.dev.vars` to refresh an expired one (which any real
 backfill run will eventually hit): copy `.dev.vars` to `workers/s3-workflows/.dev.vars`.
+
+The `--persist-to .wrangler/local-state` flag must match on both commands (run from
+the repo root) — each `wrangler dev` process otherwise gets its own local KV/DO
+storage even though both declare the same `SESSIONS` namespace `id`, so a session
+created by `workers:dev` won't be found by this worker and every backfill call fails
+with `Unauthorized`.
 
 Other commands:
 ```bash
