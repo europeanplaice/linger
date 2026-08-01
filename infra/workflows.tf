@@ -5,16 +5,19 @@ locals {
     production = {
       worker_name           = var.s3_workflows_worker_prefix
       workflow_name         = "${var.s3_workflow_name}-production"
+      mirror_workflow_name  = "${var.s3_mirror_workflow_name}-production"
       sessions_namespace_id = cloudflare_workers_kv_namespace.sessions.id
     }
     preview = {
       worker_name           = "${var.s3_workflows_worker_prefix}-preview"
       workflow_name         = "${var.s3_workflow_name}-preview"
+      mirror_workflow_name  = "${var.s3_mirror_workflow_name}-preview"
       sessions_namespace_id = cloudflare_workers_kv_namespace.sessions_preview.id
     }
     staging = {
       worker_name           = "${var.s3_workflows_worker_prefix}-staging"
       workflow_name         = "${var.s3_workflow_name}-staging"
+      mirror_workflow_name  = "${var.s3_mirror_workflow_name}-staging"
       sessions_namespace_id = cloudflare_workers_kv_namespace.sessions_staging.id
     }
   }
@@ -49,6 +52,12 @@ resource "cloudflare_workers_script" "s3_workflows" {
       script_name   = each.value.worker_name
       type          = "workflow"
       workflow_name = each.value.workflow_name
+    },
+    {
+      name          = "S3_MIRROR_WORKFLOW"
+      script_name   = each.value.worker_name
+      type          = "workflow"
+      workflow_name = each.value.mirror_workflow_name
     }
   ]
 
@@ -71,6 +80,21 @@ resource "cloudflare_workflow" "s3_backfill" {
   account_id    = var.cloudflare_account_id
   workflow_name = local.s3_workflow_targets[each.key].workflow_name
   class_name    = "S3BackfillWorkflow"
+  script_name   = each.value.script_name
+
+  lifecycle {
+    replace_triggered_by = [
+      cloudflare_workers_script.s3_workflows[each.key].content_sha256
+    ]
+  }
+}
+
+resource "cloudflare_workflow" "s3_mirror" {
+  for_each = cloudflare_workers_script.s3_workflows
+
+  account_id    = var.cloudflare_account_id
+  workflow_name = local.s3_workflow_targets[each.key].mirror_workflow_name
+  class_name    = "S3MirrorWorkflow"
   script_name   = each.value.script_name
 
   lifecycle {

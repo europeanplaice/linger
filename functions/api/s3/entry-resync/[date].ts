@@ -23,7 +23,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
 
   try {
     if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-      const result = await context.env.S3_WORKFLOW_SERVICE.mirrorEntry({
+      const result = await context.env.S3_WORKFLOW_SERVICE.mirrorEntryNow({
         sessionId,
         accountKey: session.google_sub,
         date,

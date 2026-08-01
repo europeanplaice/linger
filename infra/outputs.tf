@@ -38,3 +38,11 @@ output "s3_workflow_ids" {
     environment => workflow.id
   }
 }
+
+output "s3_mirror_workflow_ids" {
+  description = "Cloudflare mirror/delete Workflow IDs by deployment environment"
+  value = {
+    for environment, workflow in cloudflare_workflow.s3_mirror :
+    environment => workflow.id
+  }
+}

@@ -1,8 +1,10 @@
 import type { Env as PagesEnv } from '../../../functions/_shared/session'
+import type { MirrorEntryCoreInput } from './runtime'
 import type { S3SyncIndex } from './syncIndex'
 
 export interface WorkflowEnv extends PagesEnv {
   S3_BACKFILL_WORKFLOW: Workflow<S3BackfillParams>
+  S3_MIRROR_WORKFLOW: Workflow<MirrorWorkflowParams>
   S3_SYNC_INDEX: DurableObjectNamespace<S3SyncIndex>
 }
 
@@ -36,4 +38,12 @@ export interface EntryProcessResult {
 export interface EntryPage {
   entries: DiaryTarget[]
   nextPageToken?: string
+}
+
+// Payload of a single-entry mirror/delete S3MirrorWorkflow instance (created
+// fire-and-forget by the mirrorEntry/deleteEntry RPCs — see runtime.ts). One
+// instance mirrors exactly one date; the mirror steps' retry config absorbs
+// transient Drive/STS/S3 failures that used to fail a save's mirror outright.
+export interface MirrorWorkflowParams extends MirrorEntryCoreInput {
+  kind: 'mirror' | 'delete'
 }

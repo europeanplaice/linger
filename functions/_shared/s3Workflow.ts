@@ -91,6 +91,10 @@ export interface S3WorkflowService {
   getEntryStatus(input: GetEntryStatusInput): Promise<EntryStatusResult>
   setBackupEnabled(input: SetBackupEnabledInput): Promise<void>
   mirrorEntry(input: MirrorEntryInput): Promise<MirrorResult>
+  // Awaited single-entry mirror, for callers that need a synchronous result
+  // (e.g. api/s3/entry-resync's manual retry) rather than the fire-and-forget
+  // workflow instance mirrorEntry schedules.
+  mirrorEntryNow(input: MirrorEntryInput): Promise<MirrorResult>
   deleteEntry(input: DeleteEntryInput): Promise<MirrorResult>
   getWorkflowUsage(): Promise<WorkflowUsage>
 }

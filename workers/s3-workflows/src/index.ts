@@ -8,13 +8,14 @@ import type {
   StartBackfillResult,
   SetBackupEnabledInput,
 } from '../../../functions/_shared/s3Workflow'
-import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
+import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, mirrorEntryForAuthNow, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
 import { S3BackfillWorkflow } from './workflow'
+import { S3MirrorWorkflow } from './mirrorWorkflow'
 import { S3SyncIndex } from './syncIndex'
 import { runWorkerFirstPass } from './workerFirstPass'
 import type { DiaryTarget, WorkflowEnv } from './types'
 
-export { S3BackfillWorkflow, S3SyncIndex }
+export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex }
 
 function validateRequestId(requestId: string): void {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) throw new Error('Invalid request ID')
@@ -116,9 +117,22 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     await index.resetAllData()
   }
 
+  // Fire-and-forget: marks the entry pending and schedules a dedicated
+  // S3MirrorWorkflow instance (see mirrorWorkflow.ts) to do the actual mirror —
+  // so the calling save endpoint's waitUntil can't race a long mirror against
+  // its budget, and transient Drive/STS/S3 failures are retried by the
+  // workflow's steps instead of failing the mirror on the first attempt.
   async mirrorEntry(input: MirrorEntryInput) {
     if (!isValidDate(input.date)) throw new Error('Invalid date')
     return mirrorEntryForAuth(this.env, input)
+  }
+
+  // Awaited variant used by api/s3/entry-resync's manual retry, which needs a
+  // synchronous outcome (and a definitive failure recorded on the index) rather
+  // than the fire-and-forget workflow above.
+  async mirrorEntryNow(input: MirrorEntryInput) {
+    if (!isValidDate(input.date)) throw new Error('Invalid date')
+    return mirrorEntryForAuthNow(this.env, input)
   }
 
   async deleteEntry(input: DeleteEntryInput) {

@@ -27,7 +27,13 @@ variable "s3_workflows_worker_prefix" {
 }
 
 variable "s3_workflow_name" {
-  description = "Workflow name registered on each S3 Workflows Worker"
+  description = "Backfill Workflow name registered on each S3 Workflows Worker"
   type        = string
   default     = "s3-backfill-workflow"
+}
+
+variable "s3_mirror_workflow_name" {
+  description = "Single-entry mirror/delete Workflow name registered on each S3 Workflows Worker"
+  type        = string
+  default     = "s3-mirror-workflow"
 }

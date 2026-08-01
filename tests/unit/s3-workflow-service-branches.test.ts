@@ -40,6 +40,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
     getEntryStatus: vi.fn(),
     setBackupEnabled: vi.fn().mockResolvedValue(undefined),
     mirrorEntry: vi.fn(),
+    mirrorEntryNow: vi.fn(),
     deleteEntry: vi.fn(),
     getWorkflowUsage: vi.fn(),
     ...overrides,
@@ -111,15 +112,15 @@ describe('POST /api/s3/entry-resync/[date] — via S3_WORKFLOW_SERVICE', () => {
   }
 
   it('returns ok on a successful mirror', async () => {
-    const service = makeService({ mirrorEntry: vi.fn().mockResolvedValue({ ok: true }) })
+    const service = makeService({ mirrorEntryNow: vi.fn().mockResolvedValue({ ok: true }) })
     const res = await entryResyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
-    expect(service.mirrorEntry).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', date: '2026-05-01' })
+    expect(service.mirrorEntryNow).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', date: '2026-05-01' })
   })
 
   it('surfaces a failed mirror as a 502 with its error message', async () => {
-    const service = makeService({ mirrorEntry: vi.fn().mockResolvedValue({ ok: false, error: 'S3 write failed' }) })
+    const service = makeService({ mirrorEntryNow: vi.fn().mockResolvedValue({ ok: false, error: 'S3 write failed' }) })
     const res = await entryResyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'S3 write failed' })

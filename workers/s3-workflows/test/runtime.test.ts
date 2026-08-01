@@ -1,9 +1,11 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import type { SessionData } from '../../../functions/_shared/session'
 import {
   assertWithinDailyStepBudget,
   DAILY_WORKFLOW_STEP_BUDGET,
   entryKey,
+  entryStatusForAuth,
   getWorkflowUsage,
   isAtLeast,
   isMissingEntryError,
@@ -114,5 +116,63 @@ describe('workflow step usage budget', () => {
       for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
     })
     await expect(assertWithinDailyStepBudget(workflowEnv)).rejects.toThrow('budget')
+  })
+})
+
+describe('entryStatusForAuth stale-pending aging', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+
+  async function seedPending(accountKey: string, updatedAt: string) {
+    const session: SessionData = {
+      refresh_token: 'r',
+      access_token: 'a',
+      expires_at: Date.now() + 3600_000,
+      id_token: 'i',
+      google_sub: accountKey,
+    }
+    await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      instance.markPending('2026-01-01', '5', updatedAt)
+    })
+  }
+
+  it('reports a fresh pending record as pending', async () => {
+    await seedPending('stale-fresh-1', new Date().toISOString())
+    const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-fresh-1', accountKey: 'stale-fresh-1', date: '2026-01-01', requestedVersion: '5' })
+    expect(status.status).toBe('pending')
+  })
+
+  it('ages an old pending record (e.g. a never-started workflow) to unconfirmed', async () => {
+    await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-old-1', accountKey: 'stale-old-1', date: '2026-01-01', requestedVersion: '5' })
+    expect(status.status).toBe('unconfirmed')
+  })
+
+  it('still reports pending within the save-grace window even if the record itself is old', async () => {
+    await seedPending('stale-grace-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    const status = await entryStatusForAuth(workflowEnv, {
+      sessionId: 'stale-grace-1',
+      accountKey: 'stale-grace-1',
+      date: '2026-01-01',
+      requestedVersion: '5',
+      since: new Date().toISOString(),
+    })
+    expect(status.status).toBe('pending')
+  })
+
+  it('reports disabled when backup has never been enabled', async () => {
+    const accountKey = 'stale-disabled-1'
+    const session: SessionData = {
+      refresh_token: 'r',
+      access_token: 'a',
+      expires_at: Date.now() + 3600_000,
+      id_token: 'i',
+      google_sub: accountKey,
+    }
+    await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
+    const status = await entryStatusForAuth(workflowEnv, { sessionId: accountKey, accountKey, date: '2026-01-01', requestedVersion: '5' })
+    expect(status.status).toBe('disabled')
   })
 })

@@ -1,6 +1,7 @@
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionData } from '../../../functions/_shared/session'
+import * as drive from '../../../functions/_shared/drive'
 import { DAILY_WORKFLOW_STEP_BUDGET } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
@@ -162,5 +163,86 @@ describe('S3WorkflowsService.getWorkflowUsage', () => {
     const usage = await svc.getWorkflowUsage()
     expect(usage.budget).toBe(DAILY_WORKFLOW_STEP_BUDGET)
     expect(usage.remaining).toBe(Math.max(0, usage.budget - usage.steps))
+  })
+})
+
+describe('S3WorkflowsService single-entry mirror RPCs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('mirrorEntryNow mirrors inline and reports success', async () => {
+    const accountKey = 'mirror-now-1'
+    await seedSession(accountKey)
+    const svc = service()
+    const result = await svc.mirrorEntryNow({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-01' })
+    expect(result.ok).toBe(true)
+
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-01'))
+    expect(entry?.state).toBe('synced')
+  })
+
+  it('mirrorEntryNow records a permanent failure and reports it', async () => {
+    const accountKey = 'mirror-now-2'
+    await seedSession(accountKey)
+    vi.mocked(drive.findEntryMeta).mockImplementationOnce(async () => {
+      throw Object.assign(new Error('forbidden'), { status: 403 })
+    })
+    const svc = service()
+    const result = await svc.mirrorEntryNow({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-02' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('forbidden')
+
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-02'))
+    expect(entry?.state).toBe('failed')
+  })
+
+  it('mirrorEntry marks the entry pending and schedules a mirror workflow without running it inline', async () => {
+    const accountKey = 'mirror-ff-1'
+    await seedSession(accountKey)
+    const workflowEnv = {
+      ...(env as unknown as WorkflowEnv),
+      S3_MIRROR_WORKFLOW: {
+        create: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('not found')),
+      },
+    } as unknown as WorkflowEnv
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+
+    const result = await svc.mirrorEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-03', driveVersion: '9' })
+    expect(result.ok).toBe(true)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-07-03', driveVersion: '9', kind: 'mirror' }),
+      }),
+    )
+
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-03'))
+    expect(entry?.state).toBe('pending')
+    expect(entry?.driveVersion).toBe('9')
+  })
+
+  it('deleteEntry schedules a delete workflow', async () => {
+    const accountKey = 'del-ff-1'
+    await seedSession(accountKey)
+    const workflowEnv = {
+      ...(env as unknown as WorkflowEnv),
+      S3_MIRROR_WORKFLOW: {
+        create: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('not found')),
+      },
+    } as unknown as WorkflowEnv
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+
+    const result = await svc.deleteEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-04' })
+    expect(result.ok).toBe(true)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-07-04', kind: 'delete' }),
+      }),
+    )
   })
 })

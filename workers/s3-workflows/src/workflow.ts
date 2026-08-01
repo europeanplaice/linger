@@ -1,10 +1,10 @@
-import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type WorkflowStepConfig } from 'cloudflare:workers'
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
 import { getDiaryFileMeta, getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
 import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
-import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isAtLeast, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
+import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurrentEntry, indexFor, isAtLeast, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
 
 // A new (not-yet-synced) entry costs up to 6 external subrequests in the worst case:
 // STS AssumeRoleWithWebIdentity (only on a credential-cache miss — see
@@ -33,34 +33,6 @@ const BOOKKEEPING_STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backof
 // burning further steps (and daily step budget) for no chance of success.
 const EXTERNAL_STEP_RETRIES = { limit: 1, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
-
-// Every step.do() call the Workflow makes goes through here instead of calling
-// step.do() directly, so the account-wide daily step counter (see
-// recordWorkflowStep in runtime.ts) tracks the same "step" unit Cloudflare bills
-// against. Counting happens inside the callback — which step.do only ever runs
-// once per step, even across replays — rather than around step.do itself, which
-// re-executes on every replay and would overcount.
-function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, fn: () => Promise<T>): Promise<T>
-function countedStep<T extends Rpc.Serializable<T>>(env: WorkflowEnv, step: WorkflowStep, name: string, config: WorkflowStepConfig, fn: () => Promise<T>): Promise<T>
-function countedStep<T extends Rpc.Serializable<T>>(
-  env: WorkflowEnv,
-  step: WorkflowStep,
-  name: string,
-  configOrFn: WorkflowStepConfig | (() => Promise<T>),
-  maybeFn?: () => Promise<T>,
-): Promise<T> {
-  if (typeof configOrFn === 'function') {
-    return step.do(name, async () => {
-      await recordWorkflowStep(env)
-      return configOrFn()
-    })
-  }
-  const fn = maybeFn as () => Promise<T>
-  return step.do(name, configOrFn, async () => {
-    await recordWorkflowStep(env)
-    return fn()
-  })
-}
 
 function targetsFromPage(page: EntryPage): DiaryTarget[] {
   return page.entries.filter(target => /^\d{4}-\d{2}-\d{2}$/.test(target.date))

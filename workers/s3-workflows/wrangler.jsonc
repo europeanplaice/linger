@@ -13,6 +13,11 @@
       "name": "s3-backfill-workflow-production",
       "binding": "S3_BACKFILL_WORKFLOW",
       "class_name": "S3BackfillWorkflow"
+    },
+    {
+      "name": "s3-mirror-workflow-production",
+      "binding": "S3_MIRROR_WORKFLOW",
+      "class_name": "S3MirrorWorkflow"
     }
   ],
   "kv_namespaces": [
