@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite --host",
     "workers:dev": "wrangler pages dev --proxy 5173 --port 8788",
-    "build": "tsc -b && tsc -p tsconfig.functions.json --noEmit && vite build",
+    "build": "tsc -b && tsc -p tsconfig.functions.json --noEmit && npm run build:workflows && vite build",
+    "build:workflows": "tsc -p tsconfig.workflows.json --noEmit",
     "ci:local": "bash scripts/ci-local.sh",
     "test": "playwright test",
     "test:unit": "vitest run",

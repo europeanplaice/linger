@@ -22,6 +22,15 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
+    if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      const result = await context.env.S3_WORKFLOW_SERVICE.mirrorEntry({
+        sessionId,
+        accountKey: session.google_sub,
+        date,
+      })
+      if (!result.ok) return jsonResponse({ error: result.error ?? 'S3 mirror failed' }, 502)
+      return jsonResponse({ ok: true })
+    }
     const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
     if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)

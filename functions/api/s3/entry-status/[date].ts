@@ -60,6 +60,25 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
   const since = url.searchParams.get('since')
   if (!version) return jsonResponse({ error: 'version is required' }, 400)
 
+  // The Workflow Worker owns the authoritative per-entry index. The old
+  // Drive/S3-HEAD path remains below only for local environments that predate
+  // the service binding.
+  if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+    try {
+      const result = await context.env.S3_WORKFLOW_SERVICE.getEntryStatus({
+        sessionId,
+        accountKey: session.google_sub,
+        date,
+        requestedVersion: version,
+        ...(since ? { since } : {}),
+      })
+      return jsonResponse(result)
+    } catch (e) {
+      console.error('s3/entry-status.ts: Workflow status lookup failed', e)
+      return jsonResponse({ status: 'pending' })
+    }
+  }
+
   try {
     const settings = await getS3SettingsForStatusCheck(accessToken, sessionId, session, context.env)
     if (!settings || !settings.enabled) return jsonResponse({ status: 'disabled' })

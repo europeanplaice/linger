@@ -10,6 +10,31 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
+    if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      const auth = { sessionId, accountKey: session.google_sub }
+      const previous = await context.env.S3_WORKFLOW_SERVICE.getJob(auth)
+      let failedDates = previous?.failedDates ?? []
+      // During migration, a failure recorded by the pre-Workflow implementation
+      // may still exist only in Drive's audit status file.
+      if (failedDates.length === 0) {
+        const legacy = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
+        failedDates = legacy?.status.backfillProgress?.failed ?? []
+      }
+      if (failedDates.length === 0) return jsonResponse({ error: 'No failed entries to retry' }, 400)
+      try {
+        const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
+          ...auth,
+          requestId: context.request.headers.get('X-Request-ID') ?? crypto.randomUUID(),
+          scope: failedDates,
+        })
+        return jsonResponse({ ok: true, jobId: result.job.jobId, retrying: failedDates.length }, 202)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        if (message.includes('already running')) return jsonResponse({ error: message }, 409)
+        console.error('s3/backfill-retry.ts: Workflow start failed', error)
+        return jsonResponse({ error: 'Unable to start backfill retry' }, 502)
+      }
+    }
     const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
     if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)

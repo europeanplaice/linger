@@ -12,3 +12,6 @@ binding = "SESSIONS"
 id = "c97ec063171444f7929955e3d8247211"
 preview_id = "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
 
+[[services]]
+binding = "S3_WORKFLOW_SERVICE"
+service = "linger-s3-workflows"

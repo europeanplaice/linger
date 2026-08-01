@@ -1,3 +1,5 @@
+import type { S3WorkflowService } from './s3Workflow'
+
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
 const COOKIE_NAME = 'linger_session'
@@ -8,6 +10,7 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string
   SESSION_DOMAIN: string
   CF_PAGES_COMMIT_SHA?: string
+  S3_WORKFLOW_SERVICE?: S3WorkflowService
 }
 
 export interface SessionData {

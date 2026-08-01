@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { BackfillProgress } from '../types'
-import { loadS3Settings, continueS3Backfill } from '../api/s3Settings'
+import { loadS3Settings } from '../api/s3Settings'
 
 export interface UseS3BackfillResult {
   backfillProgress: BackfillProgress | null
@@ -19,10 +19,8 @@ export interface UseS3BackfillResult {
 
 // Drives S3 backfill progress from the top of the app (not from inside the Settings
 // modal) so a running backfill keeps advancing even while Settings is closed — only
-// closing the tab/app itself stops it. There's no way to push progress from the
-// server's context.waitUntil task, so this is the only way the app learns it's
-// progressing/done: poll /api/s3/settings, and on each poll also kick off the next
-// chunk via /api/s3/backfill-continue since each server-side invocation is time-boxed.
+// closing the tab/app itself stops it. Workflows continue independently of this
+// poller; the browser only reads the Durable Object-backed job snapshot.
 export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null)
   const [lastSyncError, setLastSyncError] = useState<string | null>(null)
@@ -55,38 +53,16 @@ export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
   }, [])
 
   const backfillActive = isSignedIn && (expectingBackfill || (backfillProgress !== null && !backfillProgress.finishedAt))
-  const continueInFlight = useRef(false)
   useEffect(() => {
     if (!backfillActive) return
     let cancelled = false
     const poll = () => {
-      // Kick off the next chunk (fire-and-forget) so the server starts processing
-      // while we wait for the settings poll to come back. Guard against overlapping
-      // calls when a chunk takes longer than the poll interval — the S3 writes are
-      // idempotent (putObjectIfNewer) so overlap is safe but wasteful.
-      if (!continueInFlight.current) {
-        continueInFlight.current = true
-        continueS3Backfill()
-          .then(result => {
-            // Server reports backfill is done (no progress record left, or
-            // finishedAt set). Stop polling immediately rather than waiting
-            // for the next settings poll to notice.
-            if (result.done && !cancelled) {
-              setBackfillProgress(null)
-              setExpectingBackfill(false)
-            }
-          })
-          .catch(e => console.error('Failed to continue S3 backfill:', e))
-          .finally(() => { continueInFlight.current = false })
-      }
       loadS3Settings().then(settings => {
         if (cancelled || !settings) return
         setLastSyncError(settings.lastSyncError ?? null)
         setLastSyncErrorAt(settings.lastSyncErrorAt ?? null)
-        // Only clear expectingBackfill once the server has actually written a
-        // backfillProgress record — otherwise the first poll could arrive before
-        // the initial chunk finishes writing progress, see no progress, clear the
-        // flag, and permanently stop polling before the backfill even starts.
+        // The job is visible as soon as the start RPC succeeds, even while it is
+        // still queued and before the first entry is processed.
         if (settings.backfillProgress) {
           setBackfillProgress(settings.backfillProgress)
           setExpectingBackfill(false)
@@ -94,7 +70,7 @@ export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
       }).catch(e => console.error('Failed to poll S3 backfill progress:', e))
     }
     poll()
-    const id = setInterval(poll, 2000)
+    const id = setInterval(poll, 5000)
     return () => { cancelled = true; clearInterval(id) }
   }, [backfillActive])
 

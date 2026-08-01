@@ -11,7 +11,29 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const settings = await getS3Settings(accessToken, sessionId, session, context.env)
+    let settings = await getS3Settings(accessToken, sessionId, session, context.env)
+    if (settings && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      try {
+        await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({ sessionId, accountKey: session.google_sub, enabled: settings.enabled })
+        const job = await context.env.S3_WORKFLOW_SERVICE.getJob({ sessionId, accountKey: session.google_sub })
+        if (job) {
+          const finishedAt = job.finishedAt
+          settings = {
+            ...settings,
+            backfillProgress: {
+              total: job.total,
+              done: job.completed,
+              failed: job.failedDates,
+              ...(finishedAt ? { finishedAt } : {}),
+              updatedAt: finishedAt ?? job.startedAt,
+            },
+            ...(job.error ? { lastSyncError: job.error, lastSyncErrorAt: finishedAt ?? job.startedAt } : {}),
+          }
+        }
+      } catch (e) {
+        console.error('s3/settings.ts: failed to read Workflow job', e)
+      }
+    }
     return jsonResponse(settings)
   } catch (e) {
     console.error('s3/settings.ts: GET failed', e)
@@ -85,7 +107,30 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // existing run now that config.enabled is true again. isBackfillRunActive treats a
     // run with no recent progress write as abandoned rather than active, so an orphaned
     // run can't permanently block every future re-enable from starting a fresh one.
-    if (config.enabled && !previouslyEnabled) {
+    let startedJobId: string | undefined
+    if (config.enabled && !previouslyEnabled && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      try {
+        await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({ sessionId, accountKey: session.google_sub, enabled: true, resetEntries: true })
+        const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
+          sessionId,
+          accountKey: session.google_sub,
+          requestId: context.request.headers.get('X-Request-ID') ?? crypto.randomUUID(),
+        })
+        startedJobId = result.job.jobId
+      } catch (e) {
+        const message = e instanceof Error ? e.message : ''
+        if (message.includes('already running')) return jsonResponse({ error: message }, 409)
+        console.error('s3/settings.ts: failed to start Workflow backfill', e)
+        return jsonResponse({ error: 'Settings saved, but backfill could not be started' }, 502)
+      }
+    } else if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({
+        sessionId,
+        accountKey: session.google_sub,
+        enabled: config.enabled,
+        resetEntries: true,
+      })
+    } else if (config.enabled && !previouslyEnabled) {
       const alreadyRunning = isBackfillRunActive(existing?.status.backfillProgress)
       if (!alreadyRunning) {
         const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
@@ -93,7 +138,9 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       }
     }
 
-    return jsonResponse(meta)
+    return startedJobId
+      ? jsonResponse({ ...meta, jobId: startedJobId }, 202)
+      : jsonResponse(meta)
   } catch (e) {
     console.error('s3/settings.ts: PUT failed', e)
     return jsonResponse({ error: 'Internal server error' }, 500)

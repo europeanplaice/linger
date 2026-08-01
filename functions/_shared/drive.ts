@@ -166,6 +166,30 @@ export async function listEntries(token: string, sessionId: string, session: Ses
   })
 }
 
+// Workflow backfills use this page-sized variant so no complete Drive listing is
+// persisted in a Workflow step result. The normal Pages API continues to use
+// listEntries(), which intentionally returns the full list for its existing callers.
+export async function listEntryPage(
+  token: string,
+  sessionId: string,
+  session: SessionData,
+  env: Env,
+  pageToken?: string,
+): Promise<{ files: DriveFileMeta[]; nextPageToken?: string }> {
+  return withFolderFallback(token, sessionId, session, env, async folderId => {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain'`)
+    const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version)')
+    const cursor = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''
+    return driveWithRetry(
+      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&orderBy=name&pageSize=${FILES_PAGE_SIZE}${cursor}`, {
+        headers: driveHeaders(token),
+        signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
+      }),
+      r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
+    )
+  })
+}
+
 export async function searchEntries(token: string, sessionId: string, session: SessionData, env: Env, query: string): Promise<DriveFileMeta[]> {
   const escapedQuery = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   return withFolderFallback(token, sessionId, session, env, async folderId => {

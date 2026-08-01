@@ -16,6 +16,10 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   const { accessToken, sessionId, session } = context.data
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
+  if (context.env.S3_WORKFLOW_SERVICE) {
+    return jsonResponse({ error: 'Backfill continuation is now managed by Cloudflare Workflows' }, 410)
+  }
+
   try {
     const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)

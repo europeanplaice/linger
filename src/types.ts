@@ -39,6 +39,7 @@ export interface BackfillProgress {
   done: number
   failed: string[]
   finishedAt?: string // ISO timestamp
+  updatedAt?: string // ISO timestamp
 }
 
 export interface S3Settings {

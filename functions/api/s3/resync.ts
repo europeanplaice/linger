@@ -13,6 +13,21 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
+    if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      try {
+        const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
+          sessionId,
+          accountKey: session.google_sub,
+          requestId: context.request.headers.get('X-Request-ID') ?? crypto.randomUUID(),
+        })
+        return jsonResponse({ ok: true, jobId: result.job.jobId }, 202)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        if (message.includes('already running')) return jsonResponse({ error: message }, 409)
+        console.error('s3/resync.ts: Workflow start failed', error)
+        return jsonResponse({ error: 'Unable to start backfill' }, 502)
+      }
+    }
     const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
     if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)

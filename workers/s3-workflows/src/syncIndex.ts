@@ -1,0 +1,293 @@
+import { DurableObject } from 'cloudflare:workers'
+import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
+import type { WorkflowEnv } from './types'
+
+interface JobReservation {
+  job: BackfillJob
+  created: boolean
+}
+
+interface JobRow {
+  [key: string]: string | number | null
+  job_id: string
+  state: string
+  total: number
+  completed: number
+  failed: number
+  failed_dates: string
+  started_at: string
+  finished_at: string | null
+  workflow_id: string
+  error: string | null
+}
+
+interface EntryRow {
+  [key: string]: string | number | null
+  date: string
+  drive_version: string | null
+  synced_version: string | null
+  state: string
+  updated_at: string
+  last_error: string | null
+}
+
+function isAtLeast(existing: string | undefined, incoming: string | undefined): boolean {
+  if (!existing || !incoming) return false
+  try {
+    return BigInt(existing) >= BigInt(incoming)
+  } catch {
+    return false
+  }
+}
+
+function parseFailedDates(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed) && parsed.every(date => typeof date === 'string') ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export class S3SyncIndex extends DurableObject<WorkflowEnv> {
+  constructor(ctx: DurableObjectState, env: WorkflowEnv) {
+    super(ctx, env)
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS entries (
+        date TEXT PRIMARY KEY,
+        drive_version TEXT,
+        synced_version TEXT,
+        state TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_error TEXT
+      );
+      CREATE TABLE IF NOT EXISTS jobs (
+        job_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL,
+        total INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        failed_dates TEXT NOT NULL DEFAULT '[]',
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        workflow_id TEXT NOT NULL,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS jobs_started_at_idx ON jobs(started_at);
+      CREATE TABLE IF NOT EXISTS processed_batches (
+        job_id TEXT NOT NULL,
+        batch_key TEXT NOT NULL,
+        PRIMARY KEY (job_id, batch_key)
+      );
+      CREATE TABLE IF NOT EXISTS account_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `)
+  }
+
+  private jobFromRow(row: JobRow): BackfillJob {
+    return {
+      jobId: row.job_id,
+      state: row.state as BackfillJob['state'],
+      total: row.total,
+      completed: row.completed,
+      failed: row.failed,
+      failedDates: parseFailedDates(row.failed_dates),
+      startedAt: row.started_at,
+      ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+      workflowId: row.workflow_id,
+      ...(row.error ? { error: row.error } : {}),
+    }
+  }
+
+  private findJob(jobId: string): JobRow | null {
+    const rows = this.ctx.storage.sql.exec<JobRow>(
+      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs WHERE job_id = ?',
+      jobId,
+    ).toArray()
+    return rows[0] ?? null
+  }
+
+  startJob(requestId: string, jobId: string, workflowId: string, enabled: boolean, startedAt: string): JobReservation {
+    const existingRequest = this.ctx.storage.sql.exec<JobRow>(
+      'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs WHERE request_id = ?',
+      requestId,
+    ).toArray()[0]
+    if (existingRequest) return { job: this.jobFromRow(existingRequest), created: false }
+    if (!enabled) throw new Error('S3 backup is not enabled')
+
+    const active = this.ctx.storage.sql.exec<{ job_id: string }>(
+      "SELECT job_id FROM jobs WHERE state IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",
+    ).toArray()[0]
+    if (active) throw new Error('A backfill is already running')
+
+    this.ctx.storage.sql.exec(
+      "INSERT INTO jobs (job_id, request_id, state, started_at, workflow_id) VALUES (?, ?, 'queued', ?, ?)",
+      jobId,
+      requestId,
+      startedAt,
+      workflowId,
+    )
+    const row = this.findJob(jobId)
+    if (!row) throw new Error('Failed to create backfill job')
+    return { job: this.jobFromRow(row), created: true }
+  }
+
+  markStartFailed(jobId: string, message: string, finishedAt: string): void {
+    this.ctx.storage.sql.exec(
+      "UPDATE jobs SET state = 'failed', finished_at = ?, error = ? WHERE job_id = ? AND state = 'queued'",
+      finishedAt,
+      message.slice(0, 200),
+      jobId,
+    )
+  }
+
+  markRunning(jobId: string): void {
+    this.ctx.storage.sql.exec("UPDATE jobs SET state = 'running' WHERE job_id = ? AND state = 'queued'", jobId)
+  }
+
+  setTotal(jobId: string, total: number): void {
+    this.ctx.storage.sql.exec('UPDATE jobs SET total = MAX(total, ?) WHERE job_id = ?', total, jobId)
+  }
+
+  recordProgress(jobId: string, batchKey: string, completed: number, failedDates: string[]): void {
+    const inserted = this.ctx.storage.sql.exec(
+      'INSERT OR IGNORE INTO processed_batches (job_id, batch_key) VALUES (?, ?)',
+      jobId,
+      batchKey,
+    )
+    if (inserted.rowsWritten === 0) return
+
+    const row = this.findJob(jobId)
+    if (!row) throw new Error('Backfill job not found')
+    const failed = new Set(row.failed_dates ? parseFailedDates(row.failed_dates) : [])
+    for (const date of failedDates) failed.add(date)
+    this.ctx.storage.sql.exec(
+      'UPDATE jobs SET completed = completed + ?, failed = ?, failed_dates = ? WHERE job_id = ?',
+      completed,
+      failed.size,
+      JSON.stringify([...failed].sort()),
+      jobId,
+    )
+  }
+
+  finishJob(jobId: string, finishedAt: string): void {
+    const row = this.findJob(jobId)
+    if (!row || row.state === 'cancelled') return
+    const state = row.failed > 0 ? 'failed' : 'complete'
+    this.ctx.storage.sql.exec(
+      'UPDATE jobs SET state = ?, finished_at = ?, completed = MAX(completed, total) WHERE job_id = ?',
+      state,
+      finishedAt,
+      jobId,
+    )
+  }
+
+  failJob(jobId: string, message: string, finishedAt: string): void {
+    this.ctx.storage.sql.exec(
+      "UPDATE jobs SET state = 'failed', finished_at = ?, error = ? WHERE job_id = ? AND state IN ('queued', 'running')",
+      finishedAt,
+      message.slice(0, 200),
+      jobId,
+    )
+  }
+
+  getJob(jobId?: string): BackfillJob | null {
+    const row = jobId
+      ? this.findJob(jobId)
+      : this.ctx.storage.sql.exec<JobRow>(
+        'SELECT job_id, state, total, completed, failed, failed_dates, started_at, finished_at, workflow_id, error FROM jobs ORDER BY started_at DESC LIMIT 1',
+      ).toArray()[0] ?? null
+    return row ? this.jobFromRow(row) : null
+  }
+
+  setBackupEnabled(enabled: boolean, resetEntries = false): void {
+    if (resetEntries) this.ctx.storage.sql.exec('DELETE FROM entries')
+    this.ctx.storage.sql.exec(
+      "INSERT INTO account_config (key, value) VALUES ('enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      enabled ? '1' : '0',
+    )
+  }
+
+  getBackupEnabled(): boolean | null {
+    const row = this.ctx.storage.sql.exec<{ value: string }>(
+      "SELECT value FROM account_config WHERE key = 'enabled'",
+    ).toArray()[0]
+    if (!row) return null
+    return row.value === '1'
+  }
+
+  getEntry(date: string): EntrySyncStatus | null {
+    const row = this.ctx.storage.sql.exec<EntryRow>(
+      'SELECT date, drive_version, synced_version, state, updated_at, last_error FROM entries WHERE date = ?',
+      date,
+    ).toArray()[0]
+    if (!row) return null
+    return {
+      date: row.date,
+      ...(row.drive_version ? { driveVersion: row.drive_version } : {}),
+      ...(row.synced_version ? { syncedVersion: row.synced_version } : {}),
+      state: row.state as S3SyncState,
+      updatedAt: row.updated_at,
+      ...(row.last_error ? { lastError: row.last_error } : {}),
+    }
+  }
+
+  markPending(date: string, driveVersion: string | undefined, updatedAt: string): EntrySyncStatus | null {
+    const current = this.getEntry(date)
+    if (current?.driveVersion && driveVersion && isAtLeast(current.driveVersion, driveVersion) && current.driveVersion !== driveVersion) {
+      return current
+    }
+    this.ctx.storage.sql.exec(
+      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
+       VALUES (?, ?, ?, 'pending', ?, NULL)
+       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, state = 'pending', updated_at = excluded.updated_at, last_error = NULL
+       WHERE entries.drive_version IS NULL OR excluded.drive_version IS NULL OR entries.drive_version = excluded.drive_version OR CAST(excluded.drive_version AS INTEGER) >= CAST(entries.drive_version AS INTEGER)`,
+      date,
+      driveVersion ?? current?.driveVersion ?? null,
+      current?.syncedVersion ?? null,
+      updatedAt,
+    )
+    return this.getEntry(date)
+  }
+
+  markSynced(date: string, driveVersion: string | undefined, updatedAt: string): EntrySyncStatus | null {
+    const current = this.getEntry(date)
+    if (current?.driveVersion && driveVersion && current.driveVersion !== driveVersion && isAtLeast(current.driveVersion, driveVersion)) return current
+    const syncedVersion = current?.syncedVersion && driveVersion && isAtLeast(current.syncedVersion, driveVersion)
+      ? current.syncedVersion
+      : driveVersion ?? current?.syncedVersion
+    this.ctx.storage.sql.exec(
+      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
+       VALUES (?, ?, ?, 'synced', ?, NULL)
+       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, synced_version = excluded.synced_version, state = 'synced', updated_at = excluded.updated_at, last_error = NULL`,
+      date,
+      driveVersion ?? current?.driveVersion ?? null,
+      syncedVersion ?? null,
+      updatedAt,
+    )
+    return this.getEntry(date)
+  }
+
+  markFailed(date: string, driveVersion: string | undefined, error: string, updatedAt: string): EntrySyncStatus | null {
+    const current = this.getEntry(date)
+    if (current?.driveVersion && driveVersion && current.driveVersion !== driveVersion && isAtLeast(current.driveVersion, driveVersion)) return current
+    this.ctx.storage.sql.exec(
+      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
+       VALUES (?, ?, ?, 'failed', ?, ?)
+       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, state = 'failed', updated_at = excluded.updated_at, last_error = excluded.last_error`,
+      date,
+      driveVersion ?? current?.driveVersion ?? null,
+      current?.syncedVersion ?? null,
+      updatedAt,
+      error.slice(0, 200),
+    )
+    return this.getEntry(date)
+  }
+
+  markDeleted(date: string): void {
+    this.ctx.storage.sql.exec('DELETE FROM entries WHERE date = ?', date)
+  }
+}

@@ -16,7 +16,7 @@ export async function loadS3Settings(): Promise<S3Settings | null> {
 export async function saveS3Settings(settings: S3Settings): Promise<void> {
   await apiFetch('/api/s3/settings', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Request-ID': crypto.randomUUID() },
     body: JSON.stringify(settings),
   })
 }
@@ -49,21 +49,13 @@ export async function precheckS3Settings(settings: Pick<S3Settings, 'roleArn' | 
 
 // Re-runs the initial backfill for just the entries it failed on last time.
 export async function retryS3Backfill(): Promise<void> {
-  await apiFetch('/api/s3/backfill-retry', { method: 'POST' })
+  await apiFetch('/api/s3/backfill-retry', { method: 'POST', headers: { 'X-Request-ID': crypto.randomUUID() } })
 }
 
 // Re-mirrors every entry against S3, not just previously-failed ones — catches
 // individual per-save mirror misses that never made it into a failed list.
 export async function resyncS3Backfill(): Promise<void> {
-  await apiFetch('/api/s3/resync', { method: 'POST' })
-}
-
-// Continues a chunked backfill that was started but not yet finished. Each call
-// processes at most 20 entries; the caller should invoke this repeatedly (driven
-// by useS3Backfill's polling loop) until the response indicates done.
-export async function continueS3Backfill(): Promise<{ ok: boolean; done?: boolean; remaining?: number }> {
-  const { data } = await apiFetch<{ ok: boolean; done?: boolean; remaining?: number }>('/api/s3/backfill-continue', { method: 'POST' })
-  return data
+  await apiFetch('/api/s3/resync', { method: 'POST', headers: { 'X-Request-ID': crypto.randomUUID() } })
 }
 
 // Checked after a Drive save to learn whether the S3 mirror has caught up to

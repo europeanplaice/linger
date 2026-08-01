@@ -439,6 +439,19 @@ export async function mirrorEntrySave(
   fileId: string,
   driveVersion?: string,
 ): Promise<void> {
+  // New deployments mirror through the dedicated Workflow Worker. Keep the
+  // legacy implementation below as a compatibility fallback for local/dev
+  // environments where the service binding is intentionally absent.
+  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
+    await env.S3_WORKFLOW_SERVICE.mirrorEntry({
+      sessionId,
+      accountKey: session.google_sub,
+      date,
+      fileId,
+      ...(driveVersion ? { driveVersion } : {}),
+    }).catch(error => console.error('s3Settings.ts: Workflow mirror failed', error))
+    return
+  }
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
@@ -476,6 +489,11 @@ export async function mirrorEntryDelete(
   env: Env,
   date: string,
 ): Promise<void> {
+  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
+    await env.S3_WORKFLOW_SERVICE.deleteEntry({ sessionId, accountKey: session.google_sub, date })
+      .catch(error => console.error('s3Settings.ts: Workflow delete mirror failed', error))
+    return
+  }
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)

@@ -1,0 +1,42 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "linger-s3-workflows",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "workflows": [
+    {
+      "name": "s3-backfill-workflow",
+      "binding": "S3_BACKFILL_WORKFLOW",
+      "class_name": "S3BackfillWorkflow"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "c97ec063171444f7929955e3d8247211",
+      "preview_id": "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "S3_SYNC_INDEX",
+        "class_name": "S3SyncIndex"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["S3SyncIndex"]
+    }
+  ],
+  "secrets": {
+    "required": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_DOMAIN"]
+  }
+}

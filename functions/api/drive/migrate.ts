@@ -38,7 +38,16 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
       // account-wide resync, and the in-progress run's own listing may well cover them.
       const alreadyRunning = isBackfillRunActive(record?.status.backfillProgress)
       if (record?.config.enabled && !alreadyRunning) {
-        context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, migratedDates, 'Migration re-sync', 20))
+        if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+          context.waitUntil(context.env.S3_WORKFLOW_SERVICE.startBackfill({
+            sessionId,
+            accountKey: session.google_sub,
+            requestId: crypto.randomUUID(),
+            scope: migratedDates,
+          }).then(() => undefined).catch(error => console.error('migrate.ts: Workflow re-sync failed', error)))
+        } else {
+          context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, migratedDates, 'Migration re-sync', 20))
+        }
         s3Resyncing = true
       }
     } catch (e) {
