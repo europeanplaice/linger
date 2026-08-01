@@ -233,8 +233,16 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return row ? this.jobFromRow(row) : null
   }
 
+  resetAllData(): void {
+    this.ctx.storage.sql.exec('DELETE FROM entries')
+    this.ctx.storage.sql.exec('DELETE FROM jobs')
+    this.ctx.storage.sql.exec('DELETE FROM processed_batches')
+  }
+
   setBackupEnabled(enabled: boolean, resetEntries = false): void {
-    if (resetEntries) this.ctx.storage.sql.exec('DELETE FROM entries')
+    if (resetEntries) {
+      this.resetAllData()
+    }
     this.ctx.storage.sql.exec(
       "INSERT INTO account_config (key, value) VALUES ('enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       enabled ? '1' : '0',

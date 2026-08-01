@@ -15,6 +15,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   try {
     if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
       try {
+        await context.env.S3_WORKFLOW_SERVICE.resetAllData({ sessionId, accountKey: session.google_sub })
         const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
           sessionId,
           accountKey: session.google_sub,
