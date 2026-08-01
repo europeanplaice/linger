@@ -55,9 +55,18 @@ async function runScopedWorkflow(accountKey: string, jobId: string, workflowId: 
   })
 
   const params: S3BackfillParams = { sessionId: SESSION_ID, accountKey, jobId, scope }
-  await using instance = await introspectWorkflowInstance(workflowEnv.S3_BACKFILL_WORKFLOW, workflowId)
-  await workflowEnv.S3_BACKFILL_WORKFLOW.create({ id: workflowId, params })
-  await instance.waitForStatus('complete')
+  let currentWfId = workflowId
+  let chunkIdx = 1
+  while (currentWfId) {
+    await using instance = await introspectWorkflowInstance(workflowEnv.S3_BACKFILL_WORKFLOW, currentWfId)
+    if (chunkIdx === 1) {
+      await workflowEnv.S3_BACKFILL_WORKFLOW.create({ id: currentWfId, params })
+    }
+    await instance.waitForStatus('complete')
+    const job = await runInDurableObject(index, (inst: S3SyncIndex) => inst.getJob(jobId))
+    if (job?.state === 'complete' || job?.state === 'failed') break
+    currentWfId = `${jobId}-chunk-${chunkIdx++}`
+  }
 
   return index
 }

@@ -6,10 +6,13 @@ import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, recordWorkflowStep, safeError } from './runtime'
 
-// Processing 1 entry per batch step costs ~4-5 subrequests (Drive metadata, Drive content,
-// S3 HEAD, S3 PUT). Even under retries, a 1-entry step uses at most ~15 subrequests,
-// staying far below Cloudflare Workers Free plan 50 subrequests limit.
+// Each entry costs ~3-4 subrequests (Drive metadata, Drive content, S3 HEAD, S3 PUT).
+// WORKFLOW_CHUNK_SIZE limits each Workflow instance invocation to at most 10 entries (~18
+// subrequests total, far below Cloudflare Workers Free plan 50 subrequests limit).
+// When more entries remain, the Workflow instance chains a fresh Workflow instance
+// with the remaining scope, guaranteeing a brand-new Worker invocation and 0 subrequests counter.
 const BATCH_SIZE = 1
+const WORKFLOW_CHUNK_SIZE = 10
 const MAX_BACKFILL_ENTRIES = 10_000
 const STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
@@ -122,7 +125,11 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
           await index.setTotal(params.jobId, params.scope?.length ?? 0)
           return null
         })
-        const targetBatches = chunk(params.scope, BATCH_SIZE).map(batch => batch.map(date => ({ date, fileId: '' })))
+        const chunkIdx = params.chunkIndex ?? 0
+        const currentChunk = params.scope.slice(0, WORKFLOW_CHUNK_SIZE)
+        const remainingScope = params.scope.slice(WORKFLOW_CHUNK_SIZE)
+
+        const targetBatches = chunk(currentChunk, BATCH_SIZE).map(batch => batch.map(date => ({ date, fileId: '' })))
         for (const [batchIndex, batch] of targetBatches.entries()) {
           const result = await processBatch(this.env, params, batch, step, `scope-${batchIndex}`)
           await countedStep(this.env, step, `record-progress-scope-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
@@ -131,10 +138,24 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
           })
           await step.sleep(`sleep-scope-${batchIndex}`, '1 second')
         }
+
+        if (remainingScope.length > 0) {
+          const nextChunkIdx = chunkIdx + 1
+          const nextWorkflowId = `${params.jobId}-chunk-${nextChunkIdx}`
+          await countedStep(this.env, step, `chain-chunk-${nextChunkIdx}`, async () => {
+            await this.env.S3_BACKFILL_WORKFLOW.create({
+              id: nextWorkflowId,
+              params: { ...params, scope: remainingScope, chunkIndex: nextChunkIdx },
+            })
+            return null
+          })
+          return
+        }
       } else {
         let pageToken: string | undefined
         let pageIndex = 0
         let discoveredCount = 0
+        const allTargets: DiaryTarget[] = []
         do {
           const page = await countedStep(this.env, step, `discover-page-${pageIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
             const session = await authorizedSession(this.env, params)
@@ -148,25 +169,32 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
             } satisfies EntryPage
           })
           const pageTargets = targetsFromPage(page)
+          allTargets.push(...pageTargets)
           discoveredCount += pageTargets.length
           if (discoveredCount > MAX_BACKFILL_ENTRIES) {
             throw new NonRetryableError('Backfill target limit exceeded')
           }
-          await countedStep(this.env, step, `set-page-total-${pageIndex}`, async () => {
-            await index.setTotal(params.jobId, discoveredCount)
-            return null
-          })
-          for (const [batchIndex, batch] of chunk(pageTargets, BATCH_SIZE).entries()) {
-            const result = await processBatch(this.env, params, batch, step, `page-${pageIndex}-batch-${batchIndex}`)
-            await countedStep(this.env, step, `record-progress-page-${pageIndex}-batch-${batchIndex}`, { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
-              await index.recordProgress(params.jobId, `page-${pageIndex}-batch-${batchIndex}`, result.processed, result.failedDates)
-              return null
-            })
-            await step.sleep(`sleep-page-${pageIndex}-batch-${batchIndex}`, '1 second')
-          }
           pageToken = page.nextPageToken
           pageIndex += 1
         } while (pageToken)
+
+        await countedStep(this.env, step, 'set-page-total', async () => {
+          await index.setTotal(params.jobId, discoveredCount)
+          return null
+        })
+
+        if (allTargets.length > 0) {
+          const scope = allTargets.map(t => t.date)
+          const nextWorkflowId = `${params.jobId}-chunk-1`
+          await countedStep(this.env, step, 'chain-first-chunk', async () => {
+            await this.env.S3_BACKFILL_WORKFLOW.create({
+              id: nextWorkflowId,
+              params: { ...params, scope, chunkIndex: 1 },
+            })
+            return null
+          })
+          return
+        }
       }
 
       await countedStep(this.env, step, 'mark-job-finished', { retries: STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {

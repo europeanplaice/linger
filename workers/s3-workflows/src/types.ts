@@ -14,6 +14,7 @@ export interface S3BackfillParams {
   jobId: string
   config?: S3Config
   scope?: string[]
+  chunkIndex?: number
 }
 
 export interface DiaryTarget {
