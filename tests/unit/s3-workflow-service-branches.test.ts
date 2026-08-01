@@ -35,6 +35,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 function makeService(overrides: Record<string, unknown> = {}) {
   return {
     startBackfill: vi.fn(),
+    resetAllData: vi.fn().mockResolvedValue(undefined),
     getJob: vi.fn(),
     getEntryStatus: vi.fn(),
     setBackupEnabled: vi.fn().mockResolvedValue(undefined),
@@ -274,7 +275,10 @@ describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(200)
     expect(service.startBackfill).not.toHaveBeenCalled()
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    // Not a first-time enable, so this must NOT reset entries — resetEntries: true
+    // here would wipe sync history (and, per resetAllData's own guard, refuse to
+    // run at all) on every plain re-save of already-enabled settings.
+    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true })
   })
 
   it('maps an "already running" rejection from startBackfill to 409', async () => {

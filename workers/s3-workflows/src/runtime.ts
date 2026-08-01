@@ -8,7 +8,8 @@ import {
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
-import { assumeRoleWithWebIdentity, deleteObject, describeError, putObjectIfNewer, type AssumedCredentials } from '../../../functions/_shared/s3'
+import { deleteObject, describeError, putObjectIfNewer, type AssumedCredentials } from '../../../functions/_shared/s3'
+import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
 import type { S3SyncIndex } from './syncIndex'
@@ -131,12 +132,21 @@ export async function freshGoogleTokens(
   return { accessToken, idToken }
 }
 
+// Routed through s3Settings.ts's KV-session-backed cache (getAssumedCredentials)
+// rather than calling assumeRoleWithWebIdentity's in-isolate Map cache directly —
+// the Workflow Worker's steps commonly resume on a different isolate than the one
+// that assumed the role (step.sleep and any hibernation both evict it), so the
+// in-isolate cache alone would re-pay a full STS round trip on nearly every step.
+// The KV-backed cache survives that because it's read from/written to the same
+// session record every step already loads via authorizedSession.
 export async function assumeS3Credentials(
   idToken: string,
-  accountKey: string,
+  sessionId: string,
+  session: SessionData,
+  env: WorkflowEnv,
   config: S3Config,
 ): Promise<AssumedCredentials> {
-  return assumeRoleWithWebIdentity(idToken, config.roleArn, config.region, `${accountKey}:${config.roleArn}:${config.region}`)
+  return getAssumedCredentials(idToken, sessionId, session, env, config)
 }
 
 export function safeError(error: unknown): string {
@@ -152,10 +162,22 @@ export function safeError(error: unknown): string {
     .slice(0, 200)
 }
 
+// Drive quota errors (userRateLimitExceeded/rateLimitExceeded/quotaExceeded) and
+// STS throttling/expiry (ThrottlingException/ExpiredTokenException) both come back
+// as a plain 4xx status (403 and 400 respectively, not 429) — DriveError/S3Error's
+// `message` carries the raw response body (see drive.ts's driveWithRetry and
+// s3.ts), so matching against it here is the only way to tell these apart from a
+// genuinely permanent 4xx (bad request, forbidden-for-real, etc). Without this, a
+// transient quota bump or a stale id_token gets recorded as the entry's permanent,
+// un-retriable failure instead of the next attempt (with a refreshed token, past
+// the quota window) just working.
+const RETRYABLE_ERROR_SIGNATURE = /rateLimitExceeded|quotaExceeded|ThrottlingException|ExpiredTokenException/
+
 export function isPermanentEntryError(error: unknown): boolean {
   if (error instanceof Error && 'status' in error) {
     const status = Number((error as { status: number }).status)
-    return status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 409 && status !== 429
+    if (!(status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 409 && status !== 429)) return false
+    return !RETRYABLE_ERROR_SIGNATURE.test(error.message)
   }
   return false
 }
@@ -212,7 +234,7 @@ export async function mirrorEntryForAuth(
       await index.markDeleted(input.date)
       return { ok: true }
     }
-    const creds = await assumeS3Credentials(idToken, input.accountKey, config)
+    const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
     let meta
     try {
       meta = input.fileId
@@ -267,7 +289,7 @@ export async function deleteEntryForAuth(
       await index.markDeleted(input.date)
       return { ok: true }
     }
-    const creds = await assumeS3Credentials(idToken, input.accountKey, config)
+    const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
     await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
     await index.markDeleted(input.date)
     return { ok: true }

@@ -12,7 +12,7 @@ import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, get
 import { S3BackfillWorkflow } from './workflow'
 import { S3SyncIndex } from './syncIndex'
 import { runWorkerFirstPass } from './workerFirstPass'
-import type { WorkflowEnv } from './types'
+import type { DiaryTarget, WorkflowEnv } from './types'
 
 export { S3BackfillWorkflow, S3SyncIndex }
 
@@ -47,7 +47,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     const reservation = await index.startJob(input.requestId, jobId, workflowId, config.enabled, new Date().toISOString())
     if (!reservation.created) return reservation
 
-    let remainingScope: string[] | undefined = scope
+    let remainingScope: DiaryTarget[] | undefined = scope?.map(date => ({ date }))
     if (scope && scope.length > 0) {
       try {
         const firstPassResult = await runWorkerFirstPass(
@@ -59,7 +59,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
           config,
           accessToken,
           idToken,
-          scope,
+          remainingScope,
         )
         remainingScope = firstPassResult.remainingScope
 

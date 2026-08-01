@@ -30,6 +30,11 @@ vi.mock('../../../functions/_shared/s3', () => ({
   putObjectIfNewer: vi.fn(async () => undefined),
   deleteObject: vi.fn(async () => undefined),
   describeError: (e: unknown) => (e instanceof Error ? e.message : 'Unknown error'),
+  // assumeS3Credentials now routes through s3Settings.ts's getAssumedCredentials
+  // (a KV-session-backed cache in front of assumeRoleWithWebIdentity, see
+  // runtime.ts), which imports this constant directly from the real (unmocked)
+  // s3Settings.ts — so this mock of its dependency module needs to provide it too.
+  CREDENTIALS_EXPIRY_MARGIN_MS: 15 * 60 * 1000,
 }))
 
 const SESSION_ID = 'test-session'
@@ -54,7 +59,7 @@ async function runScopedWorkflow(accountKey: string, jobId: string, workflowId: 
     instance.startJob(`req-${jobId}`, jobId, workflowId, true, new Date().toISOString())
   })
 
-  const params: S3BackfillParams = { sessionId: SESSION_ID, accountKey, jobId, scope }
+  const params: S3BackfillParams = { sessionId: SESSION_ID, accountKey, jobId, scope: scope.map(date => ({ date })) }
   let currentWfId = workflowId
   let chunkIdx = 1
   while (currentWfId) {
@@ -124,10 +129,12 @@ describe('S3BackfillWorkflow', () => {
 
     await runScopedWorkflow('6666666666', 'job-scope-6', 'wf-scope-6', ['2026-03-01'])
 
-    // A single-batch scoped run makes exactly 5 named steps: mark-job-running,
-    // set-scope-total, backup-batch-scope-0, record-progress-scope-0, mark-job-finished.
+    // A single-batch scoped run makes exactly 4 named steps: mark-job-running,
+    // set-scope-total, backup-batch-scope-0 (recordProgress is folded into this
+    // same step rather than a separate one — see workflow.ts's processBatch),
+    // mark-job-finished.
     const after = await runInDurableObject(usageStub, (instance: S3SyncIndex) => instance.getWorkflowStepUsage(today))
-    expect(after - before).toBe(5)
+    expect(after - before).toBe(4)
   })
 
   it('never stores the access token, id token, or AWS credentials in the sync index', async () => {

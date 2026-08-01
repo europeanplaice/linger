@@ -214,14 +214,14 @@ describe('putObjectIfNewer', () => {
     expect(fetchMock.mock.calls.map(c => (c[0] as Request).method)).toEqual(['HEAD', 'PUT', 'HEAD', 'HEAD', 'PUT', 'HEAD'])
   })
 
-  it('gives up silently after exhausting retries against a persistently stale write', async () => {
+  it('throws after exhausting retries against a persistently stale write, rather than silently reporting success', async () => {
     const fetchMock = vi.fn().mockImplementation((req: Request) =>
       Promise.resolve(req.method === 'HEAD'
         ? new Response(null, { status: 200, headers: { 'x-amz-meta-linger-version': '5' } })
         : new Response(null, { status: 200 })))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')).resolves.toBeUndefined()
+    await expect(putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '7')).rejects.toThrow(S3Error)
 
     expect(fetchMock).toHaveBeenCalledTimes(9) // 3 attempts × (HEAD + PUT + verify HEAD)
   })
