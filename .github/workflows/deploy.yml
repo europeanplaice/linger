@@ -41,10 +41,11 @@ jobs:
 
       - run: npm run test:unit
 
-  # Tests/builds the s3-workflows Worker only — it does not deploy it. That Worker is
-  # deployed separately via `terraform apply` in infra/ (content_file points at the
-  # locally-built artifacts/s3-workflows bundle), which stays a manual step since
-  # infra/ manages Terraform state locally with no remote backend for CI to use.
+  # Tests/builds the s3-workflows Worker only — it does not deploy it. Deployment
+  # happens via `wrangler deploy` in the deploy/deploy-staging jobs below, using
+  # wrangler.jsonc/wrangler.staging.jsonc. Terraform (infra/) only owns the
+  # surrounding scaffolding (KV namespaces, DNS, Pages projects) — it no longer
+  # manages the Worker script or its Workflow bindings.
   workers-test:
     runs-on: ubuntu-latest
     steps:
@@ -124,6 +125,12 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name=linger --commit-hash=${{ github.sha }}
 
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
+
   deploy-staging:
     needs: [lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
@@ -155,3 +162,9 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name=linger-staging --commit-hash=${{ github.sha }} --branch=staging
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.staging.jsonc

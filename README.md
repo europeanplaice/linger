@@ -136,8 +136,14 @@ The app uses **Cloudflare Web Analytics** — cookie-free, no individual trackin
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
 The workflow runs lint, unit tests, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
+The same job also deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
 
-Pushes to `main` deploy to the production Pages project (`linger`); pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com`, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/`.
+Pushes to `main` deploy to the production Pages project (`linger`) and the production `linger-s3-workflows` Worker; pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com` and the `linger-s3-workflows-staging` Worker, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' surrounding Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/` — Terraform no longer owns the Worker script or its Workflow bindings, since CI can't run `terraform apply` (local-only state, no remote backend).
+
+Cloudflare's own Pages Git integration auto-builds a preview deployment for every other branch/PR, backed by a third `linger-s3-workflows-preview` Worker. CI doesn't deploy that one (it only triggers on `main`/`staging` pushes) — deploy it by hand when its code needs to catch up:
+```bash
+npx wrangler deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.preview.jsonc
+```
 
 `vite.config.ts` uses `base: '/'` (correct for a custom domain).
 
@@ -173,7 +179,7 @@ Pushes to `main` deploy to the production Pages project (`linger`); pushes to `s
 ### 4. Configure GitHub Actions
 
 Add these repository secrets (Settings → Secrets and variables → Actions):
-- `CLOUDFLARE_API_TOKEN` — Cloudflare API token with Pages edit permissions
+- `CLOUDFLARE_API_TOKEN` — Cloudflare API token with Pages edit and Workers Scripts edit permissions (CI also deploys the `s3-workflows` Worker via `wrangler deploy`)
 - `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID
 
 Push to `main` and the app will be deployed automatically.

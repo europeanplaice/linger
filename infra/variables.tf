@@ -1,5 +1,5 @@
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token (Pages:Edit, Workers KV Storage:Edit, Zone DNS:Edit)"
+  description = "Cloudflare API token (Pages:Edit, Workers KV Storage:Edit, Zone DNS:Edit). If reused as the CI CLOUDFLARE_API_TOKEN secret, also needs Workers Scripts:Edit — CI deploys the s3-workflows Worker via `wrangler deploy`, not Terraform."
   type        = string
   sensitive   = true
 }
@@ -14,26 +14,8 @@ variable "cloudflare_zone_id" {
   type        = string
 }
 
-variable "s3_workflows_bundle_path" {
-  description = "Path to the bundled S3 Workflows Worker, relative to the Terraform root"
-  type        = string
-  default     = "../artifacts/s3-workflows/index.js"
-}
-
 variable "s3_workflows_worker_prefix" {
-  description = "Prefix used for the S3 Workflows Worker names"
+  description = "Prefix used for the S3 Workflows Worker names (the Workers themselves deploy via `wrangler deploy`, not Terraform — this only feeds the Pages S3_WORKFLOW_SERVICE binding, which references them by name)"
   type        = string
   default     = "linger-s3-workflows"
-}
-
-variable "s3_workflow_name" {
-  description = "Backfill Workflow name registered on each S3 Workflows Worker"
-  type        = string
-  default     = "s3-backfill-workflow"
-}
-
-variable "s3_mirror_workflow_name" {
-  description = "Single-entry mirror/delete Workflow name registered on each S3 Workflows Worker"
-  type        = string
-  default     = "s3-mirror-workflow"
 }

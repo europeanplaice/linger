@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "linger-s3-workflows",
+  "name": "linger-s3-workflows-preview",
   "main": "src/index.ts",
   "workers_dev": false,
   "compatibility_date": "2026-08-01",
@@ -11,12 +11,12 @@
   },
   "workflows": [
     {
-      "name": "s3-backfill-workflow-production",
+      "name": "s3-backfill-workflow-preview",
       "binding": "S3_BACKFILL_WORKFLOW",
       "class_name": "S3BackfillWorkflow"
     },
     {
-      "name": "s3-mirror-workflow-production",
+      "name": "s3-mirror-workflow-preview",
       "binding": "S3_MIRROR_WORKFLOW",
       "class_name": "S3MirrorWorkflow"
     }
@@ -24,8 +24,7 @@
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
-      "id": "c97ec063171444f7929955e3d8247211",
-      "preview_id": "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
+      "id": "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
     }
   ],
   "durable_objects": {
