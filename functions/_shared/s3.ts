@@ -120,10 +120,13 @@ function objectUrl(bucket: string, region: string, key: string): string {
 // S3 conditional-write headers (see putObjectIfNewer's comment for why they make
 // the create/update atomic): If-Match pins an update to the exact etag a preceding
 // HEAD just read, and If-None-Match: * lets at most one concurrent create win.
-// Both assume an unversioned bucket — under S3 bucket versioning a create always
-// succeeds (as a new version) and never 412s, which would break the create/update
-// flip logic below. DeleteObject has the same assumption, so nothing here opts
-// into versioning; self-hosters should leave the bucket unversioned.
+// Both behave differently under S3 bucket versioning: a create still succeeds (as
+// a new version) and never 412s, and a delete becomes a delete marker — so a stale
+// concurrent write can land last and become the bucket's "current" object. The
+// version-ordering convergence for that case lives in the caller (convergeMirror in
+// the S3 workflow Worker, driven by the Durable Object index's monotonic
+// markSynced), so versioned buckets (as the self-host Terraform template ships)
+// and unversioned buckets are both supported here.
 export interface PutObjectOptions {
   ifMatch?: string
   ifNoneMatch?: string
@@ -214,7 +217,10 @@ export async function headObjectVersion(creds: AssumedCredentials, bucket: strin
 //
 // Both paths also degrade to the other's preconditions (a 412 on a create downgrades to the
 // update path; a 404 on an update's HEAD downgrades to the create path), so a wrong hint
-// costs at most one request, never correctness. The legacy HEAD/PUT/HEAD sequence survives
+// costs at most one request, never correctness. One caveat: under bucket versioning a
+// create never 412s, so the downgrade can't fire — the caller's version-ordering
+// convergence (see the S3 workflow Worker's convergeMirror) closes that gap using the
+// Durable Object index. The legacy HEAD/PUT/HEAD sequence survives
 // only as a fallback for endpoints that reject conditional writes (S3 on Outposts). Bounded
 // and best-effort like every other write path in this file — a loss after all attempts
 // self-heals on the next mirror/resync of this date.

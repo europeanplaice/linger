@@ -17,6 +17,9 @@ vi.mock('../../../functions/_shared/drive', () => ({
 }))
 
 vi.mock('../../../functions/_shared/s3', () => ({
+  isAtLeast: (existing: string, incoming: string) => {
+    try { return BigInt(existing) >= BigInt(incoming) } catch { return false }
+  },
   assumeRoleWithWebIdentity: vi.fn(async () => ({ accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 })),
   putObjectIfNewer: vi.fn(async () => undefined),
   deleteObject: vi.fn(async () => undefined),
@@ -101,24 +104,6 @@ describe('S3WorkflowsService.startBackfill', () => {
     await seedSession(accountKey)
     const svc = service()
     await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-scope', scope: ['2026-01-01', 'not-a-date'] })).rejects.toThrow('Invalid backfill scope')
-  })
-
-  it('refuses to start a new backfill once the daily step budget is exhausted', async () => {
-    const accountKey = 'backfill-budget-1'
-    await seedSession(accountKey)
-    const workflowEnv = env as unknown as WorkflowEnv
-    const usageStub = workflowEnv.S3_SYNC_INDEX.getByName('__workflow_usage__')
-    const today = new Date().toISOString().slice(0, 10)
-    await runInDurableObject(usageStub, (instance: S3SyncIndex) => {
-      for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
-    })
-
-    const svc = service()
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-budget' })).rejects.toThrow('budget')
-
-    // No job should have been reserved for this account as a side effect of the refusal.
-    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getJob())).toBeNull()
   })
 })
 
@@ -318,5 +303,29 @@ describe('getEntryStatus lazy mirror-on-read', () => {
         params: expect.objectContaining({ date: '2026-01-07', kind: 'mirror' }),
       }),
     )
+  })
+})
+
+describe('S3WorkflowsService daily step budget', () => {
+  // Moved to the end of the file on purpose: it fills the shared __workflow_usage__
+  // counter to the daily budget, and every schedule/mirror RPC now gates on that
+  // counter, so tests after this one would be refused (see the budget gate in
+  // runtime.ts's mirrorEntryForAuth/deleteEntryForAuth/startBackfill).
+  it('refuses to start a new backfill once the daily step budget is exhausted', async () => {
+    const accountKey = 'backfill-budget-1'
+    await seedSession(accountKey)
+    const workflowEnv = env as unknown as WorkflowEnv
+    const usageStub = workflowEnv.S3_SYNC_INDEX.getByName('__workflow_usage__')
+    const today = new Date().toISOString().slice(0, 10)
+    await runInDurableObject(usageStub, (instance: S3SyncIndex) => {
+      for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
+    })
+
+    const svc = service()
+    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-budget' })).rejects.toThrow('budget')
+
+    // No job should have been reserved for this account as a side effect of the refusal.
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getJob())).toBeNull()
   })
 })

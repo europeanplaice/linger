@@ -1,7 +1,9 @@
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { putObjectIfNewer } from '../../../functions/_shared/s3'
+import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
+import { WORKFLOW_CHUNK_SIZE } from '../src/workflow'
+import type { S3Config } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv, S3BackfillParams } from '../src/types'
 
@@ -17,11 +19,18 @@ vi.mock('../../../functions/_shared/drive', () => ({
     if (date === 'broken') throw Object.assign(new Error('forbidden'), { status: 403 })
     return { id: date, name: `diary-${date}.txt`, version: `${date}-v1` }
   }),
+  getDiaryFileMeta: vi.fn(async (_token: string, _sessionId: string, _session: unknown, _env: unknown, fileId: string) => {
+    if (fileId === 'missing') throw Object.assign(new Error('not_found'), { status: 404 })
+    return { id: fileId, name: `diary-${fileId}.txt`, version: `${fileId}-v1` }
+  }),
   getEntryContent: vi.fn(async (_token: string, fileId: string) => ({ date: fileId, content: `content for ${fileId}` })),
   listEntryPage: vi.fn(async () => ({ files: [], nextPageToken: undefined })),
 }))
 
 vi.mock('../../../functions/_shared/s3', () => ({
+  isAtLeast: (existing: string, incoming: string) => {
+    try { return BigInt(existing) >= BigInt(incoming) } catch { return false }
+  },
   assumeRoleWithWebIdentity: vi.fn(async () => ({ accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 })),
   putObjectIfNewer: vi.fn(async () => undefined),
   deleteObject: vi.fn(async () => undefined),
@@ -46,7 +55,7 @@ async function seedSession(accountKey: string) {
   await env.SESSIONS.put(`session:${SESSION_ID}`, JSON.stringify(session))
 }
 
-async function runScopedWorkflow(accountKey: string, jobId: string, workflowId: string, scope: string[]) {
+async function runScopedWorkflow(accountKey: string, jobId: string, workflowId: string, scope: string[], config?: S3Config) {
   const workflowEnv = env as unknown as WorkflowEnv
   await seedSession(accountKey)
   const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
@@ -55,7 +64,7 @@ async function runScopedWorkflow(accountKey: string, jobId: string, workflowId: 
     instance.startJob(`req-${jobId}`, jobId, workflowId, true, new Date().toISOString())
   })
 
-  const params: S3BackfillParams = { sessionId: SESSION_ID, accountKey, jobId, scope: scope.map(date => ({ date })) }
+  const params: S3BackfillParams = { sessionId: SESSION_ID, accountKey, jobId, scope: scope.map(date => ({ date })), ...(config ? { config } : {}) }
   let currentWfId = workflowId
   let chunkIdx = 1
   while (currentWfId) {
@@ -173,5 +182,48 @@ describe('S3BackfillWorkflow', () => {
     for (const call of thisDateCalls) {
       expect(call[7]).toEqual({ expectExisting: true })
     }
+  })
+
+  it('keeps one Workflow instance inside the 50-subrequest pool for a full chunk of new entries', { timeout: 60_000 }, async () => {
+    // A full WORKFLOW_CHUNK_SIZE (12) scope = exactly one Workflow instance, which
+    // pools all of its Drive/S3/STS fetches against the Free plan's 50-subrequest
+    // per-instance budget (see workflow.ts's chunk-size comment for the accounting).
+    // Pinning the exact per-entry call count means an accidental extra Drive or S3
+    // round trip per entry fails here before it can quietly push a chunk over the
+    // pool limit. Config is frozen into params at start (as startBackfill does), so
+    // the workflow must not re-read Drive settings on every batch.
+    const config: S3Config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' }
+    const scope = Array.from({ length: WORKFLOW_CHUNK_SIZE }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)
+    await runScopedWorkflow('101010101010', 'job-pool-1', 'wf-pool-1', scope, config)
+
+    const drive = await import('../../../functions/_shared/drive')
+    const s3 = await import('../../../functions/_shared/s3')
+    // Per entry: findEntryMeta (name → id) + getEntryContent + one S3 write.
+    // No other Drive/S3 calls may creep into the per-entry path.
+    expect(vi.mocked(drive.findEntryMeta).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
+    expect(vi.mocked(drive.getEntryContent).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
+    expect(vi.mocked(s3.putObjectIfNewer).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
+    expect(vi.mocked(drive.getDiaryFileMeta).mock.calls.length).toBe(0)
+    expect(vi.mocked(drive.ensureFolder).mock.calls.length).toBe(0)
+    expect(vi.mocked(drive.findJsonFile).mock.calls.length).toBe(0)
+    expect(vi.mocked(drive.readJsonFile).mock.calls.length).toBe(0)
+    // Per instance: at most one STS assume-role (the KV-backed credential cache
+    // absorbs the second batch), so a full chunk costs CHUNK x 3 + 1 < 50 — which
+    // is exactly why the 50 bound below has no slack: raising CHUNK or adding any
+    // per-entry call must fail this guard.
+    expect(vi.mocked(s3.assumeRoleWithWebIdentity).mock.calls.length).toBe(1)
+    const total = (
+      vi.mocked(drive.findEntryMeta).mock.calls.length
+      + vi.mocked(drive.getEntryContent).mock.calls.length
+      + vi.mocked(drive.getDiaryFileMeta).mock.calls.length
+      + vi.mocked(drive.ensureFolder).mock.calls.length
+      + vi.mocked(drive.findJsonFile).mock.calls.length
+      + vi.mocked(drive.readJsonFile).mock.calls.length
+      + vi.mocked(drive.listEntryPage).mock.calls.length
+      + vi.mocked(s3.assumeRoleWithWebIdentity).mock.calls.length
+      + vi.mocked(s3.putObjectIfNewer).mock.calls.length
+      + vi.mocked(s3.deleteObject).mock.calls.length
+    )
+    expect(total).toBeLessThanOrEqual(50)
   })
 })

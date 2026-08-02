@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { isAtLeast } from '../../../functions/_shared/s3'
 import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
 
@@ -29,15 +30,6 @@ interface EntryRow {
   state: string
   updated_at: string
   last_error: string | null
-}
-
-function isAtLeast(existing: string | undefined, incoming: string | undefined): boolean {
-  if (!existing || !incoming) return false
-  try {
-    return BigInt(existing) >= BigInt(incoming)
-  } catch {
-    return false
-  }
 }
 
 function parseFailedDates(value: string): string[] {
@@ -107,10 +99,13 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
           value TEXT NOT NULL
         );
       `)
-      try {
+      // `updated_at` was added after the jobs table first shipped. Checking for the
+      // column up front (rather than running the ALTER in a try/catch) keeps the
+      // migration idempotent without swallowing any real SQLite error — a genuine
+      // ALTER failure surfaces instead of leaving a schema the code can't use.
+      const jobColumns = this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(jobs)').toArray()
+      if (!jobColumns.some(column => column.name === 'updated_at')) {
         this.ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN updated_at TEXT')
-      } catch {
-        // Column already exists
       }
     })
   }

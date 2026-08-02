@@ -9,7 +9,7 @@ import {
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
-import { deleteObject, describeError, putObjectIfNewer, type AssumedCredentials } from '../../../functions/_shared/s3'
+import { deleteObject, describeError, isAtLeast, putObjectIfNewer, type AssumedCredentials } from '../../../functions/_shared/s3'
 import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
@@ -314,7 +314,10 @@ export interface MirrorEntryCoreInput {
 // the callers decide when an error is permanent enough to mark the entry failed.
 export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub<S3SyncIndex>, input: MirrorEntryCoreInput): Promise<void> {
   const session = await authorizedSession(env, input)
-  await index.markPending(input.date, input.driveVersion, new Date().toISOString())
+  // The monotonic markPending guard refuses to regress a newer drive version and
+  // returns the newer record — the first chance to learn a concurrent save (or a
+  // stale backfill target) superseded our version hint.
+  const pending = await index.markPending(input.date, input.driveVersion, new Date().toISOString())
 
   const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, env)
   const config = await loadS3Config(accessToken, input.sessionId, session, env)
@@ -337,7 +340,14 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub
       await index.markDeleted(input.date)
       return
     }
-    const version = meta.version ?? input.driveVersion
+    let version = meta.version ?? input.driveVersion
+    // A newer drive version already owns this date (markPending refused ours, see
+    // above). Mirror at the newest so the bucket's current object never lags behind
+    // the newest known Drive content — under bucket versioning a stale create can
+    // never 412, so without this resolution a stale stamp could become "current".
+    if (pending?.driveVersion && version && pending.driveVersion !== version && isAtLeast(pending.driveVersion, version)) {
+      version = pending.driveVersion
+    }
     const { content } = await getEntryContent(accessToken, meta.id, input.date)
     // expectExisting=true: a save mirrors an object this account has almost certainly
     // written before (its first mirror of a brand-new date resolves the same way — HEAD
@@ -359,7 +369,14 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub
       }
       throw error
     }
-    await index.markSynced(input.date, version, new Date().toISOString())
+    const synced = await index.markSynced(input.date, version, new Date().toISOString())
+    // Post-write convergence: a newer save landed between markPending and markSynced,
+    // so markSynced's monotonic guard refused our version and returned the newer
+    // record. Re-mirror at the newest version — the narrow complement to the
+    // pre-write resolution above — so the bucket never keeps a stale "current" object.
+    if (synced?.driveVersion && version && synced.driveVersion !== version && isAtLeast(synced.driveVersion, version)) {
+      await convergeMirror(accessToken, index, config, creds, input.date, meta.id, version)
+    }
   } catch (error) {
     if (isMissingEntryError(error)) {
       // The file vanished after the mirror started (deleted in Drive, e.g. a concurrent
@@ -373,6 +390,31 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub
     }
     throw error
   }
+}
+
+// Closes the stale-write race that S3 conditional writes cannot close alone: under
+// bucket versioning a PutObject with If-None-Match: * never 412s (every create
+// succeeds as a new version), so a concurrent mirror holding an *older* drive
+// version can physically land last and become the bucket's "current" object. The
+// DO index's monotonic markSynced refuses such a write's version, and this helper
+// turns that refusal into a corrective re-mirror at the newest version the index
+// knows, keeping the bucket's current object at least as new as Drive. On an
+// unversioned bucket the 412 flip in putObjectIfNewer already prevents the stale
+// write from landing, so this is a no-op there in practice.
+export async function convergeMirror(
+  accessToken: string,
+  index: DurableObjectStub<S3SyncIndex>,
+  config: S3Config,
+  creds: AssumedCredentials,
+  date: string,
+  fileId: string,
+  writtenVersion: string,
+): Promise<void> {
+  const row = await index.getEntry(date)
+  if (!row?.driveVersion || writtenVersion === row.driveVersion || !isAtLeast(row.driveVersion, writtenVersion)) return
+  const { content } = await getEntryContent(accessToken, fileId, date)
+  await putObjectIfNewer(creds, config.bucket, config.region, entryKey(date), content, row.driveVersion, undefined, { expectExisting: true })
+  await index.markSynced(date, row.driveVersion, new Date().toISOString())
 }
 
 // Mirror one date to S3 and await the outcome — used by api/s3/entry-resync's
@@ -424,6 +466,17 @@ async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: Mirror
 // 'unconfirmed' with a retry affordance rather than an eternal spinner).
 export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
   await authorizedSession(env, input)
+  // Same daily-step budget that gates new backfills: a save's mirror must not be
+  // able to silently consume the account's entire Workflow allowance past the cap
+  // the Settings UI reports as "remaining". The refusal leaves the entry without a
+  // pending record, so entryStatusForAuth surfaces it as unconfirmed once its
+  // save-grace window passes (daily reset self-heals the account).
+  try {
+    await assertWithinDailyStepBudget(env)
+  } catch (error) {
+    console.warn('s3Workflows: mirror refused — daily Workflow step budget reached', error)
+    return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
+  }
   const index = indexFor(env, input.accountKey)
   await index.markPending(input.date, input.driveVersion, new Date().toISOString())
   try {
@@ -437,6 +490,12 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
 
 export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: string; accountKey: string; date: string }): Promise<MirrorResult> {
   await authorizedSession(env, input)
+  try {
+    await assertWithinDailyStepBudget(env)
+  } catch (error) {
+    console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
+    return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
+  }
   const index = indexFor(env, input.accountKey)
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
@@ -465,14 +524,6 @@ export async function deleteEntryCore(env: WorkflowEnv, index: DurableObjectStub
   const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
   await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
   await index.markDeleted(input.date)
-}
-
-export function isAtLeast(existing: string, incoming: string): boolean {
-  try {
-    return BigInt(existing) >= BigInt(incoming)
-  } catch {
-    return false
-  }
 }
 
 export async function findCurrentEntry(

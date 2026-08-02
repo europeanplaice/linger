@@ -1,6 +1,8 @@
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AssumedCredentials } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
+import { convergeMirror, DAILY_WORKFLOW_STEP_BUDGET, deleteEntryForAuth, mirrorEntryForAuth, type S3Config } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { MirrorWorkflowParams, WorkflowEnv } from '../src/types'
 
@@ -22,8 +24,11 @@ vi.mock('../../../functions/_shared/drive', () => ({
 }))
 
 vi.mock('../../../functions/_shared/s3', () => ({
+  isAtLeast: (existing: string, incoming: string) => {
+    try { return BigInt(existing) >= BigInt(incoming) } catch { return false }
+  },
   assumeRoleWithWebIdentity: vi.fn(async () => ({ accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 })),
-  putObjectIfNewer: vi.fn(async () => undefined),
+  putObjectIfNewer: vi.fn(async (_c, _b, _r, key: string, _content: string, version?: string) => { console.log('PUT', key, version) }),
   deleteObject: vi.fn(async () => undefined),
   describeError: (e: unknown) => (e instanceof Error ? e.message : 'Unknown error'),
   // assumeS3Credentials routes through s3Settings.ts's getAssumedCredentials,
@@ -129,5 +134,130 @@ describe('S3MirrorWorkflow', () => {
 
     const after = await runInDurableObject(usageStub, (instance: S3SyncIndex) => instance.getWorkflowStepUsage(today))
     expect(after - before).toBe(2)
+  })
+})
+
+describe('versioned-bucket convergence', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('mirrors at the index\'s newer version when a concurrent save bumped it, instead of writing a stale stamp', { timeout: 40_000 }, async () => {
+    const accountKey = '7777777777'
+    await seedSession(accountKey)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    // A newer save (version 9) already owns this date; our mirror only knows 7.
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      instance.markPending('2026-05-01', '9', new Date().toISOString())
+    })
+
+    await runMirrorWorkflow(accountKey, 'mirror-wf-conv-1', { date: '2026-05-01', kind: 'mirror', fileId: 'file-2026-05-01', driveVersion: '7' })
+
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-05-01'))
+    expect(entry?.state).toBe('synced')
+    expect(entry?.syncedVersion).toBe('9')
+    // Exactly one S3 write, stamped with the newest version — never the stale hint.
+    const { putObjectIfNewer } = await import('../../../functions/_shared/s3')
+    expect(vi.mocked(putObjectIfNewer)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(putObjectIfNewer).mock.calls[0][5]).toBe('9')
+  })
+
+  it('re-mirrors at the newest version when the index knows a newer one than the write that just landed', { timeout: 40_000 }, async () => {
+    const accountKey = '8888888888'
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      instance.markPending('2026-05-03', '9', new Date().toISOString())
+    })
+    const config: S3Config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' }
+    const creds: AssumedCredentials = { accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 }
+
+    await convergeMirror('access-token', index, config, creds, '2026-05-03', 'file-2026-05-03', '7')
+
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-05-03'))
+    expect(entry?.state).toBe('synced')
+    expect(entry?.syncedVersion).toBe('9')
+    const { putObjectIfNewer } = await import('../../../functions/_shared/s3')
+    expect(vi.mocked(putObjectIfNewer)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(putObjectIfNewer).mock.calls[0][5]).toBe('9')
+  })
+
+  it('does nothing when the index does not know a newer version than the write that just landed', { timeout: 40_000 }, async () => {
+    const accountKey = '9999999999'
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      instance.markPending('2026-05-04', '7', new Date().toISOString())
+    })
+    const config: S3Config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' }
+    const creds: AssumedCredentials = { accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 }
+
+    await convergeMirror('access-token', index, config, creds, '2026-05-04', 'file-2026-05-04', '7')
+
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-05-04'))
+    expect(entry?.state).toBe('pending')
+    expect(entry?.syncedVersion).toBeUndefined()
+    const { putObjectIfNewer } = await import('../../../functions/_shared/s3')
+    expect(vi.mocked(putObjectIfNewer)).not.toHaveBeenCalled()
+  })
+})
+
+describe('mirror/delete daily-step budget gate', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+
+  async function exhaustDailyStepBudget() {
+    const usageStub = workflowEnv.S3_SYNC_INDEX.getByName('__workflow_usage__')
+    const today = new Date().toISOString().slice(0, 10)
+    await runInDurableObject(usageStub, (instance: S3SyncIndex) => {
+      for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
+    })
+  }
+
+  it('schedules a mirror normally while the budget remains', { timeout: 60_000 }, async () => {
+    const accountKey = 'budget-mirror-ok'
+    await seedSession(accountKey)
+    const result = await mirrorEntryForAuth(workflowEnv, { sessionId: SESSION_ID, accountKey, date: '2026-06-02', driveVersion: '7' })
+    expect(result.ok).toBe(true)
+
+    // Fire-and-forget: the background workflow mirrors and marks the entry synced.
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    for (let i = 0; i < 50; i += 1) {
+      const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-06-02'))
+      if (entry?.state === 'synced') break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    const final = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-06-02'))
+    expect(final?.state).toBe('synced')
+  })
+
+  it('refuses to schedule a mirror once the daily step budget is exhausted', { timeout: 60_000 }, async () => {
+    const accountKey = 'budget-mirror-refused'
+    await seedSession(accountKey)
+    await exhaustDailyStepBudget()
+
+    const result = await mirrorEntryForAuth(workflowEnv, { sessionId: SESSION_ID, accountKey, date: '2026-06-03', driveVersion: '7' })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/budget/i)
+    // Nothing was scheduled: no pending record was even written for the date.
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-06-03'))
+    expect(entry).toBeNull()
+  })
+
+  it('refuses to schedule a delete once the daily step budget is exhausted', { timeout: 60_000 }, async () => {
+    const accountKey = 'budget-delete-refused'
+    await seedSession(accountKey)
+    await exhaustDailyStepBudget()
+
+    const result = await deleteEntryForAuth(workflowEnv, { sessionId: SESSION_ID, accountKey, date: '2026-06-04' })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/budget/i)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-06-04'))
+    expect(entry).toBeNull()
   })
 })

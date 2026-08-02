@@ -1,5 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { isAtLeast } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import {
   assertWithinDailyStepBudget,
@@ -7,7 +8,6 @@ import {
   entryKey,
   entryStatusForAuth,
   getWorkflowUsage,
-  isAtLeast,
   isMissingEntryError,
   isPermanentEntryError,
   isValidDate,

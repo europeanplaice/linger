@@ -1,12 +1,13 @@
-import type { Env as PagesEnv } from '../../../functions/_shared/session'
 import type { MirrorEntryCoreInput } from './runtime'
-import type { S3SyncIndex } from './syncIndex'
 
-export interface WorkflowEnv extends PagesEnv {
-  S3_BACKFILL_WORKFLOW: Workflow<S3BackfillParams>
-  S3_MIRROR_WORKFLOW: Workflow<MirrorWorkflowParams>
-  S3_SYNC_INDEX: DurableObjectNamespace<S3SyncIndex>
-}
+// Derived from the `wrangler types`-generated worker-configuration.d.ts (the
+// single source of truth for the Worker's bindings) instead of a hand-written
+// binding list, so regenerating types after a binding change stays consistent.
+// The global `Cloudflare.Env` includes SESSIONS + secrets + the S3_SYNC_INDEX /
+// workflow bindings this Worker is configured with. (An empty `extends`
+// interface would trip no-empty-object-type, and the alias keeps us equally
+// insulated from worker-configuration.d.ts changes.)
+export type WorkflowEnv = Cloudflare.Env
 
 import type { S3Config } from './runtime'
 

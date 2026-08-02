@@ -2,9 +2,9 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
 import { getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
-import { putObjectIfNewer } from '../../../functions/_shared/s3'
+import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
-import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurrentEntry, indexFor, isAtLeast, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
+import { authorizedSession, assumeS3Credentials, convergeMirror, countedStep, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
 
 // A new (not-yet-synced) entry costs up to 2 external subrequests: Drive content and a
 // single S3 If-None-Match PUT (see s3.ts's putObjectIfNewer — conditional writes made
@@ -28,7 +28,11 @@ import { authorizedSession, assumeS3Credentials, countedStep, entryKey, findCurr
 // its step retry, which re-runs the whole idempotent batch) inside the same pool:
 // 6 x 3 = 18, doubled to 36 on a retry, with the one-off STS call still fitting.
 const BATCH_SIZE = 6
-const WORKFLOW_CHUNK_SIZE = 12
+// Exported for the subrequest-pool guard test (workflow.test.ts), which runs a full
+// chunk and asserts the per-entry external-call count stays at 3 (and the whole
+// instance under 50). Raising it without also re-auditing that arithmetic fails the
+// guard on purpose.
+export const WORKFLOW_CHUNK_SIZE = 12
 const MAX_BACKFILL_ENTRIES = 10_000
 // Steps that only touch the Durable Object / Workflow-binding (not the external
 // Drive/S3 subrequest budget) can retry generously — those calls don't compete
@@ -141,10 +145,25 @@ async function processBatch(
             continue
           }
           version = meta.version ?? version
-          await index.markPending(target.date, version, new Date().toISOString())
+          // A concurrent save may have bumped the index to a newer drive version than
+          // this listing-derived hint (markPending's monotonic guard refuses a
+          // regression and returns the newer record). Mirror at the newest so the
+          // bucket's current object never lags behind Drive — under bucket versioning
+          // a stale create can never 412, so without this resolution a stale stamp
+          // could become "current".
+          const pending = await index.markPending(target.date, version, new Date().toISOString())
+          if (pending?.driveVersion && version && pending.driveVersion !== version && isAtLeast(pending.driveVersion, version)) {
+            version = pending.driveVersion
+          }
           const { content } = await getEntryContent(accessToken, meta.id, target.date)
           await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: known?.state === 'synced' })
-          await index.markSynced(target.date, version, new Date().toISOString())
+          const synced = await index.markSynced(target.date, version, new Date().toISOString())
+          // Narrow-window complement to the pre-write resolution above: a newer save
+          // that landed between markPending and markSynced leaves a stale "current"
+          // object (versioned buckets) unless we re-mirror at the newest version.
+          if (synced?.driveVersion && version && synced.driveVersion !== version && isAtLeast(synced.driveVersion, version)) {
+            await convergeMirror(accessToken, index, config, credentials, target.date, meta.id, version)
+          }
         } catch (error) {
           if (isMissingEntryError(error)) {
             await index.markDeleted(target.date)

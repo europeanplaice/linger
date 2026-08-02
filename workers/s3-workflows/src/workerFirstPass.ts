@@ -4,9 +4,9 @@ import {
   getEntryContent,
   listEntryPage,
 } from '../../../functions/_shared/drive'
-import { putObjectIfNewer } from '../../../functions/_shared/s3'
+import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
 import type { S3Config } from './runtime'
-import { assumeS3Credentials, entryKey, indexFor, isAtLeast } from './runtime'
+import { assumeS3Credentials, convergeMirror, entryKey, indexFor } from './runtime'
 import type { DiaryTarget, WorkflowEnv } from './types'
 
 export interface FirstPassResult {
@@ -106,10 +106,23 @@ export async function runWorkerFirstPass(
         }
 
         const version = meta.version ?? target.version
-        await index.markPending(target.date, version, new Date().toISOString())
+        // A concurrent save may have bumped the index past this listing-derived hint
+        // (markPending's monotonic guard refuses a regression and returns the newer
+        // record). Mirror at the newest so a stale stamp can never become the
+        // bucket's "current" object under versioning.
+        const pending = await index.markPending(target.date, version, new Date().toISOString())
+        const mirrorVersion = pending?.driveVersion && version && pending.driveVersion !== version && isAtLeast(pending.driveVersion, version)
+          ? pending.driveVersion
+          : version
         const { content } = await getEntryContent(accessToken, meta.id, target.date)
-        await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: known?.state === 'synced' })
-        await index.markSynced(target.date, version, new Date().toISOString())
+        await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, mirrorVersion, undefined, { expectExisting: known?.state === 'synced' })
+        const synced = await index.markSynced(target.date, mirrorVersion, new Date().toISOString())
+        // Narrow-window complement: a newer save landing between markPending and
+        // markSynced leaves a stale "current" object unless we re-mirror at the
+        // newest version the index knows.
+        if (synced?.driveVersion && mirrorVersion && synced.driveVersion !== mirrorVersion && isAtLeast(synced.driveVersion, mirrorVersion)) {
+          await convergeMirror(accessToken, index, config, credentials, target.date, meta.id, mirrorVersion)
+        }
         processed++
       } catch (e) {
         console.warn(`Worker first pass failed for date ${target.date}, delegating to Workflow retry:`, e)
