@@ -4,6 +4,9 @@
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
 
+/sw.js
+  Cache-Control: no-cache
+
 /*
   Cross-Origin-Opener-Policy: same-origin-allow-popups
   X-Frame-Options: DENY
