@@ -28,7 +28,7 @@ vi.mock('../../../functions/_shared/s3', () => ({
     try { return BigInt(existing) >= BigInt(incoming) } catch { return false }
   },
   assumeRoleWithWebIdentity: vi.fn(async () => ({ accessKeyId: 'AKIA_FAKE', secretAccessKey: 'fake-secret', sessionToken: 'fake-session-token', expiresAt: Date.now() + 3600_000 })),
-  putObjectIfNewer: vi.fn(async (_c, _b, _r, key: string, _content: string, version?: string) => { console.log('PUT', key, version) }),
+  putObjectIfNewer: vi.fn(async () => undefined),
   deleteObject: vi.fn(async () => undefined),
   describeError: (e: unknown) => (e instanceof Error ? e.message : 'Unknown error'),
   // assumeS3Credentials routes through s3Settings.ts's getAssumedCredentials,
@@ -124,7 +124,7 @@ describe('S3MirrorWorkflow', () => {
     expect(entry?.syncedVersion).toBe('7')
   })
 
-it('records exactly one workflow-usage step per instance (the mirror step only)', { timeout: 40_000 }, async () => {
+  it('records exactly one workflow-usage step per instance (the mirror step only)', { timeout: 40_000 }, async () => {
     const workflowEnv = env as unknown as WorkflowEnv
     const usageStub = workflowEnv.S3_SYNC_INDEX.getByName('__workflow_usage__')
     const today = new Date().toISOString().slice(0, 10)
@@ -303,5 +303,57 @@ describe('mirror/delete daily-step budget gate', () => {
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-06-04'))
     expect(entry).toBeNull()
+  })
+})
+
+// The budget/disabled gates sit on the save path, so they must FAIL OPEN when the
+// bookkeeping DO they read (the account-wide __workflow_usage__ tracker) is
+// unavailable: an enabled account's save must never be blocked — with its mirror
+// silently dropped — just because the counter hiccupee. The budget-exceeded case is
+// still honored (that's an intentional denial, asserted in the gates above); it's only
+// an *unexpected* failure to read the counter that degrades to scheduling the mirror.
+describe('save-path gate fails open when the usage tracker is unavailable', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+
+  function envWithUnavailableUsage(): { env: WorkflowEnv; createWorkflow: ReturnType<typeof vi.fn> } {
+    const createWorkflow = vi.fn().mockResolvedValue(undefined)
+    const realIndexNS = workflowEnv.S3_SYNC_INDEX
+    const envOverride = {
+      ...workflowEnv,
+      S3_SYNC_INDEX: {
+        getByName: (name: string) =>
+          name === '__workflow_usage__'
+            ? { getWorkflowStepUsage: async () => { throw new Error('usage tracker unavailable') } }
+            : realIndexNS.getByName(name),
+      },
+      S3_MIRROR_WORKFLOW: { create: createWorkflow, get: vi.fn().mockRejectedValue(new Error('not found')) },
+    } as unknown as WorkflowEnv
+    return { env: envOverride, createWorkflow }
+  }
+
+  it('schedules the mirror (fail-open) when the usage tracker cannot be read', { timeout: 40_000 }, async () => {
+    const accountKey = 'failopen-mirror-1'
+    await seedSession(accountKey)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(true))
+
+    const { env: envOverride, createWorkflow } = envWithUnavailableUsage(accountKey)
+    const result = await mirrorEntryForAuth(envOverride, { sessionId: SESSION_ID, accountKey, date: '2026-06-05', driveVersion: '7' })
+
+    expect(result.ok).toBe(true)
+    expect(createWorkflow).toHaveBeenCalledTimes(1)
+  })
+
+  it('schedules the delete (fail-open) when the usage tracker cannot be read', { timeout: 40_000 }, async () => {
+    const accountKey = 'failopen-delete-1'
+    await seedSession(accountKey)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(true))
+
+    const { env: envOverride, createWorkflow } = envWithUnavailableUsage(accountKey)
+    const result = await deleteEntryForAuth(envOverride, { sessionId: SESSION_ID, accountKey, date: '2026-06-06' })
+
+    expect(result.ok).toBe(true)
+    expect(createWorkflow).toHaveBeenCalledTimes(1)
   })
 })

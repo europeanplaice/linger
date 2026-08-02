@@ -40,8 +40,8 @@ export async function runWorkerFirstPass(
   const index = indexFor(env, accountKey)
   await index.markRunning(jobId)
 
-  let targetsToProcess: DiaryTarget[] = []
-  let remainingScope: DiaryTarget[] = []
+  let targetsToProcess: DiaryTarget[]
+  let remainingScope: DiaryTarget[]
 
   if (scope) {
     await index.setTotal(jobId, scope.length)

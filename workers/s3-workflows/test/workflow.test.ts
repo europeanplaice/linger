@@ -1,6 +1,6 @@
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
+import { putObjectIfNewer } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import { WORKFLOW_CHUNK_SIZE } from '../src/workflow'
 import type { S3Config } from '../src/runtime'

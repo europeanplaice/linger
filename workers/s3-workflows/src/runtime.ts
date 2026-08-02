@@ -414,6 +414,11 @@ export async function convergeMirror(
   if (!row?.driveVersion || writtenVersion === row.driveVersion || !isAtLeast(row.driveVersion, writtenVersion)) return
   const { content } = await getEntryContent(accessToken, fileId, date)
   await putObjectIfNewer(creds, config.bucket, config.region, entryKey(date), content, row.driveVersion, undefined, { expectExisting: true })
+  // Deliberately not a closed loop: if a third, even newer drive version lands between
+  // the getEntry above and this markSynced (returning that newest record instead of
+  // committing ours), we don't loop around — that newest save's own mirror converges
+  // next, and a bounded correction here would cost extra Drive/S3 subrequests for a
+  // race that self-heals. The monotonic guard guarantees no regression either way.
   await index.markSynced(date, row.driveVersion, new Date().toISOString())
 }
 
@@ -477,19 +482,37 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   // configured, or priored to the flag's existence) still runs: its first mirror
   // learns the config is absent and flips the flag to false.
   const index = indexFor(env, input.accountKey)
-  if ((await index.getBackupEnabled()) === false) {
+  // An unexpected failure reading the enabled flag (the account DO hiccupeeing) must
+  // not silently drop a save's backup: treat it as unknown (null → schedule the
+  // mirror, which re-reads config from Drive and re-flips the flag via
+  // setBackupEnabled inside mirrorEntryCore). Only an explicit flag of false — the
+  // exact "backup off" signal — skips the workflow.
+  let backupEnabled: boolean | null
+  try {
+    backupEnabled = await index.getBackupEnabled()
+  } catch (error) {
+    console.warn('s3Workflows: could not read backup-enabled flag; mirroring anyway', error)
+    backupEnabled = null
+  }
+  if (backupEnabled === false) {
     return { ok: true }
   }
   // Same daily-step budget that gates new backfills: a save's mirror must not be
   // able to silently consume the account's entire Workflow allowance past the cap
   // the Settings UI reports as "remaining". The refusal leaves the entry without a
   // pending record, so entryStatusForAuth surfaces it as unconfirmed once its
-  // save-grace window passes (daily reset self-heals the account).
+  // save-grace window passes (daily reset self-heals the account). Only the
+  // budget-exceeded denial is honored; any other (unexpected) failure to read the
+  // tracker is a bookkeeping problem rather than a reason to block the save, so it
+  // fails open and schedules the mirror anyway.
   try {
     await assertWithinDailyStepBudget(env)
   } catch (error) {
-    console.warn('s3Workflows: mirror refused — daily Workflow step budget reached', error)
-    return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
+    if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
+      console.warn('s3Workflows: mirror refused — daily Workflow step budget reached', error)
+      return { ok: false, error: error.message }
+    }
+    console.warn('s3Workflows: could not determine daily step budget; mirroring anyway', error)
   }
   await index.markPending(input.date, input.driveVersion, new Date().toISOString())
   try {
@@ -504,16 +527,27 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
 export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: string; accountKey: string; date: string }): Promise<MirrorResult> {
   await authorizedSession(env, input)
   // Same disabled-account short-circuit as mirrorEntryForAuth (see its comment):
-  // a backup-off account has nothing for a delete workflow to remove.
+  // a backup-off account has nothing for a delete workflow to remove. Fail open on
+  // an unexpected flag error (unknown → schedule), exactly as the mirror path does.
   const index = indexFor(env, input.accountKey)
-  if ((await index.getBackupEnabled()) === false) {
+  let backupEnabled: boolean | null
+  try {
+    backupEnabled = await index.getBackupEnabled()
+  } catch (error) {
+    console.warn('s3Workflows: could not read backup-enabled flag; deleting anyway', error)
+    backupEnabled = null
+  }
+  if (backupEnabled === false) {
     return { ok: true }
   }
   try {
     await assertWithinDailyStepBudget(env)
   } catch (error) {
-    console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
-    return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
+    if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
+      console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
+      return { ok: false, error: error.message }
+    }
+    console.warn('s3Workflows: could not determine daily step budget; deleting anyway', error)
   }
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
