@@ -124,7 +124,7 @@ describe('S3MirrorWorkflow', () => {
     expect(entry?.syncedVersion).toBe('7')
   })
 
-  it('records exactly two workflow-usage steps per instance (mark-pending + mirror)', { timeout: 40_000 }, async () => {
+it('records exactly one workflow-usage step per instance (the mirror step only)', { timeout: 40_000 }, async () => {
     const workflowEnv = env as unknown as WorkflowEnv
     const usageStub = workflowEnv.S3_SYNC_INDEX.getByName('__workflow_usage__')
     const today = new Date().toISOString().slice(0, 10)
@@ -133,7 +133,51 @@ describe('S3MirrorWorkflow', () => {
     await runMirrorWorkflow('6666666666', 'mirror-wf-6', { date: '2026-07-01', kind: 'mirror' })
 
     const after = await runInDurableObject(usageStub, (instance: S3SyncIndex) => instance.getWorkflowStepUsage(today))
-    expect(after - before).toBe(2)
+    expect(after - before).toBe(1)
+  })
+})
+
+describe('mirror/delete disabled-account gate', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+
+  function spyEnv() {
+    return {
+      ...workflowEnv,
+      S3_MIRROR_WORKFLOW: {
+        create: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('not found')),
+      },
+    } as unknown as WorkflowEnv
+  }
+
+  it('schedules nothing for a save when backup is explicitly disabled', { timeout: 40_000 }, async () => {
+    const accountKey = 'disabled-mirror-1'
+    await seedSession(accountKey)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(false))
+    const workflowEnv2 = spyEnv()
+
+    const result = await mirrorEntryForAuth(workflowEnv2, { sessionId: SESSION_ID, accountKey, date: '2026-08-01', driveVersion: '5' })
+
+    expect(result.ok).toBe(true)
+    expect(workflowEnv2.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-08-01'))
+    expect(entry).toBeNull()
+  })
+
+  it('schedules no delete workflow when backup is disabled', { timeout: 40_000 }, async () => {
+    const accountKey = 'disabled-del-1'
+    await seedSession(accountKey)
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(false))
+    const workflowEnv2 = spyEnv()
+
+    const result = await deleteEntryForAuth(workflowEnv2, { sessionId: SESSION_ID, accountKey, date: '2026-08-02' })
+
+    expect(result.ok).toBe(true)
+    expect(workflowEnv2.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-08-02'))
+    expect(entry).toBeNull()
   })
 })
 

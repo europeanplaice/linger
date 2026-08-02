@@ -134,12 +134,13 @@ describe('S3BackfillWorkflow', () => {
 
     await runScopedWorkflow('6666666666', 'job-scope-6', 'wf-scope-6', ['2026-03-01'])
 
-    // A single-batch scoped run makes exactly 4 named steps: mark-job-running,
-    // set-scope-total, backup-batch-scope-0 (recordProgress is folded into this
-    // same step rather than a separate one — see workflow.ts's processBatch),
-    // mark-job-finished.
+    // A single-batch scoped run makes exactly 3 named steps: mark-job-running
+    // (setTotal is folded into this same step — see the scope branch in
+    // workflow.ts, where step 1 sets the total instead of a separate step),
+    // backup-batch-scope-0 (recordProgress is folded into this same step rather
+    // than a separate one), and mark-job-finished.
     const after = await runInDurableObject(usageStub, (instance: S3SyncIndex) => instance.getWorkflowStepUsage(today))
-    expect(after - before).toBe(4)
+    expect(after - before).toBe(3)
   })
 
   it('never stores the access token, id token, or AWS credentials in the sync index', async () => {

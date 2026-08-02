@@ -466,6 +466,20 @@ async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: Mirror
 // 'unconfirmed' with a retry affordance rather than an eternal spinner).
 export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
   await authorizedSession(env, input)
+  // An account that has never enabled (or explicitly disabled) S3 backup has
+  // nothing for a mirror workflow to do: every save would otherwise pay 2 steps
+  // plus ~5-7 external Drive/S3 subrequests just to discover config-enablement is
+  // off and mark the entry deleted. The DO's enabled flag is kept in sync with the
+  // Drive config by the settings save/read endpoints and by the mirror cores
+  // themselves, so a flag of false is an exact "backup off" signal — with no
+  // markPending, entryStatusForAuth keeps reporting 'disabled' for these saves just
+  // as it does today (it gates on getBackupEnabled !== true). A null flag (never
+  // configured, or priored to the flag's existence) still runs: its first mirror
+  // learns the config is absent and flips the flag to false.
+  const index = indexFor(env, input.accountKey)
+  if ((await index.getBackupEnabled()) === false) {
+    return { ok: true }
+  }
   // Same daily-step budget that gates new backfills: a save's mirror must not be
   // able to silently consume the account's entire Workflow allowance past the cap
   // the Settings UI reports as "remaining". The refusal leaves the entry without a
@@ -477,7 +491,6 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
     console.warn('s3Workflows: mirror refused — daily Workflow step budget reached', error)
     return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
   }
-  const index = indexFor(env, input.accountKey)
   await index.markPending(input.date, input.driveVersion, new Date().toISOString())
   try {
     await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'mirror' })
@@ -490,13 +503,18 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
 
 export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: string; accountKey: string; date: string }): Promise<MirrorResult> {
   await authorizedSession(env, input)
+  // Same disabled-account short-circuit as mirrorEntryForAuth (see its comment):
+  // a backup-off account has nothing for a delete workflow to remove.
+  const index = indexFor(env, input.accountKey)
+  if ((await index.getBackupEnabled()) === false) {
+    return { ok: true }
+  }
   try {
     await assertWithinDailyStepBudget(env)
   } catch (error) {
     console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
     return { ok: false, error: error instanceof Error ? error.message : 'Daily Workflow step budget reached' }
   }
-  const index = indexFor(env, input.accountKey)
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
     await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'delete' })

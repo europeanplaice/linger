@@ -194,13 +194,15 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
     const params = event.payload
     const index = indexFor(this.env, params.accountKey)
     try {
-      await countedStep(this.env, step, 'mark-job-running', { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
-        await index.markRunning(params.jobId)
-        return null
-      })
-
       if (params.scope) {
-        await countedStep(this.env, step, 'set-scope-total', async () => {
+        // markRunning and setTotal are folded into one step (they used to be
+        // mark-job-running + set-scope-total) to cut a step per chunk: both are
+        // idempotent DO bookkeeping, and setTotal uses MAX() so a chained chunk
+        // re-running this step on a smaller remaining slice can never shrink the
+        // job's total. Every chunk instance runs this, setting the total from the
+        // full scope only on chunk index 0 and harmlessly re-raising otherwise.
+        await countedStep(this.env, step, 'mark-job-running', { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+          await index.markRunning(params.jobId)
           await index.setTotal(params.jobId, params.scope?.length ?? 0)
           return null
         })
@@ -228,6 +230,10 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
           return
         }
       } else {
+        await countedStep(this.env, step, 'mark-job-running', { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
+          await index.markRunning(params.jobId)
+          return null
+        })
         let pageToken: string | undefined
         let pageIndex = 0
         let discoveredCount = 0

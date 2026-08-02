@@ -2,11 +2,6 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
 import { countedStep, deleteEntryCore, indexFor, isPermanentEntryError, mirrorEntryCore, safeError } from './runtime'
 
-// Steps that only touch the Durable Object / Workflow-binding (not the external
-// Drive/S3 subrequest budget) can retry generously — those calls don't compete
-// with the pooled, never-resets-mid-instance subrequest limit. Same rationale as
-// workflow.ts's BOOKKEEPING_STEP_RETRIES.
-const BOOKKEEPING_STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
 // The mirror step spends external Drive/S3/STS subrequests and gets only one
 // retry: the subrequest budget is pooled across the whole Workflow instance, so
 // retrying a step that failed from exhausting that budget only guarantees it
@@ -26,16 +21,17 @@ interface MirrorStepResult {
 // 30-second budget; the real Drive→S3 work happens here, where each step's
 // retry config absorbs the transient Drive/STS/S3 failures that previously
 // failed a save's mirror outright on the first (only) attempt.
+//
+// Exactly one step (${kind}-entry): the RPC that created this instance already
+// wrote the pending marker (runtime.ts), and mirrorEntryCore/deleteEntryCore
+// re-mark pending at their very start, so the mark-pending step this workflow
+// used to run first was pure overcounting against the account's daily step
+// budget — a save's mirror now costs 1 step, not 2.
 export class S3MirrorWorkflow extends WorkflowEntrypoint<WorkflowEnv, MirrorWorkflowParams> {
   async run(event: WorkflowEvent<MirrorWorkflowParams>, step: WorkflowStep): Promise<void> {
     const params = event.payload
     const index = indexFor(this.env, params.accountKey)
     const kind = params.kind
-
-    await countedStep(this.env, step, `mark-pending-${kind}`, { retries: BOOKKEEPING_STEP_RETRIES, timeout: STEP_TIMEOUT }, async () => {
-      await index.markPending(params.date, kind === 'delete' ? undefined : params.driveVersion, new Date().toISOString())
-      return null
-    })
 
     const result = await countedStep<MirrorStepResult>(
       this.env,
