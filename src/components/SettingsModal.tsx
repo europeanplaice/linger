@@ -24,6 +24,26 @@ import {
   type BackfillProgress,
 } from '../types'
 
+const SETTINGS_SECTIONS: {
+  id: string
+  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navShortcuts' | 'navStorage' | 'navBackup'
+  className?: string
+}[] = [
+  { id: 'settings-account', labelKey: 'navAccount' },
+  { id: 'settings-appearance', labelKey: 'navAppearance' },
+  { id: 'settings-calendar', labelKey: 'navCalendar' },
+  { id: 'settings-milestones', labelKey: 'navMilestones' },
+  { id: 'settings-data', labelKey: 'navData' },
+  { id: 'settings-shortcuts', labelKey: 'navShortcuts', className: 'settings-nav-item--shortcuts' },
+  { id: 'settings-storage', labelKey: 'navStorage' },
+  { id: 'settings-backup', labelKey: 'navBackup' },
+]
+
+function AppliedChip() {
+  const { t } = useI18n()
+  return <span className="settings-applied-chip">{t.settings.applied}</span>
+}
+
 function InfoTip({ text }: { text: string }) {
   const { t } = useI18n()
   const popId = useId()
@@ -141,7 +161,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
-  const [listExpanded, setListExpanded] = useState(false)
+  const [listExpanded, setListExpanded] = useState(true)
   const milestoneLimitId = useId()
   const badgeLimitId = useId()
   const enabledBadgeCount = milestones.filter(a => a.showBadge !== false).length
@@ -162,6 +182,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   }, [locale, t])
   const dialogRef = useRef<HTMLDialogElement>(null)
   const signOutDialogRef = useRef<HTMLDialogElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const [activeSection, setActiveSection] = useState(SETTINGS_SECTIONS[0].id)
+  const [appliedFlash, setAppliedFlash] = useState<string | null>(null)
+  const appliedFlashTimer = useRef<number | undefined>(undefined)
+  const flashApplied = useCallback((key: string) => {
+    setAppliedFlash(key)
+    if (appliedFlashTimer.current !== undefined) window.clearTimeout(appliedFlashTimer.current)
+    appliedFlashTimer.current = window.setTimeout(() => setAppliedFlash(null), 1200)
+  }, [])
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
   const [s3Enabled, setS3Enabled] = useState(false)
@@ -185,6 +214,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3Collisions, setS3Collisions] = useState<string[]>([])
   const [copiedField, setCopiedField] = useState<'sub' | 'clientId' | null>(null)
   const s3OverwriteDialogRef = useRef<HTMLDialogElement>(null)
+  const [s3SetupOpen, setS3SetupOpen] = useState(true)
+  const s3SetupTouched = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -195,6 +226,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3RoleArn(settings.roleArn)
       setS3Bucket(settings.bucket)
       setS3Region(settings.region)
+      // Once S3 is configured the long setup walkthrough is a distraction — collapse
+      // it unless the user has already opened/closed it manually this session.
+      if (settings.enabled && !s3SetupTouched.current) setS3SetupOpen(false)
     }).catch(e => console.error('Failed to load S3 settings:', e))
     return () => { cancelled = true }
   }, [])
@@ -208,6 +242,25 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       dialog.close()
     }
   }, [s3OverwriteConfirmOpen])
+
+  // Scroll-spy for the section index nav: the active tab follows whichever
+  // section's top edge has crossed into the top of the scrollable list.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const onScroll = () => {
+      const listTop = list.getBoundingClientRect().top
+      let current = SETTINGS_SECTIONS[0].id
+      for (const s of SETTINGS_SECTIONS) {
+        const el = document.getElementById(s.id)
+        if (el && el.getBoundingClientRect().top - listTop <= 60) current = s.id
+      }
+      setActiveSection(current)
+    }
+    list.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => list.removeEventListener('scroll', onScroll)
+  }, [])
 
   // The Role ARN / bucket / region are exactly what Save persists and Test
   // checks — once any of them changes, a prior "Saved"/"Connected" result no
@@ -492,10 +545,23 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         <h3 id="settings-title">{t.settings.title}</h3>
         <button className="settings-modal-close" onClick={onClose} aria-label={t.settings.close}>×</button>
       </div>
-      <div className="settings-list">
+      <nav className="settings-nav" aria-label={t.settings.navLabel}>
+        {SETTINGS_SECTIONS.map(s => (
+          <button
+            key={s.id}
+            type="button"
+            className={`settings-nav-item${s.className ? ` ${s.className}` : ''}${activeSection === s.id ? ' active' : ''}`}
+            aria-current={activeSection === s.id ? 'true' : undefined}
+            onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          >
+            {t.settings[s.labelKey]}
+          </button>
+        ))}
+      </nav>
+      <div className="settings-list" ref={listRef}>
 
         {/* Account */}
-        <div className="settings-section settings-section-account">
+        <div className="settings-section settings-section-account" id="settings-account">
           <div className="settings-account-row">
             {email && (
               <span className="settings-account-avatar" aria-hidden="true">
@@ -514,15 +580,18 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* Appearance */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-appearance">
           <h4 className="settings-section-title">{t.settings.sectionAppearance}</h4>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.theme}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.theme}</span>
+              {appliedFlash === 'theme' && <AppliedChip />}
+            </span>
             <div className="settings-theme-picker">
               <button
                 type="button"
                 className={`settings-theme-option ${themeMode === 'light' ? 'active' : ''}`}
-                onClick={() => onThemeModeChange('light')}
+                onClick={() => { flashApplied('theme'); onThemeModeChange('light') }}
                 aria-label={t.settings.themeLight}
                 aria-pressed={themeMode === 'light'}
               >
@@ -538,7 +607,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-theme-option ${themeMode === 'dark' ? 'active' : ''}`}
-                onClick={() => onThemeModeChange('dark')}
+                onClick={() => { flashApplied('theme'); onThemeModeChange('dark') }}
                 aria-label={t.settings.themeDark}
                 aria-pressed={themeMode === 'dark'}
               >
@@ -550,7 +619,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-theme-option ${themeMode === 'system' ? 'active' : ''}`}
-                onClick={() => onThemeModeChange('system')}
+                onClick={() => { flashApplied('theme'); onThemeModeChange('system') }}
                 aria-label={t.settings.themeAuto}
                 aria-pressed={themeMode === 'system'}
               >
@@ -562,12 +631,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </div>
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.accentColor}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.accentColor}</span>
+              {appliedFlash === 'accent' && <AppliedChip />}
+            </span>
             <div className="settings-color-picker">
               <button
                 type="button"
                 className={`settings-color-option ${accentColor === 'indigo' ? 'active' : ''}`}
-                onClick={() => onAccentChange('indigo')}
+                onClick={() => { flashApplied('accent'); onAccentChange('indigo') }}
                 aria-label={t.settings.accentIndigo}
                 aria-pressed={accentColor === 'indigo'}
               >
@@ -577,7 +649,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-color-option ${accentColor === 'sage' ? 'active' : ''}`}
-                onClick={() => onAccentChange('sage')}
+                onClick={() => { flashApplied('accent'); onAccentChange('sage') }}
                 aria-label={t.settings.accentSage}
                 aria-pressed={accentColor === 'sage'}
               >
@@ -587,7 +659,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-color-option ${accentColor === 'terracotta' ? 'active' : ''}`}
-                onClick={() => onAccentChange('terracotta')}
+                onClick={() => { flashApplied('accent'); onAccentChange('terracotta') }}
                 aria-label={t.settings.accentTerracotta}
                 aria-pressed={accentColor === 'terracotta'}
               >
@@ -597,12 +669,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </div>
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.serifFont}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.serifFont}</span>
+              {appliedFlash === 'font' && <AppliedChip />}
+            </span>
             <div className="settings-font-picker">
               <button
                 type="button"
                 className={`settings-font-option ${fontMode === 'sans' ? 'active' : ''}`}
-                onClick={() => { if (fontMode !== 'sans') onFontToggle() }}
+                onClick={() => { if (fontMode !== 'sans') { flashApplied('font'); onFontToggle() } }}
                 aria-label={t.settings.fontSans}
                 aria-pressed={fontMode === 'sans'}
               >
@@ -612,7 +687,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-font-option ${fontMode === 'serif' ? 'active' : ''}`}
-                onClick={() => { if (fontMode !== 'serif') onFontToggle() }}
+                onClick={() => { if (fontMode !== 'serif') { flashApplied('font'); onFontToggle() } }}
                 aria-label={t.settings.fontSerif}
                 aria-pressed={fontMode === 'serif'}
               >
@@ -622,11 +697,14 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </div>
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.settings.fontSize}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.settings.fontSize}</span>
+              {appliedFlash === 'fontSize' && <AppliedChip />}
+            </span>
             <SettingsSelect
               aria-label={t.settings.fontSize}
               value={fontSize}
-              onChange={val => onFontSizeChange(val as FontSize)}
+              onChange={val => { flashApplied('fontSize'); onFontSizeChange(val as FontSize) }}
               options={[
                 { value: 'sm', label: t.settings.fontSizeSm },
                 { value: 'md', label: t.settings.fontSizeMd },
@@ -636,11 +714,14 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             />
           </div>
           <div className="settings-item">
-            <span className="settings-item-label">{t.common.language}</span>
+            <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.common.language}</span>
+              {appliedFlash === 'language' && <AppliedChip />}
+            </span>
             <SettingsSelect
               aria-label={t.common.language}
               value={language}
-              onChange={val => setLanguage(val === 'en' ? 'en' : 'ja')}
+              onChange={val => { flashApplied('language'); setLanguage(val === 'en' ? 'en' : 'ja') }}
               options={[
                 { value: 'ja', label: t.common.japanese },
                 { value: 'en', label: t.common.english },
@@ -651,10 +732,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <span className="settings-item-label-group">
               <span className="settings-item-label">{t.settings.autoSave}</span>
               <InfoTip text={t.settings.autoSaveHelp} />
+              {appliedFlash === 'autoSave' && <AppliedChip />}
             </span>
             <button
               className={`settings-switch ${autoSave ? 'active' : ''}`}
-              onClick={onAutoSaveToggle}
+              onClick={() => { flashApplied('autoSave'); onAutoSaveToggle() }}
               role="switch"
               aria-checked={autoSave}
             >
@@ -664,24 +746,25 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* Calendar */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-calendar">
           <h4 className="settings-section-title">{t.settings.sectionCalendar}</h4>
           <div className="settings-item">
             <span className="settings-item-label-group">
               <span className="settings-item-label">{t.settings.holidayCountry}</span>
               <InfoTip text={t.settings.holidaysHelp} />
+              {appliedFlash === 'calendar' && <AppliedChip />}
             </span>
             <SettingsSelect
               aria-label={t.settings.holidayCountry}
               value={holidayCountry}
-              onChange={val => onHolidayCountryChange(isHolidayCountry(val) ? val : 'off')}
+              onChange={val => { flashApplied('calendar'); onHolidayCountryChange(isHolidayCountry(val) ? val : 'off') }}
               options={holidayOptions}
             />
           </div>
         </div>
 
         {/* Milestones */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-milestones">
           <div className="settings-section-title-row">
             <span className="settings-item-label-group">
               <h4 className="settings-section-title">{t.settings.milestones}</h4>
@@ -839,7 +922,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* Data */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-data">
           <h4 className="settings-section-title">{t.settings.sectionData}</h4>
           <div className="settings-item">
             <span className="settings-item-label-group">
@@ -870,7 +953,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* Keyboard Shortcuts (hidden on mobile) */}
-        <div className="settings-section settings-shortcuts-section">
+        <div className="settings-section settings-shortcuts-section" id="settings-shortcuts">
           <h4 className="settings-section-title">{t.settings.keyboardShortcuts}</h4>
           <div className="settings-about settings-about-body">
             <div className="settings-shortcuts">
@@ -903,7 +986,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* About Data Storage */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-storage">
           <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
           <div className="settings-about settings-about-body">
             <p className="settings-about-text">
@@ -924,10 +1007,28 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         {/* S3 backup (advanced) */}
-        <div className="settings-section">
+        <div className="settings-section" id="settings-backup">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
           
-          <div className="settings-s3-group-title">{t.settings.s3GroupSetup}</div>
+          <div className="settings-s3-group-title">
+            <span className="settings-s3-group-title-label">{t.settings.s3GroupSetup}</span>
+            <button
+              type="button"
+              className="settings-s3-toggle"
+              onClick={() => { s3SetupTouched.current = true; setS3SetupOpen(v => !v) }}
+              aria-expanded={s3SetupOpen}
+            >
+              <span className={`settings-milestone-toggle-chevron${s3SetupOpen ? ' open' : ''}`} aria-hidden="true">▸</span>
+              {s3SetupOpen ? t.settings.s3Collapse : t.settings.s3Expand}
+            </button>
+          </div>
+          <motion.div
+            className="settings-s3-setup"
+            initial={false}
+            animate={{ opacity: s3SetupOpen ? 1 : 0, height: s3SetupOpen ? 'auto' : 0 }}
+            transition={{ duration: 0.18 }}
+            style={{ overflowY: 'clip', overflowX: 'visible' }}
+          >
           <p className="settings-about-text settings-s3-help">
             {t.settings.s3Help}
           </p>
@@ -1023,6 +1124,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {t.settings.s3DownloadTfvars}
             </button>
           </p>
+          </motion.div>
 
           <div className="settings-s3-group-title">{t.settings.s3GroupConnection}</div>
           

@@ -74,7 +74,7 @@ test.describe('SettingsModal — milestones', () => {
     await expect(page.getByRole('button', { name: 'Add' })).toBeDisabled()
   })
 
-  test('milestone list is collapsed by default when milestones exist', async ({ page }) => {
+  test('milestone list is expanded by default when milestones exist', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
       milestones: [
@@ -83,11 +83,11 @@ test.describe('SettingsModal — milestones', () => {
       ],
     })
 
-    await expect(page.locator('.settings-milestone-list')).toBeHidden()
-    await expect(page.getByRole('button', { name: /show milestones/i })).toBeVisible()
+    await expect(page.locator('.settings-milestone-list')).toBeVisible()
+    await expect(page.getByRole('button', { name: /hide milestones/i })).toBeVisible()
   })
 
-  test('clicking the toggle expands and collapses the milestone list', async ({ page }) => {
+  test('clicking the toggle collapses and re-expands the milestone list', async ({ page }) => {
     await loadHarness(page)
     await render(page, {
       milestones: [
@@ -95,13 +95,13 @@ test.describe('SettingsModal — milestones', () => {
       ],
     })
 
-    const toggle = page.getByRole('button', { name: /show milestones/i })
+    const toggle = page.getByRole('button', { name: /hide milestones/i })
     await toggle.click()
-    await expect(page.locator('.settings-milestone-list')).toBeVisible()
-    await expect(page.getByRole('button', { name: /hide milestones/i })).toBeVisible()
-
-    await page.getByRole('button', { name: /hide milestones/i }).click()
     await expect(page.locator('.settings-milestone-list')).toBeHidden()
+    await expect(page.getByRole('button', { name: /show milestones/i })).toBeVisible()
+
+    await page.getByRole('button', { name: /show milestones/i }).click()
+    await expect(page.locator('.settings-milestone-list')).toBeVisible()
   })
 
   test('milestone list is visible by default when no milestones exist', async ({ page }) => {

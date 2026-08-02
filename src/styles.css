@@ -1360,6 +1360,41 @@ dialog.settings-dialog::backdrop {
   background: var(--border);
   color: var(--text);
 }
+/* Section index nav: pill tabs pinned below the modal header, horizontal
+   scroll on narrow widths. */
+.settings-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.65rem 1.35rem 0.6rem;
+  overflow-x: auto;
+  flex-shrink: 0;
+  background: var(--card-bg);
+  scrollbar-width: thin;
+}
+.settings-nav-item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 0.28rem 0.7rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.settings-nav-item:hover {
+  color: var(--text);
+  background: var(--selected-bg);
+}
+.settings-nav-item.active {
+  color: var(--on-accent);
+  background: var(--accent);
+}
 .settings-list {
   display: flex;
   flex-direction: column;
@@ -1526,6 +1561,26 @@ dialog.settings-dialog::backdrop {
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+}
+/* Transient "Applied" pill shown next to instant-apply settings */
+.settings-applied-chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--save-success-flash);
+  background: color-mix(in srgb, var(--save-success-flash) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--save-success-flash) 35%, transparent);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  animation: settings-applied-pop 0.18s ease-out;
+}
+@keyframes settings-applied-pop {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 /* Copy-value rows (e.g. S3 setup IDs): the value can be arbitrarily long, so
    stack it under the label instead of squeezing both into a 2-col grid. */
@@ -1896,7 +1951,10 @@ dialog.settings-dialog::backdrop {
   padding-inline: 1.35rem;
 }
 .settings-s3-group-title {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -1910,6 +1968,30 @@ dialog.settings-dialog::backdrop {
   border-top: none;
   padding-top: 0.4rem;
   margin-top: 0;
+}
+/* Collapse toggle for the (already-configured) S3 setup walkthrough */
+.settings-s3-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0.28rem 0.6rem;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.settings-s3-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected-bg);
 }
 .settings-s3-help-links {
   display: flex;
@@ -4714,6 +4796,7 @@ dialog.history-dialog::backdrop {
   body { overflow: hidden; }
 
   .settings-shortcuts-section { display: none; }
+  .settings-nav-item--shortcuts { display: none; }
 
   /* モバイルでスクロールバーを非表示にしてUX向上 */
   * {
