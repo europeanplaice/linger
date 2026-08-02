@@ -232,17 +232,29 @@ export async function getJobForAuth(env: WorkflowEnv, input: GetJobInput) {
   return indexFor(env, input.accountKey).getJob(input.jobId)
 }
 
-// Lazy mirror-on-read: a plain open (no `since`) of a date with no index record —
-// or only a stale 'pending' record nothing is driving — fires a fire-and-forget
-// S3MirrorWorkflow (mirrorEntryForAuth) instead of leaving a 'not backed up'
-// badge that needs a manual retry, so simply opening a never-backfilled entry
-// backs it up. Concurrency-safe: markPending lands synchronously before the
-// workflow is created, so follow-up polls in the same run see a fresh pending
-// record and never re-fire; a rare racing pair of opens schedules two idempotent
-// mirrors (putObjectIfNewer's conditional write plus the DO's monotonic
-// markSynced make the duplicate harmless).
-async function scheduleLazyMirror(env: WorkflowEnv, input: GetEntryStatusInput): Promise<void> {
-  await mirrorEntryForAuth(env, { sessionId: input.sessionId, accountKey: input.accountKey, date: input.date })
+// Lazy mirror-on-read: any check (plain open or since-scoped save poll) of a date
+// that nothing is actively working toward — no index record at all, or only a
+// stale 'pending' record plus a lapsed workflow retry budget — fires a
+// fire-and-forget S3MirrorWorkflow (mirrorEntryForAuth) so the entry self-heals
+// instead of leaving a 'not backed up' / 'unconfirmed' badge that needs a manual
+// retry. Concurrency-safe: markPending lands synchronously before the workflow is
+// created, so follow-up polls in the same run see a fresh pending record and never
+// re-fire; a rare racing pair of checks schedules two idempotent mirrors
+// (putObjectIfNewer's conditional write plus the DO's monotonic markSynced make
+// the duplicate harmless). When the arm is refused the refusal is *reported*, not
+// swallowed: a used-up daily step budget is the one permanent-on-the-day check
+// (transient, resetting at UTC midnight), and a since-scoped check must surface
+// it as a concrete 'failed' with the reason rather than a vague 'unconfirmed'.
+// It deliberately writes no 'failed' row for that — a daily-windowed stickiness
+// would let the refusal outlive its own (brief) cause, so a later open re-arms
+// as normal once the budget resets.
+async function armLazyMirrorOrReport(
+  env: WorkflowEnv,
+  input: GetEntryStatusInput,
+): Promise<{ status: 'pending' } | { status: 'failed'; error: string }> {
+  const outcome = await mirrorEntryForAuth(env, { sessionId: input.sessionId, accountKey: input.accountKey, date: input.date })
+  if (outcome.ok) return { status: 'pending' }
+  return { status: 'failed', error: outcome.error ?? 'Mirror could not be scheduled' }
 }
 
 export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatusInput) {
@@ -263,31 +275,21 @@ export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatus
     // above — either means something is (or very recently was) actively working
     // toward this date, so keep reporting 'pending'. Once both have elapsed, the
     // pending record is stale (a never-started workflow, or one whose create
-    // failed): a plain open re-arms the mirror so the entry self-heals, while a
-    // since-scoped check leaves that to the client's save-scoped auto-retry.
+    // failed): re-arm the mirror here so the entry self-heals — for a since
+    // (save) check just as for a plain open — and report the arm's outcome.
     if (withinSaveGrace || (Number.isFinite(recordAge) && recordAge < MIRROR_STALE_PENDING_MS)) {
       return { status: 'pending' as const }
     }
-    if (Number.isNaN(since)) {
-      await scheduleLazyMirror(env, input)
-      return { status: 'pending' as const }
-    }
-    return { status: 'unconfirmed' as const }
+    return armLazyMirrorOrReport(env, input)
   }
   if (record?.state === 'failed') return { status: 'failed' as const, error: record.lastError }
 
   if (!Number.isNaN(since) && Date.now() - since < PENDING_GRACE_MS) return { status: 'pending' as const }
   // No record at all: this date was never mirrored (it predates S3 backup, was
   // created on another device after the last backfill, or the index was reset).
-  // A plain open starts a mirror workflow on the spot so the entry lands on
-  // 'synced' (or 'failed') as its steps run; a since-scoped check past its grace
-  // window still reports 'unconfirmed' so the client's save-scoped auto-retry
-  // handles it rather than the read path guessing.
-  if (Number.isNaN(since)) {
-    await scheduleLazyMirror(env, input)
-    return { status: 'pending' as const }
-  }
-  return { status: 'unconfirmed' as const }
+  // Re-arm it (a plain historic date that was never mirrored) — again for since
+  // (save) checks no less than plain opens — and report the outcome.
+  return armLazyMirrorOrReport(env, input)
 }
 
 export async function setBackupEnabledForAuth(

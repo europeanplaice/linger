@@ -267,7 +267,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     expect(entry?.state).toBe('pending')
   })
 
-  it('does not auto-mirror on a since-scoped check past its grace window (the client auto-retries)', async () => {
+  it('self-heals a since-scoped check past its grace window by re-arming the mirror and reporting pending', async () => {
     const accountKey = 'lazy-open-2'
     await seedSession(accountKey)
     const workflowEnv = lazyEnv()
@@ -281,8 +281,12 @@ describe('getEntryStatus lazy mirror-on-read', () => {
       requestedVersion: '7',
       since: new Date(Date.now() - 60 * 1000).toISOString(),
     })
-    expect(status.status).toBe('unconfirmed')
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    expect(status.status).toBe('pending')
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-01-06', kind: 'mirror' }),
+      }),
+    )
   })
 
   it('re-arms the mirror and reports pending when a plain open finds a stale pending record', async () => {
@@ -327,5 +331,40 @@ describe('S3WorkflowsService daily step budget', () => {
     // No job should have been reserved for this account as a side effect of the refusal.
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getJob())).toBeNull()
+  })
+
+  it('reports a refused lazy re-arm as failed with the reason, without leaving a poisoned record', async () => {
+    // This describe's first test already exhausted the shared daily budget counter,
+    // so a lazy re-arm below is refused. The refusal is a *transient* condition that
+    // self-heals at the next UTC day, so it must not leave a permanent failed row
+    // behind: after a reset, simply opening the date re-arms and syncs it. The
+    // failure is still surfaced to this check as 'failed' with the concrete reason.
+    const accountKey = 'backfill-budget-arm'
+    await seedSession(accountKey)
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(true))
+    const workflowEnv = {
+      ...(env as unknown as WorkflowEnv),
+      S3_MIRROR_WORKFLOW: {
+        create: vi.fn().mockResolvedValue(undefined),
+        get: vi.fn().mockRejectedValue(new Error('not found')),
+      },
+    } as unknown as WorkflowEnv
+    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+
+    const status = await svc.getEntryStatus({
+      sessionId: sessionIdFor(accountKey),
+      accountKey,
+      date: '2026-01-09',
+      requestedVersion: '7',
+      since: new Date(Date.now() - 60 * 1000).toISOString(),
+    })
+
+    expect(status.status).toBe('failed')
+    expect('error' in status ? status.error : '').toMatch(/budget/i)
+    // Nothing scheduled, and no persistent failed record written (so a post-reset
+    // open can still self-heal rather than being stuck on a stale failure).
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-09'))).toBeNull()
   })
 })

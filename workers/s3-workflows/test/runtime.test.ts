@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import {
@@ -89,37 +89,12 @@ describe('safeError', () => {
   })
 })
 
-describe('workflow step usage budget', () => {
-  const workflowEnv = env as unknown as WorkflowEnv
-
-  it('reports zero usage and full remaining budget when nothing has run today', async () => {
-    // Use a fixed unused date via a fresh account key isn't possible for the shared
-    // usage singleton, so this only asserts the shape/budget constant, not the count,
-    // since other tests in this file share the same singleton instance.
-    const usage = await getWorkflowUsage(workflowEnv)
-    expect(usage.budget).toBe(DAILY_WORKFLOW_STEP_BUDGET)
-    expect(usage.remaining).toBe(usage.budget - usage.steps)
-  })
-
-  it('recordWorkflowStep increases the count getWorkflowUsage reports', async () => {
-    const before = await getWorkflowUsage(workflowEnv)
-    await recordWorkflowStep(workflowEnv)
-    const after = await getWorkflowUsage(workflowEnv)
-    expect(after.steps).toBe(before.steps + 1)
-    expect(after.remaining).toBe(before.remaining - 1)
-  })
-
-  it('assertWithinDailyStepBudget throws once the budget is reached', async () => {
-    const stub = env.S3_SYNC_INDEX.getByName('__workflow_usage__')
-    const today = new Date().toISOString().slice(0, 10)
-    await runInDurableObject(stub, (instance: S3SyncIndex) => {
-      for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
-    })
-    await expect(assertWithinDailyStepBudget(workflowEnv)).rejects.toThrow('budget')
-  })
-})
-
 describe('entryStatusForAuth stale-pending aging', () => {
+  // This describe must run *before* the daily-step-budget describe below: the
+  // budget one deliberately fills the shared __workflow_usage__ counter up to the
+  // daily limit, and the lazy re-arm that this describe's stale tests exercise is
+  // gated on that same counter, so running it exhausted would flip their expected
+  // 'pending' to a budget refusal 'failed'.
   const workflowEnv = env as unknown as WorkflowEnv
 
   async function seedPending(accountKey: string, updatedAt: string) {
@@ -141,23 +116,33 @@ describe('entryStatusForAuth stale-pending aging', () => {
   it('reports a fresh pending record as pending', async () => {
     await seedPending('stale-fresh-1', new Date().toISOString())
     const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-fresh-1', accountKey: 'stale-fresh-1', date: '2026-01-01', requestedVersion: '5' })
-    expect(status.status).toBe('pending')
+    expect(status?.status).toBe('pending')
   })
 
-  it('ages an old pending record to unconfirmed on a since-scoped check past the grace window', async () => {
-    // A plain open (no `since`) of a stale pending record now re-arms the mirror
-    // instead (see index.test.ts's lazy mirror-on-read tests); the aging still
-    // surfaces for a since-scoped poll past its grace window, where the client's
-    // save-scoped auto-retry owns the recovery.
+  it('re-arms the mirror and reports pending for a stale pending record even on a since-scoped check', async () => {
+    // The old behavior reported 'unconfirmed' here and left recovery to the
+    // client's save-scoped auto-retry; the entry-status path now re-arms the
+    // mirror itself (idempotent self-heal) and reports 'pending' unless the
+    // arm is refused (then it reports 'failed' with the reason instead).
     await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-    const status = await entryStatusForAuth(workflowEnv, {
+    const create = vi.fn().mockResolvedValue(undefined)
+    const workflowEnvWithMock = {
+      ...workflowEnv,
+      S3_MIRROR_WORKFLOW: { create, get: vi.fn().mockRejectedValue(new Error('not found')) },
+    } as unknown as WorkflowEnv
+    const status = await entryStatusForAuth(workflowEnvWithMock, {
       sessionId: 'stale-old-1',
       accountKey: 'stale-old-1',
       date: '2026-01-01',
       requestedVersion: '5',
       since: new Date(Date.now() - 60 * 1000).toISOString(),
     })
-    expect(status.status).toBe('unconfirmed')
+    expect(status?.status).toBe('pending')
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ date: '2026-01-01', kind: 'mirror' }),
+      }),
+    )
   })
 
   it('still reports pending within the save-grace window even if the record itself is old', async () => {
@@ -169,7 +154,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
       requestedVersion: '5',
       since: new Date().toISOString(),
     })
-    expect(status.status).toBe('pending')
+    expect(status?.status).toBe('pending')
   })
 
   it('reports disabled when backup has never been enabled', async () => {
@@ -184,5 +169,34 @@ describe('entryStatusForAuth stale-pending aging', () => {
     await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
     const status = await entryStatusForAuth(workflowEnv, { sessionId: accountKey, accountKey, date: '2026-01-01', requestedVersion: '5' })
     expect(status.status).toBe('disabled')
+  })
+})
+
+describe('workflow step usage budget', () => {
+  const workflowEnv = env as unknown as WorkflowEnv
+
+  it('reports zero usage and full remaining budget when nothing has run today', async () => {
+    // Uses the shared usage singleton, so it only asserts the shape/budget
+    // constant, not the absolute count, since other tests share the singleton.
+    const usage = await getWorkflowUsage(workflowEnv)
+    expect(usage.budget).toBe(DAILY_WORKFLOW_STEP_BUDGET)
+    expect(usage.remaining).toBe(usage.budget - usage.steps)
+  })
+
+  it('recordWorkflowStep increases the count getWorkflowUsage reports', async () => {
+    const before = await getWorkflowUsage(workflowEnv)
+    await recordWorkflowStep(workflowEnv)
+    const after = await getWorkflowUsage(workflowEnv)
+    expect(after.steps).toBe(before.steps + 1)
+    expect(after.remaining).toBe(before.remaining - 1)
+  })
+
+  it('assertWithinDailyStepBudget throws once the budget is reached', async () => {
+    const stub = env.S3_SYNC_INDEX.getByName('__workflow_usage__')
+    const today = new Date().toISOString().slice(0, 10)
+    await runInDurableObject(stub, (instance: S3SyncIndex) => {
+      for (let i = 0; i < DAILY_WORKFLOW_STEP_BUDGET; i += 1) instance.recordWorkflowStep(today)
+    })
+    await expect(assertWithinDailyStepBudget(workflowEnv)).rejects.toThrow('budget')
   })
 })
