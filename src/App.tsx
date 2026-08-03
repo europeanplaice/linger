@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Suspense } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
@@ -19,8 +19,7 @@ import { CalendarView } from './components/CalendarView'
 import { EntryEditor } from './components/EntryEditor'
 import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
-import { SettingsModal } from './components/SettingsModal'
-import { RecollectionJourney } from './components/RecollectionJourney'
+import { SettingsModal, RecollectionJourney } from './components/lazy'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel, diaryDateParts } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
@@ -703,54 +702,58 @@ export default function App() {
       </aside>
       <AnimatePresence>
         {settingsOpen && (
-          <SettingsModal
-            autoSave={autoSave}
-            onAutoSaveToggle={handleAutoSaveToggle}
-            themeMode={themeMode}
-            onThemeModeChange={setThemeMode}
-            accentColor={accentColor}
-            onAccentChange={setAccent}
-            fontMode={fontMode}
-            onFontToggle={toggleFont}
-            fontSize={fontSize}
-            onFontSizeChange={setFontSize}
-            holidayCountry={holidayCountry}
-            onHolidayCountryChange={setHolidayCountry}
-            dates={diary.dates}
-            onExport={diary.exportAll}
-            onImport={diary.importAll}
-            onClose={() => setSettingsOpen(false)}
-            onSignOut={handleSignOut}
-            email={email ?? undefined}
-            googleSub={googleSub ?? undefined}
-            googleClientId={googleClientId ?? undefined}
-            milestones={milestones}
-            onMilestoneAdd={addMilestone}
-            onMilestoneUpdate={updateMilestone}
-            onMilestoneRemove={removeMilestone}
-            onMilestoneToggleBadge={toggleMilestoneBadge}
-            s3BackfillProgress={s3Backfill.backfillProgress}
-            s3LastSyncError={s3Backfill.lastSyncError}
-            s3LastSyncErrorAt={s3Backfill.lastSyncErrorAt}
-            s3BackfillActive={s3Backfill.backfillActive}
-            onS3StartBackfill={s3Backfill.startBackfill}
-            onS3ClearSyncError={s3Backfill.clearSyncError}
-          />
+          <Suspense fallback={null}>
+            <SettingsModal
+              autoSave={autoSave}
+              onAutoSaveToggle={handleAutoSaveToggle}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
+              accentColor={accentColor}
+              onAccentChange={setAccent}
+              fontMode={fontMode}
+              onFontToggle={toggleFont}
+              fontSize={fontSize}
+              onFontSizeChange={setFontSize}
+              holidayCountry={holidayCountry}
+              onHolidayCountryChange={setHolidayCountry}
+              dates={diary.dates}
+              onExport={diary.exportAll}
+              onImport={diary.importAll}
+              onClose={() => setSettingsOpen(false)}
+              onSignOut={handleSignOut}
+              email={email ?? undefined}
+              googleSub={googleSub ?? undefined}
+              googleClientId={googleClientId ?? undefined}
+              milestones={milestones}
+              onMilestoneAdd={addMilestone}
+              onMilestoneUpdate={updateMilestone}
+              onMilestoneRemove={removeMilestone}
+              onMilestoneToggleBadge={toggleMilestoneBadge}
+              s3BackfillProgress={s3Backfill.backfillProgress}
+              s3LastSyncError={s3Backfill.lastSyncError}
+              s3LastSyncErrorAt={s3Backfill.lastSyncErrorAt}
+              s3BackfillActive={s3Backfill.backfillActive}
+              onS3StartBackfill={s3Backfill.startBackfill}
+              onS3ClearSyncError={s3Backfill.clearSyncError}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
       <AnimatePresence>
         {recollectionOpen && (
-          <RecollectionJourney
-            dates={diary.dates}
-            getContent={handleGetContent}
-            serendipityPrefetch={serendipityPrefetch}
-            onSelect={(d) => {
-              setRecollectionOpen(false)
-              selectDate(d)
-            }}
-            onClose={() => setRecollectionOpen(false)}
-            getSimilar={tfIdf.getSimilar}
-          />
+          <Suspense fallback={null}>
+            <RecollectionJourney
+              dates={diary.dates}
+              getContent={handleGetContent}
+              serendipityPrefetch={serendipityPrefetch}
+              onSelect={(d) => {
+                setRecollectionOpen(false)
+                selectDate(d)
+              }}
+              onClose={() => setRecollectionOpen(false)}
+              getSimilar={tfIdf.getSimilar}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
       <main className="main" id="main-content" tabIndex={-1}>

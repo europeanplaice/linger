@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
@@ -13,8 +13,7 @@ import { excerpt } from '../utils/text'
 import { writingPrompts, appendPrompts } from '../data/writingPrompts'
 import { buildDynamicPrompts } from '../utils/dynamicPrompts'
 import type { RecurringTopic } from '../utils/topicExtraction'
-import { HistoryModal } from './HistoryModal'
-import { MilestoneFormModal } from './MilestoneFormModal'
+import { HistoryModal, MilestoneFormModal } from './lazy'
 import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
@@ -1129,39 +1128,43 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     <>
     <AnimatePresence>
       {showHistoryModal && fileIdRef.current && isSignedIn && (
-        <HistoryModal
-        date={date}
-        fileId={fileIdRef.current}
-        baseVersion={baseVersion}
-        text={text}
-        savedText={savedText}
-        isDirty={isDirty}
-        autoSave={autoSave}
-        onSave={onSave}
-        onRestored={(result) => {
-          const content = result.entry.content
-          setText(content)
-          setSavedTextValue(content)
-          setBaseVersionValue(result.meta.version ?? null)
-          fileIdRef.current = result.meta.id
-          setShowHistoryModal(false)
-        }}
-        onClose={() => setShowHistoryModal(false)}
-        onExpired={onExpired}
-      />
+        <Suspense fallback={null}>
+          <HistoryModal
+            date={date}
+            fileId={fileIdRef.current}
+            baseVersion={baseVersion}
+            text={text}
+            savedText={savedText}
+            isDirty={isDirty}
+            autoSave={autoSave}
+            onSave={onSave}
+            onRestored={(result) => {
+              const content = result.entry.content
+              setText(content)
+              setSavedTextValue(content)
+              setBaseVersionValue(result.meta.version ?? null)
+              fileIdRef.current = result.meta.id
+              setShowHistoryModal(false)
+            }}
+            onClose={() => setShowHistoryModal(false)}
+            onExpired={onExpired}
+          />
+        </Suspense>
       )}
     </AnimatePresence>
     {showMilestoneModal && onMilestoneAdd && (
-      <MilestoneFormModal
-        mode="add"
-        initialDate={date}
-        onSave={(label, milestoneDate, emoji, recurring) => {
-          onMilestoneAdd(label, milestoneDate, emoji, recurring)
-          setShowMilestoneModal(false)
-        }}
-        onClose={() => setShowMilestoneModal(false)}
-        t={t}
-      />
+      <Suspense fallback={null}>
+        <MilestoneFormModal
+          mode="add"
+          initialDate={date}
+          onSave={(label, milestoneDate, emoji, recurring) => {
+            onMilestoneAdd(label, milestoneDate, emoji, recurring)
+            setShowMilestoneModal(false)
+          }}
+          onClose={() => setShowMilestoneModal(false)}
+          t={t}
+        />
+      </Suspense>
     )}
     <AnimatePresence>
       {showDeleteModal && (
