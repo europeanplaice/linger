@@ -735,6 +735,7 @@ export default function App() {
               s3BackfillActive={s3Backfill.backfillActive}
               onS3StartBackfill={s3Backfill.startBackfill}
               onS3ClearSyncError={s3Backfill.clearSyncError}
+              onEntryRestored={() => { void diary.refreshEntries() }}
             />
           </Suspense>
         )}
