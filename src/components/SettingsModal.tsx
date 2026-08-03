@@ -14,7 +14,7 @@ import type { FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
-import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill, resyncS3Backfill } from '../api/s3Settings'
+import { loadS3Settings, saveS3Settings, testS3Settings, precheckS3Settings, retryS3Backfill, resyncS3Backfill, listS3RestoreCandidates, restoreS3Entry } from '../api/s3Settings'
 
 import {
   MAX_MILESTONES,
@@ -155,9 +155,12 @@ interface SettingsModalProps {
   s3BackfillActive: boolean
   onS3StartBackfill: () => void
   onS3ClearSyncError: () => void
+  // Called after an entry is recreated in Drive from the S3 backup, so the
+  // calendar/list refreshes and the restored entry becomes visible.
+  onEntryRestored?: () => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
@@ -216,6 +219,11 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const s3OverwriteDialogRef = useRef<HTMLDialogElement>(null)
   const [s3SetupOpen, setS3SetupOpen] = useState(true)
   const s3SetupTouched = useRef(false)
+  // Dates that exist in the bucket but not in Drive (null = not loaded yet).
+  const [s3RestoreCandidates, setS3RestoreCandidates] = useState<string[] | null>(null)
+  const [s3RestoreLoading, setS3RestoreLoading] = useState(false)
+  const [s3RestoringDate, setS3RestoringDate] = useState<string | null>(null)
+  const [s3RestoreError, setS3RestoreError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -242,6 +250,52 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       dialog.close()
     }
   }, [s3OverwriteConfirmOpen])
+
+  // Load the restore candidates whenever S3 backup is known to be enabled — both
+  // on open (settings loaded in the effect above) and right after a first-time
+  // enable, so the "entries missing from Drive" list is fresh. Disabled → clear.
+  const loadS3RestoreCandidates = useCallback(async () => {
+    setS3RestoreLoading(true)
+    setS3RestoreError(null)
+    try {
+      setS3RestoreCandidates(await listS3RestoreCandidates())
+    } catch (e) {
+      console.error('Failed to load S3 restore candidates:', e)
+      setS3RestoreCandidates([])
+      setS3RestoreError(t.settings.s3RestoreFailed)
+    } finally {
+      setS3RestoreLoading(false)
+    }
+  }, [t])
+
+  useEffect(() => {
+    if (!s3InitiallyEnabled) {
+      setS3RestoreCandidates(null)
+      setS3RestoreError(null)
+      return
+    }
+    void loadS3RestoreCandidates()
+  }, [s3InitiallyEnabled, loadS3RestoreCandidates])
+
+  const handleS3Restore = useCallback(async (date: string) => {
+    if (s3RestoringDate) return
+    setS3RestoringDate(date)
+    setS3RestoreError(null)
+    try {
+      const result = await restoreS3Entry(date)
+      if (!result.ok) {
+        setS3RestoreError(result.error ?? t.settings.s3RestoreFailed)
+        return
+      }
+      setS3RestoreCandidates(prev => (prev ?? []).filter(d => d !== date))
+      onEntryRestored?.()
+    } catch (e) {
+      console.error('Failed to restore S3 entry:', e)
+      setS3RestoreError(t.settings.s3RestoreFailed)
+    } finally {
+      setS3RestoringDate(null)
+    }
+  }, [s3RestoringDate, onEntryRestored, t])
 
   // Scroll-spy for the section index nav: the active tab follows whichever
   // section's top edge has crossed into the top of the scrollable list.
@@ -1195,6 +1249,42 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             <p className="settings-about-text settings-s3-help settings-s3-actions-help">
               {t.settings.s3ResyncHelp}
             </p>
+          )}
+          {s3InitiallyEnabled && (
+            <>
+              <div className="settings-s3-group-title">{t.settings.s3GroupRestore}</div>
+              <p className="settings-about-text settings-s3-help">
+                {t.settings.s3RestoreHelp}
+              </p>
+              {!s3RestoreLoading && s3RestoreCandidates && s3RestoreCandidates.length === 0 && (
+                <p className="settings-about-text settings-s3-help">{t.settings.s3RestoreNone}</p>
+              )}
+              {!s3RestoreLoading && s3RestoreCandidates && s3RestoreCandidates.length > 0 && (
+                <ul className="export-format-tree s3-overwrite-confirm-list">
+                  {s3RestoreCandidates.slice(0, 50).map(date => (
+                    <li key={date} className="export-format-file settings-s3-restore-row">
+                      <span className="settings-s3-restore-date">{date}</span>
+                      <button
+                        type="button"
+                        className={`settings-action-btn settings-action-btn--secondary${s3RestoringDate === date ? ' btn-saving' : ''}`}
+                        onClick={() => { void handleS3Restore(date) }}
+                        disabled={s3RestoringDate !== null}
+                        aria-busy={s3RestoringDate === date}
+                      >
+                        {s3RestoringDate === date && <SpinnerIcon />}
+                        {s3RestoringDate === date ? t.settings.s3Restoring : t.settings.s3Restore}
+                      </button>
+                    </li>
+                  ))}
+                  {s3RestoreCandidates.length > 50 && (
+                    <li className="export-format-file">{t.settings.s3BackfillFailedMore(s3RestoreCandidates.length - 50)}</li>
+                  )}
+                </ul>
+              )}
+              {s3RestoreError && (
+                <p className="settings-item-error"><ErrorIcon />{t.settings.s3RestoreFailed}: {s3RestoreError}</p>
+              )}
+            </>
           )}
           <div aria-live="polite">
             {s3TestState === 'ok' && <p className="settings-item-success"><CheckIcon />{t.settings.s3TestOkMsg}</p>}

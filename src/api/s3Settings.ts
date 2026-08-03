@@ -75,3 +75,27 @@ export async function getS3EntryStatus(date: string, version: string, since: str
 export async function retryS3EntrySync(date: string): Promise<void> {
   await apiFetch(`/api/s3/entry-resync/${date}`, { method: 'POST' })
 }
+
+export interface S3RestoreResult {
+  ok: boolean
+  error?: string
+}
+
+// Dates that exist in the S3 bucket but not in Drive — the entries that can be
+// recreated from backup. Empty when the backup is fully in sync with Drive.
+export async function listS3RestoreCandidates(): Promise<string[]> {
+  const { data } = await apiFetch<{ dates?: string[] }>('/api/s3/restore')
+  return data?.dates ?? []
+}
+
+// Recreates one entry in Drive from its S3 backup (see /api/s3/restore). The
+// expected error statuses (400/404/409) carry a human-readable `error` in the
+// body that's more useful than the generic thrown DriveHttpError.
+export async function restoreS3Entry(date: string): Promise<S3RestoreResult> {
+  const { data } = await apiFetch<S3RestoreResult>(`/api/s3/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date }),
+  }, [400, 404, 409])
+  return data ?? { ok: false, error: 'Restore failed' }
+}

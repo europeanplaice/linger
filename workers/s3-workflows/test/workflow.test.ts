@@ -156,16 +156,19 @@ describe('S3BackfillWorkflow', () => {
     }
   })
 
-  it('derives expectExisting=false from a DO index that has never seen the date (first mirror)', async () => {
-    // Fresh account: the index has no synced record for any scope date, so the S3
-    // write must be told expectExisting=false (an If-None-Match create) rather than
-    // paying an unnecessary HEAD.
+  it('guards every S3 write with the HEAD-based update path, even for dates the index has never seen', async () => {
+    // Regression guard: a Resync wipes the DO index (resetAllData), so every date
+    // looks unknown here. The old index-derived hint then sent expectExisting=false
+    // (a bare If-None-Match: * create) for every entry — and under bucket versioning
+    // that always succeeds as a new version, appending a duplicate version of each
+    // unchanged entry on every Resync. The write must always carry the HEAD guard
+    // that turns an already-current object into a skip instead of a re-create.
     await runScopedWorkflow('8888888888', 'job-scope-8', 'wf-scope-8', ['2026-05-01', '2026-05-02'])
 
     const optionsArgs = vi.mocked(putObjectIfNewer).mock.calls.map(c => c[7])
     expect(optionsArgs.length).toBeGreaterThan(0)
     for (const options of optionsArgs) {
-      expect(options).toEqual({ expectExisting: false })
+      expect(options).toEqual({ expectExisting: true })
     }
   })
 

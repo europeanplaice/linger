@@ -6,11 +6,17 @@ import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
 import { authorizedSession, assumeS3Credentials, convergeMirror, countedStep, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
 
-// A new (not-yet-synced) entry costs up to 2 external subrequests: Drive content and a
-// single S3 If-None-Match PUT (see s3.ts's putObjectIfNewer — conditional writes made
+// A new (not-yet-synced) entry costs up to 3 external subrequests: Drive content + S3
+// HEAD + one conditional PUT (see s3.ts's putObjectIfNewer — conditional writes made
 // the old Drive-meta + S3 HEAD + PUT + post-write HEAD sequence unnecessary, and
-// listing-derived targets carry their fileId/version straight from the listing). An
-// update to an already-mirrored date costs 3: Drive content + S3 HEAD + If-Match PUT.
+// listing-derived targets carry their fileId/version straight from the listing). The
+// HEAD never pays for a no-op: an object already at least as new as Drive is skipped
+// right after it, before any PUT. Every write goes through this HEAD-guarded update
+// path — never the bare If-None-Match create — because the index hint that used to
+// pick the cheaper path is unreliable exactly when it matters most: a Resync wipes
+// the index (resetAllData) so every date looks "new" here, and under bucket versioning
+// an If-None-Match: * PUT on an existing key always succeeds as a new version —
+// appending a duplicate version of every unchanged entry.
 // STS AssumeRoleWithWebIdentity is only a subrequest on a credential-cache miss (the
 // KV-backed cache in assumeS3Credentials usually absorbs it). An entry already synced at
 // the version a listing/scope already knows about short-circuits to a single internal DO
@@ -121,9 +127,11 @@ async function processBatch(
         try {
           // The DO index short-circuit: already mirrored at this exact Drive version
           // (known from a listing, not a stale guess) confirms with one internal call
-          // instead of any Drive/S3 subrequest at all, so a Resync that mostly
+          // instead of any Drive/S3 subrequest at all, so a backfill that mostly
           // rediscovers already-synced entries doesn't re-pay cost for every one of
-          // them. The same record also tells us expectExisting for the S3 write.
+          // them. (A Resync wipes the index precisely so this can't skip — every
+          // entry is then re-verified against the bucket by the HEAD-guarded write
+          // below instead.)
           const known = await index.getEntry(target.date)
           if (target.version) {
             if (known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
@@ -156,7 +164,12 @@ async function processBatch(
             version = pending.driveVersion
           }
           const { content } = await getEntryContent(accessToken, meta.id, target.date)
-          await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: known?.state === 'synced' })
+          // Always the HEAD-guarded update path — expectExisting=false would send an
+          // If-None-Match: * create, which under bucket versioning succeeds as a new
+          // version even when the object is already current: after a Resync's index
+          // wipe every entry would get a duplicate version. The guard costs one HEAD
+          // on genuinely-new entries and turns already-current ones into a skip.
+          await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: true })
           const synced = await index.markSynced(target.date, version, new Date().toISOString())
           // Narrow-window complement to the pre-write resolution above: a newer save
           // that landed between markPending and markSynced leaves a stale "current"

@@ -268,6 +268,56 @@ describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
     expect(ctx.waitUntil).not.toHaveBeenCalled()
   })
 
+  it('re-enables backup without resetting sync history when the bucket is unchanged', async () => {
+    // Regression guard: disable → re-enable used to wipe the DO index
+    // (resetEntries: true), so the fresh backfill re-mirrored every entry as if new —
+    // appending a duplicate S3 version of each under bucket versioning and destroying
+    // the accumulated version history. A same-bucket re-enable must keep the index so
+    // the backfill skips entries already synced at the current Drive version, while
+    // entries edited while disabled (older syncedVersion) still re-mirror.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
+    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-4' } }) })
+    const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
+    const res = await settingsPut(ctx as any)
+    expect(res.status).toBe(202)
+    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: false })
+    expect(service.startBackfill).toHaveBeenCalled()
+  })
+
+  it('resets sync history when re-enabling against a different bucket', async () => {
+    // Index records describe the previous bucket's contents — keeping them would let
+    // the fresh backfill skip entries that were never mirrored to the new bucket.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
+    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-5' } }) })
+    const ctx = makeContext({
+      env: { S3_WORKFLOW_SERVICE: service },
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, bucket: 'other-bucket' }) }),
+    })
+    const res = await settingsPut(ctx as any)
+    expect(res.status).toBe(202)
+    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    expect(service.startBackfill).toHaveBeenCalled()
+  })
+
+  it('starts a fresh backfill when the target bucket changes while backup is already enabled', async () => {
+    // Previously a bucket swap while enabled never re-backfilled (and never reset the
+    // index), silently leaving the new bucket without the older entries. It must
+    // behave like a first enable: reset + full backfill to the new bucket.
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
+    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-6' } }) })
+    const ctx = makeContext({
+      env: { S3_WORKFLOW_SERVICE: service },
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, bucket: 'other-bucket' }) }),
+    })
+    const res = await settingsPut(ctx as any)
+    expect(res.status).toBe(202)
+    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    expect(service.startBackfill).toHaveBeenCalled()
+  })
+
   it('only updates backup-enabled state (no new job) when re-saving with backup already enabled', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)

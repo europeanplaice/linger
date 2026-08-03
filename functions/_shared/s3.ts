@@ -384,6 +384,20 @@ export async function listObjectKeys(creds: AssumedCredentials, bucket: string, 
   return keys
 }
 
+// Reads an object's body as text (used by the restore-from-backup path). Returns
+// null when the object doesn't exist; any other error (403, network failure, …) is
+// thrown rather than treated as a miss, so a caller can't mistake "can't tell" for
+// "absent".
+export async function getObjectContent(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<string | null> {
+  const client = s3Client(creds, region)
+  const resp = await client.fetch(objectUrl(bucket, region, key), { method: 'GET', signal: AbortSignal.timeout(S3_FETCH_TIMEOUT_MS) })
+  if (resp.status === 404) return null
+  if (!resp.ok) {
+    throw new S3Error(resp.status, `S3 GetObject failed: ${await resp.text()}`)
+  }
+  return await resp.text()
+}
+
 export async function deleteObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<void> {
   const client = s3Client(creds, region)
   const resp = await client.fetch(objectUrl(bucket, region, key), { method: 'DELETE', signal: AbortSignal.timeout(S3_FETCH_TIMEOUT_MS) })

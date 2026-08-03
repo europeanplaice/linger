@@ -1321,6 +1321,11 @@ dialog.settings-dialog {
   flex-direction: column;
   margin: auto;
 }
+@media (min-width: 720px) {
+  dialog.settings-dialog {
+    width: min(700px, calc(100vw - 24px));
+  }
+}
 dialog.settings-dialog::backdrop {
   background: var(--overlay-heavy);
 }
@@ -1486,6 +1491,16 @@ dialog.settings-dialog::backdrop {
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+.settings-s3-restore-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.settings-s3-restore-date {
+  font-size: 0.78rem;
+  opacity: 0.9;
 }
 .settings-account-info {
   display: flex;
