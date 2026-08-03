@@ -1321,6 +1321,11 @@ dialog.settings-dialog {
   flex-direction: column;
   margin: auto;
 }
+@media (min-width: 720px) {
+  dialog.settings-dialog {
+    width: min(700px, calc(100vw - 24px));
+  }
+}
 dialog.settings-dialog::backdrop {
   background: var(--overlay-heavy);
 }
