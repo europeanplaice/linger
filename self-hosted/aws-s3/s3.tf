@@ -34,28 +34,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "diary" {
 }
 
 # Versioning keeps every PutObject version (so a stale concurrent write can be
-# recovered), but versions accumulate forever unless pruned. Bound retention of
-# noncurrent versions and expired delete markers: 30 days of old versions is
-# plenty for the "recover from a botched resync" case, and capping it also keeps
-# the cost of a long-lived account flat instead of growing a version for every
-# save, forever.
+# recovered). Old versions are kept indefinitely; only their storage class is
+# managed, moving them to S3 Intelligent-Tiering so long-lived versions cost
+# less without any deletion risk.
 resource "aws_s3_bucket_lifecycle_configuration" "diary" {
   bucket = aws_s3_bucket.diary.id
   rule {
-    id     = "prune-noncurrent-versions"
+    id     = "noncurrent-to-intelligent-tiering"
     status = "Enabled"
     filter {
       prefix = "diary-"
     }
-    noncurrent_version_expiration {
-      noncurrent_days = 30
-    }
     noncurrent_version_transition {
       noncurrent_days = 7
-      storage_class   = "STANDARD_IA"
-    }
-    expiration {
-      expired_object_delete_marker = true
+      storage_class   = "INTELLIGENT_TIERING"
     }
   }
 }
