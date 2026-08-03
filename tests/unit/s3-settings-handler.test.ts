@@ -144,7 +144,19 @@ describe('PUT /api/s3/settings', () => {
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
-  it('does not trigger a backfill when already enabled and settings are merely edited', async () => {
+  it('does not trigger a backfill when already enabled and settings are merely edited (same bucket)', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, region: 'eu-west-1' }) }),
+    })
+
+    await onRequestPut(ctx as any)
+
+    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+  })
+
+  it('triggers a backfill when the target bucket changes while backup is already enabled', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
     const ctx = makeContext({
@@ -153,7 +165,7 @@ describe('PUT /api/s3/settings', () => {
 
     await onRequestPut(ctx as any)
 
-    expect(s3Settings.backfillAllEntries).not.toHaveBeenCalled()
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledOnce()
   })
 
   it('does not trigger a backfill when disabling', async () => {

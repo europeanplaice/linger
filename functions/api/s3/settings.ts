@@ -98,6 +98,18 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // Uses chunkSize so the backfill completes within Cloudflare's execution timeout;
     // the client's polling loop will call /api/s3/backfill-continue for the rest.
     //
+    // The DO index (per-date sync records) is reset only when the target bucket
+    // actually changed: a same-bucket re-enable (disable → re-enable) must keep it so
+    // the fresh backfill can skip entries already synced at the current Drive version —
+    // wiping it would re-mirror every entry, appending a duplicate S3 version of each
+    // under bucket versioning and destroying the accumulated version history the
+    // re-enable was supposed to preserve. A region change alone invalidates nothing
+    // (same bucket, same objects — the region only selects the endpoint for future
+    // writes), and a plain disable never resets. A changed bucket, or no prior config
+    // at all, still resets: records describe the previous bucket's contents and must
+    // not be trusted against the new one. This also covers a bucket swap made while
+    // backup was already enabled, which previously never re-backfilled at all.
+    //
     // Skip starting a *new* freshStart run if one is already in flight — e.g. disabling
     // mid-backfill (backfill-continue.ts refuses to continue while disabled, stranding
     // backfillProgress unfinished) and re-enabling shortly after would otherwise race a
@@ -108,9 +120,16 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // run with no recent progress write as abandoned rather than active, so an orphaned
     // run can't permanently block every future re-enable from starting a fresh one.
     let startedJobId: string | undefined
-    if (config.enabled && !previouslyEnabled && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+    const bucketChanged = !!existing && existing.config.bucket !== body.bucket
+    const needsFreshBackfill = config.enabled && (!previouslyEnabled || bucketChanged)
+    if (needsFreshBackfill && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
       try {
-        await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({ sessionId, accountKey: session.google_sub, enabled: true, resetEntries: true })
+        await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({
+          sessionId,
+          accountKey: session.google_sub,
+          enabled: true,
+          resetEntries: !existing || bucketChanged,
+        })
         const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
           sessionId,
           accountKey: session.google_sub,
@@ -124,17 +143,17 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
         return jsonResponse({ error: 'Settings saved, but backfill could not be started' }, 502)
       }
     } else if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-      // Not a first-time enable (that's the branch above, which does reset) — just
-      // keep the DO's enabled flag in sync with this save. resetEntries must stay
-      // false here: this branch also runs on a plain re-save of already-enabled
-      // settings and on disabling, neither of which should wipe sync history or
-      // (per resetAllData's own guard) be allowed to kill an in-flight backfill.
+      // Not a fresh-start situation (a plain re-save of already-enabled settings, a
+      // region-only edit, or disabling) — just keep the DO's enabled flag in sync with
+      // this save. resetEntries must stay false here: any of these would otherwise wipe
+      // sync history or (per resetAllData's own guard) be allowed to kill an in-flight
+      // backfill.
       await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({
         sessionId,
         accountKey: session.google_sub,
         enabled: config.enabled,
       })
-    } else if (config.enabled && !previouslyEnabled) {
+    } else if (needsFreshBackfill) {
       const alreadyRunning = isBackfillRunActive(existing?.status.backfillProgress)
       if (!alreadyRunning) {
         const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
