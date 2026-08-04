@@ -1275,6 +1275,44 @@ test.describe('useDiary offline drafts', () => {
   })
 })
 
+test.describe('useDiary drafts — transient server 5xx (session still alive)', () => {
+  test('a save hitting a transient 503 becomes a draft and is replayed, without the session-expired flow', async ({ page }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await page.evaluate(() => window.diaryHarness.clearCalls())
+
+    // Initial attempt + the client's 3 backoff retries all hit the 503 the API
+    // middleware now returns when Google's token refresh blips — the session is
+    // still alive, so this must NOT trigger the session-expired flow
+    await page.evaluate(() => {
+      window.diaryHarness.q(
+        { status: 503, body: { error: 'Token refresh temporarily unavailable' } },
+        { status: 503, body: { error: 'Token refresh temporarily unavailable' } },
+        { status: 503, body: { error: 'Token refresh temporarily unavailable' } },
+        { status: 503, body: { error: 'Token refresh temporarily unavailable' } },
+      )
+    })
+    const failed = await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'kept as draft', null))
+    expect(failed).toMatchObject({ ok: false })
+    expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(4)
+
+    // No session-expired flow fired, and the edit is kept as a durable draft
+    expect(await page.evaluate(() => window.diaryHarness.expiredCalls())).toBe(0)
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toMatchObject([
+      { date: '2026-05-01', content: 'kept as draft', baseVersion: null },
+    ])
+
+    // Blip passes: the draft replays on the next 'online' event
+    await page.evaluate(({ meta }) => {
+      window.diaryHarness.q({ status: 200, body: meta })
+      window.dispatchEvent(new Event('online'))
+    }, { meta: fileMeta('1') })
+
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+    await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
+  })
+})
+
 test.describe('useDiary offline drafts — multi-draft replay', () => {
   test('a network failure on one draft does not block others from replaying', async ({ page, context }) => {
     await loadHarness(page)
