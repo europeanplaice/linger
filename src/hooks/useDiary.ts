@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
-import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError } from '../api/driveEntries'
+import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError, DriveHttpError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache, getAllDrafts, putDraft, deleteDraft } from '../lib/diaryCache'
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
@@ -100,8 +100,11 @@ function localMatchSnippet(text: string, terms: string[]): string | null {
 
 // A fetch that never produced an HTTP response — the device is offline or the
 // request failed at the network layer. These edits are kept as local drafts.
+// A 5xx from our own proxy counts too: the server-side token refresh failed
+// transiently (see functions/api/_middleware.ts), the session is still alive,
+// and the save is worth replaying once the blip passes — same as offline.
 function isNetworkFailure(e: unknown): boolean {
-  return (typeof navigator !== 'undefined' && !navigator.onLine) || e instanceof TypeError
+  return (typeof navigator !== 'undefined' && !navigator.onLine) || e instanceof TypeError || (e instanceof DriveHttpError && e.status >= 500)
 }
 
 async function mapWithConcurrency<T, R>(

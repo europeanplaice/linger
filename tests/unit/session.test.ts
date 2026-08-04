@@ -120,6 +120,86 @@ describe('getValidAccessToken', () => {
     vi.unstubAllGlobals()
   })
 
+  function fakeKvEnv(store: Map<string, string>) {
+    return {
+      ...baseEnv,
+      SESSIONS: {
+        get: vi.fn((key: string) => Promise.resolve(store.get(key) ?? null)),
+        put: vi.fn((key: string, value: string) => { store.set(key, value) }),
+      },
+    }
+  }
+
+  function okRefreshResponse() {
+    return new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  it('coalesces concurrent refreshes of the same session into a single Google call', async () => {
+    // Regression guard: on app load, several API requests fire in parallel. If they
+    // each refreshed independently (see getValidSession's inFlightRefreshes dedupe)
+    // a single expired token would stampede Google's token endpoint with the same
+    // refresh_token — inflating the odds of a 429 or a transient failure surfacing
+    // as a spurious session-expired flow.
+    const fetchSpy = vi.fn().mockResolvedValue(okRefreshResponse())
+    vi.stubGlobal('fetch', fetchSpy)
+    const store = new Map<string, string>()
+    const env = fakeKvEnv(store)
+    const sessionA = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    const sessionB = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    const [tokenA, tokenB] = await Promise.all([
+      getValidAccessToken('sid', sessionA, env as any),
+      getValidAccessToken('sid', sessionB, env as any),
+    ])
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(tokenA).toBe('new_at')
+    expect(tokenB).toBe('new_at')
+    // The waiter adopted the shared refresh's persisted tokens (the in-place
+    // mutation invariant holds for it too, not just for the refreshing caller).
+    expect(sessionB.access_token).toBe('new_at')
+  })
+
+  it('still refreshes each session independently when they differ', async () => {
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(okRefreshResponse()))
+    vi.stubGlobal('fetch', fetchSpy)
+    const store = new Map<string, string>()
+    const env = fakeKvEnv(store)
+    const sessionA = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    const sessionB = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    await Promise.all([
+      getValidAccessToken('sid-a', sessionA, env as any),
+      getValidAccessToken('sid-b', sessionB, env as any),
+    ])
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('rethrows a failed shared refresh to concurrent waiters instead of handing back an expired token', async () => {
+    // A waiter must not proceed on a stale (still-expired) access token after the
+    // shared refresh failed — it would 401 against Drive and re-trigger the
+    // session-expired flow for a session that is merely going through a blip.
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('Server Error', { status: 503 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const env = fakeKvEnv(new Map())
+    const sessionA = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    const sessionB = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    const promiseA = getValidAccessToken('sid', sessionA, env as any)
+    const promiseB = getValidAccessToken('sid', sessionB, env as any)
+    // Attach both rejection assertions before advancing fake timers (see the
+    // transient-failure test above for why ordering matters here).
+    const assertA = expect(promiseA).rejects.toThrow('Token refresh failed: 503')
+    const assertB = expect(promiseB).rejects.toThrow('Token refresh failed: 503')
+    await vi.runAllTimersAsync()
+    await Promise.all([assertA, assertB])
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
+  })
+
   it('returns current access token when not expired', async () => {
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000 }
     const result = await getValidAccessToken('sid', session, baseEnv as any)

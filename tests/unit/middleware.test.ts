@@ -119,7 +119,11 @@ describe('API auth middleware', () => {
     expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid123')
   })
 
-  it('returns 401 on a transient refresh failure (503) but does NOT invalidate the session', async () => {
+  it('returns 503 (not 401) on a transient refresh failure and does NOT invalidate the session', async () => {
+    // Regression guard: a transient Google token-endpoint failure must not surface
+    // as "session expired" — the session itself is fine, so the client should
+    // retry (503 with Retry-After) rather than tear down the session-expired
+    // modal flow. Only a dead refresh_token (400 invalid_grant) gets a 401.
     const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Server Error', { status: 503 })))
     const del = vi.fn()
@@ -134,7 +138,8 @@ describe('API auth middleware', () => {
     await vi.runAllTimersAsync()
     const response = await promise
 
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Retry-After')).toBe('1')
     expect(ctx.next).not.toHaveBeenCalled()
     expect(del).not.toHaveBeenCalled()
   })

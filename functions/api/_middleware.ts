@@ -38,8 +38,16 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
       // session so it stops being offered as a reuse candidate on the next sign-in.
       // Best-effort: a KV hiccup here shouldn't turn a clean 401 into a 500.
       await invalidateSession(sessionId, session.email, context.env).catch(() => {})
+      return jsonResponse({ error: 'Token refresh failed' }, 401)
     }
-    return jsonResponse({ error: 'Token refresh failed' }, 401)
+    // Transient refresh failure (network blip between this Worker and Google's
+    // token endpoint, or a 429/5xx from Google that outlasted the in-function
+    // retries) — the session itself is fine, only the refresh didn't land. A 401
+    // here would make the client tear down the whole session-expired flow
+    // (modal + forced re-login) for a session that never died, and the refresh
+    // would just succeed moments later. A 503 instead lets the client's existing
+    // retry-with-backoff handle it and self-heal once Google recovers.
+    return jsonResponse({ error: 'Token refresh temporarily unavailable' }, 503, { 'Retry-After': '1' })
   }
 
   context.data.sessionId = sessionId

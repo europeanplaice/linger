@@ -90,6 +90,17 @@ export class RefreshTokenInvalidError extends Error {}
 // self-healing, since callers of getValidSession treat any thrown error alike.
 const REFRESH_RETRY_DELAYS_MS = [250, 500, 1000]
 
+// Dedupes concurrent refreshes for the same session within one isolate: on app load
+// or tab wake-up, several API requests fire in parallel, and if the access token has
+// just expired they'd all independently hit Google's token endpoint with the same
+// refresh_token — stampeding it, inflating the odds of a 429 (or of *some* request
+// hitting a transient blip and surfacing a spurious failure), and multiplying KV
+// writes. The first request to need a refresh performs it and persists the result;
+// the rest wait for it and then adopt the tokens it left in KV. Scoped to the
+// isolate — a cold-start isolate can't join another isolate's in-flight refresh, but
+// then each isolate only ever does its own one refresh per expiry window anyway.
+const inFlightRefreshes = new Map<string, Promise<SessionData>>()
+
 // Mutates `session` in place (rather than returning a disconnected copy) and persists
 // it to KV itself whenever it refreshes, so every caller holding this same object
 // reference — including ones further down the call stack that read it well after this
@@ -103,6 +114,42 @@ export async function getValidSession(sessionId: string, session: SessionData, e
     return session
   }
 
+  const inFlight = inFlightRefreshes.get(sessionId)
+  if (inFlight) {
+    // Another request in this isolate is refreshing this same session right now —
+    // wait for it, then adopt whatever tokens it persisted. If the shared refresh
+    // failed (transient blip), rethrow its error rather than handing back an expired
+    // token: a caller proceeding on that would 401 against Drive and re-trigger the
+    // session-expired flow for a session that's perfectly alive, and the error type
+    // matters (RefreshTokenInvalidError must still tear the session down).
+    let sharedError: unknown
+    try {
+      await inFlight
+    } catch (err) {
+      sharedError = err
+    }
+    const fresh = await getSession(sessionId, env)
+    if (fresh?.access_token && fresh.expires_at > Date.now() + 60_000) {
+      Object.assign(session, fresh)
+      return session
+    }
+    if (sharedError) throw sharedError
+    throw new Error('Token refresh failed')
+  }
+
+  const refresh = refreshAccessToken(sessionId, session, env)
+  inFlightRefreshes.set(sessionId, refresh)
+  try {
+    return await refresh
+  } finally {
+    if (inFlightRefreshes.get(sessionId) === refresh) inFlightRefreshes.delete(sessionId)
+  }
+}
+
+// The actual refresh-and-persist loop, extracted from getValidSession so concurrent
+// callers can share a single in-flight attempt (see inFlightRefreshes above). Mutates
+// `session` in place and persists the fresh tokens to KV itself.
+async function refreshAccessToken(sessionId: string, session: SessionData, env: Env): Promise<SessionData> {
   let resp: Response
   for (let attempt = 0; ; attempt++) {
     try {
