@@ -58,6 +58,9 @@ export class EntryConflictError extends Error {
 type PendingSave = { date: string; content: string; baseVersion: string | null; baseContent?: string | null }
 
 const SEARCH_RESULT_LIMIT = 30
+
+// Cadence for the while-online draft replay poll (see the poll effect below).
+const DRAFT_RETRY_INTERVAL_MS = 10_000
 const SEARCH_REMOTE_FETCH_LIMIT = 30
 
 // All prefetch traffic (month warmup, neighbours, recollection, recent entries)
@@ -98,11 +101,11 @@ function localMatchSnippet(text: string, terms: string[]): string | null {
   return snippetSource.slice(Math.max(0, snippetIdx - 40), snippetIdx + 80).replace(/\n/g, ' ')
 }
 
-// A fetch that never produced an HTTP response — the device is offline or the
-// request failed at the network layer. These edits are kept as local drafts.
-// A 5xx from our own proxy counts too: the server-side token refresh failed
-// transiently (see functions/api/_middleware.ts), the session is still alive,
-// and the save is worth replaying once the blip passes — same as offline.
+// A failure worth keeping the edit as a durable local draft: the device is offline
+// or the request died at the network layer (no HTTP response ever came back), or
+// our own proxy answered 5xx — meaning the server-side token refresh failed
+// transiently (see functions/api/_middleware.ts) and the session is still alive,
+// so the save is worth replaying once the blip passes, exactly like offline.
 function isNetworkFailure(e: unknown): boolean {
   return (typeof navigator !== 'undefined' && !navigator.onLine) || e instanceof TypeError || (e instanceof DriveHttpError && e.status >= 500)
 }
@@ -589,6 +592,31 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const onOnline = () => { replayDraftsRef.current().catch(() => {}) }
     window.addEventListener('online', onOnline)
     return () => window.removeEventListener('online', onOnline)
+  }, [isSignedIn])
+
+  // Drafts also appear while the browser stays online — a save that exhausted its
+  // retries on a transient 5xx (see isNetworkFailure). No 'online' event fires for
+  // that, so the listener above alone would leave them unreplayed until the next
+  // page load. Poll while any non-conflicted draft lingers instead: it replays the
+  // moment the blip passes, and catches the open date's draft once the user
+  // navigates away from it (replayDrafts deliberately skips the open date — the
+  // editor owns it). Stops as soon as nothing is left to replay.
+  useEffect(() => {
+    if (!isSignedIn) return
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      if (stopped || (typeof navigator !== 'undefined' && !navigator.onLine)) return
+      const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
+      if (!drafts.some(d => !d.conflicted)) return
+      await replayDraftsRef.current().catch(() => {})
+      if (!stopped) timer = setTimeout(poll, DRAFT_RETRY_INTERVAL_MS)
+    }
+    timer = setTimeout(poll, DRAFT_RETRY_INTERVAL_MS)
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
   }, [isSignedIn])
 
   const remove = useCallback(async (date: string): Promise<void> => {

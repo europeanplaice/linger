@@ -1294,6 +1294,9 @@ test.describe('useDiary drafts — transient server 5xx (session still alive)', 
     })
     const failed = await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'kept as draft', null))
     expect(failed).toMatchObject({ ok: false })
+    // Failed via the 503 path (initial attempt + 3 backoff retries), not some
+    // unrelated harness error masquerading as a save failure
+    expect(String((failed as { error: string }).error)).toContain('503')
     expect(await page.evaluate(() => window.diaryHarness.calls())).toHaveLength(4)
 
     // No session-expired flow fired, and the edit is kept as a durable draft
@@ -1302,13 +1305,14 @@ test.describe('useDiary drafts — transient server 5xx (session still alive)', 
       { date: '2026-05-01', content: 'kept as draft', baseVersion: null },
     ])
 
-    // Blip passes: the draft replays on the next 'online' event
+    // Blip passes: the while-online draft poll replays it on its own — no
+    // connectivity change is involved, which is the whole point (a server-side
+    // token blip never flips navigator.onLine, so replay must not wait for it)
     await page.evaluate(({ meta }) => {
       window.diaryHarness.q({ status: 200, body: meta })
-      window.dispatchEvent(new Event('online'))
     }, { meta: fileMeta('1') })
 
-    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts()), { timeout: 20000 }).toEqual([])
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
   })
 })

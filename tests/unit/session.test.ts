@@ -200,6 +200,70 @@ describe('getValidAccessToken', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(4)
   })
 
+  it('propagates a dead refresh token (400 invalid_grant) to concurrent waiters as RefreshTokenInvalidError', async () => {
+    // The waiter rethrows the shared refresh's original error type — a dead
+    // refresh_token must still tear the session down for every concurrent caller,
+    // not just the one whose refresh happened to be first.
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    const env = fakeKvEnv(new Map())
+    const sessionA = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    const sessionB = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+
+    const promiseA = getValidAccessToken('sid', sessionA, env as any)
+    const promiseB = getValidAccessToken('sid', sessionB, env as any)
+    const assertA = expect(promiseA).rejects.toBeInstanceOf(RefreshTokenInvalidError)
+    const assertB = expect(promiseB).rejects.toBeInstanceOf(RefreshTokenInvalidError)
+    await Promise.all([assertA, assertB])
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets a forceRefresh caller (getValidIdToken) join the in-flight refresh and adopt its result', async () => {
+    // A missing id_token forces a refresh (see getValidIdToken) even when the
+    // access token is still valid — but if a plain refresh for the same session
+    // is already in flight, it joins that one instead of paying a second Google
+    // call, and honestly returns null for id_token when the shared response
+    // omitted it (the documented drop-stale-id_token behavior).
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(okRefreshResponse()))
+    vi.stubGlobal('fetch', fetchSpy)
+    const store = new Map<string, string>()
+    const env = fakeKvEnv(store)
+    const sessionA = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    const sessionB = { refresh_token: 'rt', access_token: 'still_valid_at', expires_at: Date.now() + 120_000 }
+
+    const [tokenA, idTokenB] = await Promise.all([
+      getValidAccessToken('sid', sessionA, env as any),
+      getValidIdToken('sid', sessionB, env as any),
+    ])
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(tokenA).toBe('new_at')
+    expect(idTokenB).toBeNull()
+  })
+
+  it('clears the in-flight entry after completion so the next expiry refreshes again', async () => {
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(okRefreshResponse()))
+    vi.stubGlobal('fetch', fetchSpy)
+    const store = new Map<string, string>()
+    const env = fakeKvEnv(store)
+    const first = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
+    await getValidAccessToken('sid', first, env as any)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // While the token is fresh no refresh happens at all...
+    const fresh = { refresh_token: 'rt', access_token: 'new_at', expires_at: Date.now() + 3600_000 }
+    await getValidAccessToken('sid', fresh, env as any)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // ...and once it expires again, a brand-new refresh runs — the map must not
+    // still hold the completed promise from the first round.
+    const expiredAgain = { refresh_token: 'rt', access_token: 'new_at', expires_at: Date.now() - 60_000 }
+    await getValidAccessToken('sid', expiredAgain, env as any)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
   it('returns current access token when not expired', async () => {
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000 }
     const result = await getValidAccessToken('sid', session, baseEnv as any)
