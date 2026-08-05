@@ -1314,7 +1314,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
 
     await page.getByRole('button', { name: 'Test connection' }).click()
 
-    await expect(page.getByText('✓ Connection verified.')).toBeVisible()
+    await expect(page.getByText('Connection verified.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Connected' })).toBeVisible()
   })
 
@@ -1366,7 +1366,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
 
     await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
 
-    await expect(page.getByText('✓ Settings saved.')).toBeVisible()
+    await expect(page.getByText('Settings saved.')).toBeVisible()
     await expect(overwriteDialog(page)).toBeHidden()
     expect(saved).toMatchObject({ enabled: true, bucket: 'my-bucket', region: 'us-east-1' })
   })
@@ -1435,7 +1435,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
 
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
 
-    await expect(page.getByText('✓ Settings saved.')).toBeVisible()
+    await expect(page.getByText('Settings saved.')).toBeVisible()
     expect(precheckCalled).toBe(false)
     expect(saveCount).toBe(1)
   })
@@ -1468,7 +1468,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await bucketField(page).fill('my-bucket-2')
 
     await expect(page.getByRole('button', { name: 'Test connection' })).toBeVisible()
-    await expect(page.getByText('✓ Connection verified.')).toBeHidden()
+    await expect(page.getByText('Connection verified.')).toBeHidden()
   })
 })
 
