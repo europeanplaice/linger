@@ -50,6 +50,7 @@ async function seedSession(accountKey: string) {
     access_token: 'access',
     expires_at: Date.now() + 3600_000,
     id_token: 'id-token',
+    id_token_verified: true,
     google_sub: accountKey,
   }
   await env.SESSIONS.put(`session:${SESSION_ID}`, JSON.stringify(session))
