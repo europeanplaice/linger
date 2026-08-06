@@ -8,6 +8,10 @@ import {
   SESSION_TTL,
 } from '../../functions/_shared/session'
 
+vi.mock('../../functions/_shared/google', () => ({
+  verifyGoogleIdToken: vi.fn().mockResolvedValue({ sub: 'google-sub-123' }),
+}))
+
 describe('jsonResponse', () => {
   it('marks JSON responses as non-cacheable with security headers', () => {
     const response = jsonResponse({ ok: true })
@@ -387,7 +391,7 @@ describe('getValidIdToken', () => {
   })
 
   it('returns the current id_token when the session is not expired', async () => {
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000, id_token: 'idtok' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000, id_token: 'idtok', id_token_verified: true }
     expect(await getValidIdToken('sid', session, baseEnv as any)).toBe('idtok')
   })
 

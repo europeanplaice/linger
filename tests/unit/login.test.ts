@@ -50,6 +50,7 @@ describe('onRequestGet (login redirect)', () => {
     expect(url.searchParams.get('scope')).toContain('email')
     expect(url.searchParams.get('access_type')).toBe('offline')
     expect(url.searchParams.get('prompt')).toBeNull()
+    expect(url.searchParams.get('nonce')).toBeTruthy()
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBeTruthy()
   })
@@ -65,8 +66,10 @@ describe('onRequestGet (login redirect)', () => {
     expect(put).toHaveBeenCalledOnce()
     const [key, verifier, options] = put.mock.calls[0]
     expect(key).toContain('oauth_state:')
-    expect(typeof verifier).toBe('string')
-    expect(verifier.length).toBeGreaterThan(0)
+    const record = JSON.parse(verifier as string) as { codeVerifier: string; nonce: string; returnPath: string }
+    expect(record.codeVerifier.length).toBeGreaterThan(0)
+    expect(record.nonce).toBeTruthy()
+    expect(record.returnPath).toBe('/')
     expect(options).toEqual({ expirationTtl: 300 })
   })
 
@@ -81,7 +84,9 @@ describe('onRequestGet (login redirect)', () => {
     const location = response.headers.get('Location')!
     const url = new URL(location)
     const state = url.searchParams.get('state')!
-    expect(state).toContain(encodeURIComponent('/custom/path'))
+    expect(state).toBeTruthy()
+    const record = JSON.parse(put.mock.calls[0][1] as string) as { returnPath: string }
+    expect(record.returnPath).toBe('/custom/path')
   })
 
   it('sanitizes protocol-relative redirect path to /', async () => {
@@ -90,15 +95,11 @@ describe('onRequestGet (login redirect)', () => {
     env.SESSIONS.put = put
     const request = new Request('http://localhost/auth/login?redirect=//evil.com')
 
-    const response = await onRequestGet({ request, env } as any)
+    await onRequestGet({ request, env } as any)
 
     // stateにprotocol-relativeなパスが含まれていないことを確認
-    const location = response.headers.get('Location')!
-    const url = new URL(location)
-    const state = url.searchParams.get('state')!
-    const colonIdx = state.indexOf(':')
-    const returnPath = colonIdx === -1 ? '/' : decodeURIComponent(state.slice(colonIdx + 1))
-    expect(returnPath).toBe('/')
+    const record = JSON.parse(put.mock.calls[0][1] as string) as { returnPath: string }
+    expect(record.returnPath).toBe('/')
   })
 
   it('defaults return path to /', async () => {
@@ -107,14 +108,10 @@ describe('onRequestGet (login redirect)', () => {
     env.SESSIONS.put = put
     const request = new Request('http://localhost/auth/login')
 
-    const response = await onRequestGet({ request, env } as any)
+    await onRequestGet({ request, env } as any)
 
-    const location = response.headers.get('Location')!
-    const url = new URL(location)
-    const state = url.searchParams.get('state')!
-    const colonIdx = state.indexOf(':')
-    const returnPath = colonIdx === -1 ? '/' : decodeURIComponent(state.slice(colonIdx + 1))
-    expect(returnPath).toBe('/')
+    const record = JSON.parse(put.mock.calls[0][1] as string) as { returnPath: string }
+    expect(record.returnPath).toBe('/')
   })
 })
 

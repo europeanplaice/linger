@@ -8,6 +8,7 @@
     "workers/s3-workflows/**/*.ts",
     "workers/s3-workflows/worker-configuration.d.ts",
     "functions/_shared/session.ts",
+    "functions/_shared/google.ts",
     "functions/_shared/s3Workflow.ts",
     "functions/_shared/drive.ts",
     "functions/_shared/s3.ts",

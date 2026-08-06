@@ -8,7 +8,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const sessionId = parseSessionId(request)
   if (sessionId) {
     const session = await getSession(sessionId, env)
-    await invalidateSession(sessionId, session?.email, env)
+    await invalidateSession(sessionId, session?.email, env, session?.google_sub)
   }
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,

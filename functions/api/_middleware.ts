@@ -6,6 +6,7 @@ import {
   saveSession,
   invalidateSession,
   addEmailSessionIndex,
+  addSubSessionIndex,
   makeSessionCookie,
   SESSION_TTL,
   jsonResponse,
@@ -29,7 +30,7 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   const session = await getSession(sessionId, context.env)
   if (!session) return jsonResponse({ error: 'Session not found' }, 401)
 
-  let validSession = session
+  let validSession: typeof session
   try {
     validSession = await getValidSession(sessionId, session, context.env)
   } catch (err) {
@@ -37,7 +38,7 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
       // Dead refresh_token (e.g. from a retired Blue/Green OAuth client) — drop the
       // session so it stops being offered as a reuse candidate on the next sign-in.
       // Best-effort: a KV hiccup here shouldn't turn a clean 401 into a 500.
-      await invalidateSession(sessionId, session.email, context.env).catch(() => {})
+      await invalidateSession(sessionId, session.email, context.env, session.google_sub).catch(() => {})
       return jsonResponse({ error: 'Token refresh failed' }, 401)
     }
     // Transient refresh failure (network blip between this Worker and Google's
@@ -70,6 +71,9 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
     // *original* login's TTL, even though the session itself lives on indefinitely.
     if (validSession.email) {
       await addEmailSessionIndex(validSession.email, sessionId, context.env)
+    }
+    if (validSession.google_sub) {
+      await addSubSessionIndex(validSession.google_sub, sessionId, context.env)
     }
   }
   const secure = !context.env.SESSION_DOMAIN.startsWith('http://')

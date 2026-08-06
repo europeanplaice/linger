@@ -1,6 +1,14 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequestGet } from '../../functions/auth/callback'
 
+vi.mock('../../functions/_shared/google', () => ({
+  verifyGoogleIdToken: vi.fn().mockResolvedValue({
+    sub: 'google-sub-123',
+    email: 'user@example.com',
+    email_verified: true,
+  }),
+}))
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
@@ -36,6 +44,12 @@ function callbackUrl(params: Record<string, string>): string {
   return `http://localhost/auth/callback?${qs}`
 }
 
+function callbackRequest(params: Record<string, string>, cookieState = 'valid-state'): Request {
+  return new Request(callbackUrl(params), {
+    headers: { Cookie: `linger_oauth_state=${encodeURIComponent(cookieState)}` },
+  })
+}
+
 describe('onRequestGet (OAuth callback)', () => {
   it('returns 400 when code is missing', async () => {
     const request = new Request(callbackUrl({ state: 'abc' }))
@@ -59,7 +73,7 @@ describe('onRequestGet (OAuth callback)', () => {
 
   it('returns 400 when state is invalid or expired', async () => {
     const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue(null), delete: vi.fn(), put: vi.fn() } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'invalid' }))
+    const request = callbackRequest({ code: 'abc', state: 'invalid' }, 'invalid')
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -68,10 +82,21 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(body).toEqual({ error: 'Invalid or expired state' })
   })
 
+  it('rejects a callback opened in a different browser session', async () => {
+    const get = vi.fn().mockResolvedValue('verifier')
+    const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put: vi.fn() } })
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' }, 'different-state')
+
+    const response = await onRequestGet({ request, env } as any)
+
+    expect(response.status).toBe(400)
+    expect(get).not.toHaveBeenCalled()
+  })
+
   it('returns 500 when token exchange fails without exposing upstream error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('secret internal error from Google', { status: 400 })))
-    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn(), list: vi.fn().mockResolvedValue({ keys: [], list_complete: true }) } })
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -83,13 +108,13 @@ describe('onRequestGet (OAuth callback)', () => {
 
   it('redirects with auth_error=no_refresh_token when no refresh_token is received', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
+      new Response(JSON.stringify({ access_token: 'at', expires_in: 3600, id_token: 'verified-id-token' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
-    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn(), list: vi.fn().mockResolvedValue({ keys: [], list_complete: true }) } })
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -112,7 +137,7 @@ describe('onRequestGet (OAuth callback)', () => {
       return Promise.resolve('verifier')
     })
     const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -137,7 +162,7 @@ describe('onRequestGet (OAuth callback)', () => {
       return Promise.resolve('verifier')
     })
     const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put: vi.fn() } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -147,14 +172,14 @@ describe('onRequestGet (OAuth callback)', () => {
 
   it('returns 302 on success with session cookie', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), {
+      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: 'verified-id-token' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
     const put = vi.fn()
     const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -165,7 +190,8 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(setCookie).toContain('Secure')
     expect(setCookie).toContain('Max-Age=')
     expect(response.headers.get('Location')).toBe('/')
-    const savedSession = JSON.parse(put.mock.calls[0][1] as string)
+    const sessionCall = put.mock.calls.find(call => (call[0] as string).startsWith('session:'))
+    const savedSession = JSON.parse(sessionCall![1] as string)
     expect(savedSession.client_id).toBe('client-id')
   })
 
@@ -181,7 +207,7 @@ describe('onRequestGet (OAuth callback)', () => {
     const put = vi.fn()
     const get = vi.fn().mockResolvedValue('verifier')
     const env = makeEnv({ SESSIONS: { get, delete: vi.fn(), put } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     await onRequestGet({ request, env } as any)
 
@@ -190,7 +216,7 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(savedSession.email).toBe('user@example.com')
   })
 
-  it('saves session without email when id_token is absent', async () => {
+  it('rejects a token response without an ID token', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), {
         status: 200,
@@ -199,24 +225,22 @@ describe('onRequestGet (OAuth callback)', () => {
     ))
     const put = vi.fn()
     const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put } })
-    const request = new Request(callbackUrl({ code: 'abc', state: 'valid-state' }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
-    await onRequestGet({ request, env } as any)
-
-    const savedSession = JSON.parse(put.mock.calls[0][1] as string)
-    expect(savedSession.email).toBeUndefined()
+    const response = await onRequestGet({ request, env } as any)
+    expect(response.status).toBe(500)
+    expect(put).not.toHaveBeenCalled()
   })
 
   it('redirects to / when returnPath is protocol-relative (//evil.com)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), {
+      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: 'verified-id-token' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
     const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
-    const returnPath = encodeURIComponent('//evil.com')
-    const request = new Request(callbackUrl({ code: 'abc', state: `valid-state:${returnPath}` }))
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
@@ -226,14 +250,13 @@ describe('onRequestGet (OAuth callback)', () => {
 
   it('redirects to the return path from state', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 }), {
+      new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: 'verified-id-token' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
-    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
-    const returnPath = encodeURIComponent('/some/path')
-    const request = new Request(callbackUrl({ code: 'abc', state: `valid-state:${returnPath}` }))
+    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify({ codeVerifier: 'verifier', returnPath: '/some/path' })), delete: vi.fn(), put: vi.fn(), list: vi.fn().mockResolvedValue({ keys: [], list_complete: true }) } })
+    const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 

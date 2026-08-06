@@ -1,8 +1,11 @@
 import type { S3WorkflowService } from './s3Workflow'
+import { verifyGoogleIdToken } from './google'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
 const COOKIE_NAME = 'linger_session'
+const OAUTH_STATE_COOKIE_NAME = 'linger_oauth_state'
+export const OAUTH_STATE_TTL = 300
 
 export interface Env {
   SESSIONS: KVNamespace
@@ -23,6 +26,7 @@ export interface SessionData {
   changes_start_page_token?: string // Drive Changes API page token for incremental sync
   client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
   id_token?: string // Google-signed JWT (openid scope) — handed to AWS STS AssumeRoleWithWebIdentity for self-hosted S3
+  id_token_verified?: boolean // true only after local Google signature/claims validation
   google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
   s3_settings_negative_cache_at?: number // ms since epoch — last time a save/delete confirmed no s3_settings.json exists, so Drive-only users don't pay a files.list lookup on every save
   s3_settings_file_id?: string // Drive fileId of s3_settings.json, cached like folder_id so every mirror/poll doesn't pay a files.list lookup just to find the settings file — never the settings *content* itself (see s3Settings.ts's loadS3SettingsRecord), since a stale bucket/roleArn/enabled value could mirror content to a bucket the user just disabled or changed
@@ -59,7 +63,9 @@ export function parseSessionId(request: Request): string | null {
     if (eq === -1) continue
     const name = trimmed.slice(0, eq)
     const value = trimmed.slice(eq + 1)
-    if (name === COOKIE_NAME && value) return decodeURIComponent(value)
+    if (name === COOKIE_NAME && value) {
+      try { return decodeURIComponent(value) } catch { return null }
+    }
   }
   return null
 }
@@ -189,6 +195,16 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
     throw new Error(`Token refresh failed: ${resp.status}`)
   }
   const tokens = await resp.json() as { access_token: string; expires_in: number; id_token?: string }
+  let idToken: string | undefined
+  if (tokens.id_token) {
+    try {
+      const claims = await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID)
+      if (!session.google_sub || claims.sub === session.google_sub) idToken = tokens.id_token
+    } catch {
+      // Never persist an unverified ID token. Access-token use can continue,
+      // while callers that require an ID token will request a later refresh.
+    }
+  }
   Object.assign(session, {
     access_token: tokens.access_token,
     expires_at: Date.now() + tokens.expires_in * 1000,
@@ -199,7 +215,8 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
     // is expired by definition whenever this branch runs. Carry forward only a freshly
     // issued one; otherwise drop it rather than handing callers a dead token that would
     // make every subsequent STS AssumeRoleWithWebIdentity call fail silently.
-    id_token: tokens.id_token,
+    id_token: idToken,
+    id_token_verified: idToken ? true : undefined,
   })
   await saveSession(sessionId, session, env)
   return session
@@ -220,7 +237,7 @@ export async function getValidAccessToken(sessionId: string, session: SessionDat
 // getValidIdToken callers actually need it — a plain getValidAccessToken caller has no
 // reason to pay for an early refresh just because id_token happens to be absent.
 export async function getValidIdToken(sessionId: string, session: SessionData, env: Env): Promise<string | null> {
-  const validSession = await getValidSession(sessionId, session, env, { forceRefresh: !session.id_token })
+  const validSession = await getValidSession(sessionId, session, env, { forceRefresh: !session.id_token || session.id_token_verified !== true })
   return validSession.id_token ?? null
 }
 
@@ -232,6 +249,27 @@ export function makeSessionCookie(sessionId: string, maxAge: number, secure = tr
 export function clearSessionCookie(secure = true): string {
   const secureFlag = secure ? '; Secure' : ''
   return `${COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Strict; Path=/; Max-Age=0`
+}
+
+export function makeOAuthStateCookie(state: string, secure = true): string {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(state)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${OAUTH_STATE_TTL}`
+}
+
+export function clearOAuthStateCookie(secure = true): string {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${OAUTH_STATE_COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=0`
+}
+
+export function parseOAuthStateCookie(request: Request): string | null {
+  const header = request.headers.get('Cookie') ?? ''
+  for (const part of header.split(';')) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq === -1 || trimmed.slice(0, eq) !== OAUTH_STATE_COOKIE_NAME) continue
+    try { return decodeURIComponent(trimmed.slice(eq + 1)) || null } catch { return null }
+  }
+  return null
 }
 
 function normalizeEmail(email: string): string {
@@ -257,6 +295,14 @@ function emailSessionIndexKey(email: string, sessionId: string): string {
   return `${emailSessionIndexPrefix(email)}${sessionId}`
 }
 
+function subSessionIndexPrefix(sub: string): string {
+  return `ssidx:${sub}:`
+}
+
+function subSessionIndexKey(sub: string, sessionId: string): string {
+  return `${subSessionIndexPrefix(sub)}${sessionId}`
+}
+
 // Also called on every sliding TTL renewal (see _middleware.ts) to re-stamp this
 // key's own TTL in step with the session record's — otherwise an actively-used,
 // renewed session would still fall out of the index (and out of RISC's reach)
@@ -267,6 +313,14 @@ export async function addEmailSessionIndex(email: string, sessionId: string, env
 
 export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
   await env.SESSIONS.delete(emailSessionIndexKey(email, sessionId))
+}
+
+export async function addSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {
+  await env.SESSIONS.put(subSessionIndexKey(sub, sessionId), '', { expirationTtl: SESSION_TTL })
+}
+
+export async function removeSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {
+  await env.SESSIONS.delete(subSessionIndexKey(sub, sessionId))
 }
 
 // Caps list() pagination — no real account will ever approach this many
@@ -300,16 +354,40 @@ export async function getRefreshTokenForEmail(email: string, clientId: string, e
   return null
 }
 
+export async function getRefreshTokenForSub(sub: string, clientId: string, env: Env): Promise<string | null> {
+  const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
+  for (const id of ids) {
+    const session = await getSession(id, env)
+    if (session?.refresh_token && session.client_id === clientId) return session.refresh_token
+  }
+  return null
+}
+
+async function listSessionIdsForPrefix(prefix: string, env: Env): Promise<string[]> {
+  const ids: string[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < MAX_INDEX_LIST_PAGES; page++) {
+    const result = await env.SESSIONS.list({ prefix, cursor })
+    ids.push(...result.keys.map(k => k.name.slice(prefix.length)))
+    if (result.list_complete) break
+    cursor = result.cursor
+  }
+  return ids
+}
+
 // Removes a single dead session (e.g. refresh failed) from both the session record
 // and the email index, so it stops being offered as a reuse candidate by
 // getRefreshTokenForEmail while it waits out its KV TTL. Deletes the session record
 // first: if only one of the two deletes can land, a dangling index entry (harmless
 // — getSession returns null for it and every caller already skips null sessions)
 // is far preferable to a live session left silently unreachable via the index.
-export async function invalidateSession(sessionId: string, email: string | undefined, env: Env): Promise<void> {
+export async function invalidateSession(sessionId: string, email: string | undefined, env: Env, googleSub?: string): Promise<void> {
   await env.SESSIONS.delete(`session:${sessionId}`)
   if (email) {
     await removeEmailSessionIndex(email, sessionId, env)
+  }
+  if (googleSub) {
+    await removeSubSessionIndex(googleSub, sessionId, env)
   }
 }
 
@@ -324,6 +402,18 @@ export async function deleteAllSessionsForEmail(email: string, env: Env): Promis
     await Promise.allSettled([
       env.SESSIONS.delete(`session:${id}`),
       removeEmailSessionIndex(email, id, env),
+    ])
+  }))
+}
+
+export async function deleteAllSessionsForSub(sub: string, env: Env): Promise<void> {
+  const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
+  await Promise.allSettled(ids.map(async id => {
+    const session = await getSession(id, env)
+    await Promise.allSettled([
+      env.SESSIONS.delete(`session:${id}`),
+      removeSubSessionIndex(sub, id, env),
+      ...(session?.email ? [removeEmailSessionIndex(session.email, id, env)] : []),
     ])
   }))
 }

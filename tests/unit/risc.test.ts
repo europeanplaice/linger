@@ -332,7 +332,7 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(response.status).toBe(202)
   })
 
-  it('returns 202 with revoked:0 when no email hint is present', async () => {
+  it('revokes by subject sub even when no email hint is present', async () => {
     mockCrypto(true)
     mockJwks()
     const payload = validPayload({
@@ -346,7 +346,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const response = await postRisc(jwt, makeEnv())
     const body = await response.json() as { handled: number; revoked: number }
     expect(response.status).toBe(202)
-    expect(body).toMatchObject({ handled: 1, revoked: 0 })
+    expect(body).toMatchObject({ handled: 1, revoked: 1 })
   })
 
   it('returns 202 with handled:0 for unknown event types', async () => {

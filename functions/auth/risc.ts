@@ -1,5 +1,5 @@
 import type { Env } from '../_shared/session'
-import { deleteAllSessionsForEmail, jsonResponse } from '../_shared/session'
+import { deleteAllSessionsForEmail, deleteAllSessionsForSub, jsonResponse } from '../_shared/session'
 
 const GOOGLE_ISSUER = 'https://accounts.google.com'
 const GOOGLE_RISC_JWKS_URL = 'https://accounts.google.com/o/oauth2/risc/jwks'
@@ -158,6 +158,11 @@ function extractEmail(payload: SetEventPayload): string | null {
   return raw ? raw.trim().toLowerCase() : null
 }
 
+function extractSub(payload: SetEventPayload): string | null {
+  const sub = payload.subject?.sub?.trim()
+  return sub || null
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const body = (await request.text()).trim()
   if (!body) return jsonResponse({ error: 'Empty request body' }, 400)
@@ -177,14 +182,17 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (!HANDLED_EVENT_TYPES.has(eventType)) continue
     handled++
 
+    const sub = extractSub(payload)
     const email = extractEmail(payload)
-    if (!email) {
-      console.log(`RISC ${eventType}: no email available; skipping`)
+    if (!sub && !email) {
+      console.log(`RISC ${eventType}: no subject identifier available; skipping`)
       continue
     }
 
     try {
-      await deleteAllSessionsForEmail(email, env)
+      if (sub) await deleteAllSessionsForSub(sub, env)
+      // Legacy fallback for sessions created before sub indexing.
+      if (email) await deleteAllSessionsForEmail(email, env)
       revoked++
       console.log(`RISC ${eventType}: revoked sessions`)
     } catch (err) {
