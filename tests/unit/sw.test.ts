@@ -257,6 +257,11 @@ describe('service worker (public/sw.js) fetch handling', () => {
     expect(result).toBeUndefined();
   });
 
+  it('does not intercept /auth/ navigations (must hit the network directly for the OAuth redirect chain)', async () => {
+    const result = h.dispatchFetch({ url: 'https://app.example.com/auth/login?redirect=%2F', method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(result).toBeUndefined();
+  });
+
   it('does not intercept non-GET requests', async () => {
     const result = h.dispatchFetch({ url: ASSET_URL, method: 'POST' });
     expect(result).toBeUndefined();

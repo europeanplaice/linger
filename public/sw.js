@@ -77,6 +77,13 @@ self.addEventListener('fetch', event => {
 
   const scopePath = new URL(self.registration.scope).pathname
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith(`${scopePath}api/`)) return
+  // OAuth navigations (/auth/login → accounts.google.com → /auth/callback) must hit
+  // the network directly. Intercepting them here would make the SW's own fetch()
+  // silently follow the whole cross-origin redirect chain (including Google's
+  // consent/account screen) and hand back only the final response — the user never
+  // sees Google's UI, the address bar never visibly moves, and a real interactive
+  // step (e.g. account chooser, re-consent) has no page to render on.
+  if (url.pathname.startsWith('/auth/') || url.pathname.startsWith(`${scopePath}auth/`)) return
 
   if (request.cache === 'no-store' || request.cache === 'reload' || request.cache === 'no-cache') {
     event.respondWith(fetch(request).catch(() => Response.error()))
