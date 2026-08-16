@@ -190,16 +190,23 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
   }
   if (!resp.ok) {
     if (resp.status === 400) {
-      let isInvalidGrant = false
+      // Any 400 from the token endpoint is a request/grant/client problem, not a
+      // transient one — retrying gets the same 400 again. invalid_grant (dead/revoked/
+      // wrong-client refresh_token) is the expected, routine case. Anything else
+      // (e.g. invalid_client from a client_id/secret mismatch after an OAuth
+      // blue/green swap) is unexpected and env-wide — log it so it doesn't fail
+      // silently, since it'll otherwise look identical to a normal expired session.
+      let errorCode = 'unknown'
       try {
         const errJson = await resp.json() as { error?: string }
-        if (errJson.error === 'invalid_grant') isInvalidGrant = true
+        if (errJson.error) errorCode = errJson.error
       } catch {
-        isInvalidGrant = false
+        // non-JSON body, leave errorCode as 'unknown'
       }
-      if (isInvalidGrant) {
-        throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status}`)
+      if (errorCode !== 'invalid_grant') {
+        console.error(`Token refresh got 400 with unexpected error code: ${errorCode}`)
       }
+      throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status} (${errorCode})`)
     }
     throw new Error(`Token refresh failed: ${resp.status}`)
   }

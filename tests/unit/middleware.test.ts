@@ -98,6 +98,28 @@ describe('API auth middleware', () => {
     expect(del).toHaveBeenCalledWith('session:sid123')
   })
 
+  it('returns 401 (not 503) when the token endpoint returns 400 with a non-invalid_grant error', async () => {
+    // Regression guard: a 400 from Google's token endpoint is always a request/grant/
+    // client problem (never transient — retrying gets the same 400 again), even when
+    // the error code isn't invalid_grant. e.g. invalid_client from a client_id/secret
+    // mismatch after an OAuth blue/green swap must not be treated as self-healing.
+    const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_client' }), { status: 400 })))
+    const del = vi.fn()
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entries', {
+        headers: { Cookie: 'linger_session=sid123' },
+      }),
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
+    })
+
+    const response = await onRequest(ctx as any)
+
+    expect(response.status).toBe(401)
+    expect(ctx.next).not.toHaveBeenCalled()
+    expect(del).toHaveBeenCalledWith('session:sid123')
+  })
+
   it('removes the invalidated session from its email index when the refresh_token is dead', async () => {
     const expiredSession = makeSession({ expires_at: Date.now() - 60_000, email: 'user@example.com' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
