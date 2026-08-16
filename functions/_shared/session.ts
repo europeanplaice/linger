@@ -190,7 +190,16 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
   }
   if (!resp.ok) {
     if (resp.status === 400) {
-      throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status}`)
+      let isInvalidGrant = false
+      try {
+        const errJson = await resp.json() as { error?: string }
+        if (errJson.error === 'invalid_grant') isInvalidGrant = true
+      } catch {
+        isInvalidGrant = false
+      }
+      if (isInvalidGrant) {
+        throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status}`)
+      }
     }
     throw new Error(`Token refresh failed: ${resp.status}`)
   }
