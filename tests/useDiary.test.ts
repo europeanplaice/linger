@@ -37,7 +37,10 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function startHarness(page: import('@playwright/test').Page, extraEntries: { files: { id: string; name: string; version: string }[] } = ENTRIES_EMPTY) {
   await page.evaluate((entries) => {
-    window.diaryHarness.q({ status: 200, body: entries })
+    // Prepend a 404 for the parallel getEntryByDate(today) call that fires
+    // alongside loadEntryList — the FIFO mock has no URL matching so the
+    // today-404 must sit in front of the list response.
+    window.diaryHarness.q({ status: 404, body: { error: 'Not found' } }, { status: 200, body: entries })
     window.diaryHarness.start()
   }, extraEntries)
   await page.waitForSelector('#harness-ready')
@@ -655,7 +658,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
         { id: 'remove-2026-05-01-1', type: 'REMOVE', date: '2026-05-01', timestamp: Date.now() },
       ]))
       window.diaryHarness.setEmail('other@example.com')
-      window.diaryHarness.q({ status: 200, body: { files: [] } })
+      window.diaryHarness.q({ status: 404, body: { error: 'Not found' } }, { status: 200, body: { files: [] } })
       window.diaryHarness.start()
     })
     await page.waitForSelector('#harness-ready')
@@ -680,7 +683,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
         snippet: 'cached secret',
       }])
       window.diaryHarness.setEmail(null)
-      window.diaryHarness.q({ status: 200, body: { files: [] } })
+      window.diaryHarness.q({ status: 404, body: { error: 'Not found' } }, { status: 200, body: { files: [] } })
       window.diaryHarness.start()
     })
     await page.waitForSelector('#harness-ready')
@@ -703,7 +706,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     await reloadHarness(page)
     await page.evaluate(async () => {
       // Same email as default (user@example.com) — IDB should not be cleared
-      window.diaryHarness.q({ status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] } })
+      window.diaryHarness.q({ status: 404, body: { error: 'Not found' } }, { status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] } })
       window.diaryHarness.start()
     })
 
@@ -728,7 +731,7 @@ test.describe('useDiary IDB cache — 0-RTT startup', () => {
     await reloadHarness(page)
     await page.evaluate(() => {
       // Drive response deliberately delayed so IDB hydration is observable first
-      window.diaryHarness.q({ status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] }, delayMs: 500 })
+      window.diaryHarness.q({ status: 404, body: { error: 'Not found' } }, { status: 200, body: { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] }, delayMs: 500 })
       window.diaryHarness.start()
     })
 
@@ -746,6 +749,7 @@ test.describe('useDiary prefetch on initial load', () => {
     // Queue list + all 3 entry responses so the prefetch can consume them
     await page.evaluate(({ files, entries }) => {
       window.diaryHarness.q(
+        { status: 404, body: { error: 'Not found' } },
         { status: 200, body: { files } },
         ...entries.map(entry => ({ status: 200, body: entry })),
       )
@@ -756,8 +760,8 @@ test.describe('useDiary prefetch on initial load', () => {
     })
 
     await page.waitForSelector('#harness-ready')
-    // 1 list call + 3 prefetch content calls
-    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(4)
+    // 1 today-404 + 1 list call + 3 prefetch content calls
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(5)
     await page.evaluate(() => window.diaryHarness.clearCalls())
 
     // Content is now in cache — getContent must not make another network call
@@ -774,6 +778,7 @@ test.describe('useDiary prefetch on initial load', () => {
     // If a 4th or 5th were attempted, the queue would be exhausted and recorded in calls()
     await page.evaluate(({ files, entries }) => {
       window.diaryHarness.q(
+        { status: 404, body: { error: 'Not found' } },
         { status: 200, body: { files } },
         ...entries.map(entry => ({ status: 200, body: entry })),
       )
@@ -784,11 +789,11 @@ test.describe('useDiary prefetch on initial load', () => {
     })
 
     await page.waitForSelector('#harness-ready')
-    // 1 list + exactly 3 prefetch calls — 4th and 5th entries must not be attempted
-    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(4)
+    // 1 today-404 + 1 list + exactly 3 prefetch calls — 4th and 5th entries must not be attempted
+    await expect.poll(async () => (await page.evaluate(() => window.diaryHarness.calls())).length).toBe(5)
 
     const calls = await page.evaluate(() => window.diaryHarness.calls())
-    const prefetchUrls = calls.slice(1).map((c: { url: string }) => c.url)
+    const prefetchUrls = calls.slice(2).map((c: { url: string }) => c.url)
     expect(prefetchUrls.some((u: string) => u.includes('2026-05-05'))).toBe(true)
     expect(prefetchUrls.some((u: string) => u.includes('2026-05-04'))).toBe(true)
     expect(prefetchUrls.some((u: string) => u.includes('2026-05-03'))).toBe(true)
@@ -1263,6 +1268,7 @@ test.describe('useDiary offline drafts', () => {
         savedAt: Date.now(),
       }])
       window.diaryHarness.q(
+        { status: 404, body: { error: 'Not found' } },
         { status: 200, body: { files: [] } },
         { status: 200, body: meta },
       )

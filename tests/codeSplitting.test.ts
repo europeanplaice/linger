@@ -8,6 +8,7 @@ test.describe('code splitting', () => {
     })
     await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
     await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
+    await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404, json: { error: 'Not found' } }))
     await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
   })
 
