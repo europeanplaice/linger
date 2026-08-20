@@ -371,13 +371,49 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           })
           setLoading(false)
         }
-        // Always sync with Drive to pick up remote changes and evict stale content
-        const freshCache = await loadEntryList(true, canUsePersistentCache)
+        // Always sync with Drive to pick up remote changes and evict stale content.
+        // Fire getEntryByDate for today in parallel so the editor can render
+        // without waiting for the full file list to complete.
+        const today = new Date().toISOString().split('T')[0]
+        const [prefetchedToday, freshCache] = await Promise.all([
+          getEntryByDate(today).catch(() => null),
+          loadEntryList(true, canUsePersistentCache),
+        ])
         setFreshListLoaded(true)
 
-        // Prefetch the 3 most recent entries that aren't already in memory
+        // Merge pre-fetched today content into the reconciled cache.
+        // This runs inside the updater to avoid a race with concurrent
+        // React state batching — we always read from the latest prev.
+        if (prefetchedToday && prefetchedToday !== 'not-modified') {
+          updateCache(prev => {
+            const existing = prev.get(today)
+            if (existing &&
+                existing.meta.id === prefetchedToday.meta.id &&
+                existing.meta.version === prefetchedToday.meta.version &&
+                !existing.content) {
+              const next = new Map(prev)
+              next.set(today, {
+                ...existing,
+                content: prefetchedToday.entry,
+                snippet: existing.snippet ?? prefetchedToday.entry.content.slice(0, 500),
+              })
+              if (email !== null) putCached({
+                date: today,
+                meta: prefetchedToday.meta,
+                content: prefetchedToday.entry,
+                snippet: prefetchedToday.entry.content.slice(0, 500),
+              }).catch(() => {})
+              return next
+            }
+            return prev
+          })
+        }
+
+        // Prefetch the 3 most recent entries that aren't already in memory,
+        // excluding today (already pre-fetched above).
         const recentDates = Array.from(freshCache.keys())
           .sort((a, b) => b.localeCompare(a))
+          .filter(d => d !== today)
           .slice(0, 3)
           .filter(d => !freshCache.get(d)?.content)
         for (const d of recentDates) {

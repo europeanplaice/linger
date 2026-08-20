@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestGet as onSearch } from '../../functions/api/drive/search'
+import { onRequestGet as onListEntries } from '../../functions/api/drive/entries'
 import { onRequestGet as onGetEntry, onRequestPost as onPostEntry, onRequestDelete as onDeleteEntry } from '../../functions/api/drive/entry/[date]'
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
 import { onRequestGet as onGetRevision } from '../../functions/api/drive/revisions/[fileId]/[revisionId]'
@@ -16,6 +17,7 @@ vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
+  listEntries: vi.fn().mockResolvedValue([]),
   searchEntries: vi.fn().mockResolvedValue([{ id: 'f1' }]),
   findEntryMeta: vi.fn().mockResolvedValue({ id: 'entry-1', name: 'diary-2026-05-01.json', version: '7' }),
   getEntryContent: vi.fn().mockResolvedValue({ date: '2026-05-01', content: 'hi', updated_at: '' }),
@@ -45,6 +47,42 @@ function makeContext(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('list entries handler', () => {
+  it('fetches start page token in parallel with listing entries', async () => {
+    let listResolves: (() => void) | undefined
+    let tokenResolves: (() => void) | undefined
+    const listStarted = vi.fn()
+    const tokenStarted = vi.fn()
+
+    vi.mocked(drive.listEntries).mockImplementationOnce(() => {
+      listStarted()
+      return new Promise(resolve => { listResolves = () => resolve([{ id: 'f1', name: 'diary-2026-05-01.txt', version: '1' }]) })
+    })
+    vi.mocked(drive.getStartPageToken).mockImplementationOnce(() => {
+      tokenStarted()
+      return new Promise(resolve => { tokenResolves = () => resolve('tok-fresh') })
+    })
+
+    const put = vi.fn()
+    const ctx = makeContext({ env: { SESSIONS: { put } } })
+    const resPromise = onListEntries(ctx as any)
+
+    // Both calls should have started before either resolves
+    expect(listStarted).toHaveBeenCalledOnce()
+    expect(tokenStarted).toHaveBeenCalledOnce()
+
+    // Resolve both
+    listResolves!()
+    tokenResolves!()
+    const res = await resPromise
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { files: unknown[] }
+    expect(body.files).toHaveLength(1)
+    expect(put).toHaveBeenCalledOnce()
+  })
 })
 
 describe('search handler', () => {
