@@ -9,16 +9,18 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
   try {
     const [files, startPageToken] = await Promise.all([
       listEntries(accessToken, sessionId, session, context.env),
-      getStartPageToken(accessToken),
+      getStartPageToken(accessToken).catch(() => null),
     ])
 
     // Persist the changes API baseline so the next incremental sync is
     // relative to the state just observed here.
-    try {
-      session.changes_start_page_token = startPageToken
-      await saveSession(sessionId, { ...session, changes_start_page_token: startPageToken }, context.env)
-    } catch (e) {
-      console.error('entries.ts: Failed to refresh changes start page token', e)
+    if (startPageToken) {
+      try {
+        session.changes_start_page_token = startPageToken
+        await saveSession(sessionId, { ...session, changes_start_page_token: startPageToken }, context.env)
+      } catch (e) {
+        console.error('entries.ts: Failed to refresh changes start page token', e)
+      }
     }
 
     return jsonResponse({ files })

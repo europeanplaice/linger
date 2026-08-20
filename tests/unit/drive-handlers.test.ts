@@ -83,6 +83,20 @@ describe('list entries handler', () => {
     expect(body.files).toHaveLength(1)
     expect(put).toHaveBeenCalledOnce()
   })
+
+  it('still returns entries when getStartPageToken fails', async () => {
+    vi.mocked(drive.getStartPageToken).mockRejectedValueOnce(new Error('token fetch failed'))
+
+    const put = vi.fn()
+    const ctx = makeContext({ env: { SESSIONS: { put } } })
+    const res = await onListEntries(ctx as any)
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { files: unknown[] }
+    expect(body.files).toEqual([])
+    // Session should not be updated when token fetch fails
+    expect(put).not.toHaveBeenCalled()
+  })
 })
 
 describe('search handler', () => {
