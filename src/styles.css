@@ -5310,6 +5310,120 @@ dialog.recollection-dialog::backdrop {
   border-color: var(--accent);
 }
 
+/* Keyboard Shortcuts modal */
+dialog.shortcuts-dialog {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  width: min(400px, 90vw);
+  box-shadow: 0 8px 32px var(--shadow-heavy);
+  margin: auto;
+  overflow: hidden;
+}
+dialog.shortcuts-dialog::backdrop {
+  background: var(--overlay-heavy);
+}
+@starting-style {
+  dialog.shortcuts-dialog::backdrop { background: transparent; }
+}
+.shortcuts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.shortcuts-close {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  line-height: 1;
+}
+.shortcuts-close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.shortcuts-body {
+  padding: 0.6rem 1.2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+}
+.shortcuts-row + .shortcuts-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.shortcuts-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted, var(--text));
+}
+.shortcuts-keys {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.shortcuts-keys span {
+  font-size: 0.72rem;
+  color: var(--text-muted, var(--text));
+  opacity: 0.55;
+}
+.shortcuts-keys kbd {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  min-width: 1.5em;
+  text-align: center;
+  background: var(--code-bg, var(--border));
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0.12em 0.45em;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Sidebar help button */
+.btn-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.btn-help:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.btn-help:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* dialog:not([open]) must come after all specific dialog rules (equal specificity,
    last-rule-wins) to ensure dialogs are hidden when closed even if display:flex
    is set elsewhere in their rule. */

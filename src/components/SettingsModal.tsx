@@ -26,7 +26,7 @@ import {
 
 const SETTINGS_SECTIONS: {
   id: string
-  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navShortcuts' | 'navStorage' | 'navBackup'
+  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navStorage' | 'navBackup'
   className?: string
 }[] = [
   { id: 'settings-account', labelKey: 'navAccount' },
@@ -34,7 +34,6 @@ const SETTINGS_SECTIONS: {
   { id: 'settings-calendar', labelKey: 'navCalendar' },
   { id: 'settings-milestones', labelKey: 'navMilestones' },
   { id: 'settings-data', labelKey: 'navData' },
-  { id: 'settings-shortcuts', labelKey: 'navShortcuts', className: 'settings-nav-item--shortcuts' },
   { id: 'settings-storage', labelKey: 'navStorage' },
   { id: 'settings-backup', labelKey: 'navBackup' },
 ]
@@ -1003,39 +1002,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               {shareMsg ?? t.settings.share}
             </button>
-          </div>
-        </div>
-
-        {/* Keyboard Shortcuts (hidden on mobile) */}
-        <div className="settings-section settings-shortcuts-section" id="settings-shortcuts">
-          <h4 className="settings-section-title">{t.settings.keyboardShortcuts}</h4>
-          <div className="settings-about settings-about-body">
-            <div className="settings-shortcuts">
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.saveEntry}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.previousNextDay}</span>
-                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>←</kbd><span>/</span><kbd>→</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.goToToday}</span>
-                <span className="settings-shortcut-keys"><kbd>Alt</kbd><span>+</span><kbd>↑</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.toggleDarkTheme}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>D</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.toggleSerifFont}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>F</kbd></span>
-              </div>
-              <div className="settings-shortcut-row">
-                <span className="settings-shortcut-desc">{t.settings.focusSearch}</span>
-                <span className="settings-shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></span>
-              </div>
-            </div>
           </div>
         </div>
 

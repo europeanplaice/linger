@@ -10,3 +10,4 @@ export const SettingsModal = lazy(() => import('./SettingsModal').then(m => ({ d
 export const RecollectionJourney = lazy(() => import('./RecollectionJourney').then(m => ({ default: m.RecollectionJourney })))
 export const HistoryModal = lazy(() => import('./HistoryModal').then(m => ({ default: m.HistoryModal })))
 export const MilestoneFormModal = lazy(() => import('./MilestoneFormModal').then(m => ({ default: m.MilestoneFormModal })))
+export const KeyboardShortcutsModal = lazy(() => import('./KeyboardShortcutsModal').then(m => ({ default: m.KeyboardShortcutsModal })))

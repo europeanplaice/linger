@@ -19,7 +19,7 @@ import { CalendarView } from './components/CalendarView'
 import { EntryEditor } from './components/EntryEditor'
 import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
-import { SettingsModal, RecollectionJourney } from './components/lazy'
+import { SettingsModal, RecollectionJourney, KeyboardShortcutsModal } from './components/lazy'
 import { AppIcon } from './components/AppIcon'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel, diaryDateParts } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
@@ -185,6 +185,7 @@ export default function App() {
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recollectionOpen, setRecollectionOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [serendipityPrefetch, setSerendipityPrefetch] = useState<[string, string] | [string] | []>([])
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
   const searchBarRef = useRef<SearchBarHandle>(null)
@@ -493,6 +494,11 @@ export default function App() {
           requestAnimationFrame(() => searchBarRef.current?.focus())
           return
         }
+        if (e.key === '?') {
+          e.preventDefault()
+          setShortcutsOpen(v => !v)
+          return
+        }
       }
       if (!e.altKey || e.repeat) return
       if (document.activeElement instanceof HTMLInputElement) return
@@ -686,6 +692,9 @@ export default function App() {
             </motion.button>
             )}
           </AnimatePresence>
+          <button className="btn-help" onClick={() => setShortcutsOpen(true)} title={t.settings.keyboardShortcuts}>
+            <svg className="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </button>
           <button className="btn-account btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
             {email && (
               <span className="account-avatar" aria-hidden="true">
@@ -754,6 +763,13 @@ export default function App() {
               onClose={() => setRecollectionOpen(false)}
               getSimilar={tfIdf.getSimilar}
             />
+          </Suspense>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {shortcutsOpen && (
+          <Suspense fallback={null}>
+            <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />
           </Suspense>
         )}
       </AnimatePresence>
