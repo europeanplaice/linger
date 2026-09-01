@@ -28,6 +28,10 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 - Touch swipe navigation between days on mobile
 - Share individual entries or share the app URL
 - Installable as a Progressive Web App
+- Contextual writing prompts — a static bank plus dynamic prompts fed by your cadence, milestones, holidays, seasons and the topics you write about (see `src/data/writingPrompts.ts`, `src/utils/dynamicPrompts.ts`)
+- Local TF-IDF search over your cached corpus, powering "similar past entries" and topic signals (see `src/utils/tfidf.ts`, `src/hooks/useTfIdfSearch.ts`)
+- Optional **S3 mirror/backup** — mirror entries to an S3 bucket in your own AWS account using short-lived credentials assumed from your Google sign-in, with resumable backfills, per-entry mirroring, and restore-from-backup (see "S3 mirror / self-hosted backup" below)
+- `?` opens a keyboard-shortcuts reference modal
 
 ## How it works
 
@@ -77,11 +81,12 @@ Drive 429/5xx responses are retried with exponential backoff.
 
 ### State
 - `useAuth` (`src/hooks/useAuth.ts`) — calls `/auth/session` on load to check sign-in state;
-  exposes `{ status, tokenExpired, hadSession, email, signIn, signOut, handleExpired, retryAfterExpired }`
+  exposes `{ status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }`
+  (`googleSub` is the user's numeric Google account ID and `googleClientId` the OAuth client — both shown in Settings under the S3 connection; `authError` can be `'no_refresh_token'`)
 - `useDiary` (`src/hooks/useDiary.ts`) — on sign-in, calls `listEntries` via the `/api/drive/…`
   proxy; lazily fetches content per entry into a `Map<date, EntryCache>`;
   hydrates recent entry metadata/content from IndexedDB, syncs Drive changes incrementally, prefetches likely next entries,
-  and exposes `{ loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll }`
+  and exposes `{ loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }`
 
 ### Browser storage
 The browser stores only non-sensitive preferences and small UI hints in `localStorage`:
@@ -123,6 +128,7 @@ No OAuth tokens are exposed to the browser or written to browser storage. Diary 
 - `SettingsModal` — language, theme, accent color, font family/size, auto-save, holiday calendar, milestone management, export/import, app sharing, keyboard shortcuts, data-storage links, and legal links
 - `SessionExpiredModal` — prompts re-auth when the session expires and retries the pending save
 - `HistoryModal` — view and restore past Drive revisions of an entry
+- `KeyboardShortcutsModal` — keyboard-shortcut reference, opened by pressing `?`
 - `ExportButton` — ZIP export UI used inside `SettingsModal`; bundles plain-text entries plus a portable `index.html` viewer
 - `ImportButton` — ZIP import UI used inside `SettingsModal`; reads the app's own export format or a raw `linger_diary` folder downloaded from Drive, including milestones
 - `MilestoneFormModal` — add/edit milestone form modal; used inside `SettingsModal` and `EntryEditor`
@@ -135,7 +141,7 @@ The app uses **Cloudflare Web Analytics** — cookie-free, no individual trackin
 
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
-The workflow runs lint, unit tests, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
+The workflow runs lint, unit tests, the S3 Worker's test suite, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
 The same job also deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
 
 Pushes to `main` deploy to the production Pages project (`linger`) and the production `linger-s3-workflows` Worker; pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com` and the `linger-s3-workflows-staging` Worker, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' surrounding Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/` — Terraform no longer owns the Worker script or its Workflow bindings, since CI can't run `terraform apply` (local-only state, no remote backend).
@@ -146,6 +152,14 @@ npx wrangler deploy workers/s3-workflows/src/index.ts --config workers/s3-workfl
 ```
 
 `vite.config.ts` uses `base: '/'` (correct for a custom domain).
+
+### S3 mirror / self-hosted backup
+
+Alongside Google Drive, you can optionally mirror entries to an **S3 bucket in your own AWS account** — a redundant backup/export target independent of Linger. AWS has no consumer OAuth consent screen, so Linger never holds long-lived AWS credentials: at request time the server exchanges your existing Google sign-in `id_token` for short-lived AWS credentials via `sts:AssumeRoleWithWebIdentity`. The role's IAM trust policy is scoped by both `accounts.google.com:aud` (Linger's OAuth client ID) and `accounts.google.com:sub` (your personal numeric Google account ID), so only your own session can assume it.
+
+The trust relationship is set up **once in your own AWS account** with the standalone Terraform module in `self-hosted/aws-s3/` (IAM OIDC provider + role + a versioned, encryption-enabled, fully private bucket). `terraform apply` prints the `role_arn`/`bucket_name` to paste into Settings under **S3 backup**, where you can test the connection, run an initial backfill, retry failed entries, resync everything, restore entries missing from Drive, and watch per-entry sync status (`synced` / `pending` / `failed` / `unconfirmed` / `backfilling`). Revocation is `terraform destroy` — bucket contents and the bucket itself (`prevent_destroy`) are untouched.
+
+S3 access flows through the Pages Functions at `/api/s3/…` and a dedicated Worker reached via the `S3_WORKFLOW_SERVICE` service binding (`workers/s3-workflows/`). Heavy operations run as **Cloudflare Workflows** (durable, resumable backfills in chained chunks and per-save mirrors) coordinated by a `S3SyncIndex` Durable Object that tracks per-date sync state. The full user-facing setup guide mirrors `public/self-hosted-s3.html` and the module's `README.md`.
 
 ## Self-hosting
 
@@ -252,10 +266,14 @@ Some UI states are hard to trigger naturally during development. Append `?previe
 ## Tech stack
 
 - React 19 + TypeScript
-- Vite 8
-- Cloudflare Pages + Pages Functions (auth + Drive API proxy)
+- Vite 8 (with build-time prerendering of the signed-out landing page and CSP inline-hash injection)
+- Cloudflare Pages + Pages Functions (auth + Drive API proxy + S3 proxy)
 - Cloudflare KV (session storage)
+- Cloudflare Workers + Workflows + Durable Objects (`workers/s3-workflows/`, S3 mirror/backfill)
 - Google Drive API v3 (plain `fetch`, server-side via Cloudflare Functions)
-- Google OAuth 2.0 Authorization Code Flow with PKCE
-- Playwright for e2e tests, Vitest for unit tests
-- GitHub Actions + Cloudflare Pages (deployment)
+- Google OAuth 2.0 Authorization Code Flow with PKCE (server-side token refresh, `drive.file` scope)
+- AWS STS `AssumeRoleWithWebIdentity` (short-lived S3 credentials from the Google id_token)
+- `motion` for animations, `jszip` for ZIP export/import, `@github/relative-time-element`, `lucide-react` for icons, `unicode-emoji-json` for the emoji picker
+- PWA via a service worker (`public/sw.js`) + Web App Manifest
+- Playwright for e2e tests, Vitest for unit + Workers tests (`@cloudflare/vitest-pool-workers`)
+- GitHub Actions + Cloudflare Pages (deployment), Terraform for Cloudflare (`infra/`) and the self-hosted S3 setup (`self-hosted/aws-s3/`)
