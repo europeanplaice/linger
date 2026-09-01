@@ -1236,6 +1236,9 @@ html.session-restoring .landing {
   z-index: 1;
   background: var(--sidebar-bg);
   padding-bottom: max(0px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 .sidebar-bottom::before {
   content: "";
@@ -5427,6 +5430,22 @@ dialog.shortcuts-dialog::backdrop {
   font-size: 0.82rem;
   line-height: 1.3;
   text-align: start;
+}
+
+/* Keep the three bottom actions on one shared inset and icon baseline. */
+.sidebar-bottom > .btn-recollection,
+.sidebar-bottom > .btn-help,
+.sidebar-bottom > .btn-account {
+  width: calc(100% - 2rem);
+  margin-inline: 1rem;
+}
+.sidebar-bottom > .btn-help,
+.sidebar-bottom > .btn-account {
+  padding-inline: 0.7rem;
+}
+.sidebar-bottom > .btn-recollection {
+  margin-block-start: 0.35rem;
+  margin-block-end: 0.1rem;
 }
 
 /* dialog:not([open]) must come after all specific dialog rules (equal specificity,
