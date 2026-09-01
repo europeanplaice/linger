@@ -1247,6 +1247,56 @@ html.session-restoring .landing {
   background: linear-gradient(transparent, var(--sidebar-bg));
   pointer-events: none;
 }
+/* Sidebar "About data storage" info block */
+.sidebar-storage {
+  padding: 0.35rem 1rem 0.4rem;
+  border-top: 1px solid var(--border);
+}
+.sidebar-storage-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted, var(--text));
+  cursor: pointer;
+  list-style: none;
+  padding: 0.25rem 0;
+}
+.sidebar-storage-toggle::-webkit-details-marker { display: none; }
+.sidebar-storage-chevron {
+  margin-left: auto;
+  font-size: 0.6rem;
+  transition: transform 0.15s ease;
+}
+.sidebar-storage[open] .sidebar-storage-chevron { transform: rotate(90deg); }
+.sidebar-storage-body {
+  padding: 0.4rem 0 0.2rem;
+}
+.sidebar-storage-text {
+  font-size: 0.75rem;
+  color: var(--text-muted, var(--text));
+  margin: 0 0 0.3rem;
+  line-height: 1.5;
+}
+.sidebar-storage-list {
+  font-size: 0.72rem;
+  color: var(--text-muted, var(--text));
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  line-height: 1.5;
+}
+.sidebar-storage-link {
+  color: var(--accent);
+  display: inline-block;
+  font-size: 0.72rem;
+  margin-top: 0.4rem;
+  text-decoration: none;
+}
+.sidebar-storage-link:hover { text-decoration: underline; }
 .btn-account {
   display: flex;
   align-items: center;

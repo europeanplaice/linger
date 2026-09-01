@@ -6,7 +6,6 @@ import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
-import { folderNameForHostname } from '../utils/folderName'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { AccentColor } from '../hooks/useAccentColor'
@@ -26,7 +25,7 @@ import {
 
 const SETTINGS_SECTIONS: {
   id: string
-  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navStorage' | 'navBackup'
+  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navBackup'
   className?: string
 }[] = [
   { id: 'settings-account', labelKey: 'navAccount' },
@@ -34,7 +33,6 @@ const SETTINGS_SECTIONS: {
   { id: 'settings-calendar', labelKey: 'navCalendar' },
   { id: 'settings-milestones', labelKey: 'navMilestones' },
   { id: 'settings-data', labelKey: 'navData' },
-  { id: 'settings-storage', labelKey: 'navStorage' },
   { id: 'settings-backup', labelKey: 'navBackup' },
 ]
 
@@ -1002,27 +1000,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               {shareMsg ?? t.settings.share}
             </button>
-          </div>
-        </div>
-
-        {/* About Data Storage */}
-        <div className="settings-section" id="settings-storage">
-          <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
-          <div className="settings-about settings-about-body">
-            <p className="settings-about-text">
-              {t.settings.storageIntro}
-            </p>
-            <ul className="settings-about-list">
-              {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
-            </ul>
-            <a
-              href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="settings-drive-link"
-            >
-              {t.settings.viewInDrive} ↗
-            </a>
           </div>
         </div>
 

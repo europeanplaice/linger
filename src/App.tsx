@@ -21,6 +21,7 @@ import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal, RecollectionJourney, KeyboardShortcutsModal } from './components/lazy'
 import { AppIcon } from './components/AppIcon'
+import { folderNameForHostname } from './utils/folderName'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel, diaryDateParts } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
 import { recollectionHint } from './utils/recollectionHint'
@@ -668,6 +669,27 @@ export default function App() {
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
         )}
         <div className="sidebar-bottom">
+          <details className="sidebar-storage">
+            <summary className="sidebar-storage-toggle">
+              <svg className="btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5L9 20"/></svg>
+              {t.settings.aboutDataStorage}
+              <span className="sidebar-storage-chevron" aria-hidden="true">▸</span>
+            </summary>
+            <div className="sidebar-storage-body">
+              <p className="sidebar-storage-text">{t.settings.storageIntro}</p>
+              <ul className="sidebar-storage-list">
+                {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
+              </ul>
+              <a
+                href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="sidebar-storage-link"
+              >
+                {t.settings.viewInDrive} ↗
+              </a>
+            </div>
+          </details>
           <AnimatePresence>
             {diary.dates.length > 0 && (
             <motion.button
