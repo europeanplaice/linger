@@ -13,6 +13,7 @@ import { useOnline } from './hooks/useOnline'
 import { useTabSync } from './hooks/useTabSync'
 import { useS3Backfill } from './hooks/useS3Backfill'
 import { useS3StaleEntryAutoResync } from './hooks/useS3StaleEntryAutoResync'
+import { Keyboard } from 'lucide-react'
 import { Landing } from './components/Landing'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -21,7 +22,6 @@ import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal, RecollectionJourney, KeyboardShortcutsModal } from './components/lazy'
 import { AppIcon } from './components/AppIcon'
-import { folderNameForHostname } from './utils/folderName'
 import { todayYmd, shiftDate, weekdayLabel, diaryDateLabel, diaryDateParts } from './utils/date'
 import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './utils/recollectionDates'
 import { recollectionHint } from './utils/recollectionHint'
@@ -669,27 +669,6 @@ export default function App() {
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
         )}
         <div className="sidebar-bottom">
-          <details className="sidebar-storage">
-            <summary className="sidebar-storage-toggle">
-              <svg className="btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5L9 20"/></svg>
-              {t.settings.aboutDataStorage}
-              <span className="sidebar-storage-chevron" aria-hidden="true">▸</span>
-            </summary>
-            <div className="sidebar-storage-body">
-              <p className="sidebar-storage-text">{t.settings.storageIntro}</p>
-              <ul className="sidebar-storage-list">
-                {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
-              </ul>
-              <a
-                href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="sidebar-storage-link"
-              >
-                {t.settings.viewInDrive} ↗
-              </a>
-            </div>
-          </details>
           <AnimatePresence>
             {diary.dates.length > 0 && (
             <motion.button
@@ -715,7 +694,8 @@ export default function App() {
             )}
           </AnimatePresence>
           <button className="btn-help" onClick={() => setShortcutsOpen(true)} title={t.settings.keyboardShortcuts}>
-            <svg className="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <Keyboard className="btn-icon" size={18} strokeWidth={1.8} aria-hidden="true" />
+            <span className="sidebar-help-label">{t.settings.keyboardShortcuts}</span>
           </button>
           <button className="btn-account btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
             {email && (

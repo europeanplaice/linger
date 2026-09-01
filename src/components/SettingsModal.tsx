@@ -6,6 +6,7 @@ import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
+import { folderNameForHostname } from '../utils/folderName'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { AccentColor } from '../hooks/useAccentColor'
@@ -25,7 +26,7 @@ import {
 
 const SETTINGS_SECTIONS: {
   id: string
-  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navBackup'
+  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navStorage' | 'navBackup'
   className?: string
 }[] = [
   { id: 'settings-account', labelKey: 'navAccount' },
@@ -33,6 +34,7 @@ const SETTINGS_SECTIONS: {
   { id: 'settings-calendar', labelKey: 'navCalendar' },
   { id: 'settings-milestones', labelKey: 'navMilestones' },
   { id: 'settings-data', labelKey: 'navData' },
+  { id: 'settings-storage', labelKey: 'navStorage' },
   { id: 'settings-backup', labelKey: 'navBackup' },
 ]
 
@@ -1003,6 +1005,27 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
         </div>
 
+        {/* About data storage */}
+        <div className="settings-section" id="settings-storage">
+          <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
+          <div className="settings-about settings-about-body">
+            <p className="settings-about-text">
+              {t.settings.storageIntro}
+            </p>
+            <ul className="settings-about-list">
+              {t.settings.storageItems.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+            <a
+              href={`https://drive.google.com/drive/search?q=${folderNameForHostname(window.location.hostname)}${email ? `&authuser=${encodeURIComponent(email)}` : ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="settings-drive-link"
+            >
+              {t.settings.viewInDrive} ↗
+            </a>
+          </div>
+        </div>
+
         {/* S3 backup (advanced) */}
         <div className="settings-section" id="settings-backup">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
@@ -1360,5 +1383,4 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     </motion.dialog>
   )
 }
-
 
