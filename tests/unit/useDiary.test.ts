@@ -41,6 +41,8 @@ const meta = (date: string, version = '1', id = `file-${date}`): DriveFileMeta =
 
 const entryObj = (date: string, content?: string): DiaryEntry => ({ date, content: content ?? `Entry for ${date}` })
 
+const todayStr = (): string => new Date().toISOString().split('T')[0]
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -62,8 +64,9 @@ function renderUseDiary(opts: { email?: string | null; authStatus?: 'initializin
 
 describe('useDiary initial load parallelization', () => {
   it('calls listEntries and getEntryByDate(today) in parallel', async () => {
-    const todayMeta = meta('2026-08-20')
-    const todayContent = entryObj('2026-08-20', 'Today diary')
+    const today = todayStr()
+    const todayMeta = meta(today)
+    const todayContent = entryObj(today, 'Today diary')
 
     let listResolves: (files: DriveFileMeta[]) => void
     let contentResolves: (result: LoadedDiaryEntry | null) => void
@@ -81,7 +84,7 @@ describe('useDiary initial load parallelization', () => {
 
     // Both should have been called before either resolves
     expect(driveEntries.listEntries).toHaveBeenCalledOnce()
-    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith('2026-08-20')
+    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today)
 
     // Resolve both
     await act(async () => {
@@ -90,12 +93,13 @@ describe('useDiary initial load parallelization', () => {
     })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.dates).toContain('2026-08-20')
+    expect(result.current.dates).toContain(today)
   })
 
   it('merges pre-fetched content into cache after listEntries reconciles', async () => {
-    const todayMeta = meta('2026-08-20')
-    const todayContent = entryObj('2026-08-20', 'Pre-fetched today')
+    const today = todayStr()
+    const todayMeta = meta(today)
+    const todayContent = entryObj(today, 'Pre-fetched today')
     const yesterdayMeta = meta('2026-08-19')
 
     vi.mocked(driveEntries.listEntries).mockResolvedValueOnce([todayMeta, yesterdayMeta])
@@ -105,16 +109,17 @@ describe('useDiary initial load parallelization', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    expect(result.current.dates).toContain('2026-08-20')
+    expect(result.current.dates).toContain(today)
     expect(result.current.dates).toContain('2026-08-19')
 
     // getEntryByDate was called for today (parallel pre-fetch)
-    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith('2026-08-20')
+    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today)
   })
 
   it('does not re-fetch today via background prefetch (already pre-fetched)', async () => {
+    const today = todayStr()
     const files: DriveFileMeta[] = [
-      meta('2026-08-20'),
+      meta(today),
       meta('2026-08-19'),
       meta('2026-08-18'),
       meta('2026-08-17'),
@@ -123,8 +128,8 @@ describe('useDiary initial load parallelization', () => {
     vi.mocked(driveEntries.listEntries).mockResolvedValueOnce(files)
     // Pre-fetch for today
     vi.mocked(driveEntries.getEntryByDate).mockResolvedValueOnce({
-      entry: entryObj('2026-08-20'),
-      meta: meta('2026-08-20'),
+      entry: entryObj(today),
+      meta: meta(today),
     })
 
     const { result } = renderUseDiary()
@@ -140,7 +145,7 @@ describe('useDiary initial load parallelization', () => {
 
     // Today should only appear once in getEntryByDate calls
     const todayCalls = vi.mocked(driveEntries.getEntryByDate).mock.calls
-      .filter(([date]) => date === '2026-08-20')
+      .filter(([date]) => date === today)
     expect(todayCalls).toHaveLength(1)
 
     // Background prefetches for 19 and 18 should also have run
