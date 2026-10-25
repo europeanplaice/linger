@@ -1,6 +1,7 @@
 import type { Env, SessionData } from '../_shared/session'
 import { saveSession, addEmailSessionIndex, addSubSessionIndex, getRefreshTokenForEmail, getRefreshTokenForSub, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 import { verifyGoogleIdToken } from '../_shared/google'
+import { sanitizeReturnPath } from '../_shared/returnPath'
 
 // Inserts `key=value` before any `#fragment` in `path` (a query string can't
 // follow a fragment), joining with `&` if `path` already has a query string.
@@ -39,7 +40,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   } catch {
     stateRecord = { codeVerifier: stateRecordRaw, nonce: '', returnPath: '/' }
   }
-  const safeReturnPath = (stateRecord.returnPath.startsWith('/') && !stateRecord.returnPath.startsWith('//')) ? stateRecord.returnPath : '/'
+  const safeReturnPath = sanitizeReturnPath(stateRecord.returnPath, env.SESSION_DOMAIN)
 
   const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',

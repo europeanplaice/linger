@@ -232,20 +232,35 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(put).not.toHaveBeenCalled()
   })
 
-  it('redirects to / when returnPath is protocol-relative (//evil.com)', async () => {
+  it.each(['//evil.com', '/\\evil.com', '/\t/evil.com', '/notes/..//evil.com'])('revalidates an unsafe return path from stored state %j', async (returnPath) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: 'verified-id-token' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
-    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue('verifier'), delete: vi.fn(), put: vi.fn() } })
+    const stateRecord = JSON.stringify({ codeVerifier: 'verifier', returnPath })
+    const env = makeEnv({ SESSIONS: { get: vi.fn().mockResolvedValue(stateRecord), delete: vi.fn(), put: vi.fn() } })
     const request = callbackRequest({ code: 'abc', state: 'valid-state' })
 
     const response = await onRequestGet({ request, env } as any)
 
     expect(response.status).toBe(302)
     expect(response.headers.get('Location')).toBe('/')
+  })
+
+  it('keeps a missing-refresh-token redirect on this origin', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'at', expires_in: 3600, id_token: 'verified-id-token' })),
+    ))
+    const stateRecord = JSON.stringify({ codeVerifier: 'verifier', returnPath: '/\\evil.com' })
+    const env = makeEnv()
+    env.SESSIONS.get.mockResolvedValue(stateRecord)
+
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env } as any)
+
+    expect(response.status).toBe(302)
+    expect(response.headers.get('Location')).toBe('/?auth_error=no_refresh_token')
   })
 
   it('redirects to the return path from state', async () => {

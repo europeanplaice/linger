@@ -113,6 +113,27 @@ describe('onRequestGet (login redirect)', () => {
     const record = JSON.parse(put.mock.calls[0][1] as string) as { returnPath: string }
     expect(record.returnPath).toBe('/')
   })
+
+  it.each(['/\\evil.com', '/\t/evil.com', '/notes/..//evil.com'])('does not store an unsafe return path %j', async (returnPath) => {
+    const env = makeEnv()
+    const request = new Request(`http://localhost/auth/login?${new URLSearchParams({ redirect: returnPath })}`)
+
+    await onRequestGet({ request, env } as any)
+
+    const record = JSON.parse(env.SESSIONS.put.mock.calls[0][1] as string)
+    expect(record.returnPath).toBe('/')
+  })
+
+  it('keeps the query and fragment of a local return path', async () => {
+    const env = makeEnv()
+    const returnPath = '/notes?date=2026-10-25#entry'
+    const request = new Request(`http://localhost/auth/login?${new URLSearchParams({ redirect: returnPath })}`)
+
+    await onRequestGet({ request, env } as any)
+
+    const record = JSON.parse(env.SESSIONS.put.mock.calls[0][1] as string)
+    expect(record.returnPath).toBe(returnPath)
+  })
 })
 
 describe('onRequestPost', () => {

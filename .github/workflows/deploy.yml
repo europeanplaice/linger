@@ -3,16 +3,32 @@ name: CI and Deploy
 on:
   push:
     branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -102,7 +118,7 @@ jobs:
       - run: npm run audit
 
   deploy:
-    needs: [lint, unit-test, workers-test, e2e-test, npm-audit]
+    needs: [build, lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -132,7 +148,7 @@ jobs:
           command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
 
   deploy-staging:
-    needs: [lint, unit-test, workers-test, e2e-test, npm-audit]
+    needs: [build, lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:

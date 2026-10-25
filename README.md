@@ -144,6 +144,10 @@ The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/wor
 The workflow runs lint, unit tests, the S3 Worker's test suite, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
 The same job also deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
 
+Pull requests targeting `main` or `staging` run the build and the same lint, test, and audit checks. Deployments run only on pushes to those branches. A separate weekly dependency audit (`.github/workflows/dependency-audit.yml`) checks for newly disclosed vulnerabilities even when no code changes. Dependabot checks npm packages and GitHub Actions weekly and opens update pull requests.
+
+Some Cloudflare test dependencies pin older transitive packages. The `package.json` overrides keep Sharp, Undici (within each major version), and the test plugin's Zod on patched releases. Recheck these overrides when upgrading `@cloudflare/vitest-plugin`; TypeScript stays on 6.x while `typescript-eslint` requires `<6.1.0`.
+
 Pushes to `main` deploy to the production Pages project (`linger`) and the production `linger-s3-workflows` Worker; pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com` and the `linger-s3-workflows-staging` Worker, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' surrounding Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/` — Terraform no longer owns the Worker script or its Workflow bindings, since CI can't run `terraform apply` (local-only state, no remote backend).
 
 Cloudflare's own Pages Git integration auto-builds a preview deployment for every other branch/PR, backed by a third `linger-s3-workflows-preview` Worker. CI doesn't deploy that one (it only triggers on `main`/`staging` pushes) — deploy it by hand when its code needs to catch up:
@@ -248,7 +252,7 @@ npm run lint         # ESLint on src/ and tests/
 npm run preview      # serve the production build with Wrangler locally
 npm test             # run the Playwright e2e test suite
 npm run test:unit    # run Vitest unit tests
-npm run test:workers # run the S3 Workflows Worker's test suite (@cloudflare/vitest-pool-workers)
+npm run test:workers # run the S3 Workflows Worker's test suite (@cloudflare/vitest-plugin)
 ```
 
 #### UI preview params
@@ -275,5 +279,5 @@ Some UI states are hard to trigger naturally during development. Append `?previe
 - AWS STS `AssumeRoleWithWebIdentity` (short-lived S3 credentials from the Google id_token)
 - `motion` for animations, `jszip` for ZIP export/import, `@github/relative-time-element`, `lucide-react` for icons, `unicode-emoji-json` for the emoji picker
 - PWA via a service worker (`public/sw.js`) + Web App Manifest
-- Playwright for e2e tests, Vitest for unit + Workers tests (`@cloudflare/vitest-pool-workers`)
+- Playwright for e2e tests, Vitest for unit + Workers tests (`@cloudflare/vitest-plugin`)
 - GitHub Actions + Cloudflare Pages (deployment), Terraform for Cloudflare (`infra/`) and the self-hosted S3 setup (`self-hosted/aws-s3/`)

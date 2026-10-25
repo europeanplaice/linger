@@ -59,7 +59,7 @@ export default defineConfig({
     license({
       thirdParty: {
         output: {
-          file: resolve(__dirname, 'dist/LICENSES.txt'),
+          file: resolve(import.meta.dirname, 'dist/LICENSES.txt'),
         },
       },
     }),
@@ -72,7 +72,7 @@ export default defineConfig({
         server.middlewares.use((req, res, next) => {
           const pathname = req.url?.split('?')[0] ?? ''
           if (!pathname.startsWith('/') || pathname.includes('.')) return next()
-          const candidate = resolve(__dirname, `public${pathname}.html`)
+          const candidate = resolve(import.meta.dirname, `public${pathname}.html`)
           if (existsSync(candidate)) {
             res.setHeader('Content-Type', 'text/html; charset=utf-8')
             res.end(readFileSync(candidate, 'utf-8'))
@@ -86,8 +86,8 @@ export default defineConfig({
       name: 'sw-cache-version-dev',
       apply: 'serve',
       buildStart() {
-        const src = resolve(__dirname, 'public/sw.js')
-        const distDir = resolve(__dirname, 'dist')
+        const src = resolve(import.meta.dirname, 'public/sw.js')
+        const distDir = resolve(import.meta.dirname, 'dist')
         if (!existsSync(distDir)) mkdirSync(distDir)
         const content = readFileSync(src, 'utf-8')
           .replace('__CACHE_VERSION__', `linger-dev-${Date.now()}`)
@@ -96,7 +96,7 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
           if (req.url !== '/sw.js') return next()
-          const content = readFileSync(resolve(__dirname, 'public/sw.js'), 'utf-8')
+          const content = readFileSync(resolve(import.meta.dirname, 'public/sw.js'), 'utf-8')
             .replace('__CACHE_VERSION__', `linger-dev-${Date.now()}`)
           res.setHeader('Content-Type', 'application/javascript')
           res.end(content)
@@ -107,7 +107,7 @@ export default defineConfig({
       name: 'csp-inline-hashes',
       apply: 'build',
       writeBundle() {
-        const distPath = resolve(__dirname, 'dist')
+        const distPath = resolve(import.meta.dirname, 'dist')
         const html = readFileSync(resolve(distPath, 'index.html'), 'utf-8')
         const dom = new JSDOM(html)
         const scripts = Array.from(dom.window.document.querySelectorAll('script'))
@@ -133,11 +133,11 @@ export default defineConfig({
       apply: 'build',
       async writeBundle() {
         const esbuild = require('esbuild') as typeof import('esbuild')
-        const cacheDir = resolve(__dirname, 'node_modules/.cache/linger-prerender')
+        const cacheDir = resolve(import.meta.dirname, 'node_modules/.cache/linger-prerender')
         mkdirSync(cacheDir, { recursive: true })
         const outfile = resolve(cacheDir, 'prerender.cjs')
         await esbuild.build({
-          entryPoints: [resolve(__dirname, 'src/prerender.tsx')],
+          entryPoints: [resolve(import.meta.dirname, 'src/prerender.tsx')],
           outfile,
           bundle: true,
           // CJS so React's server renderer can require() Node builtins at runtime.
@@ -155,7 +155,7 @@ export default defineConfig({
         })
         const { renderLanding } = require(outfile) as { renderLanding: () => string }
         const html = renderLanding()
-        const indexPath = resolve(__dirname, 'dist/index.html')
+        const indexPath = resolve(import.meta.dirname, 'dist/index.html')
         const index = readFileSync(indexPath, 'utf-8')
         const marker = '<div id="root"></div>'
         if (!index.includes(marker)) {
@@ -168,8 +168,8 @@ export default defineConfig({
     {
       name: 'sw-cache-version',
       writeBundle() {
-        const distPath = resolve(__dirname, 'dist')
-        const swPath = resolve(__dirname, 'dist/sw.js')
+        const distPath = resolve(import.meta.dirname, 'dist')
+        const swPath = resolve(import.meta.dirname, 'dist/sw.js')
         const version = hashDistFiles(distPath).slice(0, 16)
         const content = readFileSync(swPath, 'utf-8').replace(
           '__CACHE_VERSION__',
