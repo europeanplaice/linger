@@ -122,7 +122,7 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(response.headers.get('Location')).toBe('/?auth_error=no_refresh_token')
   })
 
-  it('reuses stored refresh_token when Google omits it on repeat sign-in, from a session matching the live client', async () => {
+  it.each(['esidx:user@example.com:', 'ssidx:google-sub-123:'])('reuses a subject-matched refresh token through %s', async (indexPrefix) => {
     const idToken = `header.${btoa(JSON.stringify({ email: 'user@example.com' }))}.sig`
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: 'at', expires_in: 3600, id_token: idToken }), {
@@ -131,9 +131,12 @@ describe('onRequestGet (OAuth callback)', () => {
       }),
     ))
     const put = vi.fn()
-    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:old-session' }], list_complete: true })
+    const list = vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
+      keys: prefix === indexPrefix ? [{ name: `${indexPrefix}old-session` }] : [],
+      list_complete: true,
+    }))
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'client-id' }))
+      if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'client-id', google_sub: 'google-sub-123' }))
       return Promise.resolve('verifier')
     })
     const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put } })
@@ -148,6 +151,34 @@ describe('onRequestGet (OAuth callback)', () => {
     expect(savedSession.client_id).toBe('client-id')
   })
 
+  it.each([
+    ['email', 'another-google-sub'],
+    ['email', undefined],
+    ['subject', 'another-google-sub'],
+    ['subject', undefined],
+  ])('rejects a refresh token from the %s index when its stored subject is %s', async (index, googleSub) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      access_token: 'at', expires_in: 3600, id_token: 'verified-id-token',
+    }))))
+    const prefix = index === 'email' ? 'esidx:user@example.com:' : 'ssidx:google-sub-123:'
+    const list = vi.fn().mockImplementation(({ prefix: requested }: { prefix: string }) => Promise.resolve({
+      keys: requested === prefix ? [{ name: `${prefix}old-session` }] : [],
+      list_complete: true,
+    }))
+    const get = vi.fn().mockImplementation((key: string) => Promise.resolve(
+      key === 'session:old-session'
+        ? JSON.stringify({ refresh_token: 'other-account-token', client_id: 'client-id', google_sub: googleSub })
+        : key.startsWith('oauth_state:') ? 'verifier' : null,
+    ))
+    const put = vi.fn()
+    const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put } })
+
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env } as any)
+
+    expect(response.headers.get('Location')).toBe('/?auth_error=no_refresh_token')
+    expect(put).not.toHaveBeenCalled()
+  })
+
   it('does not reuse a stored refresh_token minted by a different (e.g. retired Blue/Green) OAuth client', async () => {
     const idToken = `header.${btoa(JSON.stringify({ email: 'user@example.com' }))}.sig`
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
@@ -156,9 +187,12 @@ describe('onRequestGet (OAuth callback)', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
-    const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:old-session' }], list_complete: true })
+    const list = vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
+      keys: prefix === 'esidx:user@example.com:' ? [{ name: 'esidx:user@example.com:old-session' }] : [],
+      list_complete: true,
+    }))
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'retired-client' }))
+      if (key === 'session:old-session') return Promise.resolve(JSON.stringify({ refresh_token: 'stored-rt', access_token: 'old-at', expires_at: 0, client_id: 'retired-client', google_sub: 'google-sub-123' }))
       return Promise.resolve('verifier')
     })
     const env = makeEnv({ SESSIONS: { get, list, delete: vi.fn(), put: vi.fn() } })

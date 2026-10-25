@@ -84,8 +84,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (!refreshToken) {
     refreshToken = (await getRefreshTokenForSub(googleSub, env.GOOGLE_CLIENT_ID, env)) ?? undefined
     if (!refreshToken && email) {
-      // Legacy sessions created before sub indexing are still migrated on login.
-      refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env)) ?? undefined
+      // Migrate pre-index sessions only when their stored subject also matches.
+      refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env, googleSub)) ?? undefined
     }
   }
   if (!refreshToken) {

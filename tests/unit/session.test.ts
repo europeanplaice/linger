@@ -547,60 +547,60 @@ describe('getRefreshTokenForEmail', () => {
   it('returns null when no sessions are indexed for the email', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
     const env = { SESSIONS: { list } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBeNull()
     expect(list).toHaveBeenCalledWith({ prefix: 'esidx:user@example.com:' })
   })
 
   it('returns the refresh_token from the first session matching the current client', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
+      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' }))
       return Promise.resolve(null)
     })
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt1')
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBe('rt1')
   })
 
   it('skips sessions without a refresh_token and returns the first one that has it', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a' }))
-      if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
+      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' }))
+      if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' }))
       return Promise.resolve(null)
     })
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt2')
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBe('rt2')
   })
 
   it('returns null when all indexed sessions have no refresh_token', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
-    const get = vi.fn().mockResolvedValue(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a' }))
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' }))
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBeNull()
   })
 
   it('skips a refresh_token minted by a different (e.g. retired Blue/Green) client', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-old', access_token: 'at', expires_at: 0, client_id: 'client-old' }))
-      if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-current', access_token: 'at', expires_at: 0, client_id: 'client-a' }))
+      if (key === 'session:sid1') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-old', access_token: 'at', expires_at: 0, client_id: 'client-old', google_sub: 'google-sub-123' }))
+      if (key === 'session:sid2') return Promise.resolve(JSON.stringify({ refresh_token: 'rt-current', access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' }))
       return Promise.resolve(null)
     })
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt-current')
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBe('rt-current')
   })
 
   it('returns null when the only matching session predates client_id tracking', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true })
     const get = vi.fn().mockResolvedValue(JSON.stringify({ refresh_token: 'rt1', access_token: 'at', expires_at: 0 }))
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBeNull()
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBeNull()
   })
 
   it('normalizes email (uppercase) before listing the index', async () => {
     const list = vi.fn().mockResolvedValue({ keys: [], list_complete: true })
     const env = { SESSIONS: { list } }
-    await getRefreshTokenForEmail('User@Example.COM', 'client-a', env as any)
+    await getRefreshTokenForEmail('User@Example.COM', 'client-a', env as any, 'google-sub-123')
     expect(list).toHaveBeenCalledWith({ prefix: 'esidx:user@example.com:' })
   })
 
@@ -609,10 +609,10 @@ describe('getRefreshTokenForEmail', () => {
       .mockResolvedValueOnce({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: false, cursor: 'c1' })
       .mockResolvedValueOnce({ keys: [{ name: 'esidx:user@example.com:sid2' }], list_complete: true })
     const get = vi.fn().mockImplementation((key: string) =>
-      key === 'session:sid2' ? Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a' })) : Promise.resolve(null)
+      key === 'session:sid2' ? Promise.resolve(JSON.stringify({ refresh_token: 'rt2', access_token: 'at', expires_at: 0, client_id: 'client-a', google_sub: 'google-sub-123' })) : Promise.resolve(null)
     )
     const env = { SESSIONS: { list, get } }
-    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any)).toBe('rt2')
+    expect(await getRefreshTokenForEmail('user@example.com', 'client-a', env as any, 'google-sub-123')).toBe('rt2')
     expect(list).toHaveBeenNthCalledWith(1, { prefix: 'esidx:user@example.com:', cursor: undefined })
     expect(list).toHaveBeenNthCalledWith(2, { prefix: 'esidx:user@example.com:', cursor: 'c1' })
   })

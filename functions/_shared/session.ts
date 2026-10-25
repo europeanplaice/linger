@@ -361,11 +361,14 @@ async function listSessionIdsForEmail(email: string, env: Env): Promise<string[]
 // Blue/Green client swap, a token from the retired client is rejected by Google
 // (invalid_grant) on every refresh, so blindly reusing the oldest surviving session
 // forces the user into a repeated fail-then-relogin loop instead of a single relogin.
-export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env): Promise<string | null> {
+// The email index is only a lookup aid for sessions that predate sub indexing.
+// Email addresses can change owners; only a matching stable subject authorizes
+// token reuse. Sessions without a subject must obtain fresh consent instead.
+export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env, googleSub: string): Promise<string | null> {
   const ids = await listSessionIdsForEmail(email, env)
   for (const id of ids) {
     const session = await getSession(id, env)
-    if (session?.refresh_token && session.client_id === clientId) return session.refresh_token
+    if (session?.refresh_token && session.client_id === clientId && session.google_sub === googleSub) return session.refresh_token
   }
   return null
 }
@@ -374,7 +377,7 @@ export async function getRefreshTokenForSub(sub: string, clientId: string, env: 
   const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
   for (const id of ids) {
     const session = await getSession(id, env)
-    if (session?.refresh_token && session.client_id === clientId) return session.refresh_token
+    if (session?.refresh_token && session.client_id === clientId && session.google_sub === sub) return session.refresh_token
   }
   return null
 }

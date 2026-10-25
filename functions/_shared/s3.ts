@@ -62,9 +62,11 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     DurationSeconds: '43200',
   })
 
-  const resp = await fetch(`https://sts.${region}.amazonaws.com/?${params.toString()}`, {
+  // Keep the identity token out of URLs captured by request logs and traces.
+  const resp = await fetch(`https://sts.${region}.amazonaws.com/`, {
     method: 'POST',
-    headers: { Accept: 'application/json' },
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
     signal: AbortSignal.timeout(S3_FETCH_TIMEOUT_MS),
   })
 

@@ -8,6 +8,29 @@ afterEach(() => {
 })
 
 describe('assumeRoleWithWebIdentity', () => {
+  it('sends the identity token in the POST body without exposing credentials in the URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(stsResponse('2099-01-01T00:00:00Z'))
+    vi.stubGlobal('fetch', fetchMock)
+    const idToken = 'private.jwt+with/special=characters&scope=secret'
+    const roleArn = 'arn:aws:iam::123456789012:role/linger-s3'
+
+    await assumeRoleWithWebIdentity(idToken, roleArn, 'ap-northeast-1')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://sts.ap-northeast-1.amazonaws.com/')
+    expect(init.method).toBe('POST')
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/x-www-form-urlencoded')
+    expect(new Headers(init.headers).get('Accept')).toBe('application/json')
+    expect(Object.fromEntries(new URLSearchParams(init.body as string))).toEqual({
+      Action: 'AssumeRoleWithWebIdentity',
+      Version: '2011-06-15',
+      RoleArn: roleArn,
+      RoleSessionName: 'linger',
+      WebIdentityToken: idToken,
+      DurationSeconds: '43200',
+    })
+  })
+
   it('parses the AssumeRoleWithWebIdentity response into flat credentials', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       AssumeRoleWithWebIdentityResponse: {
