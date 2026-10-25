@@ -177,6 +177,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   let handled = 0
   let revoked = 0
+  let failed = false
 
   for (const [eventType, payload] of Object.entries(claims.events)) {
     if (!HANDLED_EVENT_TYPES.has(eventType)) continue
@@ -190,15 +191,21 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
 
     try {
-      if (sub) await deleteAllSessionsForSub(sub, env)
-      // Legacy fallback for sessions created before sub indexing.
-      if (email) await deleteAllSessionsForEmail(email, env)
+      // Attempt both indexes even if one fails; acknowledge only after all
+      // revocations finish, leaving failed sessions indexed for redelivery.
+      const results = await Promise.allSettled([
+        ...(sub ? [deleteAllSessionsForSub(sub, env)] : []),
+        ...(email ? [deleteAllSessionsForEmail(email, env)] : []),
+      ])
+      if (results.some(result => result.status === 'rejected')) throw new Error('Session revocation incomplete')
       revoked++
       console.log(`RISC ${eventType}: revoked sessions`)
     } catch (err) {
+      failed = true
       console.error(`RISC ${eventType}: failed to revoke sessions: ${err instanceof Error ? err.message : err}`)
     }
   }
 
+  if (failed) return jsonResponse({ error: 'Session revocation temporarily unavailable' }, 503, { 'Retry-After': '1' })
   return jsonResponse({ ok: true, handled, revoked }, 202)
 }

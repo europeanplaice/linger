@@ -410,30 +410,26 @@ export async function invalidateSession(sessionId: string, email: string | undef
   }
 }
 
-// Each session's index entry is independent (see addEmailSessionIndex), so unlike
-// the old shared-array design there's no combined state that a partial failure
-// could corrupt — one session's delete failing can't affect another's. A session
-// whose KV delete fails here simply lingers until its own pre-existing TTL, the
-// same bounded residual risk this function already carried before this change.
+// Attempt every session, but report partial failure so the security event can be
+// retried. Delete a record before its index: a failed record deletion must leave
+// the live session discoverable on the next attempt.
+async function revokeSessions(operations: Promise<void>[]): Promise<void> {
+  const results = await Promise.allSettled(operations)
+  if (results.some(result => result.status === 'rejected')) {
+    throw new Error('Session revocation incomplete')
+  }
+}
+
 export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {
   const ids = await listSessionIdsForEmail(email, env)
-  await Promise.allSettled(ids.map(async id => {
-    await Promise.allSettled([
-      env.SESSIONS.delete(`session:${id}`),
-      removeEmailSessionIndex(email, id, env),
-    ])
-  }))
+  await revokeSessions(ids.map(id => invalidateSession(id, email, env)))
 }
 
 export async function deleteAllSessionsForSub(sub: string, env: Env): Promise<void> {
   const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
-  await Promise.allSettled(ids.map(async id => {
+  await revokeSessions(ids.map(async id => {
     const session = await getSession(id, env)
-    await Promise.allSettled([
-      env.SESSIONS.delete(`session:${id}`),
-      removeSubSessionIndex(sub, id, env),
-      ...(session?.email ? [removeEmailSessionIndex(session.email, id, env)] : []),
-    ])
+    await invalidateSession(id, session?.email, env, sub)
   }))
 }
 

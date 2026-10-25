@@ -340,6 +340,46 @@ describe('get entry handler', () => {
 })
 
 describe('post entry handler', () => {
+  it.each([
+    { force: true, baseVersion: '8' },
+    { force: true, baseVersion: null },
+    {},
+  ])('rejects an unauthorized file without saving or mirroring with options %j', async (options) => {
+    vi.mocked(drive.getDiaryFileMeta).mockRejectedValueOnce(new drive.DriveError(404, 'not_found'))
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entry/2026-05-01', {
+        method: 'POST',
+        body: JSON.stringify({ content: 'overwrite', fileId: 'outsideDiaryFile123', ...options }),
+      }),
+      params: { date: '2026-05-01' },
+    })
+
+    const res = await onPostEntry(ctx as any)
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ conflict: null })
+    expect(drive.saveEntry).not.toHaveBeenCalled()
+    expect(s3Settings.mirrorEntrySave).not.toHaveBeenCalled()
+    expect(drive.getEntryContent).not.toHaveBeenCalled()
+  })
+
+  it('allows force to bypass version conflicts only after authorizing the diary file', async () => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/entry/2026-05-01', {
+        method: 'POST',
+        body: JSON.stringify({ content: 'overwrite', fileId: 'validFileId1234567890', force: true, baseVersion: 'old' }),
+      }),
+      params: { date: '2026-05-01' },
+    })
+
+    const res = await onPostEntry(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(drive.getDiaryFileMeta).toHaveBeenCalledWith('tok', 'sid', {}, {}, 'validFileId1234567890', '2026-05-01')
+    expect(drive.saveEntry).toHaveBeenCalledWith('tok', { date: '2026-05-01', content: 'overwrite' }, 'folder-1', 'entry-1')
+    expect(drive.getEntryContent).not.toHaveBeenCalled()
+  })
+
   it('rejects oversized entries', async () => {
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entry/2026-05-01', {

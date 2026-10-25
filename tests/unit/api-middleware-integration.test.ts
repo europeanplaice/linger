@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest as apiMiddleware } from '../../functions/api/_middleware'
-import { onRequestGet as onGetEntry } from '../../functions/api/drive/entry/[date]'
+import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../functions/api/drive/entry/[date]'
 import * as drive from '../../functions/_shared/drive'
 import { createFakeKV, type FakeKV } from '../helpers/fakeKV'
 
@@ -64,6 +64,37 @@ afterEach(() => {
 })
 
 describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
+  it.each([
+    { force: true },
+    {},
+    { baseVersion: '7' },
+  ])('blocks updates outside the diary folder through real file authorization with options %j', async (options) => {
+    const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession({ folder_id: 'diary-folder' })) })
+    const env = makeEnv(kv)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'externalFile12345678', name: 'diary-2026-05-01.txt', mimeType: 'text/plain',
+      parents: ['another-folder'], version: '7', trashed: false,
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+    const request = new Request('https://example.com/api/drive/entry/2026-05-01', {
+      method: 'POST',
+      headers: { Cookie: 'linger_session=sid123', Origin: 'https://example.com' },
+      body: JSON.stringify({ content: 'overwrite', fileId: 'externalFile12345678', ...options }),
+    })
+    const context = makeChainedContext(request, env, { date: '2026-05-01' })
+    context.next = vi.fn(() => onPostEntry(context as never))
+
+    const response = await apiMiddleware(context as never)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ conflict: null })
+    // Only the metadata GET may reach Google; no content read or PATCH.
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0][0]).toContain('/drive/v3/files/externalFile12345678?fields=')
+    expect(fetchMock.mock.calls[0][1].method).toBeUndefined()
+    expect(context.waitUntil).not.toHaveBeenCalled()
+  })
+
   it('threads sessionId/accessToken from middleware into the handler and returns the entry', async () => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
     const env = makeEnv(kv)

@@ -3,7 +3,7 @@ import {
   parseSessionId, getSession, saveSession, getValidAccessToken, getValidIdToken,
   makeSessionCookie, clearSessionCookie, jsonResponse,
   addEmailSessionIndex, removeEmailSessionIndex, deleteAllSessionsForEmail,
-  getRefreshTokenForEmail, invalidateSession,
+  getRefreshTokenForEmail, invalidateSession, deleteAllSessionsForSub,
   RefreshTokenInvalidError,
   SESSION_TTL,
 } from '../../functions/_shared/session'
@@ -682,12 +682,6 @@ describe('deleteAllSessionsForEmail', () => {
   })
 
   it('still deletes the other indexed sessions when one session record fails to delete', async () => {
-    // Regression guard: each session's index entry is independent (see
-    // addEmailSessionIndex), so one KV failure must not abort or corrupt the
-    // others — unlike the old shared-array design, there is no combined state
-    // to "keep the failed ones in" any more; a session that fails to delete
-    // here simply lingers until its own pre-existing TTL, same residual risk
-    // as before.
     const list = vi.fn().mockResolvedValue({
       keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }],
       list_complete: true,
@@ -696,9 +690,10 @@ describe('deleteAllSessionsForEmail', () => {
       key === 'session:sid1' ? Promise.reject(new Error('KV error')) : Promise.resolve(undefined)
     )
     const env = { SESSIONS: { list, delete: del } }
-    await deleteAllSessionsForEmail('user@example.com', env as any)
+    await expect(deleteAllSessionsForEmail('user@example.com', env as any)).rejects.toThrow()
     expect(del).toHaveBeenCalledWith('session:sid2')
     expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
+    expect(del).not.toHaveBeenCalledWith('esidx:user@example.com:sid1')
   })
 
   it('does nothing when no sessions are indexed', async () => {
@@ -707,5 +702,38 @@ describe('deleteAllSessionsForEmail', () => {
     const env = { SESSIONS: { list, delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
     expect(del).not.toHaveBeenCalled()
+  })
+})
+
+describe.each([
+  { label: 'email', revoke: deleteAllSessionsForEmail, subject: 'user@example.com', prefix: 'esidx:user@example.com:' },
+  { label: 'subject', revoke: deleteAllSessionsForSub, subject: 'google-sub-123', prefix: 'ssidx:google-sub-123:' },
+])('retryable $label session revocation', ({ revoke, subject, prefix }) => {
+  it('keeps a failed session discoverable and revokes it on retry, while deleting other sessions', async () => {
+    const storedSession = JSON.stringify({ email: 'user@example.com', google_sub: 'google-sub-123' })
+    const store = new Map([
+      ['session:sid1', storedSession], ['session:sid2', storedSession],
+      [`${prefix}sid1`, ''], [`${prefix}sid2`, ''],
+    ])
+    let failDelete = true
+    const env = { SESSIONS: {
+      list: vi.fn(async () => ({ keys: [...store.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })), list_complete: true })),
+      get: vi.fn(async (key: string) => store.get(key) ?? null),
+      delete: vi.fn(async (key: string) => {
+        if (key === 'session:sid1' && failDelete) throw new Error('KV unavailable')
+        store.delete(key)
+      }),
+    } }
+
+    await expect(revoke(subject, env as any)).rejects.toThrow()
+    expect(store.has('session:sid1')).toBe(true)
+    expect(store.has(`${prefix}sid1`)).toBe(true)
+    expect(store.has('session:sid2')).toBe(false)
+    expect(store.has(`${prefix}sid2`)).toBe(false)
+
+    failDelete = false
+    await revoke(subject, env as any)
+    expect(store.has('session:sid1')).toBe(false)
+    expect(store.has(`${prefix}sid1`)).toBe(false)
   })
 })

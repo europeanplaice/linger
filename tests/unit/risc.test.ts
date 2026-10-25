@@ -286,6 +286,25 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
   })
 
+  it.each(['email', 'subject'])('returns a retryable error when %s session deletion fails', async (index) => {
+    mockCrypto(true)
+    mockJwks()
+    const prefix = index === 'email' ? 'esidx:user@example.com:' : 'ssidx:12345:'
+    const env = makeEnv({
+      list: vi.fn().mockImplementation(({ prefix: requested }: { prefix: string }) => Promise.resolve({
+        keys: requested === prefix ? [{ name: `${prefix}sid1` }] : [], list_complete: true,
+      })),
+      delete: vi.fn().mockRejectedValue(new Error('KV unavailable')),
+    })
+
+    const response = await postRisc(makeJwt(VALID_HEADER, validPayload()), env)
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Retry-After')).toBe('1')
+    expect(await response.json()).toEqual({ error: 'Session revocation temporarily unavailable' })
+    expect(env.SESSIONS.delete).not.toHaveBeenCalledWith(`${prefix}sid1`)
+  })
+
   it('uses cached JWKS and skips fetch on cache hit', async () => {
     mockCrypto(true)
     const cachedResp = new Response(JSON.stringify(FAKE_JWKS), { headers: { 'Content-Type': 'application/json' } })

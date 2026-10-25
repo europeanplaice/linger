@@ -102,14 +102,15 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     if (body.fileId && (body.force || body.baseVersion !== null)) {
       if (!/^[a-zA-Z0-9_-]{10,200}$/.test(body.fileId)) return jsonResponse({ error: 'Invalid file ID' }, 400)
       const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-      let currentMeta: DriveFileMeta | null = null
+      // Force only overrides conflict detection, never file authorization.
+      let currentMeta: DriveFileMeta
+      try {
+        currentMeta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date)
+      } catch (e) {
+        if (e instanceof DriveError && e.status === 404) return jsonResponse({ conflict: null }, 409)
+        throw e
+      }
       if (!body.force && typeof body.baseVersion === 'string') {
-        try {
-          currentMeta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date)
-        } catch (e) {
-          if (e instanceof DriveError && e.status === 404) return jsonResponse({ conflict: null }, 409)
-          throw e
-        }
         if ((currentMeta.version ?? null) !== body.baseVersion) {
           const remoteEntry = await getEntryContent(accessToken, currentMeta.id, date)
           if (body.baseContent == null || remoteEntry.content !== body.baseContent) {
@@ -118,7 +119,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
         }
       }
       try {
-        const savedMeta = await saveEntry(accessToken, entry, folderId, currentMeta?.id ?? body.fileId)
+        const savedMeta = await saveEntry(accessToken, entry, folderId, currentMeta.id)
         context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, body.content, savedMeta.id, savedMeta.version))
         return jsonResponse(savedMeta)
       } catch (e) {
