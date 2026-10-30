@@ -4,7 +4,7 @@ export type FontSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const STORAGE_KEY = 'linger_fontsize'
 
-const FONT_SIZE_VALUES: Record<FontSize, string> = {
+export const FONT_SIZE_VALUES: Record<FontSize, string> = {
   sm: '1rem',
   md: '1.1rem',
   lg: '1.25rem',

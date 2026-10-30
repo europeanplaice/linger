@@ -1315,22 +1315,24 @@ html.session-restoring .landing {
 /* ── Settings modal ── */
 dialog.settings-dialog {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  width: min(520px, calc(100vw - 24px));
-  max-height: min(90dvh, 90vh);
+  border-radius: 16px;
+  width: min(880px, calc(100vw - 32px));
+  max-width: none;
+  height: min(800px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
   box-shadow: 0 8px 32px var(--shadow-heavy);
   overflow: hidden;
-  display: flex;
   flex-direction: column;
   margin: auto;
+  overscroll-behavior: contain;
 }
-@media (min-width: 720px) {
-  dialog.settings-dialog {
-    width: min(700px, calc(100vw - 24px));
-  }
+dialog.settings-dialog[open] {
+  display: flex;
 }
 dialog.settings-dialog::backdrop {
   background: var(--overlay-heavy);
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 @starting-style {
   dialog.settings-dialog::backdrop { background: transparent; }
@@ -1339,14 +1341,22 @@ dialog.settings-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.1rem 1.35rem;
+  gap: 1rem;
+  flex-shrink: 0;
+  padding: 1.3rem 1.5rem;
   border-bottom: 1px solid var(--border);
 }
 .settings-modal-header h3 {
-  font-size: 1.15rem;
+  font-size: 1.3rem;
   font-weight: 600;
   letter-spacing: 0.01em;
   margin: 0;
+}
+.settings-subtitle {
+  margin-top: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 .settings-modal-close {
   background: none;
@@ -1354,8 +1364,9 @@ dialog.settings-dialog::backdrop {
   font-size: 1.3rem;
   cursor: pointer;
   color: var(--text-muted);
-  width: 1.9rem;
-  height: 1.9rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1368,31 +1379,39 @@ dialog.settings-dialog::backdrop {
   background: var(--border);
   color: var(--text);
 }
-/* Section index nav: pill tabs pinned below the modal header, horizontal
-   scroll on narrow widths. */
+/* A persistent index and one continuous reading pane. */
+.settings-workspace {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
 .settings-nav {
   display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.65rem 1.35rem 0.6rem;
-  overflow-x: auto;
-  flex-shrink: 0;
-  background: var(--card-bg);
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem 0.65rem;
+  overflow-y: auto;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
   scrollbar-width: thin;
 }
 .settings-nav-item {
   display: inline-flex;
   align-items: center;
+  gap: 0.65rem;
+  text-align: start;
   white-space: nowrap;
   background: none;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.74rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 500;
   font-family: inherit;
-  padding: 0.28rem 0.7rem;
+  min-height: 2.75rem;
+  padding: 0.6rem 0.75rem;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .settings-nav-item:hover {
@@ -1400,8 +1419,29 @@ dialog.settings-dialog::backdrop {
   background: var(--selected-bg);
 }
 .settings-nav-item.active {
-  color: var(--on-accent);
-  background: var(--accent);
+  color: var(--accent);
+  background: var(--selected-bg);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.settings-instant-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding: 1.5rem 0.65rem 0.25rem;
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+.settings-instant-note svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  color: var(--accent);
+}
+.settings-dialog :is(button, a):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 .settings-list {
   display: flex;
@@ -1409,15 +1449,46 @@ dialog.settings-dialog::backdrop {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  padding: 0;
+  min-width: 0;
+  padding: 0 0.5rem;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .settings-item {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 3rem;
-  padding: 0.7rem 1.35rem;
+  min-height: 3.75rem;
+  padding: 0.8rem 1.35rem;
   gap: 1rem;
+}
+.settings-item-copytext {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.settings-item-description {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+.settings-writing-preview {
+  margin: 0.75rem 1.35rem 1rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.settings-writing-preview figcaption {
+  margin-bottom: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.settings-writing-preview p {
+  color: var(--text);
+  line-height: 1.9;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .settings-item-label {
   font-size: 0.9rem;
@@ -1554,6 +1625,11 @@ dialog.settings-dialog::backdrop {
 .settings-switch.active {
   background: var(--accent);
 }
+.settings-switch::before {
+  content: '';
+  position: absolute;
+  inset: -11px -4px;
+}
 .settings-switch:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--save-glow);
@@ -1587,8 +1663,6 @@ dialog.settings-dialog::backdrop {
   white-space: nowrap;
   font-size: 0.62rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--save-success-flash);
   background: color-mix(in srgb, var(--save-success-flash) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--save-success-flash) 35%, transparent);
@@ -1716,6 +1790,7 @@ dialog.settings-dialog::backdrop {
 .settings-font-picker {
   display: flex;
   gap: 0.5rem;
+  min-width: 13rem;
 }
 .settings-font-option {
   display: flex;
@@ -1724,6 +1799,7 @@ dialog.settings-dialog::backdrop {
   gap: 0.3rem;
   padding: 0.5rem 0.75rem;
   min-width: 4.5rem;
+  flex: 1;
   border: 1.5px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
@@ -1745,9 +1821,9 @@ dialog.settings-dialog::backdrop {
   line-height: 1;
 }
 .settings-font-label {
-  font-size: 0.62rem;
-  font-family: ui-monospace, monospace;
-  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  font-family: var(--font-body);
+  white-space: nowrap;
 }
 .settings-theme-picker {
   display: flex;
@@ -1778,9 +1854,8 @@ dialog.settings-dialog::backdrop {
   color: var(--text);
 }
 .settings-theme-label {
-  font-size: 0.62rem;
-  font-family: ui-monospace, monospace;
-  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  font-family: var(--font-body);
 }
 .settings-color-picker {
   display: grid;
@@ -1818,9 +1893,23 @@ dialog.settings-dialog::backdrop {
   border: 1.5px solid rgba(0,0,0,0.12);
 }
 .settings-color-label {
-  font-size: 0.62rem;
-  font-family: ui-monospace, monospace;
-  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  font-family: var(--font-body);
+}
+.settings-dialog :is(.settings-theme-option, .settings-color-option, .settings-font-option) {
+  position: relative;
+  min-height: 3.75rem;
+  padding-inline: 1rem;
+}
+.settings-dialog :is(.settings-theme-option, .settings-color-option, .settings-font-option).active::after {
+  content: '✓';
+  position: absolute;
+  top: 0.1rem;
+  right: 0.25rem;
+  font: 600 0.65rem var(--font-body);
+}
+.settings-dialog .settings-select-trigger {
+  min-height: 2.75rem;
 }
 .settings-select {
   position: relative;
@@ -2739,6 +2828,45 @@ dialog.settings-dialog::backdrop {
   outline-offset: 2px;
 }
 
+@media (max-width: 700px) {
+  dialog.settings-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 12px;
+  }
+  .settings-modal-header {
+    padding: 1rem 1.1rem;
+  }
+  .settings-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .settings-nav {
+    position: relative;
+    flex-direction: row;
+    flex-shrink: 0;
+    gap: 0.35rem;
+    overflow-x: auto;
+    padding: 0.5rem 1rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scroll-padding-inline: 1rem;
+  }
+  .settings-nav-item {
+    flex-shrink: 0;
+    gap: 0.4rem;
+    min-height: 2.75rem;
+    padding: 0.6rem 0.7rem;
+  }
+  .settings-instant-note {
+    display: none;
+  }
+  .settings-list {
+    padding-inline: 0;
+  }
+}
+
 @media (max-width: 480px) {
   .settings-item,
   .settings-account-row {
@@ -2774,6 +2902,13 @@ dialog.settings-dialog::backdrop {
   .settings-color-option {
     flex: 1;
     min-width: 0;
+  }
+  .settings-writing-preview {
+    margin-inline: 1rem;
+    padding: 1rem;
+  }
+  .settings-dialog :is(.settings-select-trigger, .settings-text-input) {
+    font-size: 1rem;
   }
 
   .settings-item:has(.settings-export) .settings-export,
@@ -2823,23 +2958,27 @@ dialog.settings-dialog::backdrop {
 
 /* Settings sections — group related rows with a shared top border */
 .settings-section {
-  padding-bottom: 0.5rem;
+  padding-block: 1.25rem;
+  flex-shrink: 0;
 }
 .settings-section + .settings-section {
   border-top: 1px solid var(--border);
 }
 
-/* Section header: signature left accent bar evokes a journal margin line */
 .settings-section-title {
   display: block;
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
   margin: 0;
-  padding: 0.65rem 1.35rem 0.3rem calc(1.35rem - 3px);
-  border-left: 3px solid var(--accent);
+  padding: 0.25rem 1.35rem 0.65rem;
+}
+.settings-section-description {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  padding-inline: 1.35rem;
+  margin-bottom: 0.8rem;
 }
 
 /* Title row for sections needing an inline badge (e.g. milestone count) */
@@ -2848,8 +2987,10 @@ dialog.settings-dialog::backdrop {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.65rem 1.35rem 0.3rem calc(1.35rem - 3px);
-  border-left: 3px solid var(--accent);
+  padding: 0.25rem 1.35rem 0.65rem;
+}
+.settings-section-account {
+  padding-block: 0.5rem;
 }
 .settings-milestone-title-actions {
   display: flex;

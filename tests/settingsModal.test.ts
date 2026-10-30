@@ -27,6 +27,53 @@ function milestoneRow(page: import('@playwright/test').Page, label: string) {
   })
 }
 
+test.describe('SettingsModal — section navigation and preview', () => {
+  for (const width of [1280, 390]) {
+    test(`keeps navigation available while jumping between sections at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await loadHarness(page)
+      await render(page)
+
+      const nav = page.getByRole('navigation', { name: 'Settings sections' })
+      await expect(nav.getByRole('button', { name: 'Account', exact: true })).toHaveAttribute('aria-current', 'location')
+      const writing = nav.getByRole('button', { name: 'Writing', exact: true })
+      await writing.focus()
+      await page.keyboard.press('Enter')
+      await expect(writing).toHaveAttribute('aria-current', 'location')
+      await expect(page.getByRole('switch', { name: 'Auto-save' })).toBeInViewport()
+
+      const backup = nav.getByRole('button', { name: 'Backup', exact: true })
+      await backup.click()
+      await expect(backup).toHaveAttribute('aria-current', 'location')
+      await expect(page.locator('#settings-backup .settings-section-title')).toBeInViewport()
+      await expect(page.getByRole('button', { name: 'Close settings' })).toBeInViewport()
+
+      // Scrolling the reading pane also updates and reveals the current index item.
+      await page.locator('.settings-list').evaluate(el => el.scrollTo({ top: 0 }))
+      const account = nav.getByRole('button', { name: 'Account', exact: true })
+      await expect(account).toHaveAttribute('aria-current', 'location')
+      await expect(account).toBeInViewport()
+    })
+  }
+
+  test('previews the selected font and size together', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+
+    const preview = page.getByRole('figure', { name: 'Writing preview' }).locator('p')
+    const initialSize = await preview.evaluate(el => parseFloat(getComputedStyle(el).fontSize))
+    await page.getByRole('button', { name: 'Font size', exact: true }).click()
+    await page.getByRole('option', { name: 'Extra large' }).click()
+    expect(await preview.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThan(initialSize)
+
+    await page.getByRole('group', { name: 'Font', exact: true }).getByRole('button', { name: 'Sans', exact: true }).click()
+    await expect(preview).toHaveCSS('font-family', /Inter/)
+    await page.getByRole('group', { name: 'Font', exact: true }).getByRole('button', { name: 'Serif', exact: true }).click()
+    await expect(preview).toHaveCSS('font-family', /Source Serif 4/)
+  })
+})
+
 test.describe('SettingsModal — milestones', () => {
   test('adds, toggles, and confirms deletion of a milestone', async ({ page }) => {
     await loadHarness(page)
@@ -1010,24 +1057,22 @@ test.describe('SettingsModal — accent color', () => {
 })
 
 test.describe('SettingsModal — InfoTip', () => {
-  test('clicking the Auto-save info button shows help text', async ({ page }) => {
+  test('Auto-save explains its behavior without opening help', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
     const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
-    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
-
-    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
-    await expect(popover).toBeVisible()
+    await expect(autoSaveItem.getByText('Saves automatically a few seconds after you stop typing.')).toBeVisible()
+    await expect(autoSaveItem.getByRole('switch', { name: 'Auto-save' })).toHaveAccessibleDescription('Saves automatically a few seconds after you stop typing.')
   })
 
   test('clicking outside the popover closes it', async ({ page }) => {
     await loadHarness(page)
     await render(page)
 
-    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
-    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
-    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
+    const holidaysItem = page.locator('#settings-calendar .settings-item')
+    await holidaysItem.getByRole('button', { name: 'More information' }).click()
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'Shows public holidays' })
     await expect(popover).toBeVisible()
 
     await page.mouse.click(5, 5)
@@ -1038,9 +1083,9 @@ test.describe('SettingsModal — InfoTip', () => {
     await loadHarness(page)
     await render(page)
 
-    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
-    await autoSaveItem.getByRole('button', { name: 'More information' }).click()
-    const popover = page.locator('.infotip-popover').filter({ hasText: 'few seconds' })
+    const holidaysItem = page.locator('#settings-calendar .settings-item')
+    await holidaysItem.getByRole('button', { name: 'More information' }).click()
+    const popover = page.locator('.infotip-popover').filter({ hasText: 'Shows public holidays' })
     await expect(popover).toBeVisible()
 
     await page.keyboard.press('Escape')
@@ -1051,8 +1096,8 @@ test.describe('SettingsModal — InfoTip', () => {
     await loadHarness(page)
     await render(page)
 
-    const autoSaveItem = page.locator('.settings-item', { hasText: 'Auto-save' })
-    const infoBtn = autoSaveItem.getByRole('button', { name: 'More information' })
+    const holidaysItem = page.locator('#settings-calendar .settings-item')
+    const infoBtn = holidaysItem.getByRole('button', { name: 'More information' })
 
     await expect(infoBtn).toHaveAttribute('aria-expanded', 'false')
     await infoBtn.click()

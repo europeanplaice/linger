@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Info } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
+import { BookOpen, CalendarDays, Check, CloudUpload, FolderOpen, HardDrive, Info, Palette, PartyPopper, UserRound, X, type LucideIcon } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
@@ -10,7 +10,7 @@ import { folderNameForHostname } from '../utils/folderName'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
 import type { AccentColor } from '../hooks/useAccentColor'
-import type { FontSize } from '../hooks/useFontSize'
+import { FONT_SIZE_VALUES, type FontSize } from '../hooks/useFontSize'
 import type { ImportResult } from '../hooks/useDiary'
 import type { HolidayCountry } from '../utils/holidays'
 import { HOLIDAY_COUNTRY_CODES, isHolidayCountry } from '../utils/holidays'
@@ -26,16 +26,17 @@ import {
 
 const SETTINGS_SECTIONS: {
   id: string
-  labelKey: 'navAccount' | 'navAppearance' | 'navCalendar' | 'navMilestones' | 'navData' | 'navStorage' | 'navBackup'
-  className?: string
+  labelKey: 'navAccount' | 'navAppearance' | 'navWriting' | 'navCalendar' | 'navMilestones' | 'navData' | 'navStorage' | 'navBackup'
+  icon: LucideIcon
 }[] = [
-  { id: 'settings-account', labelKey: 'navAccount' },
-  { id: 'settings-appearance', labelKey: 'navAppearance' },
-  { id: 'settings-calendar', labelKey: 'navCalendar' },
-  { id: 'settings-milestones', labelKey: 'navMilestones' },
-  { id: 'settings-data', labelKey: 'navData' },
-  { id: 'settings-storage', labelKey: 'navStorage' },
-  { id: 'settings-backup', labelKey: 'navBackup' },
+  { id: 'settings-account', labelKey: 'navAccount', icon: UserRound },
+  { id: 'settings-appearance', labelKey: 'navAppearance', icon: Palette },
+  { id: 'settings-writing', labelKey: 'navWriting', icon: BookOpen },
+  { id: 'settings-calendar', labelKey: 'navCalendar', icon: CalendarDays },
+  { id: 'settings-milestones', labelKey: 'navMilestones', icon: PartyPopper },
+  { id: 'settings-data', labelKey: 'navData', icon: FolderOpen },
+  { id: 'settings-storage', labelKey: 'navStorage', icon: HardDrive },
+  { id: 'settings-backup', labelKey: 'navBackup', icon: CloudUpload },
 ]
 
 function AppliedChip() {
@@ -161,6 +162,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
+  const reducedMotion = useReducedMotion()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
   const [milestoneModal, setMilestoneModal] = useState<{ mode: 'add' | 'edit'; milestone?: Milestone } | null>(null)
   const [listExpanded, setListExpanded] = useState(true)
@@ -185,6 +187,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const dialogRef = useRef<HTMLDialogElement>(null)
   const signOutDialogRef = useRef<HTMLDialogElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const navRef = useRef<HTMLElement>(null)
   const [activeSection, setActiveSection] = useState(SETTINGS_SECTIONS[0].id)
   const [appliedFlash, setAppliedFlash] = useState<string | null>(null)
   const appliedFlashTimer = useRef<number | undefined>(undefined)
@@ -302,18 +305,35 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     const list = listRef.current
     if (!list) return
     const onScroll = () => {
+      if (!dialogRef.current?.open) return
       const listTop = list.getBoundingClientRect().top
       let current = SETTINGS_SECTIONS[0].id
       for (const s of SETTINGS_SECTIONS) {
         const el = document.getElementById(s.id)
-        if (el && el.getBoundingClientRect().top - listTop <= 60) current = s.id
+        if (el && el.getBoundingClientRect().top - listTop <= 28) current = s.id
       }
       setActiveSection(current)
     }
     list.addEventListener('scroll', onScroll, { passive: true })
-    onScroll()
-    return () => list.removeEventListener('scroll', onScroll)
+    const frame = requestAnimationFrame(onScroll)
+    return () => {
+      cancelAnimationFrame(frame)
+      list.removeEventListener('scroll', onScroll)
+    }
   }, [])
+
+  // Keep the current section visible in the mobile index without scrolling
+  // the content pane or moving keyboard focus away from the current control.
+  useEffect(() => {
+    const nav = navRef.current
+    const active = nav?.querySelector<HTMLElement>('[aria-current]')
+    if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return
+    const navRect = nav.getBoundingClientRect()
+    const activeRect = active.getBoundingClientRect()
+    if (activeRect.left < navRect.left || activeRect.right > navRect.right) {
+      nav.scrollTo({ left: nav.scrollLeft + activeRect.left - navRect.left - (nav.clientWidth - active.clientWidth) / 2, behavior: 'instant' })
+    }
+  }, [activeSection])
 
   // The Role ARN / bucket / region are exactly what Save persists and Test
   // checks — once any of them changes, a prior "Saved"/"Connected" result no
@@ -589,27 +609,39 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       aria-labelledby="settings-title"
       onCancel={handleCancel}
       onClick={handleBackdropClick}
-      initial={{ opacity: 0, y: 14, scale: 0.96 }}
+      initial={{ opacity: 0, y: reducedMotion ? 0 : 14, scale: reducedMotion ? 1 : 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+      exit={{ opacity: 0, y: reducedMotion ? 0 : 8, scale: reducedMotion ? 1 : 0.97 }}
       transition={{ type: 'spring', stiffness: 420, damping: 32 }}
     >
       <div className="settings-modal-header">
-        <h3 id="settings-title">{t.settings.title}</h3>
-        <button className="settings-modal-close" onClick={onClose} aria-label={t.settings.close}>×</button>
+        <div>
+          <h3 id="settings-title">{t.settings.title}</h3>
+          <p className="settings-subtitle">{t.settings.subtitle}</p>
+        </div>
+        <button type="button" className="settings-modal-close" onClick={onClose} aria-label={t.settings.close}><X size={20} aria-hidden="true" /></button>
       </div>
-      <nav className="settings-nav" aria-label={t.settings.navLabel}>
+      <div className="settings-workspace">
+      <nav ref={navRef} className="settings-nav" aria-label={t.settings.navLabel}>
         {SETTINGS_SECTIONS.map(s => (
           <button
             key={s.id}
             type="button"
-            className={`settings-nav-item${s.className ? ` ${s.className}` : ''}${activeSection === s.id ? ' active' : ''}`}
-            aria-current={activeSection === s.id ? 'true' : undefined}
-            onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className={`settings-nav-item${activeSection === s.id ? ' active' : ''}`}
+            aria-current={activeSection === s.id ? 'location' : undefined}
+            aria-controls={s.id}
+            onClick={() => {
+              const section = document.getElementById(s.id)
+              const list = listRef.current
+              if (!section || !list) return
+              list.scrollTo({ top: list.scrollTop + section.getBoundingClientRect().top - list.getBoundingClientRect().top, behavior: reducedMotion ? 'instant' : 'smooth' })
+            }}
           >
+            <s.icon size={17} strokeWidth={1.7} aria-hidden="true" />
             {t.settings[s.labelKey]}
           </button>
         ))}
+        <p className="settings-instant-note"><Check size={16} aria-hidden="true" />{t.settings.instantHelp}</p>
       </nav>
       <div className="settings-list" ref={listRef}>
 
@@ -635,12 +667,13 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* Appearance */}
         <div className="settings-section" id="settings-appearance">
           <h4 className="settings-section-title">{t.settings.sectionAppearance}</h4>
+          <p className="settings-section-description">{t.settings.appearanceDescription}</p>
           <div className="settings-item">
             <span className="settings-item-label-group">
               <span className="settings-item-label">{t.settings.theme}</span>
               {appliedFlash === 'theme' && <AppliedChip />}
             </span>
-            <div className="settings-theme-picker">
+            <div className="settings-theme-picker" role="group" aria-label={t.settings.theme}>
               <button
                 type="button"
                 className={`settings-theme-option ${themeMode === 'light' ? 'active' : ''}`}
@@ -688,7 +721,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <span className="settings-item-label">{t.settings.accentColor}</span>
               {appliedFlash === 'accent' && <AppliedChip />}
             </span>
-            <div className="settings-color-picker">
+            <div className="settings-color-picker" role="group" aria-label={t.settings.accentColor}>
               <button
                 type="button"
                 className={`settings-color-option ${accentColor === 'indigo' ? 'active' : ''}`}
@@ -723,10 +756,31 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
           <div className="settings-item">
             <span className="settings-item-label-group">
+              <span className="settings-item-label">{t.common.language}</span>
+              {appliedFlash === 'language' && <AppliedChip />}
+            </span>
+            <SettingsSelect
+              aria-label={t.common.language}
+              value={language}
+              onChange={val => { flashApplied('language'); setLanguage(val === 'en' ? 'en' : 'ja') }}
+              options={[
+                { value: 'ja', label: t.common.japanese },
+                { value: 'en', label: t.common.english },
+              ]}
+            />
+          </div>
+        </div>
+
+        {/* Writing */}
+        <div className="settings-section" id="settings-writing">
+          <h4 className="settings-section-title">{t.settings.sectionWriting}</h4>
+          <p className="settings-section-description">{t.settings.writingDescription}</p>
+          <div className="settings-item">
+            <span className="settings-item-label-group">
               <span className="settings-item-label">{t.settings.serifFont}</span>
               {appliedFlash === 'font' && <AppliedChip />}
             </span>
-            <div className="settings-font-picker">
+            <div className="settings-font-picker" role="group" aria-label={t.settings.serifFont}>
               <button
                 type="button"
                 className={`settings-font-option ${fontMode === 'sans' ? 'active' : ''}`}
@@ -766,31 +820,27 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               ]}
             />
           </div>
+          <figure className="settings-writing-preview" aria-label={t.settings.previewLabel}>
+            <figcaption>{t.settings.previewLabel}</figcaption>
+            <p style={{
+              fontFamily: fontMode === 'serif' ? "'Source Serif 4', 'Noto Serif JP', serif" : "'Inter', 'LINE Seed JP', sans-serif",
+              fontSize: FONT_SIZE_VALUES[fontSize],
+            }}>{t.settings.previewText}</p>
+          </figure>
           <div className="settings-item">
             <span className="settings-item-label-group">
-              <span className="settings-item-label">{t.common.language}</span>
-              {appliedFlash === 'language' && <AppliedChip />}
-            </span>
-            <SettingsSelect
-              aria-label={t.common.language}
-              value={language}
-              onChange={val => { flashApplied('language'); setLanguage(val === 'en' ? 'en' : 'ja') }}
-              options={[
-                { value: 'ja', label: t.common.japanese },
-                { value: 'en', label: t.common.english },
-              ]}
-            />
-          </div>
-          <div className="settings-item">
-            <span className="settings-item-label-group">
-              <span className="settings-item-label">{t.settings.autoSave}</span>
-              <InfoTip text={t.settings.autoSaveHelp} />
+              <span className="settings-item-copytext">
+                <span className="settings-item-label">{t.settings.autoSave}</span>
+                <span id="settings-autosave-help" className="settings-item-description">{t.settings.autoSaveHelp}</span>
+              </span>
               {appliedFlash === 'autoSave' && <AppliedChip />}
             </span>
             <button
               className={`settings-switch ${autoSave ? 'active' : ''}`}
               onClick={() => { flashApplied('autoSave'); onAutoSaveToggle() }}
               role="switch"
+              aria-label={t.settings.autoSave}
+              aria-describedby="settings-autosave-help"
               aria-checked={autoSave}
             >
               <span className="settings-switch-thumb" />
@@ -1322,6 +1372,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">{t.settings.github}</a>
         </div>
       </div>
+      </div>
+      <div className="sr-only" role="status">{appliedFlash ? t.settings.applied : ''}</div>
 
       {milestoneModal && (
         <MilestoneFormModal
