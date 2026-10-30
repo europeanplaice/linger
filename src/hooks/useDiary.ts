@@ -16,6 +16,14 @@ interface EntryCache {
   snippet?: string
 }
 
+interface DiaryScope {
+  active: boolean
+  ready: boolean
+  controller: AbortController
+  authStatus: AuthStatus
+  email: string | null
+}
+
 export interface DiaryState {
   loading: boolean
   freshListLoaded: boolean
@@ -148,33 +156,63 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const bgActiveRef = useRef(0)
   const fgActiveRef = useRef(0)
   const pendingSaveRef = useRef<PendingSave | null>(null)
+  const replayingDraftsRef = useRef(false)
   const onExpiredRef = useLatestRef(onExpired)
   const onEvictedRef = useLatestRef(onEntriesEvicted)
 
   const storageAdapter = useMemo(() => new LocalStorageAdapter(), [])
   const syncQueue = useMemo(() => new SyncQueueManager(), [])
+  const scopeRef = useRef<DiaryScope | null>(null)
+
+  // Each committed authentication state owns its asynchronous work. Keep the
+  // captured scope invalid even if the same account later signs back in.
+  useEffect(() => {
+    const scope: DiaryScope = { active: true, ready: false, controller: new AbortController(), authStatus, email }
+    scopeRef.current = scope
+    cacheRef.current = new Map()
+    setCache(new Map())
+    inflightRef.current.clear()
+    saveQueueRef.current.clear()
+    pendingSaveRef.current = null
+    replayingDraftsRef.current = false
+    bgQueueRef.current.splice(0).forEach(task => task.cancel())
+    bgActiveRef.current = 0
+    fgActiveRef.current = 0
+    return () => { scope.active = false; scope.controller.abort() }
+  }, [authStatus, email])
+
+  const getScope = useCallback(() => {
+    const scope = scopeRef.current
+    return scope?.active && scope.authStatus === authStatus && scope.email === email ? scope : null
+  }, [authStatus, email])
 
   // Wipes everything persisted for the current account: the IDB entry/draft
   // cache, the local entry mirror, and the offline sync queue. Anything left
   // behind would leak into (or replay against) the next signed-in account.
   const clearLocalData = useCallback(async (): Promise<void> => {
     await Promise.all([
-      clearCache().catch(() => {}),
+      clearCache(),
       storageAdapter.clearAll().catch(() => {}),
       syncQueue.clear().catch(() => {}),
     ])
   }, [storageAdapter, syncQueue])
 
   const updateCache = useCallback((updater: (prev: Map<string, EntryCache>) => Map<string, EntryCache>) => {
+    const scope = getScope()
+    if (!scope) return
     setCache(prev => {
+      if (!scope.active) return prev
       const next = updater(prev)
       cacheRef.current = next
       return next
     })
-  }, [])
+  }, [getScope])
 
   const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean): Promise<Map<string, EntryCache>> => {
-    const files = await listEntries()
+    const scope = getScope()
+    if (!scope) return new Map()
+    const files = await listEntries(scope.controller.signal)
+    if (!scope.active) return new Map()
 
     // Compute new state and IDB diff using the current cache snapshot
     const prev = cacheRef.current
@@ -222,7 +260,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
 
     return next
-  }, [updateCache])
+  }, [updateCache, getScope])
 
   // Starts queued background fetches while no user-initiated load is running
   // and the background budget has room.
@@ -235,7 +273,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   }, [])
 
   const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean; background?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
-    if (!isSignedIn) return null
+    const scope = getScope()
+    if (!isSignedIn || !scope) return null
 
     const cached = cacheRef.current.get(date)
     // Content is already in memory (verified by listEntries version check or saved this session)
@@ -252,9 +291,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
 
     const doFetch = async (): Promise<LoadedDiaryEntry | null> => {
+      if (!scope.active) return null
       try {
         const current = cacheRef.current.get(date)
-        const loaded = await getEntryByDate(date, undefined, current?.meta.id)
+        const loaded = await getEntryByDate(date, undefined, current?.meta.id, scope.controller.signal)
+        if (!scope.active) return null
         if (!loaded || loaded === 'not-modified') {
           if (options.forceNetwork && current) {
             updateCache(prev => {
@@ -283,6 +324,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (email !== null) putCached({ date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})
         return { entry: content, meta }
       } catch (e) {
+        if (!scope.active) return null
         if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
         throw e
       }
@@ -298,6 +340,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           if (foreground) fgActiveRef.current++
           else bgActiveRef.current++
           doFetch().then(resolve, reject).finally(() => {
+            if (!scope.active) return
             if (foreground) fgActiveRef.current--
             else bgActiveRef.current--
             pumpBgQueue()
@@ -309,6 +352,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     } else {
       fgActiveRef.current++
       fetchPromise = doFetch().finally(() => {
+        if (!scope.active) return
         fgActiveRef.current--
         pumpBgQueue()
       })
@@ -324,18 +368,15 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
     if (options.background) pumpBgQueue()
     return fetchPromise
-  }, [isSignedIn, email, updateCache, pumpBgQueue])
+  }, [isSignedIn, email, updateCache, pumpBgQueue, getScope])
 
   // Load entry list when signed in
   useEffect(() => {
+    const scope = getScope()
+    if (!scope) return
     if (!isSignedIn) {
-      const empty = new Map<string, EntryCache>()
       setFreshListLoaded(false)
-      cacheRef.current = empty
-      setCache(empty)
-      // Drop queued background fetches — a task starting after sign-out would
-      // 401 and wrongly surface the session-expired flow.
-      bgQueueRef.current.splice(0).forEach(t => t.cancel())
+      setLoading(false)
       // Only wipe the persistent cache once the session is known to be gone;
       // while auth is still restoring ('initializing') the cache must survive
       // so the IDB preload below has data after a reload.
@@ -354,15 +395,18 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         const storedUser = localStorage.getItem('linger_session_user')
         if (!canUsePersistentCache) {
           await clearLocalData()
+          if (!scope.active) return
           localStorage.removeItem('linger_session_user')
         } else if (storedUser !== email) {
           await clearLocalData()
+          if (!scope.active) return
           localStorage.setItem('linger_session_user', email)
         }
 
         // Preload from IDB immediately so the sidebar and previously-opened entries
         // appear without waiting for the Drive network round trip.
         const idbEntries = canUsePersistentCache ? await getAllCached().catch(() => [] as CachedEntry[]) : []
+        if (!scope.active) return
         if (idbEntries.length > 0) {
           updateCache(() => {
             const m = new Map<string, EntryCache>()
@@ -376,9 +420,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         // without waiting for the full file list to complete.
         const today = new Date().toISOString().split('T')[0]
         const [prefetchedToday, freshCache] = await Promise.all([
-          getEntryByDate(today).catch(() => null),
+          getEntryByDate(today, undefined, undefined, scope.controller.signal).catch(() => null),
           loadEntryList(true, canUsePersistentCache),
         ])
+        if (!scope.active) return
+        scope.ready = true
         setFreshListLoaded(true)
 
         // Merge pre-fetched today content into the reconciled cache.
@@ -420,20 +466,23 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           getContent(d, { background: true }).catch(() => {})
         }
       } catch (e) {
+        if (!scope.active) return
         if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
         console.error('Failed to load diary entries:', e)
         setError(String(e))
         setFreshListLoaded(false)
       } finally {
-        setLoading(false)
+        if (scope.active) setLoading(false)
       }
     })()
-  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData])
+  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData, getScope])
 
   const refreshEntries = useCallback(async (): Promise<void> => {
-    if (!isSignedIn) return
+    const scope = getScope()
+    if (!isSignedIn || !scope) return
     try {
-      const { changes } = await getChanges()
+      const { changes } = await getChanges(scope.controller.signal)
+      if (!scope.active) return
       if (changes.length === 0) {
         // First-time token initialisation — the full list already ran on sign-in.
         return
@@ -497,20 +546,24 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         ]).catch(() => {})
       }
     } catch (e) {
+      if (!scope.active) return
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
       throw e
     }
-  }, [isSignedIn, email, updateCache])
+  }, [isSignedIn, email, updateCache, getScope])
 
   const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null): Promise<LoadedDiaryEntry> => {
-    if (!isSignedIn) throw new Error('Not signed in')
+    const scope = getScope()
+    if (!isSignedIn || !scope) throw new Error('Not signed in')
 
     const prev = saveQueueRef.current.get(date) ?? Promise.resolve()
     const run = prev.catch(() => {}).then(async (): Promise<LoadedDiaryEntry> => {
+      if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
       const entry: DiaryEntry = { date, content }
       try {
         const cachedMeta = cacheRef.current.get(date)?.meta ?? null
-        const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force })
+        const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force, signal: scope.controller.signal })
+        if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
         updateCache(p => {
           const next = new Map(p)
           next.set(date, { meta, content: entry, snippet: entry.content.slice(0, 500) })
@@ -522,6 +575,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         deleteDraft(date).catch(() => {})
         return { entry, meta }
       } catch (e) {
+        if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
         if (e instanceof TokenExpiredError) {
           pendingSaveRef.current = { date, content, baseVersion, baseContent }
           onExpiredRef.current()
@@ -558,24 +612,25 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     })
     saveQueueRef.current.set(date, run)
     return run
-  }, [isSignedIn, email, updateCache, storageAdapter, syncQueue])
+  }, [isSignedIn, email, updateCache, storageAdapter, getScope])
 
   const selectedDateRef = useLatestRef(selectedDate)
-
-  const replayingDraftsRef = useRef(false)
 
   // Push drafts persisted while offline back to Drive. Runs after the initial
   // Drive sync and whenever connectivity returns. The date open in the editor
   // is skipped — the editor owns that draft and retries it itself.
   const replayDrafts = useCallback(async (): Promise<void> => {
-    if (!isSignedIn || replayingDraftsRef.current) return
+    const scope = getScope()
+    if (!isSignedIn || !scope?.ready || replayingDraftsRef.current) return
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     replayingDraftsRef.current = true
     try {
       await syncQueue.process(async (item) => {
+        if (!scope.active) return false
         try {
           if (item.type === 'REMOVE') {
-            await deleteEntry(item.date)
+            await deleteEntry(item.date, scope.controller.signal)
+            if (!scope.active) return false
             updateCache(prev => {
               const next = new Map(prev)
               next.delete(item.date)
@@ -593,6 +648,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
 
       const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
       for (const draft of drafts) {
+        if (!scope.active) return
         if (draft.conflicted) continue
         if (draft.date === selectedDateRef.current) continue
         const cached = cacheRef.current.get(draft.date)
@@ -603,6 +659,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         try {
           await save(draft.date, draft.content, draft.baseVersion, false, draft.baseContent)
         } catch (e) {
+          if (!scope.active) return
           if (e instanceof TokenExpiredError) return
           if (e instanceof EntryConflictError) {
             // Leave resolution to the user in the editor; stop auto-retrying.
@@ -612,9 +669,9 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         }
       }
     } finally {
-      replayingDraftsRef.current = false
+      if (scope.active) replayingDraftsRef.current = false
     }
-  }, [isSignedIn, save, syncQueue, storageAdapter, updateCache])
+  }, [isSignedIn, save, syncQueue, storageAdapter, updateCache, getScope])
 
   const replayDraftsRef = useLatestRef(replayDrafts)
 
@@ -644,6 +701,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const poll = async () => {
       if (stopped || (typeof navigator !== 'undefined' && !navigator.onLine)) return
       const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
+      if (stopped) return
       if (!drafts.some(d => !d.conflicted)) return
       await replayDraftsRef.current().catch(() => {})
       if (!stopped) timer = setTimeout(poll, DRAFT_RETRY_INTERVAL_MS)
@@ -656,14 +714,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   }, [isSignedIn])
 
   const remove = useCallback(async (date: string): Promise<void> => {
-    if (!isSignedIn) throw new Error('Not signed in')
+    const scope = getScope()
+    if (!isSignedIn || !scope) throw new Error('Not signed in')
     const existing = cacheRef.current.get(date)
     if (!existing) {
       deleteDraft(date).catch(() => {})
       return
     }
     try {
-      await deleteEntry(date)
+      await deleteEntry(date, scope.controller.signal)
+      if (!scope.active) return
       updateCache(prev => {
         const next = new Map(prev)
         next.delete(date)
@@ -674,6 +734,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       deleteDraft(date).catch(() => {})
       broadcastMessage({ type: 'DIARY_REMOVED', date })
     } catch (e) {
+      if (!scope.active) return
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
       if (isNetworkFailure(e)) {
         syncQueue.enqueue({
@@ -685,10 +746,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       }
       throw e
     }
-  }, [isSignedIn, updateCache, storageAdapter, syncQueue])
+  }, [isSignedIn, updateCache, storageAdapter, syncQueue, getScope])
 
   const search = useCallback(async (query: string): Promise<SearchResult> => {
-    if (!isSignedIn || !query.trim()) return { results: [], unindexedCount: 0, totalCount: 0 }
+    const scope = getScope()
+    if (!isSignedIn || !scope || !query.trim()) return { results: [], unindexedCount: 0, totalCount: 0 }
 
     const terms = query.trim().split(/\s+/).filter(Boolean)
     const cached = cacheRef.current
@@ -712,7 +774,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     let failedCount = 0
     let unfetchedMatches = 0
     try {
-      const files = await searchEntries(query)
+      const files = await searchEntries(query, scope.controller.signal)
+      if (!scope.active) return { results: [], unindexedCount: 0, totalCount: 0 }
       const candidates = files
         .map(f => ({ date: f.name.replace('diary-', '').replace(/\.(json|md|txt)$/, ''), fileId: f.id }))
         .filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date) && !found.has(date))
@@ -734,8 +797,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       unfetchedMatches = toFetch.length - limited.length
 
       await mapWithConcurrency(limited, 5, async ({ date, fileId }) => {
+        if (!scope.active) return
         try {
-          const loaded = await getEntryByDate(date, undefined, fileId)
+          const loaded = await getEntryByDate(date, undefined, fileId, scope.controller.signal)
+          if (!scope.active) return
           if (!loaded || loaded === 'not-modified') return
           const text = loaded.entry.content
           const snippet = localMatchSnippet(text, terms) ?? headSnippet(text)
@@ -756,11 +821,12 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       failedCount = uncachedCount
     }
 
+    if (!scope.active) return { results: [], unindexedCount: 0, totalCount: 0 }
     const results = Array.from(found, ([date, snippet]) => ({ date, snippet }))
     results.sort((a, b) => b.date.localeCompare(a.date))
     const totalCount = results.length + unfetchedMatches
     return { results: results.slice(0, SEARCH_RESULT_LIMIT), unindexedCount: failedCount, totalCount }
-  }, [isSignedIn, updateCache])
+  }, [isSignedIn, updateCache, getScope])
 
   const retryPendingSave = useCallback(async (): Promise<LoadedDiaryEntry | null> => {
     const pending = pendingSaveRef.current
@@ -770,13 +836,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   }, [save])
 
   const exportAll = useCallback(async (onProgress?: (done: number, total: number) => void): Promise<{ date: string; content: string }[]> => {
-    if (!isSignedIn) throw new Error('Not signed in')
+    const scope = getScope()
+    if (!isSignedIn || !scope) throw new Error('Not signed in')
 
     const dates = Array.from(cache.keys()).sort((a, b) => a.localeCompare(b))
     const total = dates.length
     let done = 0
     const results = await mapWithConcurrency(dates, 4, async (date) => {
+      if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
       const loaded = await getContent(date)
+      if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
       done += 1
       onProgress?.(done, total)
       const entry = loaded?.entry
@@ -785,7 +854,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     })
 
     return results
-  }, [isSignedIn, cache, getContent])
+  }, [isSignedIn, cache, getContent, getScope])
 
   // Imports previously-exported entries. Dates that already exist locally (or
   // that the server reports as a conflict, e.g. a stale cache snapshot) are
@@ -795,7 +864,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     entries: { date: string; content: string }[],
     onProgress?: (done: number, total: number) => void,
   ): Promise<ImportResult> => {
-    if (!isSignedIn) throw new Error('Not signed in')
+    const scope = getScope()
+    if (!isSignedIn || !scope) throw new Error('Not signed in')
 
     const total = entries.length
     let done = 0
@@ -804,6 +874,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const failed: string[] = []
 
     await mapWithConcurrency(entries, 4, async ({ date, content }) => {
+      if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
       try {
         if (cacheRef.current.has(date)) {
           skipped.push(date)
@@ -812,6 +883,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           imported.push(date)
         }
       } catch (e) {
+        if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
         if (e instanceof TokenExpiredError) throw e
         if (e instanceof EntryConflictError) {
           skipped.push(date)
@@ -820,24 +892,26 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         }
       } finally {
         done += 1
-        onProgress?.(done, total)
+        if (scope.active) onProgress?.(done, total)
       }
     })
 
     return { imported, skipped, failed }
-  }, [isSignedIn, save])
+  }, [isSignedIn, save, getScope])
 
   // Prefetch a set of dates with bounded concurrency. Skips dates that have no
   // entry or whose content is already loaded; in-flight dedup in getContent
   // prevents racing with other prefetch paths.
   const prefetch = useCallback(async (dates: string[], concurrency = 3): Promise<void> => {
-    if (!isSignedIn) return
+    const scope = getScope()
+    if (!isSignedIn || !scope) return
     const targets = dates.filter(d => cacheRef.current.has(d) && !cacheRef.current.get(d)?.content)
     if (targets.length === 0) return
     await mapWithConcurrency(targets, Math.max(1, concurrency), async (d) => {
+      if (!scope.active) return
       await getContent(d, { background: true }).catch(() => {})
     })
-  }, [isSignedIn, getContent])
+  }, [isSignedIn, getContent, getScope])
 
   const getContentRef = useLatestRef(getContent)
 
@@ -854,8 +928,8 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     return () => clearTimeout(id)
   }, [selectedDate])
 
-  const dates = useMemo(() => Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)), [cache])
-  const hasLegacyMdFiles = useMemo(() => Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache])
+  const dates = useMemo(() => getScope() ? Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)) : [], [cache, getScope])
+  const hasLegacyMdFiles = useMemo(() => Boolean(getScope()) && Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache, getScope])
 
   return { loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }
 }

@@ -75,7 +75,7 @@ describe('findJsonFile', () => {
 describe('ensureFolder', () => {
   it('returns cached folder_id from session', async () => {
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'cached' }
-    const env = { SESSIONS: { put: vi.fn() } }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } }
     const result = await ensureFolder('token', 'sid', session, env as any)
     expect(result).toBe('cached')
   })
@@ -83,7 +83,7 @@ describe('ensureFolder', () => {
   it('finds existing folder on Drive', async () => {
     mockFetch(driveJsonResponse({ files: [{ id: 'existing-folder' }] }))
     const put = vi.fn()
-    const env = { SESSIONS: { put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
@@ -98,7 +98,7 @@ describe('ensureFolder', () => {
       .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
       .mockResolvedValueOnce(driveJsonResponse({ id: 'new-folder' })))
     const put = vi.fn()
-    const env = { SESSIONS: { put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
@@ -110,7 +110,7 @@ describe('ensureFolder', () => {
       .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
       .mockResolvedValueOnce(driveJsonResponse({ id: 'staging-folder' }))
     vi.stubGlobal('fetch', fetchMock)
-    const env = { SESSIONS: { put: vi.fn() }, SESSION_DOMAIN: 'https://staging.linger.europeanplaice.com' }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://staging.linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
@@ -128,7 +128,7 @@ describe('ensureFolder', () => {
       .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
       .mockResolvedValueOnce(driveJsonResponse({ id: 'dev-folder' }))
     vi.stubGlobal('fetch', fetchMock)
-    const env = { SESSIONS: { put: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
     const result = await ensureFolder('token', 'sid', session, env as any)
@@ -250,7 +250,7 @@ describe('getDiaryFileMeta', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
 
-    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01')
+    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01')
 
     expect(result).toEqual(meta)
   })
@@ -265,7 +265,7 @@ describe('getDiaryFileMeta', () => {
     })))
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 
@@ -281,7 +281,7 @@ describe('getDiaryFileMeta', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
 
-    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01')
+    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01')
 
     expect(result).toEqual(meta)
   })
@@ -296,7 +296,7 @@ describe('getDiaryFileMeta', () => {
     })))
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 
@@ -310,7 +310,7 @@ describe('getDiaryFileMeta', () => {
     })))
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 })
@@ -450,7 +450,7 @@ describe('getRevisionContent', () => {
 })
 
 const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, folder_id: 'folder-1' })
-const envStub = { SESSIONS: { put: vi.fn() } } as any
+const envStub = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any
 
 describe('listEntries pagination', () => {
   it('uses pageSize=100 and orderBy=name', async () => {

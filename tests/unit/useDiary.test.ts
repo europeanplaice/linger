@@ -84,7 +84,7 @@ describe('useDiary initial load parallelization', () => {
 
     // Both should have been called before either resolves
     expect(driveEntries.listEntries).toHaveBeenCalledOnce()
-    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today)
+    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today, undefined, undefined, expect.any(AbortSignal))
 
     // Resolve both
     await act(async () => {
@@ -113,7 +113,7 @@ describe('useDiary initial load parallelization', () => {
     expect(result.current.dates).toContain('2026-08-19')
 
     // getEntryByDate was called for today (parallel pre-fetch)
-    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today)
+    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today, undefined, undefined, expect.any(AbortSignal))
   })
 
   it('does not re-fetch today via background prefetch (already pre-fetched)', async () => {

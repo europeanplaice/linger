@@ -8,6 +8,9 @@ import {
   addEmailSessionIndex,
   addSubSessionIndex,
   makeSessionCookie,
+  clearSessionCookie,
+  isSessionRevoked,
+  SessionRevokedError,
   SESSION_TTL,
   jsonResponse,
   validateMutationOrigin,
@@ -56,6 +59,11 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   context.data.session = validSession
 
   const response = await context.next()
+  const secure = !context.env.SESSION_DOMAIN.startsWith('http://')
+  const revokedResponse = () => jsonResponse({ error: 'Session revoked' }, 401, {
+    'Set-Cookie': clearSessionCookie(secure),
+  })
+  if (await isSessionRevoked(sessionId, context.env)) return revokedResponse()
 
   // getValidSession above already persisted a refreshed token itself (mutating and
   // saving `session` in place — see its own doc comment), so this block only needs to
@@ -63,7 +71,12 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   // a refresh that already happened.
   const needsRenew = !validSession.renewed_at || Date.now() - validSession.renewed_at > RENEW_INTERVAL
   if (needsRenew) {
-    await saveSession(sessionId, { ...validSession, renewed_at: Date.now() }, context.env)
+    try {
+      await saveSession(sessionId, { ...validSession, renewed_at: Date.now() }, context.env)
+    } catch (err) {
+      if (err instanceof SessionRevokedError) return revokedResponse()
+      throw err
+    }
     // The email index entry (esidx:{email}:{sessionId} — see session.ts) carries its
     // own TTL, separate from the session record's. Re-stamp it in step with the
     // session's own sliding renewal above, or an actively-used session would still
@@ -76,7 +89,6 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
       await addSubSessionIndex(validSession.google_sub, sessionId, context.env)
     }
   }
-  const secure = !context.env.SESSION_DOMAIN.startsWith('http://')
   const newHeaders = new Headers(response.headers)
   newHeaders.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
   if (context.env.CF_PAGES_COMMIT_SHA) {

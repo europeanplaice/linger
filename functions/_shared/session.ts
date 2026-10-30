@@ -73,6 +73,7 @@ export function parseSessionId(request: Request): string | null {
 export async function getSession(sessionId: string, env: Env): Promise<SessionData | null> {
   const raw = await env.SESSIONS.get(`session:${sessionId}`)
   if (!raw) return null
+  if (await isSessionRevoked(sessionId, env)) return null
   try {
     return JSON.parse(raw) as SessionData
   } catch {
@@ -81,13 +82,25 @@ export async function getSession(sessionId: string, env: Env): Promise<SessionDa
 }
 
 export async function saveSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
+  if (await isSessionRevoked(sessionId, env)) throw new SessionRevokedError('Session revoked')
   await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(session), { expirationTtl: SESSION_TTL })
+  // Revocation can finish while put() is in flight. Its separate marker remains
+  // authoritative even if another location still reads this late session write.
+  if (await isSessionRevoked(sessionId, env)) {
+    await env.SESSIONS.delete(`session:${sessionId}`)
+    throw new SessionRevokedError('Session revoked')
+  }
+}
+
+export async function isSessionRevoked(sessionId: string, env: Env): Promise<boolean> {
+  return await env.SESSIONS.get(`revoked-session:${sessionId}`) === '1'
 }
 
 // Thrown only when Google says the refresh_token itself is dead (400 invalid_grant —
 // e.g. revoked, or minted by a since-retired Blue/Green OAuth client). Distinct from
 // transient failures (429/5xx) so callers only tear down the session in this case.
 export class RefreshTokenInvalidError extends Error {}
+export class SessionRevokedError extends RefreshTokenInvalidError {}
 
 // Retry delays for transient refresh failures (network error, 429, 5xx) — mirrors
 // driveWithRetry's backoff (functions/_shared/drive.ts). Without this, a single Google
@@ -394,13 +407,13 @@ async function listSessionIdsForPrefix(prefix: string, env: Env): Promise<string
   return ids
 }
 
-// Removes a single dead session (e.g. refresh failed) from both the session record
-// and the email index, so it stops being offered as a reuse candidate by
-// getRefreshTokenForEmail while it waits out its KV TTL. Deletes the session record
-// first: if only one of the two deletes can land, a dangling index entry (harmless
-// — getSession returns null for it and every caller already skips null sessions)
-// is far preferable to a live session left silently unreachable via the index.
+// Write revocation separately before deleting tokens or indexes. An in-flight
+// refresh/renewal must never restore authorization by recreating session:{id}.
+// IDs are never reused; the marker contains no credentials and has no TTL because
+// a late writer can extend the session record beyond its original expiration.
+// KV propagation is still eventually consistent, just as for session deletion.
 export async function invalidateSession(sessionId: string, email: string | undefined, env: Env, googleSub?: string): Promise<void> {
+  await env.SESSIONS.put(`revoked-session:${sessionId}`, '1')
   await env.SESSIONS.delete(`session:${sessionId}`)
   if (email) {
     await removeEmailSessionIndex(email, sessionId, env)

@@ -33,6 +33,7 @@ interface SaveEntryOptions {
   baseVersion?: string | null
   baseContent?: string | null
   force?: boolean
+  signal?: AbortSignal
 }
 
 interface SaveConflictResponse {
@@ -56,8 +57,25 @@ function retryDelay(attempt: number): number {
 
 const MAX_RETRIES = 3
 
+function waitForRetry(delay: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      reject(new DOMException('Request cancelled', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, delay)
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+  })
+}
+
 export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatuses: number[] = []): Promise<{ data: T; status: number }> {
   for (let attempt = 0; ; attempt++) {
+    if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
     const res = await fetch(url, { ...init, credentials: 'include', cache: 'no-store' })
 
     if (res.ok) return { data: await res.json() as T, status: res.status }
@@ -71,7 +89,7 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
       let delay = retryDelay(attempt)
       const ra = res.headers.get('Retry-After')
       if (ra) { const s = parseFloat(ra); if (!isNaN(s)) delay = s * 1000 }
-      await new Promise(r => setTimeout(r, delay * (1 + 0.2 * (Math.random() * 2 - 1))))
+      await waitForRetry(delay * (1 + 0.2 * (Math.random() * 2 - 1)), init?.signal)
       continue
     }
     throw new DriveHttpError(res.status, body)
@@ -80,6 +98,7 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
 
 async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void> {
   for (let attempt = 0; ; attempt++) {
+    if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
     const res = await fetch(url, { ...init, credentials: 'include', cache: 'no-store' })
 
     if (res.ok || res.status === 204) return
@@ -90,36 +109,36 @@ async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void>
       let delay = retryDelay(attempt)
       const ra = res.headers.get('Retry-After')
       if (ra) { const s = parseFloat(ra); if (!isNaN(s)) delay = s * 1000 }
-      await new Promise(r => setTimeout(r, delay * (1 + 0.2 * (Math.random() * 2 - 1))))
+      await waitForRetry(delay * (1 + 0.2 * (Math.random() * 2 - 1)), init?.signal)
       continue
     }
     throw new DriveHttpError(res.status, body)
   }
 }
 
-export async function listEntries(): Promise<DriveFileMeta[]> {
-  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/entries`)
+export async function listEntries(signal?: AbortSignal): Promise<DriveFileMeta[]> {
+  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/entries`, { signal })
   return data?.files ?? []
 }
 
-export async function searchEntries(query: string): Promise<DriveFileMeta[]> {
-  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/search?q=${encodeURIComponent(query)}`)
+export async function searchEntries(query: string, signal?: AbortSignal): Promise<DriveFileMeta[]> {
+  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/search?q=${encodeURIComponent(query)}`, { signal })
   return data?.files ?? []
 }
 
-export async function getChanges(): Promise<ChangesResult> {
-  const { data } = await apiFetch<ChangesResult>(`${BASE}/changes`)
+export async function getChanges(signal?: AbortSignal): Promise<ChangesResult> {
+  const { data } = await apiFetch<ChangesResult>(`${BASE}/changes`, { signal })
   return { changes: data?.changes ?? [], newStartPageToken: data?.newStartPageToken ?? '' }
 }
 
 export type { DriveChange }
 
-export async function getEntryByDate(date: string, cachedVersion?: string, fileId?: string): Promise<LoadedDiaryEntry | null | 'not-modified'> {
+export async function getEntryByDate(date: string, cachedVersion?: string, fileId?: string, signal?: AbortSignal): Promise<LoadedDiaryEntry | null | 'not-modified'> {
   const headers: Record<string, string> = cachedVersion ? { 'If-None-Match': cachedVersion } : {}
   const params = fileId ? `?fileId=${encodeURIComponent(fileId)}` : ''
   const { data, status } = await apiFetch<{ entry: DiaryEntry; meta: DriveFileMeta }>(
     `${BASE}/entry/${encodeURIComponent(date)}${params}`,
-    { headers },
+    { headers, signal },
   )
   if (status === 304) return 'not-modified'
   if (status === 404 || !data) return null
@@ -130,6 +149,7 @@ export async function saveEntry(date: string, entry: DiaryEntry, optionsOrFileId
   const options = typeof optionsOrFileId === 'string' ? { fileId: optionsOrFileId } : optionsOrFileId
   const { data, status } = await apiFetch<DriveFileMeta | SaveConflictResponse>(`${BASE}/entry/${encodeURIComponent(date)}`, {
     method: 'POST',
+    signal: options.signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       content: entry.content,
@@ -143,8 +163,8 @@ export async function saveEntry(date: string, entry: DiaryEntry, optionsOrFileId
   return data as DriveFileMeta
 }
 
-export async function deleteEntry(date: string): Promise<void> {
-  await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, { method: 'DELETE' })
+export async function deleteEntry(date: string, signal?: AbortSignal): Promise<void> {
+  await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, { method: 'DELETE', signal })
 }
 
 export interface MigrateExtensionsResult {

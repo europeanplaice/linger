@@ -13,7 +13,7 @@ describe('logout handler', () => {
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid123' },
     })
-    const env = { SESSIONS: { get, delete: del }, SESSION_DOMAIN: 'https://example.com' }
+    const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
     const response = await onLogout({ request, env } as any)
 
@@ -33,7 +33,7 @@ describe('logout handler', () => {
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid123' },
     })
-    const env = { SESSIONS: { get, delete: del }, SESSION_DOMAIN: 'https://example.com' }
+    const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
     await onLogout({ request, env } as any)
 
@@ -75,7 +75,7 @@ describe('logout handler', () => {
     const request = new Request('http://localhost/auth/logout', {
       headers: { Cookie: 'linger_session=sid' },
     })
-    const env = { SESSIONS: { get, delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
+    const env = { SESSIONS: { get, put: vi.fn(), delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
 
     const response = await onLogout({ request, env } as any)
 

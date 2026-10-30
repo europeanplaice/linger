@@ -66,7 +66,7 @@ describe('list entries handler', () => {
     })
 
     const put = vi.fn()
-    const ctx = makeContext({ env: { SESSIONS: { put } } })
+    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } } })
     const resPromise = onListEntries(ctx as any)
 
     // Both calls should have started before either resolves
@@ -88,7 +88,7 @@ describe('list entries handler', () => {
     vi.mocked(drive.getStartPageToken).mockRejectedValueOnce(new Error('token fetch failed'))
 
     const put = vi.fn()
-    const ctx = makeContext({ env: { SESSIONS: { put } } })
+    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } } })
     const res = await onListEntries(ctx as any)
 
     expect(res.status).toBe(200)
@@ -576,7 +576,7 @@ describe('changes handler', () => {
     const ctx = {
       request: new Request('http://localhost/api/drive/changes'),
       data: { accessToken: 'tok', sessionId: 'sid', session },
-      env: { SESSIONS: { put } },
+      env: { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } },
     }
     return { ctx, put }
   }

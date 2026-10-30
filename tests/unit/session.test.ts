@@ -71,7 +71,7 @@ describe('getSession', () => {
 describe('saveSession', () => {
   it('writes session JSON to KV with 30-day TTL', async () => {
     const put = vi.fn()
-    const env = { SESSIONS: { put } }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
     await saveSession('sid', session, env as any)
     expect(put).toHaveBeenCalledWith('session:sid', JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 })
@@ -276,7 +276,7 @@ describe('getValidAccessToken', () => {
 
   it('does not write to KV when token is still valid', async () => {
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 120_000 }
 
     await getValidAccessToken('sid', session, env as any)
@@ -292,7 +292,7 @@ describe('getValidAccessToken', () => {
       })
     ))
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     const result = await getValidAccessToken('sid', session, env as any)
@@ -341,7 +341,7 @@ describe('getValidAccessToken', () => {
       }))
     vi.stubGlobal('fetch', fetchSpy)
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     const promise = getValidAccessToken('sid', session, env as any)
@@ -358,7 +358,7 @@ describe('getValidAccessToken', () => {
         headers: { 'Content-Type': 'application/json' },
       }))
     vi.stubGlobal('fetch', fetchSpy)
-    const env = { ...baseEnv, SESSIONS: { put: vi.fn() } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000 }
 
     const promise = getValidAccessToken('sid', session, env as any)
@@ -403,7 +403,7 @@ describe('getValidIdToken', () => {
       })
     ))
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
 
     expect(await getValidIdToken('sid', session, env as any)).toBe('new_idtok')
@@ -423,7 +423,7 @@ describe('getValidIdToken', () => {
       })
     ))
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'still_valid_at', expires_at: Date.now() + 120_000 }
 
     expect(await getValidIdToken('sid', session, env as any)).toBe('recovered_idtok')
@@ -456,7 +456,7 @@ describe('getValidIdToken', () => {
       })
     ))
     const put = vi.fn()
-    const env = { ...baseEnv, SESSIONS: { put } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
 
     expect(await getValidIdToken('sid', session, env as any)).toBeNull()
@@ -479,7 +479,7 @@ describe('getValidIdToken', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     ))
-    const env = { ...baseEnv, SESSIONS: { put: vi.fn() } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
 
     await getValidIdToken('sid', session, env as any)
@@ -496,7 +496,7 @@ describe('getValidIdToken', () => {
       })
     ))
     const store = new Map<string, string>()
-    const env = { ...baseEnv, SESSIONS: { put: vi.fn((key: string, value: string) => { store.set(key, value) }) } }
+    const env = { ...baseEnv, SESSIONS: { get: vi.fn(async (key: string) => store.get(key) ?? null), put: vi.fn((key: string, value: string) => { store.set(key, value) }) } }
     const session = { refresh_token: 'rt', access_token: 'old_at', expires_at: Date.now() - 60_000, id_token: 'old_idtok' }
 
     await getValidIdToken('sid', session, env as any)
@@ -625,7 +625,7 @@ describe('invalidateSession', () => {
   // silently unreachable via the email index.
   it('deletes the session record before removing the email index entry', async () => {
     const del = vi.fn()
-    const env = { SESSIONS: { delete: del } }
+    const env = { SESSIONS: { put: vi.fn(), delete: del } }
     await invalidateSession('sid1', 'user@example.com', env as any)
     expect(del).toHaveBeenNthCalledWith(1, 'session:sid1')
     expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid1')
@@ -633,7 +633,7 @@ describe('invalidateSession', () => {
 
   it('deletes the session record without touching the index when email is unknown', async () => {
     const del = vi.fn()
-    const env = { SESSIONS: { delete: del } }
+    const env = { SESSIONS: { put: vi.fn(), delete: del } }
     await invalidateSession('sid1', undefined, env as any)
     expect(del).toHaveBeenCalledTimes(1)
     expect(del).toHaveBeenCalledWith('session:sid1')
@@ -666,7 +666,7 @@ describe('deleteAllSessionsForEmail', () => {
       list_complete: true,
     })
     const del = vi.fn().mockResolvedValue(undefined)
-    const env = { SESSIONS: { list, delete: del } }
+    const env = { SESSIONS: { list, put: vi.fn(), delete: del } }
     await deleteAllSessionsForEmail('user@example.com', env as any)
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
@@ -689,7 +689,7 @@ describe('deleteAllSessionsForEmail', () => {
     const del = vi.fn().mockImplementation((key: string) =>
       key === 'session:sid1' ? Promise.reject(new Error('KV error')) : Promise.resolve(undefined)
     )
-    const env = { SESSIONS: { list, delete: del } }
+    const env = { SESSIONS: { list, put: vi.fn(), delete: del } }
     await expect(deleteAllSessionsForEmail('user@example.com', env as any)).rejects.toThrow()
     expect(del).toHaveBeenCalledWith('session:sid2')
     expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
@@ -719,6 +719,7 @@ describe.each([
     const env = { SESSIONS: {
       list: vi.fn(async () => ({ keys: [...store.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })), list_complete: true })),
       get: vi.fn(async (key: string) => store.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => { store.set(key, value) }),
       delete: vi.fn(async (key: string) => {
         if (key === 'session:sid1' && failDelete) throw new Error('KV unavailable')
         store.delete(key)
