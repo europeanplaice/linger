@@ -57,6 +57,8 @@ jobs:
 
       - run: npm run test:unit
 
+      - run: node scripts/check-deployment.test.mjs
+
   # Tests/builds the s3-workflows Worker only — it does not deploy it. Deployment
   # happens via `wrangler deploy` in the deploy/deploy-staging jobs below, using
   # wrangler.jsonc/wrangler.staging.jsonc. Terraform (infra/) only owns the
@@ -147,6 +149,10 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
 
+      - name: Verify production deployment
+        timeout-minutes: 3
+        run: node scripts/check-deployment.mjs https://linger.europeanplaice.com
+
   deploy-staging:
     needs: [build, lint, unit-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
@@ -184,3 +190,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.staging.jsonc
+
+      - name: Verify staging deployment
+        timeout-minutes: 3
+        run: node scripts/check-deployment.mjs https://staging.linger.europeanplaice.com

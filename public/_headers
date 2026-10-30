@@ -5,7 +5,7 @@
   Cache-Control: no-cache, no-store, must-revalidate
 
 /sw.js
-  Cache-Control: no-cache
+  Cache-Control: no-cache, no-store, must-revalidate
 
 /*
   Cross-Origin-Opener-Policy: same-origin-allow-popups
