@@ -1173,17 +1173,11 @@ test.describe('SettingsModal — settings-item layout', () => {
     await render(page)
 
     const trigger = page.getByRole('button', { name: 'Font size' })
-    const chevron = trigger.locator('.settings-select-chevron')
-    const triggerBox = await trigger.boundingBox()
-    const chevronBox = await chevron.boundingBox()
-
-    expect(triggerBox).not.toBeNull()
-    expect(chevronBox).not.toBeNull()
-    if (triggerBox && chevronBox) {
-      const chevronRight = chevronBox.x + chevronBox.width
-      const triggerRight = triggerBox.x + triggerBox.width
-      expect(triggerRight - chevronRight).toBeLessThan(12)
-    }
+    // Measure both edges in one frame while the dialog's opening spring runs.
+    await expect.poll(() => trigger.evaluate(element => {
+      const chevron = element.querySelector('.settings-select-chevron')!
+      return element.getBoundingClientRect().right - chevron.getBoundingClientRect().right
+    })).toBeLessThan(12)
   })
 
   test('Export all and Share buttons have equal width', async ({ page }) => {

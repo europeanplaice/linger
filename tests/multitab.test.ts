@@ -8,10 +8,14 @@ async function setup(context: BrowserContext, options: { blockFirstNotifications
   const rejected: { cookie: string; expected: string | undefined }[] = []
   const deletions: string[] = []
   await context.addCookies([{ name: 'linger_session', value: 'A', url: baseUrl }])
+  // WebKit can omit Cookie from intercepted headers, so the mock server reads the
+  // browser's URL-scoped cookie jar instead of the intercepted headers.
+  const requestAccount = async (url: string) => (await context.cookies(url)).find(cookie => cookie.name === 'linger_session')?.value
   await context.route('**/auth/**', async route => {
-    const account = /linger_session=([AB])/.exec(route.request().headers().cookie ?? '')?.[1]
+    const headers = await route.request().allHeaders()
+    const account = await requestAccount(route.request().url())
     if (route.request().url().endsWith('/logout')) {
-      if (account && route.request().headers()['x-linger-account'] !== `sub:account-${account}`) {
+      if (account && headers['x-linger-account'] !== `sub:account-${account}`) {
         await route.fulfill({ status: 401, json: { code: 'account_changed' } }); return
       }
       await route.fulfill({ json: { ok: true }, headers: { 'Set-Cookie': 'linger_session=; Path=/; Max-Age=0' } }); return
@@ -19,9 +23,10 @@ async function setup(context: BrowserContext, options: { blockFirstNotifications
     await route.fulfill({ json: { signedIn: Boolean(account), email: account ? `${account}@example.com` : null, googleSub: account ? `account-${account}` : null } })
   })
   await context.route('**/api/drive/**', async route => {
-    const account = /linger_session=([AB])/.exec(route.request().headers().cookie ?? '')?.[1]
+    const headers = await route.request().allHeaders()
+    const account = await requestAccount(route.request().url())
     if (!account) { await route.fulfill({ status: 401, json: { error: 'Unauthorized' } }); return }
-    const expected = route.request().headers()['x-linger-account']
+    const expected = headers['x-linger-account']
     if (expected !== `sub:account-${account}`) {
       rejected.push({ cookie: account, expected })
       await route.fulfill({ status: 401, json: { code: 'account_changed' }, headers: { 'X-Linger-Account-Changed': '1' } }); return
