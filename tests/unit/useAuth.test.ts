@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAuth } from '../../src/hooks/useAuth'
+import { AUTH_EVENT_KEY, getAccountSnapshot, setActiveAccount } from '../../src/lib/accountSession'
 
 const { mockStartSignIn, mockCheckSession, mockRevokeSession } = vi.hoisted(() => ({
   mockStartSignIn: vi.fn(),
@@ -15,6 +16,8 @@ vi.mock('../../src/api/auth', () => ({
 }))
 
 beforeEach(() => {
+  localStorage.clear()
+  setActiveAccount(null, true)
   mockStartSignIn.mockReset()
   mockCheckSession.mockReset()
   mockCheckSession.mockResolvedValue({ signedIn: false, email: null })
@@ -22,6 +25,65 @@ beforeEach(() => {
 })
 
 describe('useAuth', () => {
+  it('clears local authentication when another tab signs a different account in', async () => {
+    mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'a' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    act(() => {
+      localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'other-tab', account: 'sub:b' }))
+      window.dispatchEvent(new StorageEvent('storage', { key: AUTH_EVENT_KEY }))
+    })
+    expect(result.current.status).toBe('signedOut')
+    expect(getAccountSnapshot()).toMatchObject({ account: null, clearSharedData: false })
+    expect(mockRevokeSession).not.toHaveBeenCalled()
+  })
+
+  it('still clears authentication if recording the session flag fails', async () => {
+    mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'a' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'new-account', account: 'sub:b' }))
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError') })
+    try {
+      act(() => { window.dispatchEvent(new StorageEvent('storage', { key: AUTH_EVENT_KEY })) })
+      expect(result.current.status).toBe('signedOut')
+    } finally { spy.mockRestore() }
+  })
+
+  it('does not restore a session response arriving after local sign-out', async () => {
+    let resolve!: (info: { signedIn: boolean; email: string }) => void
+    mockCheckSession.mockReturnValue(new Promise(r => { resolve = r }))
+    mockRevokeSession.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAuth())
+    act(() => result.current.signOut())
+    await act(async () => { resolve({ signedIn: true, email: 'a@example.com' }) })
+    expect(result.current.status).toBe('signedOut')
+    expect(getAccountSnapshot().account).toBeNull()
+  })
+
+  it('does not accept an old restoration response after another account signs in', async () => {
+    let resolve!: (info: { signedIn: boolean; email: string }) => void
+    mockCheckSession.mockReturnValue(new Promise(r => { resolve = r }))
+    const { result } = renderHook(() => useAuth())
+    act(() => {
+      localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'new-account', account: 'sub:b' }))
+      window.dispatchEvent(new StorageEvent('storage', { key: AUTH_EVENT_KEY }))
+    })
+    await act(async () => { resolve({ signedIn: true, email: 'a@example.com' }) })
+    expect(result.current.status).toBe('signedOut')
+  })
+
+  it('detects a missed auth event when the tab is focused again', async () => {
+    mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'a' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    act(() => {
+      localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'missed', account: null }))
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(result.current.status).toBe('signedOut')
+  })
+
   it('initializes with status initializing', () => {
     mockCheckSession.mockImplementation(() => new Promise(() => {}))
     const { result } = renderHook(() => useAuth())

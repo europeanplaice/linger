@@ -9,6 +9,71 @@ describe('SyncQueueManager', () => {
     queueManager = new SyncQueueManager();
   });
 
+  it('retains independent operations from multiple tab instances', async () => {
+    const other = new SyncQueueManager();
+    await Promise.all([
+      queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 }),
+      other.enqueue({ id: 'b', type: 'REMOVE', date: '2026-05-02', timestamp: 2 }),
+    ]);
+    expect((await new SyncQueueManager().getPending()).map(item => item.id)).toEqual(['a', 'b']);
+  });
+
+  it('does not resurrect another tab\'s completed operation from stale memory', async () => {
+    await queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
+    const other = new SyncQueueManager();
+    await other.dequeue('a');
+    await queueManager.enqueue({ id: 'b', type: 'REMOVE', date: '2026-05-02', timestamp: 2 });
+    expect((await other.getPending()).map(item => item.id)).toEqual(['b']);
+  });
+
+  it('preserves a replacement queued while an earlier operation is processing', async () => {
+    await queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
+    await queueManager.process(async () => {
+      await new SyncQueueManager().enqueue({ id: 'b', type: 'REMOVE', date: '2026-05-01', timestamp: 2 });
+      return true;
+    });
+    expect((await queueManager.getPending()).map(item => item.id)).toEqual(['b']);
+  });
+
+  it('partitions queues by account and clears only the owning account', async () => {
+    const a = new SyncQueueManager('a@example.com');
+    const b = new SyncQueueManager('b@example.com');
+    await a.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
+    await b.enqueue({ id: 'b', type: 'REMOVE', date: '2026-05-01', timestamp: 2 });
+    await a.clear();
+    expect(await a.getPending()).toEqual([]);
+    expect((await b.getPending()).map(item => item.id)).toEqual(['b']);
+  });
+
+  it('migrates a legacy queue for its owner without importing it into another account', async () => {
+    localStorage.setItem('linger_session_user', 'a@example.com');
+    localStorage.setItem('linger_pending_sync_queue', JSON.stringify([{ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 }]));
+    expect(await new SyncQueueManager('b@example.com').getPending()).toEqual([]);
+    const a = new SyncQueueManager('a@example.com');
+    expect((await a.getPending()).map(item => item.id)).toEqual(['a']);
+    expect(localStorage.getItem('linger_pending_sync_queue')).toBeNull();
+  });
+
+  it('retains an operation in memory when storage writes exceed quota', async () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+    try {
+      await queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
+      expect((await queueManager.getPending()).map(item => item.id)).toEqual(['a']);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('keeps all legacy operations available when migration cannot write storage', async () => {
+    localStorage.setItem('linger_pending_sync_queue', JSON.stringify([
+      { id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 },
+      { id: 'b', type: 'REMOVE', date: '2026-05-02', timestamp: 2 },
+    ]));
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+    try {
+      expect((await new SyncQueueManager().getPending()).map(item => item.id)).toEqual(['a', 'b']);
+      expect(localStorage.getItem('linger_pending_sync_queue')).not.toBeNull();
+    } finally { spy.mockRestore(); }
+  });
+
   it('adds items to queue and gets pending items', async () => {
     await queueManager.enqueue({
       id: 'item-1',

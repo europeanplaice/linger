@@ -6,6 +6,7 @@ const STORE = 'entries'
 const DRAFTS_STORE = 'drafts'
 
 export interface CachedEntry {
+  owner?: string
   date: string
   meta: DriveFileMeta
   content?: DiaryEntry
@@ -16,6 +17,7 @@ export interface CachedEntry {
 // offline). baseVersion/baseContent capture the entry state the edit was made
 // against, so a later sync still goes through normal conflict detection.
 export interface DraftEntry {
+  owner?: string
   date: string
   content: string
   baseVersion: string | null

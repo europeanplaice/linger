@@ -4,6 +4,7 @@ import { onRequest } from '../../functions/api/_middleware'
 function makeSession(overrides?: Record<string, unknown>) {
   return {
     refresh_token: 'rt',
+    google_sub: 'account-a',
     access_token: 'at',
     expires_at: Date.now() + 3600_000,
     ...overrides,
@@ -52,7 +53,7 @@ describe('API auth middleware', () => {
       request: new Request('http://localhost/api/drive/entry/2026-05-01', {
         method: 'POST',
         headers: {
-          Cookie: 'linger_session=sid123',
+          Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a',
           Origin: 'https://attacker.example',
           'Sec-Fetch-Site': 'cross-site',
         },
@@ -69,7 +70,7 @@ describe('API auth middleware', () => {
   it('returns 401 when session not in KV', async () => {
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(null) } },
     })
@@ -86,7 +87,7 @@ describe('API auth middleware', () => {
     const del = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
     })
@@ -108,7 +109,7 @@ describe('API auth middleware', () => {
     const del = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
     })
@@ -130,7 +131,7 @@ describe('API auth middleware', () => {
     })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get, put: vi.fn(), delete: del } },
     })
@@ -151,7 +152,7 @@ describe('API auth middleware', () => {
     const del = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
     })
@@ -171,7 +172,7 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
@@ -196,7 +197,7 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
@@ -211,14 +212,14 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
 
     await onRequest(ctx as any)
 
-    expect(put).toHaveBeenCalledOnce()
+    expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
   })
 
   it('renews the email index TTL alongside the session record when renewal fires and an email is on file', async () => {
@@ -232,7 +233,7 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
@@ -247,14 +248,14 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
 
     await onRequest(ctx as any)
 
-    expect(put).toHaveBeenCalledTimes(1) // only the session record itself
+    expect(put).not.toHaveBeenCalledWith(expect.stringMatching(/^esidx:/), expect.anything(), expect.anything())
     expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
   })
 
@@ -275,7 +276,7 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put } },
     })
@@ -297,7 +298,7 @@ describe('API auth middleware', () => {
     const put = vi.fn()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
     })
@@ -311,7 +312,7 @@ describe('API auth middleware', () => {
     const session = makeSession()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: {
         SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() },
@@ -328,7 +329,7 @@ describe('API auth middleware', () => {
     const session = makeSession()
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123' },
+        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
       }),
       env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() } },
     })

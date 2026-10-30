@@ -1,96 +1,107 @@
 export interface QueueItem {
-  id: string;
-  type: 'SAVE' | 'REMOVE';
-  date: string;
-  content?: string;
-  baseVersion?: string | null;
-  timestamp: number;
+  id: string
+  type: 'SAVE' | 'REMOVE'
+  date: string
+  content?: string
+  baseVersion?: string | null
+  timestamp: number
 }
 
-const STORAGE_KEY = 'linger_pending_sync_queue';
+const LEGACY_KEY = 'linger_pending_sync_queue'
+const ITEM_PREFIX = 'linger_pending_sync_item:'
 
 export class SyncQueueManager {
-  private queue: QueueItem[] = [];
+  private fallback = new Map<string, QueueItem>()
+  private readonly prefix: string
 
-  constructor() {
-    this.load();
+  constructor(private readonly owner?: string) {
+    this.prefix = ITEM_PREFIX + encodeURIComponent(owner ?? '') + ':'
+    this.migrateLegacy()
   }
 
-  private load(): void {
-    if (typeof localStorage === 'undefined') return;
+  private key(id: string): string { return this.prefix + encodeURIComponent(id) }
+
+  private migrateLegacy(): void {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          this.queue = parsed;
-        } else {
-          this.queue = [];
+      if (this.owner !== undefined && localStorage.getItem('linger_session_user') !== this.owner) return
+      const raw = localStorage.getItem(LEGACY_KEY)
+      if (!raw) return
+      const items = JSON.parse(raw)
+      if (!Array.isArray(items)) return
+      for (const item of items) {
+        if (typeof item?.id === 'string' && typeof item.date === 'string') this.fallback.set(item.id, item)
+      }
+      for (const item of items) {
+        if (typeof item?.id === 'string' && typeof item.date === 'string') {
+          if (!localStorage.getItem(this.key(item.id))) localStorage.setItem(this.key(item.id), JSON.stringify(item))
+          this.fallback.delete(item.id)
         }
       }
-    } catch {
-      this.queue = [];
-    }
-  }
-
-  private save(): void {
-    if (typeof localStorage === 'undefined') return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.queue));
-    } catch {
-      // Storage quota or restriction error
-    }
-  }
-
-  async enqueue(item: QueueItem): Promise<void> {
-    this.queue = this.queue.filter((i) => i.date !== item.date);
-    this.queue.push(item);
-    this.save();
-  }
-
-  async dequeue(id: string): Promise<void> {
-    this.queue = this.queue.filter((i) => i.id !== id);
-    this.save();
+      localStorage.removeItem(LEGACY_KEY)
+    } catch { /* Keep the legacy record if migration cannot finish. */ }
   }
 
   async getPending(): Promise<QueueItem[]> {
-    return [...this.queue];
-  }
-
-  // Drops every queued item. Called on sign-out and account switch — a
-  // REMOVE queued by one account must never replay against another one.
-  async clear(): Promise<void> {
-    this.queue = [];
-    if (typeof localStorage === 'undefined') return;
     try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Storage restriction error
-    }
+      const items: QueueItem[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (!key?.startsWith(this.prefix)) continue
+        try {
+          const item = JSON.parse(localStorage.getItem(key) ?? 'null')
+          if (item && typeof item.id === 'string' && typeof item.date === 'string') items.push(item)
+        } catch { /* Skip a corrupt record without dropping other operations. */ }
+      }
+      const pending = new Map(items.map(item => [item.id, item]))
+      this.fallback.forEach((item, id) => pending.set(id, item))
+      return [...pending.values()].sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id))
+    } catch { return [...this.fallback.values()] }
   }
 
-  // Handler contract: resolve true → item synced (dequeued), resolve false →
-  // stop processing (e.g. went offline again), throw → this item failed but
-  // the rest are independent dates, so keep going and rethrow at the end.
-  async process(handler: (item: QueueItem) => Promise<boolean>): Promise<void> {
-    const items = [...this.queue];
-    const errors: unknown[] = [];
-    let processed = false;
-    for (const item of items) {
-      let success: boolean;
-      try {
-        success = await handler(item);
-      } catch (e) {
-        errors.push(e);
-        continue;
+  async enqueue(item: QueueItem): Promise<void> {
+    const previous = await this.getPending()
+    for (const old of previous) { if (old.date === item.date) this.fallback.delete(old.id) }
+    try {
+      localStorage.setItem(this.key(item.id), JSON.stringify(item))
+      for (const old of previous) {
+        if (old.date === item.date && old.id !== item.id) localStorage.removeItem(this.key(old.id))
       }
-      if (!success) break;
-      this.queue = this.queue.filter((i) => i.id !== item.id);
-      processed = true;
+    } catch { this.fallback.set(item.id, item) }
+  }
+
+  async dequeue(id: string): Promise<void> {
+    this.fallback.delete(id)
+    try { localStorage.removeItem(this.key(id)) } catch { /* Storage unavailable. */ }
+  }
+
+  async clear(): Promise<void> {
+    this.fallback.clear()
+    try {
+      const keys = Object.keys(localStorage).filter(key => key.startsWith(this.prefix))
+      keys.forEach(key => localStorage.removeItem(key))
+      localStorage.removeItem(LEGACY_KEY)
+    } catch { /* Storage unavailable. */ }
+  }
+
+  async process(handler: (item: QueueItem) => Promise<boolean>): Promise<void> {
+    const run = async () => {
+      const errors: unknown[] = []
+      for (const item of await this.getPending()) {
+        // Another tab may have cleared/replaced this item while we were waiting.
+        if (!(await this.getPending()).some(pending => pending.id === item.id)) continue
+        try {
+          if (!await handler(item)) break
+          // Delete only this operation; never overwrite a queue snapshot.
+          await this.dequeue(item.id)
+        } catch (error) { errors.push(error) }
+      }
+      if (errors.length) throw new AggregateError(errors, 'Failed to sync some queued diary changes')
     }
-    if (processed) this.save();
-    if (errors.length > 0) {
-      throw new AggregateError(errors, 'Failed to sync some queued diary changes');
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      await navigator.locks.request('linger-sync:' + (this.owner ?? ''), run)
+    } else {
+      // Older browsers retain every operation; duplicate DELETEs are idempotent.
+      await run()
     }
   }
 }

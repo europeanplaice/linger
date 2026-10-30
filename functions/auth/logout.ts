@@ -1,5 +1,5 @@
 import type { Env } from '../_shared/session'
-import { parseSessionId, getSession, invalidateSession, clearSessionCookie, validateMutationOrigin } from '../_shared/session'
+import { parseSessionId, getSession, invalidateSession, clearSessionCookie, validateMutationOrigin, validateRequestAccount, jsonResponse } from '../_shared/session'
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const originError = validateMutationOrigin(request, env)
@@ -8,6 +8,11 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const sessionId = parseSessionId(request)
   if (sessionId) {
     const session = await getSession(sessionId, env)
+    // Without a readable session we cannot prove which account owns this cookie.
+    // Do not invalidate an unknown ID or clear a possibly new account's cookie.
+    if (!session) return jsonResponse({ ok: true })
+    const accountError = validateRequestAccount(request, session)
+    if (accountError) return accountError
     await invalidateSession(sessionId, session?.email, env, session?.google_sub)
   }
   return new Response(JSON.stringify({ ok: true }), {

@@ -55,6 +55,14 @@ export interface Data extends Record<string, unknown> {
   session: SessionData
 }
 
+export function validateRequestAccount(request: Request, session: SessionData): Response | null {
+  const expected = session.google_sub ? `sub:${session.google_sub}`
+    : session.email ? `email:${encodeURIComponent(session.email.trim().toLowerCase())}` : null
+  if (expected && request.headers.get('X-Linger-Account') === expected) return null
+  // Do not clear the cookie: it may belong to the new account in another tab.
+  return jsonResponse({ error: 'Account changed', code: 'account_changed' }, 401, { 'X-Linger-Account-Changed': '1' })
+}
+
 export function parseSessionId(request: Request): string | null {
   const header = request.headers.get('Cookie') ?? ''
   for (const part of header.split(';')) {

@@ -6,6 +6,7 @@ import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
 import { SyncQueueManager } from '../lib/syncQueue'
 import { broadcastMessage } from '../utils/tabSync'
+import { getAccountSnapshot } from '../lib/accountSession'
 import type { AuthStatus } from './useAuth'
 import { shiftDate } from '../utils/date'
 import { useLatestRef } from './useEvent'
@@ -161,7 +162,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const onEvictedRef = useLatestRef(onEntriesEvicted)
 
   const storageAdapter = useMemo(() => new LocalStorageAdapter(), [])
-  const syncQueue = useMemo(() => new SyncQueueManager(), [])
+  const syncQueue = useMemo(() => new SyncQueueManager(email ?? undefined), [email])
   const scopeRef = useRef<DiaryScope | null>(null)
 
   // Each committed authentication state owns its asynchronous work. Keep the
@@ -254,7 +255,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     if (syncPersistentCache) {
       // Background IDB sync — non-blocking
       Promise.all([
-        ...toUpsert.map(e => putCached(e).catch(() => {})),
+        ...toUpsert.map(e => putCached({ ...e, owner: scope.email ?? undefined }).catch(() => {})),
         ...toDelete.map(d => deleteCached(d).catch(() => {})),
       ]).catch(() => {})
     }
@@ -321,7 +322,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           }
           return next
         })
-        if (email !== null) putCached({ date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})
+        if (email !== null) putCached({ owner: email, date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})
         return { entry: content, meta }
       } catch (e) {
         if (!scope.active) return null
@@ -380,7 +381,13 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       // Only wipe the persistent cache once the session is known to be gone;
       // while auth is still restoring ('initializing') the cache must survive
       // so the IDB preload below has data after a reload.
-      if (authStatus === 'signedOut') clearLocalData().catch(() => {})
+      if (authStatus === 'signedOut') {
+        // A stale tab must not wipe the new account's shared cache. Its own
+        // offline queue is partitioned by account and can always be discarded.
+        const storedUser = localStorage.getItem('linger_session_user')
+        if (getAccountSnapshot().clearSharedData && (!storedUser || storedUser === email)) clearLocalData().catch(() => {})
+        else syncQueue.clear().catch(() => {})
+      }
       return
     }
     setFreshListLoaded(false)
@@ -399,13 +406,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           localStorage.removeItem('linger_session_user')
         } else if (storedUser !== email) {
           await clearLocalData()
+          if (storedUser) await new SyncQueueManager(storedUser).clear()
           if (!scope.active) return
           localStorage.setItem('linger_session_user', email)
         }
 
         // Preload from IDB immediately so the sidebar and previously-opened entries
         // appear without waiting for the Drive network round trip.
-        const idbEntries = canUsePersistentCache ? await getAllCached().catch(() => [] as CachedEntry[]) : []
+        const idbEntries = canUsePersistentCache ? (await getAllCached().catch(() => [] as CachedEntry[])).filter(e => e.owner === undefined || e.owner === email) : []
         if (!scope.active) return
         if (idbEntries.length > 0) {
           updateCache(() => {
@@ -444,6 +452,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
                 snippet: existing.snippet ?? prefetchedToday.entry.content.slice(0, 500),
               })
               if (email !== null) putCached({
+                owner: email,
                 date: today,
                 meta: prefetchedToday.meta,
                 content: prefetchedToday.entry,
@@ -475,7 +484,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (scope.active) setLoading(false)
       }
     })()
-  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData, getScope])
+  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData, getScope, syncQueue])
 
   const refreshEntries = useCallback(async (): Promise<void> => {
     const scope = getScope()
@@ -541,7 +550,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       if (evicted.length) onEvictedRef.current?.(evicted)
       if (syncPersistentCache) {
         Promise.all([
-          ...toUpsert.map(e => putCached(e).catch(() => {})),
+          ...toUpsert.map(e => putCached({ ...e, owner: scope.email ?? undefined }).catch(() => {})),
           ...toDelete.map(d => deleteCached(d).catch(() => {})),
         ]).catch(() => {})
       }
@@ -569,7 +578,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           next.set(date, { meta, content: entry, snippet: entry.content.slice(0, 500) })
           return next
         })
-        if (email !== null) putCached({ date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
+        if (email !== null) putCached({ owner: email, date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
         storageAdapter.saveEntry(date, content).catch(() => {})
         broadcastMessage({ type: 'DIARY_UPDATED', date })
         deleteDraft(date).catch(() => {})
@@ -587,7 +596,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           // Replay is handled solely by the drafts loop below (it knows how
           // to skip the date open in the editor and mark conflicts) — do not
           // also enqueue this in syncQueue, which would replay it a second time.
-          putDraft({ date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
+          putDraft({ owner: email, date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
         }
         if (e instanceof SaveConflictError) {
           if (e.remote) {
@@ -649,6 +658,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       const drafts = await getAllDrafts().catch(() => [] as DraftEntry[])
       for (const draft of drafts) {
         if (!scope.active) return
+        if (draft.owner !== undefined && draft.owner !== scope.email) continue
         if (draft.conflicted) continue
         if (draft.date === selectedDateRef.current) continue
         const cached = cacheRef.current.get(draft.date)

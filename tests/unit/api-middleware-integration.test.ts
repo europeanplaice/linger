@@ -23,6 +23,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
 function makeSession(overrides?: Record<string, unknown>) {
   return {
     refresh_token: 'rt',
+    google_sub: 'account-a',
     access_token: 'at-123',
     expires_at: Date.now() + 3600_000,
     ...overrides,
@@ -78,7 +79,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     vi.stubGlobal('fetch', fetchMock)
     const request = new Request('https://example.com/api/drive/entry/2026-05-01', {
       method: 'POST',
-      headers: { Cookie: 'linger_session=sid123', Origin: 'https://example.com' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Origin: 'https://example.com' },
       body: JSON.stringify({ content: 'overwrite', fileId: 'externalFile12345678', ...options }),
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
@@ -99,7 +100,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
     const env = makeEnv(kv)
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -144,7 +145,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
       new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }),
     ))
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 

@@ -1,4 +1,5 @@
 import type { ChangesResult, DiaryEntry, DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../types'
+import { accountRequest, invalidateAccount } from '../lib/accountSession'
 
 const BASE = '/api/drive'
 
@@ -74,12 +75,24 @@ function waitForRetry(delay: number, signal?: AbortSignal | null): Promise<void>
 }
 
 export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatuses: number[] = []): Promise<{ data: T; status: number }> {
+  const account = accountRequest(init)
   for (let attempt = 0; ; attempt++) {
+    account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-    const res = await fetch(url, { ...init, credentials: 'include', cache: 'no-store' })
+    const res = await fetch(url, { ...account.init, credentials: 'include', cache: 'no-store' })
+    account.assertCurrent()
+    if (res.headers.get('X-Linger-Account-Changed') === '1') {
+      invalidateAccount()
+      // This account was replaced, so do not open the expired-session modal or
+      // retain a pending save that could be retried after signing another user in.
+      throw new DOMException('Account changed', 'AbortError')
+    }
 
-    if (res.ok) return { data: await res.json() as T, status: res.status }
-    if (acceptedStatuses.includes(res.status)) return { data: await res.json() as T, status: res.status }
+    if (res.ok || acceptedStatuses.includes(res.status)) {
+      const data = await res.json() as T
+      account.assertCurrent()
+      return { data, status: res.status }
+    }
     if (res.status === 304) return { data: null as T, status: 304 }
     if (res.status === 401) throw new TokenExpiredError()
     if (res.status === 404) return { data: null as T, status: 404 }
@@ -97,9 +110,16 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
 }
 
 async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void> {
+  const account = accountRequest(init)
   for (let attempt = 0; ; attempt++) {
+    account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-    const res = await fetch(url, { ...init, credentials: 'include', cache: 'no-store' })
+    const res = await fetch(url, { ...account.init, credentials: 'include', cache: 'no-store' })
+    account.assertCurrent()
+    if (res.headers.get('X-Linger-Account-Changed') === '1') {
+      invalidateAccount()
+      throw new DOMException('Account changed', 'AbortError')
+    }
 
     if (res.ok || res.status === 204) return
     if (res.status === 401) throw new TokenExpiredError()

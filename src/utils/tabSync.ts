@@ -1,6 +1,7 @@
 import type { StorageMode } from '../types';
 
 export type TabSyncEvent =
+  | { type: 'AUTH_CHANGED'; id: string; account: string | null; persisted?: boolean }
   | { type: 'DIARY_UPDATED'; date: string }
   | { type: 'DIARY_REMOVED'; date: string }
   | { type: 'MILESTONES_UPDATED' }

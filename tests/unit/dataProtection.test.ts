@@ -80,20 +80,20 @@ it('does not show account A data to account B when an older read finishes after 
 })
 
 it('keeps a logged-out session deleted when an earlier API request finishes', async () => {
-  const session = { refresh_token: 'r', access_token: 'a', expires_at: Date.now() + 3_600_000 }
+  const session = { google_sub: 'account-a', refresh_token: 'r', access_token: 'a', expires_at: Date.now() + 3_600_000 }
   const kv = createFakeKV({ 'session:a': JSON.stringify(session) })
   const env = { SESSIONS: kv, SESSION_DOMAIN: 'https://app.example.com', GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' }
   const downstream = deferred<Response>()
   const entered = deferred<void>()
   const apiPending = middleware({
-    request: new Request('https://app.example.com/api/drive/entries', { headers: { Cookie: 'linger_session=a' } }),
+    request: new Request('https://app.example.com/api/drive/entries', { headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a' } }),
     env, data: {},
     next: () => { entered.resolve(); return downstream.promise },
   } as never)
   await entered.promise
   const response = await logout({
     request: new Request('https://app.example.com/auth/logout', {
-      method: 'POST', headers: { Cookie: 'linger_session=a', Origin: 'https://app.example.com' },
+      method: 'POST', headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a', Origin: 'https://app.example.com' },
     }), env,
   } as never)
   expect(response.status).toBe(200)

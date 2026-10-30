@@ -1,3 +1,5 @@
+import { accountRequest } from '../lib/accountSession'
+
 export function startSignIn(returnPath = window.location.pathname + window.location.search + window.location.hash): void {
   window.location.href = `/auth/login?redirect=${encodeURIComponent(returnPath)}`
 }
@@ -25,5 +27,7 @@ export async function checkSession(): Promise<SessionInfo> {
 }
 
 export async function revokeSession(): Promise<void> {
-  await fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+  const { init } = accountRequest({ method: 'POST' })
+  const response = await fetch('/auth/logout', { ...init, credentials: 'include' })
+  if (!response.ok) throw new Error('Logout failed')
 }

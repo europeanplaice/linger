@@ -15,6 +15,7 @@ import {
   jsonResponse,
   validateMutationOrigin,
   RefreshTokenInvalidError,
+  validateRequestAccount,
 } from '../_shared/session'
 
 // KV writes are capped at 1000/day on the free tier. Writing on every request
@@ -32,6 +33,8 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
 
   const session = await getSession(sessionId, context.env)
   if (!session) return jsonResponse({ error: 'Session not found' }, 401)
+  const accountError = validateRequestAccount(context.request, session)
+  if (accountError) return accountError
 
   let validSession: typeof session
   try {
