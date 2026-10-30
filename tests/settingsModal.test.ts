@@ -43,7 +43,7 @@ test.describe('SettingsModal — section navigation and preview', () => {
       await expect(writing).toHaveAttribute('aria-current', 'location')
       await expect(page.getByRole('switch', { name: 'Auto-save' })).toBeInViewport()
 
-      const backup = nav.getByRole('button', { name: 'Backup', exact: true })
+      const backup = nav.getByRole('button', { name: 'S3 backup', exact: true })
       await backup.click()
       await expect(backup).toHaveAttribute('aria-current', 'location')
       await expect(page.locator('#settings-backup .settings-section-title')).toBeInViewport()
@@ -585,9 +585,9 @@ test.describe('SettingsModal — about data storage', () => {
     await loadHarness(page)
     await render(page, { modalOpen: true })
 
-    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'Google Drive' }) })
     await expect(aboutSection).toBeVisible()
-    await expect(aboutSection.locator('h4')).toHaveText('About data storage')
+    await expect(aboutSection.locator('h4')).toHaveText('Google Drive')
     await expect(aboutSection.locator('.settings-about-text')).toContainText('Your diary entries are stored in your Google Drive:')
   })
 
@@ -595,7 +595,7 @@ test.describe('SettingsModal — about data storage', () => {
     await loadHarness(page)
     await render(page, { modalOpen: true })
 
-    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'Google Drive' }) })
     const listItems = aboutSection.locator('.settings-about-list li')
     await expect(listItems).toHaveCount(5)
     await expect(listItems.nth(0)).toContainText('linger_diary')
@@ -610,7 +610,7 @@ test.describe('SettingsModal — about data storage', () => {
     await render(page, { modalOpen: true })
 
     const exportSection = page.locator('.settings-item').filter({ hasText: 'Export all entries' })
-    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'About data storage' }) })
+    const aboutSection = page.locator('.settings-section').filter({ has: page.locator('h4', { hasText: 'Google Drive' }) })
     await expect(exportSection).toBeVisible()
     await expect(aboutSection).toBeVisible()
 

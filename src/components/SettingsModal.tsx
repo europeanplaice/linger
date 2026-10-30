@@ -527,7 +527,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       '',
       '# Your own Google account\'s stable numeric ID (the \'sub\' claim, digits only,',
       '# e.g. "112233445566778899001"), not your email. This is the same value shown',
-      '# as "Your Google account ID" in linger\'s Settings under S3 backup (advanced).',
+      '# as "Your Google account ID" in linger\'s Settings under S3 backup.',
       '# Without this, any signed-in linger user could assume this role.',
       `linger_google_sub = "${googleSub || 'YOUR_GOOGLE_ACCOUNT_ID_FROM_LINGER_SETTINGS'}"`,
     ]
@@ -1024,7 +1024,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
         </div>
 
-        {/* Data */}
+        {/* Import and export */}
         <div className="settings-section" id="settings-data">
           <h4 className="settings-section-title">{t.settings.sectionData}</h4>
           <div className="settings-item">
@@ -1046,16 +1046,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               onImportMilestones={onMilestoneAdd ? handleImportMilestones : undefined}
             />
           </div>
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
-            <button className="settings-action-btn" onClick={handleShareApp}>
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-              {shareMsg ?? t.settings.share}
-            </button>
-          </div>
         </div>
 
-        {/* About data storage */}
+        {/* Google Drive */}
         <div className="settings-section" id="settings-storage">
           <h4 className="settings-section-title">{t.settings.aboutDataStorage}</h4>
           <div className="settings-about settings-about-body">
@@ -1076,7 +1069,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           </div>
         </div>
 
-        {/* S3 backup (advanced) */}
+        {/* S3 backup */}
         <div className="settings-section" id="settings-backup">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
           
@@ -1364,13 +1357,22 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           )}
         </div>
 
-        <div className="settings-legal">
-          <a href="/privacy" target="_blank" rel="noopener noreferrer">{t.settings.privacyPolicy}</a>
-          {' · '}
-          <a href="/terms-of-service" target="_blank" rel="noopener noreferrer">{t.settings.termsOfService}</a>
-          {' · '}
-          <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">{t.settings.github}</a>
-        </div>
+        <footer className="settings-footer">
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
+            <button className="settings-action-btn" onClick={handleShareApp}>
+              <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              {shareMsg ?? t.settings.share}
+            </button>
+          </div>
+          <div className="settings-legal">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">{t.settings.privacyPolicy}</a>
+            {' · '}
+            <a href="/terms-of-service" target="_blank" rel="noopener noreferrer">{t.settings.termsOfService}</a>
+            {' · '}
+            <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">{t.settings.github}</a>
+          </div>
+        </footer>
       </div>
       </div>
       <div className="sr-only" role="status">{appliedFlash ? t.settings.applied : ''}</div>

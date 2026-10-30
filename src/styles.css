@@ -1382,7 +1382,7 @@ dialog.settings-dialog::backdrop {
 /* A persistent index and one continuous reading pane. */
 .settings-workspace {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -3030,6 +3030,11 @@ dialog.settings-dialog::backdrop {
   min-width: 0;
 }
 
+.settings-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  flex-shrink: 0;
+}
 .settings-legal {
   display: flex;
   gap: 0.4rem;
