@@ -1,5 +1,5 @@
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token (Pages:Edit, Workers KV Storage:Edit, Zone DNS:Edit). If reused as the CI CLOUDFLARE_API_TOKEN secret, also needs Workers Scripts:Edit — CI deploys the s3-workflows Worker via `wrangler deploy`, not Terraform."
+  description = "Cloudflare API token (Pages:Edit, D1:Edit, Workers KV Storage:Edit, Zone DNS:Edit). If reused as the CI CLOUDFLARE_API_TOKEN secret, also needs Workers Scripts:Edit — CI deploys the s3-workflows Worker via `wrangler deploy`, not Terraform."
   type        = string
   sensitive   = true
 }

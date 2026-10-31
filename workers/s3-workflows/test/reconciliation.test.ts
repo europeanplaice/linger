@@ -1,3 +1,4 @@
+import { createSession } from '../../../functions/_shared/session'
 import { createExecutionContext, env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as drive from '../../../functions/_shared/drive'
@@ -34,7 +35,7 @@ async function seed() {
   const accountKey = crypto.randomUUID()
   const auth = { accountKey, sessionId: accountKey }
   const session: SessionData = { google_sub: accountKey, access_token: 'access', refresh_token: 'refresh', expires_at: Date.now() + 3_600_000, id_token: 'identity', id_token_verified: true }
-  await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
+  await createSession(accountKey, session, env)
   const index = env.S3_SYNC_INDEX.getByName(accountKey)
   await index.setBackupEnabled(true)
   return { auth, index, service: new Service(createExecutionContext(), env) }

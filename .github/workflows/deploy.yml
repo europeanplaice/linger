@@ -137,6 +137,13 @@ jobs:
         env:
           DEPLOY_VERSION: ${{ github.sha }}
 
+      - name: Apply authentication database migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply AUTH_DB --remote --config workers/s3-workflows/wrangler.jsonc
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -178,6 +185,13 @@ jobs:
       # otherwise it silently bakes in production's S3_WORKFLOW_SERVICE/
       # SESSIONS bindings, regardless of --project-name/--branch.
       - run: cp wrangler.staging.toml wrangler.toml
+
+      - name: Apply staging authentication database migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply AUTH_DB --remote --config workers/s3-workflows/wrangler.staging.jsonc
 
       - uses: cloudflare/wrangler-action@v3
         with:

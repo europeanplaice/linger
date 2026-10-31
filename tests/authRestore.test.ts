@@ -24,6 +24,42 @@ test('valid session skips login screen and shows diary directly', async ({ page 
   await expect(page.locator('.login-screen')).toHaveCount(0)
 })
 
+test('reload displays the account cache before Drive responds instead of an empty editor', async ({ page }) => {
+  const email = 'cached-reader@example.com'
+  const content = 'Previously saved diary content'
+  await page.goto(`${baseUrl}/tests/useDiaryHarness.html`)
+  const date = await page.evaluate(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })
+  await page.evaluate(async ({ email, content, date }) => {
+    localStorage.setItem('linger_session_user', email)
+    await window.diaryHarness.seedIdb([{ date, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' }, content: { date, content } }])
+  }, { email, content, date })
+
+  let releaseDrive!: () => void
+  const gate = new Promise<void>(resolve => { releaseDrive = resolve })
+  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email, googleSub: 'cached-reader' } }))
+  await page.route('/api/drive/entries', async route => {
+    await gate
+    await route.fulfill({ json: { files: [{ id: 'cached-file', name: `diary-${date}.txt`, version: '1' }] } })
+  })
+  await page.route('/api/drive/entry/**', async route => {
+    await gate
+    await route.fulfill({ json: { entry: { date, content }, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' } } })
+  })
+  // Drive stays blocked through both assertions, so only the local cache can
+  // supply the content on the first mount and on the subsequent reload.
+  try {
+    await page.goto(baseUrl)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue(content)
+    await page.reload()
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue(content)
+  } finally {
+    releaseDrive()
+  }
+})
+
 test('keeps editor header typography stable between skeleton and loaded states', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 })
 

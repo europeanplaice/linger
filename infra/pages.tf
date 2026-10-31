@@ -19,9 +19,11 @@ resource "cloudflare_pages_project" "linger" {
       always_use_latest_compatibility_date = false
       compatibility_date                   = "2024-11-01"
       compatibility_flags                  = []
-      d1_databases                         = {}
-      durable_object_namespaces            = {}
-      fail_open                            = true
+      d1_databases = {
+        AUTH_DB = { id = cloudflare_d1_database.auth["preview"].id }
+      }
+      durable_object_namespaces = {}
+      fail_open                 = true
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_preview.id
@@ -38,9 +40,11 @@ resource "cloudflare_pages_project" "linger" {
       always_use_latest_compatibility_date = false
       compatibility_date                   = "2024-11-01"
       compatibility_flags                  = []
-      d1_databases                         = {}
-      durable_object_namespaces            = {}
-      fail_open                            = true
+      d1_databases = {
+        AUTH_DB = { id = cloudflare_d1_database.auth["production"].id }
+      }
+      durable_object_namespaces = {}
+      fail_open                 = true
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions.id
@@ -59,6 +63,11 @@ resource "cloudflare_pages_project" "linger" {
     ignore_changes = [
       deployment_configs.preview.env_vars,
       deployment_configs.production.env_vars,
+      # Wrangler deploys service bindings; provider 5.22 cannot round-trip their
+      # omitted environment reliably when patching unrelated Pages settings.
+      deployment_configs.preview.services,
+      deployment_configs.production.services,
+      deployment_configs.production.wrangler_config_hash,
     ]
   }
 }
@@ -87,9 +96,11 @@ resource "cloudflare_pages_project" "linger_staging" {
       always_use_latest_compatibility_date = false
       compatibility_date                   = "2024-11-01"
       compatibility_flags                  = []
-      d1_databases                         = {}
-      durable_object_namespaces            = {}
-      fail_open                            = true
+      d1_databases = {
+        AUTH_DB = { id = cloudflare_d1_database.auth["staging"].id }
+      }
+      durable_object_namespaces = {}
+      fail_open                 = true
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_staging.id
@@ -106,9 +117,11 @@ resource "cloudflare_pages_project" "linger_staging" {
       always_use_latest_compatibility_date = false
       compatibility_date                   = "2024-11-01"
       compatibility_flags                  = []
-      d1_databases                         = {}
-      durable_object_namespaces            = {}
-      fail_open                            = true
+      d1_databases = {
+        AUTH_DB = { id = cloudflare_d1_database.auth["staging"].id }
+      }
+      durable_object_namespaces = {}
+      fail_open                 = true
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_staging.id
@@ -127,6 +140,11 @@ resource "cloudflare_pages_project" "linger_staging" {
     ignore_changes = [
       deployment_configs.preview.env_vars,
       deployment_configs.production.env_vars,
+      # Wrangler deploys service bindings; provider 5.22 cannot round-trip their
+      # omitted environment reliably when patching unrelated Pages settings.
+      deployment_configs.preview.services,
+      deployment_configs.production.services,
+      deployment_configs.production.wrangler_config_hash,
     ]
   }
 }

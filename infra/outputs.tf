@@ -22,3 +22,7 @@ output "pages_project_staging_subdomain" {
   description = "Cloudflare Pages default subdomain for the staging project"
   value       = cloudflare_pages_project.linger_staging.subdomain
 }
+output "auth_database_ids" {
+  description = "Authentication D1 IDs by environment; copy into the corresponding Pages and Worker Wrangler configs"
+  value       = { for environment, database in cloudflare_d1_database.auth : environment => database.id }
+}

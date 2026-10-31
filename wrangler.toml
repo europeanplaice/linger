@@ -15,3 +15,32 @@ preview_id = "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
 [[services]]
 binding = "S3_WORKFLOW_SERVICE"
 service = "linger-s3-workflows"
+
+# Set a shared UTC cutoff at least 30 days after the last KV-only deployment.
+[vars]
+AUTH_KV_FALLBACK_UNTIL = "2026-12-03T09:30:25Z"
+AUTH_KV_REVOCATION_CHECK_UNTIL = "2026-10-31T11:30:25Z"
+
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "linger-auth-production"
+database_id = "9cf1ea9e-9bc5-4fc3-833c-f275a552ad54"
+migrations_dir = "migrations/auth"
+
+[env.preview.vars]
+AUTH_KV_FALLBACK_UNTIL = "2026-12-03T09:30:25Z"
+AUTH_KV_REVOCATION_CHECK_UNTIL = "2026-10-31T11:30:25Z"
+
+[[env.preview.d1_databases]]
+binding = "AUTH_DB"
+database_name = "linger-auth-preview"
+database_id = "7ff5f2ac-0dd5-4ad5-8a46-4d689a279300"
+migrations_dir = "migrations/auth"
+
+[[env.preview.kv_namespaces]]
+binding = "SESSIONS"
+id = "ea13bcd4fd2f4bdcba8cbbfddf7ac4f2"
+
+[[env.preview.services]]
+binding = "S3_WORKFLOW_SERVICE"
+service = "linger-s3-workflows-preview"
