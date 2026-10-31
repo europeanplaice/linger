@@ -4,6 +4,11 @@
   "license": "MIT",
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "npm@12.2.1",
+  "engines": {
+    "node": ">=26.0.0 <27.0.0",
+    "npm": ">=12.2.1 <13.0.0"
+  },
   "scripts": {
     "dev": "vite --host",
     "workers:dev": "wrangler pages dev --proxy 5173 --port 8788 --persist-to .wrangler/local-state",
@@ -25,7 +30,7 @@
     "aws4fetch": "^1.0.20",
     "diff": "^9.0.0",
     "jszip": "^3.10.2",
-    "lucide-react": "^1.65.0",
+    "lucide-react": "^1.66.0",
     "motion": "^14.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -33,7 +38,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.11",
-    "@cloudflare/workers-types": "^5.20261030.1",
+    "@cloudflare/workers-types": "^5.20261031.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.64.1",
     "@testing-library/react": "^16.3.3",
