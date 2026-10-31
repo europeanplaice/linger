@@ -34,6 +34,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 
 function makeService(overrides: Record<string, unknown> = {}) {
   return {
+    saveSettings: vi.fn().mockResolvedValue({ meta: { id: 'settings-file', name: 's3_settings.json', version: '1' }, needsBackfill: true }),
     startBackfill: vi.fn(),
     resetAllData: vi.fn().mockResolvedValue(undefined),
     getJob: vi.fn(),
@@ -262,26 +263,21 @@ describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(202)
     expect(((await res.json()) as any).jobId).toBe('job-3')
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
     // The legacy in-request backfillAllEntries path must never also fire once the
     // Workflow Worker is handling this account — that would double-mirror every entry.
     expect(ctx.waitUntil).not.toHaveBeenCalled()
   })
 
   it('re-enables backup without resetting sync history when the bucket is unchanged', async () => {
-    // Regression guard: disable → re-enable used to wipe the DO index
-    // (resetEntries: true), so the fresh backfill re-mirrored every entry as if new —
-    // appending a duplicate S3 version of each under bucket versioning and destroying
-    // the accumulated version history. A same-bucket re-enable must keep the index so
-    // the backfill skips entries already synced at the current Drive version, while
-    // entries edited while disabled (older syncedVersion) still re-mirror.
+    // The settings RPC owns target validation and preserves same-bucket history.
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
     const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-4' } }) })
     const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(202)
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: false })
+    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: validSettings })
     expect(service.startBackfill).toHaveBeenCalled()
   })
 
@@ -297,7 +293,7 @@ describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
     })
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(202)
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
     expect(service.startBackfill).toHaveBeenCalled()
   })
 
@@ -314,28 +310,43 @@ describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
     })
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(202)
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true, resetEntries: true })
+    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
     expect(service.startBackfill).toHaveBeenCalled()
   })
 
   it('only updates backup-enabled state (no new job) when re-saving with backup already enabled', async () => {
     vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
     vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
-    const service = makeService()
+    const service = makeService({ saveSettings: vi.fn().mockResolvedValue({ meta: { id: 'settings-file', version: '1' }, needsBackfill: false }) })
     const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
     const res = await settingsPut(ctx as any)
     expect(res.status).toBe(200)
     expect(service.startBackfill).not.toHaveBeenCalled()
-    // Not a first-time enable, so this must NOT reset entries — resetEntries: true
-    // here would wipe sync history (and, per resetAllData's own guard, refuse to
-    // run at all) on every plain re-save of already-enabled settings.
-    expect(service.setBackupEnabled).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', enabled: true })
+    // Same-target re-saves need no new job; the settings RPC owns enablement too.
+    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: validSettings })
   })
 
   it('maps an "already running" rejection from startBackfill to 409', async () => {
     const service = makeService({ startBackfill: vi.fn().mockRejectedValue(new Error('A backfill is already running')) })
     const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
     expect(res.status).toBe(409)
+  })
+
+  it('leaves Drive unchanged when saving settings is rejected by an active backfill', async () => {
+    const service = makeService({ saveSettings: vi.fn().mockRejectedValue(new Error('A backfill is already running')) })
+    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
+    expect(res.status).toBe(409)
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
+    expect(service.startBackfill).not.toHaveBeenCalled()
+  })
+
+  it('starts a pending backfill on a retry even though the saved bucket is unchanged', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
+    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
+    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ job: { jobId: 'retry-job' }, created: true }) })
+    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
+    expect(res.status).toBe(202)
+    expect(service.startBackfill).toHaveBeenCalled()
   })
 
   it('maps any other startBackfill failure to 502 without losing the already-saved settings', async () => {

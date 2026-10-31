@@ -1,9 +1,12 @@
 import type { DiaryWriterService } from './diaryWriter'
+import type { DriveFileMeta } from './drive'
+import type { S3Config } from './s3Settings'
 
 export type S3SyncState = 'pending' | 'synced' | 'failed' | 'unknown'
 
 export interface EntrySyncStatus {
   date: string
+  fileId?: string
   driveVersion?: string
   syncedVersion?: string
   state: S3SyncState
@@ -87,6 +90,7 @@ export interface WorkflowUsage {
 
 /** RPC surface exposed by the dedicated Workflow Worker. */
 export interface S3WorkflowService extends DiaryWriterService {
+  saveSettings(input: S3WorkflowAuth & { config: S3Config }): Promise<{ meta: DriveFileMeta; needsBackfill: boolean }>
   startBackfill(input: StartBackfillInput): Promise<StartBackfillResult>
   resetAllData(input: S3WorkflowAuth): Promise<void>
   getJob(input: GetJobInput): Promise<BackfillJob | null>

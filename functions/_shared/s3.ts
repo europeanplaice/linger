@@ -122,14 +122,10 @@ function objectUrl(bucket: string, region: string, key: string): string {
 // S3 conditional-write headers (see putObjectIfNewer's comment for why they make
 // the create/update atomic): If-Match pins an update to the exact etag a preceding
 // HEAD just read, and If-None-Match: * lets at most one concurrent create win.
-// Both behave differently under S3 bucket versioning: a create still succeeds (as
-// a new version) and never 412s, and a delete becomes a delete marker — so a stale
-// concurrent write can land last and become the bucket's "current" object. The
-// version-ordering convergence for that case lives in the caller (convergeMirror in
-// the S3 workflow Worker, driven by the Durable Object index's monotonic
-// markSynced), so versioned buckets (as the self-host Terraform template ships)
-// and unversioned buckets are both supported here.
+// These preconditions also apply to versioned buckets: If-None-Match checks the
+// current version and succeeds only if it is absent or is a delete marker.
 export interface PutObjectOptions {
+  fileId?: string
   ifMatch?: string
   ifNoneMatch?: string
 }
@@ -149,6 +145,7 @@ export async function putObject(
   const client = s3Client(creds, region)
   const headers: Record<string, string> = { 'Content-Type': contentType }
   if (version) headers['x-amz-meta-linger-version'] = version
+  if (options?.fileId) headers['x-amz-meta-linger-file-id'] = options.fileId
   if (options?.ifMatch) headers['If-Match'] = options.ifMatch
   if (options?.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch
   const resp = await client.fetch(objectUrl(bucket, region, key), {
@@ -171,6 +168,7 @@ export function isAtLeast(existing: string, incoming: string): boolean {
 }
 
 interface HeadObjectResult {
+  fileId: string | null
   etag: string
   version: string | null
 }
@@ -185,7 +183,7 @@ async function headObject(creds: AssumedCredentials, bucket: string, region: str
   if (!head.ok) {
     throw new S3Error(head.status, `S3 HeadObject failed: ${await head.text()}`)
   }
-  return { etag: head.headers.get('etag') ?? '', version: head.headers.get('x-amz-meta-linger-version') }
+  return { etag: head.headers.get('etag') ?? '', version: head.headers.get('x-amz-meta-linger-version'), fileId: head.headers.get('x-amz-meta-linger-file-id') }
 }
 
 // Reads the linger-stamped version off an object without fetching its body, or
@@ -217,18 +215,14 @@ export async function headObjectVersion(creds: AssumedCredentials, bucket: strin
 //     lands on the exact object state just validated — a newer write landing in between
 //     surfaces as a 412 and the loop re-reads.
 //
-// Both paths also degrade to the other's preconditions (a 412 on a create downgrades to the
-// update path; a 404 on an update's HEAD downgrades to the create path), so a wrong hint
-// costs at most one request, never correctness. One caveat: under bucket versioning a
-// create never 412s, so the downgrade can't fire — the caller's version-ordering
-// convergence (see the S3 workflow Worker's convergeMirror) closes that gap using the
-// Durable Object index. The legacy HEAD/PUT/HEAD sequence survives
-// only as a fallback for endpoints that reject conditional writes (S3 on Outposts). Bounded
-// and best-effort like every other write path in this file — a loss after all attempts
-// self-heals on the next mirror/resync of this date.
+// A 412 switches a create to the update path; a missing object switches an
+// update to the create path. This applies equally to versioned buckets.
 const PUT_IF_NEWER_MAX_ATTEMPTS = 3
 
 export interface PutObjectIfNewerOptions {
+  // Drive versions are comparable only within the same file. A recreated date
+  // has a new ID and may restart at a lower version.
+  fileId?: string
   // True when the caller believes the key already exists (an update to an object it
   // previously mirrored); false when it knows the key can't exist yet (a first mirror
   // of a date that has never been synced). Defaults to true: both a first mirror and an
@@ -250,16 +244,17 @@ async function putObjectIfNewerLegacy(
   body: string,
   version?: string,
   contentType?: string,
+  fileId?: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < PUT_IF_NEWER_MAX_ATTEMPTS; attempt++) {
     if (version) {
-      const existing = await headObjectVersion(creds, bucket, region, key)
-      if (existing && isAtLeast(existing, version)) return
+      const existing = await headObject(creds, bucket, region, key)
+      if (existing?.version && (!fileId || existing.fileId === fileId) && isAtLeast(existing.version, version)) return
     }
-    await putObject(creds, bucket, region, key, body, contentType, version)
+    await putObject(creds, bucket, region, key, body, contentType, version, { fileId })
     if (!version) return
-    const landed = await headObjectVersion(creds, bucket, region, key)
-    if (landed && isAtLeast(landed, version)) return
+    const landed = await headObject(creds, bucket, region, key)
+    if (landed?.version && (!fileId || landed.fileId === fileId) && isAtLeast(landed.version, version)) return
   }
   throw new S3Error(409, `S3 PutObjectIfNewer: write did not land as version ${version} after ${PUT_IF_NEWER_MAX_ATTEMPTS} attempts`)
 }
@@ -285,7 +280,7 @@ export async function putObjectIfNewer(
   for (let attempt = 0; attempt < PUT_IF_NEWER_MAX_ATTEMPTS; attempt++) {
     if (!version) {
       // No version, no ordering to guard — a plain PUT is enough.
-      await putObject(creds, bucket, region, key, body, contentType)
+      await putObject(creds, bucket, region, key, body, contentType, undefined, { fileId: options?.fileId })
       return
     }
     if (expectExisting) {
@@ -293,24 +288,24 @@ export async function putObjectIfNewer(
       // If-Match so a concurrent write can't slip in between the read and the write.
       const head = await headObject(creds, bucket, region, key)
       if (head) {
-        if (head.version && isAtLeast(head.version, version)) return
+        if (head.version && (!options?.fileId || head.fileId === options.fileId) && isAtLeast(head.version, version)) return
         if (!head.etag) {
           // The endpoint omitted ETag on HEAD — an If-Match PUT would carry no
           // precondition (putObject only sets the header for a non-empty value),
           // silently degrading this update to a non-atomic PUT. Use the legacy
           // sequence, which re-reads and verifies the version after the write.
-          return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType)
+          return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType, options?.fileId)
         }
         try {
-          await putObject(creds, bucket, region, key, body, contentType, version, { ifMatch: head.etag })
+          await putObject(creds, bucket, region, key, body, contentType, version, { ifMatch: head.etag, fileId: options?.fileId })
           return
         } catch (error) {
           // 412: another writer moved the object after our HEAD — re-read and retry.
-          if (error instanceof S3Error && error.status === 412) continue
+          if (error instanceof S3Error && (error.status === 412 || error.status === 409)) continue
           // 404: the object was deleted between our HEAD and PUT — re-create it.
           if (error instanceof S3Error && error.status === 404) { expectExisting = false; continue }
           if (isConditionalWriteUnsupported(error)) {
-            return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType)
+            return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType, options?.fileId)
           }
           throw error
         }
@@ -322,14 +317,14 @@ export async function putObjectIfNewer(
     // Create path: If-None-Match: * makes the create atomic — only one concurrent
     // caller can win, the loser gets a 412 and re-reads.
     try {
-      await putObject(creds, bucket, region, key, body, contentType, version, { ifNoneMatch: '*' })
+      await putObject(creds, bucket, region, key, body, contentType, version, { ifNoneMatch: '*', fileId: options?.fileId })
       return
     } catch (error) {
       // 412: a concurrent writer created the object between our check and now — switch
       // to the update path and re-read its version rather than clobbering blindly.
-      if (error instanceof S3Error && error.status === 412) { expectExisting = true; continue }
+      if (error instanceof S3Error && (error.status === 412 || error.status === 409)) { expectExisting = true; continue }
       if (isConditionalWriteUnsupported(error)) {
-        return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType)
+        return putObjectIfNewerLegacy(creds, bucket, region, key, body, version, contentType, options?.fileId)
       }
       throw error
     }

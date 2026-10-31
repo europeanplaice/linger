@@ -1,53 +1,20 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
-import { getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
-import { getEntryContent, listEntryPage } from '../../../functions/_shared/drive'
-import { putObjectIfNewer, isAtLeast } from '../../../functions/_shared/s3'
+import { getValidAccessToken } from '../../../functions/_shared/session'
+import { listEntryPage } from '../../../functions/_shared/drive'
+import { isAtLeast } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
-import { authorizedSession, assumeS3Credentials, convergeMirror, countedStep, entryKey, findCurrentEntry, indexFor, isMissingEntryError, isPermanentEntryError, loadS3Config, safeError } from './runtime'
+import { authorizedSession, countedStep, indexFor, isPermanentEntryError, loadS3Config, safeError } from './runtime'
 
-// A new (not-yet-synced) entry costs up to 3 external subrequests: Drive content + S3
-// HEAD + one conditional PUT (see s3.ts's putObjectIfNewer — conditional writes made
-// the old Drive-meta + S3 HEAD + PUT + post-write HEAD sequence unnecessary, and
-// listing-derived targets carry their fileId/version straight from the listing). The
-// HEAD never pays for a no-op: an object already at least as new as Drive is skipped
-// right after it, before any PUT. Every write goes through this HEAD-guarded update
-// path — never the bare If-None-Match create — because the index hint that used to
-// pick the cheaper path is unreliable exactly when it matters most: a Resync wipes
-// the index (resetAllData) so every date looks "new" here, and under bucket versioning
-// an If-None-Match: * PUT on an existing key always succeeds as a new version —
-// appending a duplicate version of every unchanged entry.
-// STS AssumeRoleWithWebIdentity is only a subrequest on a credential-cache miss (the
-// KV-backed cache in assumeS3Credentials usually absorbs it). An entry already synced at
-// the version a listing/scope already knows about short-circuits to a single internal DO
-// lookup instead (see the DO-index check in processBatch), so a Resync of a mostly-
-// already-synced account costs far less than this bounds.
-// WORKFLOW_CHUNK_SIZE keeps a worst-case chunk (every entry an update: 3 each) to
-// 12 x 3 = 36 subrequests — real headroom under Cloudflare Workers Free plan's
-// 50-subrequests-per-Workflow-instance pool, which (unlike step retries) is never reset
-// mid-instance, including across step.sleep/hibernation. The rare 412-downgrade race (a
-// concurrent mirror writing the same date) costs extra requests — up to 3 per affected
-// entry (create 412 then HEAD + If-Match PUT) — but the pool absorbs a few of those before
-// the batch step's own retry takes over. When more entries remain, the Workflow instance
-// chains a fresh Workflow instance with the remaining scope, guaranteeing a brand-new
-// Worker invocation and a fresh 50-subrequest pool. BATCH_SIZE keeps a single batch (plus
-// its step retry, which re-runs the whole idempotent batch) inside the same pool:
-// 6 x 3 = 18, doubled to 36 on a retry, with the one-off STS call still fitting.
+// Each date is reconciled in its own Durable Object RPC, giving it a separate
+// external-request budget and serializing it against saves, deletes and target
+// changes. Keep bounded batches/chunks for checkpoints and Workflow state size.
 const BATCH_SIZE = 6
-// Exported for the subrequest-pool guard test (workflow.test.ts), which runs a full
-// chunk and asserts the per-entry external-call count stays at 3 (and the whole
-// instance under 50). Raising it without also re-auditing that arithmetic fails the
-// guard on purpose.
 export const WORKFLOW_CHUNK_SIZE = 12
 const MAX_BACKFILL_ENTRIES = 10_000
-// Steps that only touch the Durable Object / Workflow-binding (not the external
-// Drive/S3 subrequest budget) can retry generously — those calls don't compete
-// with the pooled, never-resets-mid-instance subrequest limit above.
+// Bookkeeping can retry more freely; keep work batches bounded so a long
+// external outage does not consume the account's daily Workflow step budget.
 const BOOKKEEPING_STEP_RETRIES = { limit: 3, delay: '5 seconds' as const, backoff: 'exponential' as const }
-// Steps that spend external Drive/S3/STS subrequests get only one retry: because
-// the subrequest budget is pooled across the whole Workflow instance, retrying a
-// step that failed from exhausting that budget only guarantees it fails again,
-// burning further steps (and daily step budget) for no chance of success.
 const EXTERNAL_STEP_RETRIES = { limit: 1, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
 
@@ -105,8 +72,6 @@ async function processBatch(
     async () => {
       const session = await authorizedSession(env, params)
       const accessToken = await getValidAccessToken(params.sessionId, session, env)
-      const idToken = await getValidIdToken(params.sessionId, session, env)
-      if (!idToken) throw new NonRetryableError('Google identity token unavailable')
       const config = params.config ?? await loadS3Config(accessToken, params.sessionId, session, env)
       if (!config || !config.enabled) throw new NonRetryableError('S3 backup is not enabled')
       const index = indexFor(env, params.accountKey)
@@ -119,75 +84,21 @@ async function processBatch(
       if (await index.getBackupEnabled() === false) {
         throw new NonRetryableError('S3 backup was disabled during the backfill')
       }
-      const credentials = await assumeS3Credentials(idToken, params.sessionId, session, env, config)
       const failedDates: string[] = []
 
       for (const target of targets) {
-        let version: string | undefined
         try {
-          // The DO index short-circuit: already mirrored at this exact Drive version
-          // (known from a listing, not a stale guess) confirms with one internal call
-          // instead of any Drive/S3 subrequest at all, so a backfill that mostly
-          // rediscovers already-synced entries doesn't re-pay cost for every one of
-          // them. (A Resync wipes the index precisely so this can't skip — every
-          // entry is then re-verified against the bucket by the HEAD-guarded write
-          // below instead.)
           const known = await index.getEntry(target.date)
-          if (target.version) {
-            if (known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
-            version = target.version
-          }
-          // Listing-derived targets (fileId + version known) skip the Drive metadata
-          // round-trip: the content fetch below still catches a mid-run deletion (404),
-          // and a Drive version bumped after the listing is caught by the next
-          // listing/resync, since putObjectIfNewer's conditional write stamps only the
-          // version we know. That stamp can lag the content by a version if Drive bumps
-          // between the listing and the fetch — harmless, because the DO index's
-          // monotonic markSynced never regresses and a later save at the newer version
-          // re-mirrors. findCurrentEntry remains for name-only scope targets.
-          const meta = target.fileId
-            ? { id: target.fileId, version: target.version }
-            : await findCurrentEntry(accessToken, params.sessionId, session, env, target.date)
-          if (!meta) {
-            await index.markDeleted(target.date)
-            continue
-          }
-          version = meta.version ?? version
-          // A concurrent save may have bumped the index to a newer drive version than
-          // this listing-derived hint (markPending's monotonic guard refuses a
-          // regression and returns the newer record). Mirror at the newest so the
-          // bucket's current object never lags behind Drive — under bucket versioning
-          // a stale create can never 412, so without this resolution a stale stamp
-          // could become "current".
-          const pending = await index.markPending(target.date, version, new Date().toISOString())
-          if (pending?.driveVersion && version && pending.driveVersion !== version && isAtLeast(pending.driveVersion, version)) {
-            version = pending.driveVersion
-          }
-          const { content } = await getEntryContent(accessToken, meta.id, target.date)
-          // Always the HEAD-guarded update path — expectExisting=false would send an
-          // If-None-Match: * create, which under bucket versioning succeeds as a new
-          // version even when the object is already current: after a Resync's index
-          // wipe every entry would get a duplicate version. The guard costs one HEAD
-          // on genuinely-new entries and turns already-current ones into a skip.
-          await putObjectIfNewer(credentials, config.bucket, config.region, entryKey(target.date), content, version, undefined, { expectExisting: true })
-          const synced = await index.markSynced(target.date, version, new Date().toISOString())
-          // Narrow-window complement to the pre-write resolution above: a newer save
-          // that landed between markPending and markSynced leaves a stale "current"
-          // object (versioned buckets) unless we re-mirror at the newest version.
-          if (synced?.driveVersion && version && synced.driveVersion !== version && isAtLeast(synced.driveVersion, version)) {
-            await convergeMirror(accessToken, index, config, credentials, target.date, meta.id, version)
-          }
+          if (target.fileId && known?.fileId === target.fileId && target.version && known.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
+          await index.reconcileEntry({ sessionId: params.sessionId, accountKey: params.accountKey, date: target.date, expectedBucket: config.bucket, jobId: params.jobId })
         } catch (error) {
-          if (isMissingEntryError(error)) {
-            await index.markDeleted(target.date)
-            continue
-          }
+          if (error instanceof Error && error.name === 'SupersededBackfillError') throw new NonRetryableError(error.message)
           // A 4xx from Drive/S3 is an entry-specific failure. Network/5xx errors
           // escape the batch so Workflow retry can repeat the whole idempotent batch.
           if (!isPermanentEntryError(error)) throw error
           const message = safeError(error)
           failedDates.push(target.date)
-          await index.markFailed(target.date, version, message, new Date().toISOString())
+          await index.markFailed(target.date, (await index.getEntry(target.date))?.driveVersion, message, new Date().toISOString())
         }
       }
       const result = { processed: targets.length, failedDates }

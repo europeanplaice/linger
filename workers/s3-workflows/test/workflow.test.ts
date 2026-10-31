@@ -157,78 +157,37 @@ describe('S3BackfillWorkflow', () => {
     }
   })
 
-  it('guards every S3 write with the HEAD-based update path, even for dates the index has never seen', async () => {
-    // Regression guard: a Resync wipes the DO index (resetAllData), so every date
-    // looks unknown here. The old index-derived hint then sent expectExisting=false
-    // (a bare If-None-Match: * create) for every entry — and under bucket versioning
-    // that always succeeds as a new version, appending a duplicate version of each
-    // unchanged entry on every Resync. The write must always carry the HEAD guard
-    // that turns an already-current object into a skip instead of a re-create.
+  it('passes source file IDs to S3 writes so recreated dates can restart their version', async () => {
     await runScopedWorkflow('8888888888', 'job-scope-8', 'wf-scope-8', ['2026-05-01', '2026-05-02'])
-
-    const optionsArgs = vi.mocked(putObjectIfNewer).mock.calls.map(c => c[7])
-    expect(optionsArgs.length).toBeGreaterThan(0)
-    for (const options of optionsArgs) {
-      expect(options).toEqual({ expectExisting: true })
+    for (const call of vi.mocked(putObjectIfNewer).mock.calls) {
+      expect(call[7]).toEqual({ fileId: String(call[3]).slice(6, -4) })
     }
   })
 
-  it('derives expectExisting=true for dates the DO index already knows are synced', async () => {
-    const accountKey = '9999999999'
-    const workflowEnv = env as unknown as WorkflowEnv
-    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
-    await runInDurableObject(index, (instance: S3SyncIndex) => {
-      instance.markSynced('2026-06-01', '2026-06-01-v1', new Date().toISOString())
-    })
-    await runScopedWorkflow(accountKey, 'job-scope-9', 'wf-scope-9', ['2026-06-01'])
-
-    const thisDateCalls = vi.mocked(putObjectIfNewer).mock.calls.filter(c => String(c[3]).includes('2026-06-01'))
-    expect(thisDateCalls.length).toBeGreaterThan(0)
-    for (const call of thisDateCalls) {
-      expect(call[7]).toEqual({ expectExisting: true })
-    }
-  })
-
-  it('keeps one Workflow instance inside the 50-subrequest pool for a full chunk of new entries', { timeout: 60_000 }, async () => {
-    // A full WORKFLOW_CHUNK_SIZE (12) scope = exactly one Workflow instance, which
-    // pools all of its Drive/S3/STS fetches against the Free plan's 50-subrequest
-    // per-instance budget (see workflow.ts's chunk-size comment for the accounting).
-    // Pinning the exact per-entry call count means an accidental extra Drive or S3
-    // round trip per entry fails here before it can quietly push a chunk over the
-    // pool limit. Config is frozen into params at start (as startBackfill does), so
-    // the workflow must not re-read Drive settings on every batch.
-    const config: S3Config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' }
-    const scope = Array.from({ length: WORKFLOW_CHUNK_SIZE }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)
-    await runScopedWorkflow('101010101010', 'job-pool-1', 'wf-pool-1', scope, config)
-
+  it('rechecks Drive after a backfill write and removes a concurrently deleted entry', async () => {
     const drive = await import('../../../functions/_shared/drive')
     const s3 = await import('../../../functions/_shared/s3')
-    // Per entry: findEntryMeta (name → id) + getEntryContent + one S3 write.
-    // No other Drive/S3 calls may creep into the per-entry path.
-    expect(vi.mocked(drive.findEntryMeta).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
-    expect(vi.mocked(drive.getEntryContent).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
-    expect(vi.mocked(s3.putObjectIfNewer).mock.calls.length).toBe(WORKFLOW_CHUNK_SIZE)
-    expect(vi.mocked(drive.getDiaryFileMeta).mock.calls.length).toBe(0)
-    expect(vi.mocked(drive.ensureFolder).mock.calls.length).toBe(0)
-    expect(vi.mocked(drive.findJsonFile).mock.calls.length).toBe(0)
-    expect(vi.mocked(drive.readJsonFile).mock.calls.length).toBe(0)
-    // Per instance: at most one STS assume-role (the KV-backed credential cache
-    // absorbs the second batch), so a full chunk costs CHUNK x 3 + 1 < 50 — which
-    // is exactly why the 50 bound below has no slack: raising CHUNK or adding any
-    // per-entry call must fail this guard.
-    expect(vi.mocked(s3.assumeRoleWithWebIdentity).mock.calls.length).toBe(1)
-    const total = (
-      vi.mocked(drive.findEntryMeta).mock.calls.length
-      + vi.mocked(drive.getEntryContent).mock.calls.length
-      + vi.mocked(drive.getDiaryFileMeta).mock.calls.length
-      + vi.mocked(drive.ensureFolder).mock.calls.length
-      + vi.mocked(drive.findJsonFile).mock.calls.length
-      + vi.mocked(drive.readJsonFile).mock.calls.length
-      + vi.mocked(drive.listEntryPage).mock.calls.length
-      + vi.mocked(s3.assumeRoleWithWebIdentity).mock.calls.length
-      + vi.mocked(s3.putObjectIfNewer).mock.calls.length
-      + vi.mocked(s3.deleteObject).mock.calls.length
-    )
-    expect(total).toBeLessThanOrEqual(50)
+    vi.mocked(drive.findEntryMeta)
+      .mockResolvedValueOnce({ id: 'old-file', name: 'diary-2026-05-03.txt', version: '7' })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+    vi.mocked(drive.getDiaryFileMeta).mockRejectedValueOnce(Object.assign(new Error('deleted'), { status: 404 }))
+    const index = await runScopedWorkflow('backfill-deleted-race', 'job-deleted-race', 'wf-deleted-race', ['2026-05-03'])
+    expect(s3.putObjectIfNewer).toHaveBeenCalledTimes(1)
+    expect(s3.deleteObject).toHaveBeenCalledTimes(1)
+    expect(await index.getEntry('2026-05-03')).toBeNull()
+    expect((await index.getJob('job-deleted-race'))?.state).toBe('complete')
+  })
+
+  it('revalidates current configuration and Drive metadata in each bounded reconciliation', { timeout: 60_000 }, async () => {
+    const config: S3Config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' }
+    const scope = Array.from({ length: WORKFLOW_CHUNK_SIZE }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`)
+    const index = await runScopedWorkflow('101010101010', 'job-pool-1', 'wf-pool-1', scope, config)
+    const drive = await import('../../../functions/_shared/drive')
+    expect(drive.findEntryMeta).toHaveBeenCalledTimes(WORKFLOW_CHUNK_SIZE)
+    expect(drive.getDiaryFileMeta).toHaveBeenCalledTimes(WORKFLOW_CHUNK_SIZE)
+    expect(drive.readJsonFile).toHaveBeenCalledTimes(WORKFLOW_CHUNK_SIZE)
+    expect(putObjectIfNewer).toHaveBeenCalledTimes(WORKFLOW_CHUNK_SIZE)
+    expect((await index.getJob('job-pool-1'))?.completed).toBe(WORKFLOW_CHUNK_SIZE)
   })
 })

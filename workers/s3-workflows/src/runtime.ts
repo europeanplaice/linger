@@ -9,7 +9,7 @@ import {
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
-import { deleteObject, describeError, isAtLeast, putObjectIfNewer, type AssumedCredentials } from '../../../functions/_shared/s3'
+import { deleteObject, describeError, isAtLeast, putObjectIfNewer, S3Error, type AssumedCredentials } from '../../../functions/_shared/s3'
 import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
@@ -306,122 +306,65 @@ export interface MirrorEntryCoreInput {
   date: string
   fileId?: string
   driveVersion?: string
+  expectedBucket?: string
+  jobId?: string
 }
 
-// The actual mirror work for one date, shared by the S3MirrorWorkflow steps and
-// the awaited mirrorEntryNow RPC (see index.ts). Always marks the DO index as it
-// goes (pending → synced/deleted) but, unlike the old mirrorEntryForAuth, never
-// swallows failures: a transient Drive/STS/S3 error is rethrown so the Workflow
-// step's retry (or the caller) can repeat the whole idempotent mirror, and only
-// the callers decide when an error is permanent enough to mark the entry failed.
-export async function mirrorEntryCore(env: WorkflowEnv, index: DurableObjectStub<S3SyncIndex>, input: MirrorEntryCoreInput): Promise<void> {
-  const session = await authorizedSession(env, input)
-  // The monotonic markPending guard refuses to regress a newer drive version and
-  // returns the newer record — the first chance to learn a concurrent save (or a
-  // stale backfill target) superseded our version hint.
-  const pending = await index.markPending(input.date, input.driveVersion, new Date().toISOString())
+// All S3 mutations (including backfills and delete retries) run through the
+// account's DO queue. Hints from old saves/listings never authorize a delete or
+// supply a version stamp: Drive's current file is the authority on both.
+export class SupersededBackfillError extends Error {
+  constructor(message: string) { super(message); this.name = 'SupersededBackfillError' }
+}
 
+export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex, 'getJob' | 'markPending' | 'markSynced' | 'markDeleted' | 'setBackupEnabled'>, input: MirrorEntryCoreInput): Promise<void> {
+  const session = await authorizedSession(env, input)
+  if (input.jobId) {
+    const job = await index.getJob(input.jobId)
+    if (!job || !['queued', 'running'].includes(job.state)) throw new SupersededBackfillError('Backfill is no longer active')
+  }
   const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, env)
   const config = await loadS3Config(accessToken, input.sessionId, session, env)
+  if (input.expectedBucket && config?.bucket !== input.expectedBucket) throw new SupersededBackfillError('S3 backup target changed')
   await index.setBackupEnabled(!!config?.enabled)
-  if (!config || !config.enabled) {
+  if (!config?.enabled) {
     await index.markDeleted(input.date)
     return
   }
   const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
-  const key = entryKey(input.date)
-  try {
-    // fileId present: the Drive save already supplied the id + version, so skip the
-    // metadata round-trip — the content fetch below doubles as the existence check.
-    // Name-only input still searches Drive for the current file.
-    const meta = input.fileId
-      ? { id: input.fileId, version: input.driveVersion }
-      : await findCurrentEntry(accessToken, input.sessionId, session, env, input.date)
+  // A concurrent Drive mutation may land during S3 I/O. Re-read after each write
+  // and reconcile again rather than declaring stale content synced. Bound the
+  // work; Workflow/alarm retries resume if a date keeps changing.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const meta = await findCurrentEntry(accessToken, input.sessionId, session, env, input.date)
     if (!meta) {
-      await deleteObject(creds, config.bucket, config.region, key)
+      await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
+      if (await findCurrentEntry(accessToken, input.sessionId, session, env, input.date)) continue
       await index.markDeleted(input.date)
       return
     }
-    let version = meta.version ?? input.driveVersion
-    // A newer drive version already owns this date (markPending refused ours, see
-    // above). Mirror at the newest so the bucket's current object never lags behind
-    // the newest known Drive content — under bucket versioning a stale create can
-    // never 412, so without this resolution a stale stamp could become "current".
-    if (pending?.driveVersion && version && pending.driveVersion !== version && isAtLeast(pending.driveVersion, version)) {
-      version = pending.driveVersion
-    }
-    const { content } = await getEntryContent(accessToken, meta.id, input.date)
-    // expectExisting=true: a save mirrors an object this account has almost certainly
-    // written before (its first mirror of a brand-new date resolves the same way — HEAD
-    // 404 then If-None-Match PUT, still two requests, see s3.ts).
-    await putObjectIfNewer(creds, config.bucket, config.region, key, content, version, undefined, { expectExisting: true })
-    // Reconfirm the entry still exists in Drive before recording it synced. A concurrent
-    // delete-mirror that commits between our content fetch and this point would otherwise
-    // leave a phantom S3 object plus a 'synced' record for a deleted date, which nothing
-    // ever revisits (backfills only touch dates still listed in Drive, and
-    // entryStatusForAuth short-circuits on a synced record). The content fetch alone
-    // can't close this window — it only catches deletions that landed before it.
+    const version = meta.version
+    await index.markPending(input.date, version, new Date().toISOString(), meta.id)
+    let content: string
     try {
-      await getDiaryFileMeta(accessToken, input.sessionId, session, env, meta.id, input.date)
+      content = (await getEntryContent(accessToken, meta.id, input.date)).content
     } catch (error) {
-      if (isMissingEntryError(error)) {
-        await deleteObject(creds, config.bucket, config.region, key)
-        await index.markDeleted(input.date)
-        return
-      }
+      if (isMissingEntryError(error)) continue
       throw error
     }
-    const synced = await index.markSynced(input.date, version, new Date().toISOString())
-    // Post-write convergence: a newer save landed between markPending and markSynced,
-    // so markSynced's monotonic guard refused our version and returned the newer
-    // record. Re-mirror at the newest version — the narrow complement to the
-    // pre-write resolution above — so the bucket never keeps a stale "current" object.
-    if (synced?.driveVersion && version && synced.driveVersion !== version && isAtLeast(synced.driveVersion, version)) {
-      await convergeMirror(accessToken, index, config, creds, input.date, meta.id, version)
+    await putObjectIfNewer(creds, config.bucket, config.region, entryKey(input.date), content, version, undefined, { fileId: meta.id })
+    try {
+      const current = await getDiaryFileMeta(accessToken, input.sessionId, session, env, meta.id, input.date)
+      if (current.version !== version) continue
+    } catch (error) {
+      if (isMissingEntryError(error)) continue
+      throw error
     }
-  } catch (error) {
-    if (isMissingEntryError(error)) {
-      // The file vanished after the mirror started (deleted in Drive, e.g. a concurrent
-      // delete racing this save's mirror) — remove the now-orphaned object and record
-      // the delete rather than failing the entry. This covers deletions that landed
-      // before the content fetch (a 404 from it); deletions racing the markSynced above
-      // are handled by the post-write recheck just added.
-      await deleteObject(creds, config.bucket, config.region, key)
-      await index.markDeleted(input.date)
-      return
-    }
-    throw error
+    const synced = await index.markSynced(input.date, version, new Date().toISOString(), meta.id)
+    if (synced?.driveVersion && version && synced.driveVersion !== version) continue
+    return
   }
-}
-
-// Closes the stale-write race that S3 conditional writes cannot close alone: under
-// bucket versioning a PutObject with If-None-Match: * never 412s (every create
-// succeeds as a new version), so a concurrent mirror holding an *older* drive
-// version can physically land last and become the bucket's "current" object. The
-// DO index's monotonic markSynced refuses such a write's version, and this helper
-// turns that refusal into a corrective re-mirror at the newest version the index
-// knows, keeping the bucket's current object at least as new as Drive. On an
-// unversioned bucket the 412 flip in putObjectIfNewer already prevents the stale
-// write from landing, so this is a no-op there in practice.
-export async function convergeMirror(
-  accessToken: string,
-  index: DurableObjectStub<S3SyncIndex>,
-  config: S3Config,
-  creds: AssumedCredentials,
-  date: string,
-  fileId: string,
-  writtenVersion: string,
-): Promise<void> {
-  const row = await index.getEntry(date)
-  if (!row?.driveVersion || writtenVersion === row.driveVersion || !isAtLeast(row.driveVersion, writtenVersion)) return
-  const { content } = await getEntryContent(accessToken, fileId, date)
-  await putObjectIfNewer(creds, config.bucket, config.region, entryKey(date), content, row.driveVersion, undefined, { expectExisting: true })
-  // Deliberately not a closed loop: if a third, even newer drive version lands between
-  // the getEntry above and this markSynced (returning that newest record instead of
-  // committing ours), we don't loop around — that newest save's own mirror converges
-  // next, and a bounded correction here would cost extra Drive/S3 subrequests for a
-  // race that self-heals. The monotonic guard guarantees no regression either way.
-  await index.markSynced(date, row.driveVersion, new Date().toISOString())
+  throw new S3Error(409, 'Drive entry changed during S3 reconciliation')
 }
 
 // Mirror one date to S3 and await the outcome — used by api/s3/entry-resync's
@@ -429,9 +372,10 @@ export async function convergeMirror(
 // failure back on the DO index) rather than the fire-and-forget workflow the
 // plain mirrorEntry RPC schedules.
 export async function mirrorEntryForAuthNow(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
+  await authorizedSession(env, input)
   const index = indexFor(env, input.accountKey)
   try {
-    await mirrorEntryCore(env, index, input)
+    await index.reconcileEntry(input)
     return { ok: true }
   } catch (error) {
     const message = safeError(error)
@@ -516,7 +460,7 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
     }
     console.warn('s3Workflows: could not determine daily step budget; mirroring anyway', error)
   }
-  await index.markPending(input.date, input.driveVersion, new Date().toISOString())
+  await index.markPending(input.date, input.driveVersion, new Date().toISOString(), input.fileId)
   try {
     await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'mirror' })
     return { ok: true }
@@ -542,42 +486,26 @@ export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: s
   if (backupEnabled === false) {
     return { ok: true }
   }
+  const deletionId = crypto.randomUUID()
+  await index.queueDeletion(input, deletionId)
   try {
     await assertWithinDailyStepBudget(env)
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
       console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
+      await index.deferDeletion(input.date, deletionId, Date.parse(`${todayUTC()}T00:00:00.000Z`) + 86_400_000)
       return { ok: false, error: error.message }
     }
     console.warn('s3Workflows: could not determine daily step budget; deleting anyway', error)
   }
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
-    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'delete' })
+    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'delete', deletionId })
     return { ok: true }
   } catch (error) {
     console.error('s3Workflows: failed to start delete workflow', error)
     return { ok: true }
   }
-}
-
-// The S3 object-removal half of the mirror workflow's step — see the delete
-// branch in mirrorWorkflow.ts. Same contract as mirrorEntryCore: throws on any
-// failure so the step's retry (or caller) decides how to proceed.
-export async function deleteEntryCore(env: WorkflowEnv, index: DurableObjectStub<S3SyncIndex>, input: { sessionId: string; accountKey: string; date: string }): Promise<void> {
-  const session = await authorizedSession(env, input)
-  await index.markPending(input.date, undefined, new Date().toISOString())
-
-  const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, env)
-  const config = await loadS3Config(accessToken, input.sessionId, session, env)
-  await index.setBackupEnabled(!!config?.enabled)
-  if (!config || !config.enabled) {
-    await index.markDeleted(input.date)
-    return
-  }
-  const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
-  await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
-  await index.markDeleted(input.date)
 }
 
 export async function findCurrentEntry(

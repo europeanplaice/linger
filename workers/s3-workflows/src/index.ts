@@ -16,6 +16,8 @@ import { runWorkerFirstPass } from './workerFirstPass'
 import type { DiaryTarget, WorkflowEnv } from './types'
 import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { DiaryWriter } from './diaryWriter'
+import type { S3Config } from './runtime'
+import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 
 export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex, DiaryWriter }
 
@@ -30,6 +32,11 @@ function validateScope(scope: string[] | undefined): string[] | undefined {
 }
 
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
+  async saveSettings(input: S3WorkflowAuth & { config: S3Config }) {
+    await authorizedSession(this.env, input)
+    return indexFor(this.env, input.accountKey).saveBackupSettings(input)
+  }
+
   async ensureDiaryFolder(input: DiaryWriterAuth): Promise<string> {
     await authorizedSession(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
@@ -57,7 +64,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     const workflowId = crypto.randomUUID()
     const index = indexFor(this.env, input.accountKey)
     await index.setBackupEnabled(config.enabled)
-    const reservation = await index.startJob(input.requestId, jobId, workflowId, config.enabled, new Date().toISOString())
+    const reservation = await index.startJob(input.requestId, jobId, workflowId, config.enabled, new Date().toISOString(), config.bucket)
     if (!reservation.created) return reservation
 
     let remainingScope: DiaryTarget[] | undefined = scope?.map(date => ({ date }))
@@ -78,6 +85,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
 
         if (firstPassResult.isFinished) {
           await index.finishJob(jobId, new Date().toISOString())
+          await index.markBackfillStarted(config.bucket)
           const finishedJob = await index.getJob(jobId)
           return { job: finishedJob!, created: true }
         }
@@ -102,6 +110,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
         // above any chain-step retry window) is enough for duplicate-create detection.
         retention: { successRetention: '1 hour', errorRetention: '1 day' },
       })
+      await index.markBackfillStarted(config.bucket)
       return reservation
     } catch (error) {
       await index.markStartFailed(jobId, safeError(error), new Date().toISOString())

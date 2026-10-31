@@ -351,6 +351,39 @@ describe('putObjectIfNewer', () => {
   })
 })
 
+describe('putObjectIfNewer source identity', () => {
+  it('overwrites an older file generation even when its version number is higher', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { headers: { etag: '"old"', 'x-amz-meta-linger-version': '100', 'x-amz-meta-linger-file-id': 'old-file' } }))
+      .mockResolvedValueOnce(new Response(null))
+    vi.stubGlobal('fetch', fetchMock)
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'entry.txt', 'recreated', '1', undefined, { fileId: 'new-file' })
+    const request = fetchMock.mock.calls[1][0] as Request
+    expect(request.headers.get('If-Match')).toBe('"old"')
+    expect(request.headers.get('x-amz-meta-linger-version')).toBe('1')
+    expect(request.headers.get('x-amz-meta-linger-file-id')).toBe('new-file')
+  })
+
+  it('skips an already newer version of the same Drive file', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { headers: { etag: '"current"', 'x-amz-meta-linger-version': '100', 'x-amz-meta-linger-file-id': 'same-file' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'entry.txt', 'old content', '1', undefined, { fileId: 'same-file' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rereads after a conditional PUT gets a concurrent-delete 409', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { headers: { etag: '"old"', 'x-amz-meta-linger-version': '1' } }))
+      .mockResolvedValueOnce(new Response('<Error><Code>ConditionalRequestConflict</Code></Error>', { status: 409 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null))
+    vi.stubGlobal('fetch', fetchMock)
+    await putObjectIfNewer(creds, 'my-bucket', 'us-east-1', 'entry.txt', 'current', '2')
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect((fetchMock.mock.calls[3][0] as Request).headers.get('If-None-Match')).toBe('*')
+  })
+})
+
 describe('headObjectVersion', () => {
   it('returns the linger-version metadata when the object exists', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(

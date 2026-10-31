@@ -1,12 +1,9 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
-import { countedStep, deleteEntryCore, indexFor, isPermanentEntryError, mirrorEntryCore, safeError } from './runtime'
+import { countedStep, indexFor, isPermanentEntryError, safeError } from './runtime'
 
-// The mirror step spends external Drive/S3/STS subrequests and gets only one
-// retry: the subrequest budget is pooled across the whole Workflow instance, so
-// retrying a step that failed from exhausting that budget only guarantees it
-// fails again, burning further steps (and daily step budget) for no chance of
-// success — see workflow.ts's EXTERNAL_STEP_RETRIES.
+// Retry transient Drive/STS/S3 failures once within this Workflow. Persistent
+// deletion intents also have the DO alarm as an independent recovery path.
 const EXTERNAL_STEP_RETRIES = { limit: 1, delay: '5 seconds' as const, backoff: 'exponential' as const }
 const STEP_TIMEOUT = '2 minutes' as const
 
@@ -23,8 +20,8 @@ interface MirrorStepResult {
 // failed a save's mirror outright on the first (only) attempt.
 //
 // Exactly one step (${kind}-entry): the RPC that created this instance already
-// wrote the pending marker (runtime.ts), and mirrorEntryCore/deleteEntryCore
-// re-mark pending at their very start, so the mark-pending step this workflow
+// wrote the pending marker (runtime.ts), and the shared reconciliation
+// updates the marker while processing, so the mark-pending step this workflow
 // used to run first was pure overcounting against the account's daily step
 // budget — a save's mirror now costs 1 step, not 2.
 export class S3MirrorWorkflow extends WorkflowEntrypoint<WorkflowEnv, MirrorWorkflowParams> {
@@ -40,8 +37,8 @@ export class S3MirrorWorkflow extends WorkflowEntrypoint<WorkflowEnv, MirrorWork
       { retries: EXTERNAL_STEP_RETRIES, timeout: STEP_TIMEOUT },
       async () => {
         try {
-          if (kind === 'delete') await deleteEntryCore(this.env, index, params)
-          else await mirrorEntryCore(this.env, index, params)
+          await index.reconcileEntry(params)
+          if (params.deletionId) await index.completeDeletion(params.date, params.deletionId)
           return { ok: true }
         } catch (error) {
           // A definitive, entry-specific 4xx (bad request, genuinely forbidden, …)

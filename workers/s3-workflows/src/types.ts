@@ -46,5 +46,6 @@ export interface EntryPage {
 // instance mirrors exactly one date; the mirror steps' retry config absorbs
 // transient Drive/STS/S3 failures that used to fail a save's mirror outright.
 export interface MirrorWorkflowParams extends MirrorEntryCoreInput {
+  deletionId?: string
   kind: 'mirror' | 'delete'
 }
