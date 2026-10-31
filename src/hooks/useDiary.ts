@@ -20,6 +20,8 @@ interface EntryCache {
 interface DiaryScope {
   active: boolean
   ready: boolean
+  cacheReady: Promise<void>
+  releaseCache: () => void
   controller: AbortController
   authStatus: AuthStatus
   email: string | null
@@ -170,7 +172,9 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   // Each committed authentication state owns its asynchronous work. Keep the
   // captured scope invalid even if the same account later signs back in.
   useEffect(() => {
-    const scope: DiaryScope = { active: true, ready: false, controller: new AbortController(), authStatus, email }
+    let releaseCache!: () => void
+    const cacheReady = new Promise<void>(resolve => { releaseCache = resolve })
+    const scope: DiaryScope = { active: true, ready: false, cacheReady, releaseCache, controller: new AbortController(), authStatus, email }
     scopeRef.current = scope
     cacheRef.current = new Map()
     setCache(new Map())
@@ -182,7 +186,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     bgQueueRef.current.splice(0).forEach(task => task.cancel())
     bgActiveRef.current = 0
     fgActiveRef.current = 0
-    return () => { scope.active = false; scope.controller.abort() }
+    return () => { scope.active = false; scope.releaseCache(); scope.controller.abort() }
   }, [authStatus, email])
 
   const getScope = useCallback(() => {
@@ -277,8 +281,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   }, [])
 
   const getContent = useCallback(async (date: string, options: { forceNetwork?: boolean; background?: boolean } = {}): Promise<LoadedDiaryEntry | null> => {
+    // Child editor effects run before this hook's parent effects on sign-in.
+    // Let the committed account scope initialize, then wait only for its local
+    // cache, so a cached entry never flashes as empty or waits for Drive sync.
+    await Promise.resolve()
     const scope = getScope()
     if (!isSignedIn || !scope) return null
+    await scope.cacheReady
+    if (!scope.active) return null
 
     const cached = cacheRef.current.get(date)
     // Content is already in memory (verified by listEntries version check or saved this session)
@@ -379,6 +389,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const scope = getScope()
     if (!scope) return
     if (!isSignedIn) {
+      scope.releaseCache()
       setFreshListLoaded(false)
       setLoading(false)
       // Only wipe the persistent cache once the session is known to be gone;
@@ -419,13 +430,13 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         const idbEntries = canUsePersistentCache ? (await getAllCached().catch(() => [] as CachedEntry[])).filter(e => e.owner === undefined || e.owner === email) : []
         if (!scope.active) return
         if (idbEntries.length > 0) {
-          updateCache(() => {
-            const m = new Map<string, EntryCache>()
-            for (const e of idbEntries) m.set(e.date, { meta: e.meta, content: e.content, snippet: e.snippet })
-            return m
-          })
+          const hydrated = new Map<string, EntryCache>()
+          for (const e of idbEntries) hydrated.set(e.date, { meta: e.meta, content: e.content, snippet: e.snippet })
+          cacheRef.current = hydrated
+          updateCache(() => hydrated)
           setLoading(false)
         }
+        scope.releaseCache()
         // Always sync with Drive to pick up remote changes and evict stale content.
         // Fire getEntryByDate for today in parallel so the editor can render
         // without waiting for the full file list to complete.
@@ -484,6 +495,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         setError(String(e))
         setFreshListLoaded(false)
       } finally {
+        scope.releaseCache()
         if (scope.active) setLoading(false)
       }
     })()
