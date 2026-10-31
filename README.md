@@ -107,6 +107,24 @@ and legacy reservations without them are cancelled with a notice. User deletions
 move the Drive file to the trash, where it can be recovered under Drive's normal
 retention policy.
 
+Diary mutation safeguards are covered by both mocked call-count tests and HTTP
+boundary tests (`tests/unit/drive-handlers.test.ts` and
+`tests/unit/diaryMutation-safety.test.ts`). Rejected operations must issue zero
+Drive writes and schedule no S3 changes. A confirmed delete must trash exactly
+the confirmed file once; the Drive adapter has no permanent-delete helper.
+Date lookups reject duplicate files instead of selecting an arbitrary result.
+The Worker tests additionally exercise concurrent saves/deletes, separate
+accounts, revoked sessions, and lost creation responses. These suites run in CI
+before deployment.
+
+Google authorization requests exactly `drive.file`, `openid`, and `email`, with
+incremental scope aggregation disabled. `drive.file` still permits editing and
+deleting app-accessible files: Google offers no equivalent writable scope that
+forbids deletion. Application checks and tests reduce accidental mutation risk;
+they do not provide an immutable-storage guarantee. Existing access/refresh
+tokens are not narrowed by changing the login URL; previously broader grants
+require separate revocation and reauthorization.
+
 ### State
 - `useAuth` (`src/hooks/useAuth.ts`) — calls `/auth/session` on load to check sign-in state;
   exposes `{ status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }`

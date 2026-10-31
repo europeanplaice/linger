@@ -33,7 +33,6 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   findJsonFile: vi.fn().mockResolvedValue(null),
   readJsonFile: vi.fn().mockResolvedValue([]),
   writeJsonFile: vi.fn().mockResolvedValue({ id: 'milestones-file', name: 'milestones.json' }),
-  deleteEntry: vi.fn().mockResolvedValue(undefined),
   trashEntry: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -234,7 +233,7 @@ describe('milestones handler', () => {
     )
   })
 
-  it('deletes legacy anniversaries.json on first write to milestones.json', async () => {
+  it('trashes legacy anniversaries.json only after writing milestones.json', async () => {
     vi.mocked(drive.findJsonFile)
       .mockResolvedValueOnce(null)           // milestones.json not found (first PUT call)
       .mockResolvedValueOnce('legacy-file')  // anniversaries.json found
@@ -247,7 +246,18 @@ describe('milestones handler', () => {
 
     await onPutMilestones(ctx as any)
 
-    expect(drive.deleteEntry).toHaveBeenCalledWith('tok', 'legacy-file')
+    expect(drive.trashEntry).toHaveBeenCalledExactlyOnceWith('tok', 'legacy-file')
+    expect(vi.mocked(drive.writeJsonFile).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(drive.trashEntry).mock.invocationCallOrder[0])
+  })
+
+  it('does not trash the legacy settings when writing the replacement fails', async () => {
+    vi.mocked(drive.findJsonFile).mockResolvedValueOnce(null)
+    vi.mocked(drive.writeJsonFile).mockRejectedValueOnce(new drive.DriveError(403, 'Forbidden'))
+    const ctx = makeContext({
+      request: new Request('http://localhost/api/drive/milestones', { method: 'PUT', body: '[]' }),
+    })
+    expect((await onPutMilestones(ctx as any)).status).toBe(500)
+    expect(drive.trashEntry).not.toHaveBeenCalled()
   })
 
   it('rejects an empty label', async () => {
@@ -537,6 +547,32 @@ describe('post entry handler', () => {
 })
 
 describe('delete entry handler', () => {
+  it.each<Record<string, string>>([
+    {}, { 'If-Match': '7' }, { 'X-Linger-File-Id': 'entry-1' },
+    { 'X-Linger-File-Id': 'entry-1', 'If-Match': '6' },
+    { 'X-Linger-File-Id': 'old-file', 'If-Match': '7' },
+  ])('calls neither trash nor save for incomplete/stale delete preconditions %j', async headers => {
+    const ctx = makeContext({
+      request: new Request('http://localhost/', { method: 'DELETE', headers }), params: { date: '2026-05-01' },
+    })
+    expect([409, 428]).toContain((await onDeleteEntry(ctx as any)).status)
+    expect(drive.trashEntry).toHaveBeenCalledTimes(0)
+    expect(drive.saveEntry).toHaveBeenCalledTimes(0)
+    expect(s3Settings.mirrorEntryDelete).toHaveBeenCalledTimes(0)
+  })
+
+  it('does not call trash when the Drive lookup fails', async () => {
+    vi.mocked(drive.findEntryMeta).mockRejectedValueOnce(new drive.DriveError(403, 'Forbidden'))
+    const ctx = makeContext({
+      request: new Request('http://localhost/', { method: 'DELETE', headers: { 'X-Linger-File-Id': 'entry-1', 'If-Match': '7' } }),
+      params: { date: '2026-05-01' },
+    })
+    expect((await onDeleteEntry(ctx as any)).status).toBe(403)
+    expect(drive.trashEntry).toHaveBeenCalledTimes(0)
+    expect(drive.saveEntry).toHaveBeenCalledTimes(0)
+    expect(s3Settings.mirrorEntryDelete).toHaveBeenCalledTimes(0)
+  })
+
   it('mirrors the delete to S3 after removing the Drive file', async () => {
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entry/2026-05-01', { method: 'DELETE', headers: { 'X-Linger-File-Id': 'entry-1', 'If-Match': '7' } }),
@@ -546,7 +582,7 @@ describe('delete entry handler', () => {
     const res = await onDeleteEntry(ctx as any)
 
     expect(res.status).toBe(204)
-    expect(drive.trashEntry).toHaveBeenCalledWith('tok', 'entry-1')
+    expect(drive.trashEntry).toHaveBeenCalledExactlyOnceWith('tok', 'entry-1')
     expect(s3Settings.mirrorEntryDelete).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01')
   })
 })

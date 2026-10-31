@@ -56,6 +56,9 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
   }
 
   if (!body || typeof body.content !== 'string') return jsonResponse({ error: 'content is required' }, 400)
+  if (body.fileId !== undefined && (typeof body.fileId !== 'string' || !/^[a-zA-Z0-9_-]{10,200}$/.test(body.fileId))) {
+    return jsonResponse({ error: 'Invalid file ID' }, 400)
+  }
   if (body.content.length > MAX_ENTRY_CONTENT_LENGTH) return jsonResponse({ error: 'Entry is too large' }, 413)
   if (body.baseVersion !== undefined && body.baseVersion !== null && typeof body.baseVersion !== 'string') {
     return jsonResponse({ error: 'Invalid baseVersion' }, 400)
@@ -74,7 +77,6 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
     // metadata before writing because Drive v3 does not document version as an
     // If-Match token.
     if (body.fileId && (body.force || body.baseVersion !== null)) {
-      if (!/^[a-zA-Z0-9_-]{10,200}$/.test(body.fileId)) return jsonResponse({ error: 'Invalid file ID' }, 400)
       const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
       // Force only overrides conflict detection, never file authorization.
       let currentMeta: DriveFileMeta
@@ -85,7 +87,7 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
         throw e
       }
       if (!body.force) {
-        if ((currentMeta.version ?? null) !== (body.baseVersion ?? null)) {
+        if (!currentMeta.version || !body.baseVersion || currentMeta.version !== body.baseVersion) {
           const remoteEntry = await getEntryContent(accessToken, currentMeta.id, date)
           if (body.baseContent == null || remoteEntry.content !== body.baseContent) {
             return jsonResponse({ conflict: { entry: remoteEntry, meta: currentMeta } }, 409)
@@ -126,7 +128,13 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
     const fileId = meta?.id
     if (!meta && !body.force && body.baseVersion != null) return jsonResponse({ conflict: null }, 409)
 
-    if (meta && !body.force && (meta.version ?? null) !== (body.baseVersion ?? null)) {
+    // A caller that observed absence must not use an old file ID to update a
+    // different/recreated file discovered by date, even if its text is identical.
+    if (meta && body.fileId && body.fileId !== meta.id) {
+      const remoteEntry = await getEntryContent(accessToken, meta.id, date)
+      return jsonResponse({ conflict: { entry: remoteEntry, meta } }, 409)
+    }
+    if (meta && !body.force && (!meta.version || !body.baseVersion || meta.version !== body.baseVersion)) {
       const remoteEntry = await getEntryContent(accessToken, meta.id, date)
       if (body.baseContent == null || remoteEntry.content !== body.baseContent) {
         return jsonResponse({ conflict: { entry: remoteEntry, meta } }, 409)

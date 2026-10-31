@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
-  ensureFolder, getEntryContent, saveEntry, deleteEntry, trashEntry, generateFileId,
+  ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
 } from '../../functions/_shared/drive'
@@ -168,16 +168,13 @@ describe('getEntryContent', () => {
     expect(result).toEqual({ date: '2026-05-01', content: 'legacy body' })
   })
 
-  it('treats a body that opens with --- block as frontmatter (known edge case)', async () => {
-    // If a user writes an entry whose body starts with ---\n...\n---\n, the lenient
-    // parser misidentifies that block as frontmatter and strips it. The date is still
-    // correct (from the filename), but the stripped block is not in content.
+  it('preserves ordinary Markdown separators instead of discarding diary text', async () => {
     const raw = '---\nnot really frontmatter\n---\nrest of entry'
     mockFetch(new Response(raw, { status: 200, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } }))
 
     const result = await getEntryContent('token', 'file-123', '2026-05-01')
     expect(result.date).toBe('2026-05-01')
-    expect(result.content).toBe('rest of entry')
+    expect(result.content).toBe(raw)
   })
 
   it('retries on 429 then succeeds', async () => {
@@ -402,19 +399,6 @@ describe('saveEntry', () => {
     expect(contentType).toContain('multipart/related')
     expect(contentType).toContain('boundary=linger_boundary')
     expect(fetchCall[1].body).toContain('linger_boundary')
-  })
-})
-
-describe('deleteEntry', () => {
-  it('sends DELETE request and returns void', async () => {
-    const delFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    vi.stubGlobal('fetch', delFetch)
-
-    await deleteEntry('token', 'file-1')
-
-    const call = delFetch.mock.calls[0] as any
-    expect(call[0]).toContain('/files/file-1')
-    expect(call[1].method).toBe('DELETE')
   })
 })
 

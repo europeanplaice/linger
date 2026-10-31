@@ -46,8 +46,10 @@ describe('onRequestGet (login redirect)', () => {
     expect(url.searchParams.get('client_id')).toBe('test-client-id')
     expect(url.searchParams.get('redirect_uri')).toBe('https://example.com/auth/callback')
     expect(url.searchParams.get('response_type')).toBe('code')
-    expect(url.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/drive.file')
-    expect(url.searchParams.get('scope')).toContain('email')
+    expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual([
+      'email', 'https://www.googleapis.com/auth/drive.file', 'openid',
+    ])
+    expect(url.searchParams.get('include_granted_scopes')).toBe('false')
     expect(url.searchParams.get('access_type')).toBe('offline')
     expect(url.searchParams.get('prompt')).toBe('consent')
     expect(url.searchParams.get('nonce')).toBeTruthy()

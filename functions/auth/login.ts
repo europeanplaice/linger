@@ -37,7 +37,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     nonce,
     access_type: 'offline',
     prompt: 'consent',
-    include_granted_scopes: 'true',
+    // Do not union these permissions with broader scopes granted in the past.
+    include_granted_scopes: 'false',
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
   })

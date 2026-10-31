@@ -62,12 +62,11 @@ const DRIVE_FETCH_TIMEOUT_MS = 20_000
 async function driveWithRetry<T>(
   fetcher: () => Promise<Response>,
   parse: (r: Response) => Promise<T>,
-  accept204 = false,
 ): Promise<T> {
   const delays = [250, 500, 1000]
   for (let attempt = 0; ; attempt++) {
     const res = await fetcher()
-    if (res.ok || (accept204 && res.status === 204)) return parse(res)
+    if (res.ok) return parse(res)
 
     if (res.status === 412) throw new DriveConflictError()
     const body = await res.text()
@@ -264,12 +263,17 @@ export async function findEntryMeta(token: string, sessionId: string, session: S
   // interpolate directly. Accept both the legacy `.md` and current `.txt` names.
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and (name='diary-${date}.md' or name='diary-${date}.txt')`)
-    const fields = encodeURIComponent('files(id,name,modifiedTime,version)')
+    const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version,mimeType,parents,trashed)')
     const res = await driveWithRetry(
-      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-      r => r.json() as Promise<{ files: DriveFileMeta[] }>,
+      () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=2`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+      r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
     )
-    return res.files[0] ?? null
+    // A legacy .md and a .txt (or two same-named files) must never be resolved
+    // by arbitrary list order. Leave both untouched until the user resolves it.
+    if (res.files.length > 1 || res.nextPageToken) throw new DriveError(409, 'Multiple diary files exist for this date')
+    const meta = res.files[0]
+    if (meta && !isExpectedDiaryFile(meta, folderId, date)) throw new DriveError(409, 'Diary file metadata does not match the requested date and folder')
+    return meta ?? null
   })
 }
 
@@ -332,9 +336,12 @@ function parseEntry(text: string, date: string): DiaryEntry {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
   if (match) {
     const frontmatter = match[1]
-    const content = match[2].replace(/^\n/, '')
     const fmDate = frontmatter.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
-    return { date: date || fmDate, content }
+    // Ordinary Markdown separators are diary text, not a legacy file header.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fmDate)) {
+      const content = match[2].replace(/^\r?\n/, '')
+      return { date: date || fmDate, content }
+    }
   }
   return { date, content: text }
 }
@@ -427,14 +434,6 @@ export async function migrateMdToTxt(token: string, sessionId: string, session: 
     )
   }
   return legacy.map(e => e.date)
-}
-
-export async function deleteEntry(token: string, fileId: string): Promise<void> {
-  await driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}`, { method: 'DELETE', headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-    () => Promise.resolve(),
-    true,
-  )
 }
 
 export async function generateFileId(token: string): Promise<string> {

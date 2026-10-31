@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, deleteEntry } from '../../_shared/drive'
+import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, trashEntry } from '../../_shared/drive'
 
 const FILE_NAME = 'milestones.json'
 const LEGACY_FILE_NAME = 'anniversaries.json'
@@ -115,11 +115,11 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     const existingFileId = await findJsonFile(accessToken, folderId, FILE_NAME) ?? undefined
     const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, sanitized, existingFileId)
 
-    // Migrate: delete the legacy anniversaries.json if it still exists.
+    // Only trash the legacy file after the replacement was written successfully.
     if (!existingFileId) {
       const legacyFileId = await findJsonFile(accessToken, folderId, LEGACY_FILE_NAME)
       if (legacyFileId) {
-        await deleteEntry(accessToken, legacyFileId)
+        await trashEntry(accessToken, legacyFileId)
       }
     }
 
