@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest as apiMiddleware } from '../../functions/api/_middleware'
 import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../functions/api/drive/entry/[date]'
+import { saveDiaryEntry } from '../../functions/_shared/entryMutation'
 import * as drive from '../../functions/_shared/drive'
 import { createFakeKV, type FakeKV } from '../helpers/fakeKV'
 
@@ -31,12 +32,22 @@ function makeSession(overrides?: Record<string, unknown>) {
 }
 
 function makeEnv(kv: FakeKV) {
-  return {
+  const base = {
     SESSIONS: kv,
     GOOGLE_CLIENT_ID: 'client-id',
     GOOGLE_CLIENT_SECRET: 'client-secret',
     SESSION_DOMAIN: 'https://example.com',
   }
+  return { ...base, S3_WORKFLOW_SERVICE: {
+    mutateDiaryEntry: async (input: { sessionId: string; date: string; body: string }) => {
+      const session = JSON.parse((await kv.get(`session:${input.sessionId}`))!)
+      return saveDiaryEntry({
+        request: new Request('https://example.com/', { method: 'POST', body: input.body }),
+        params: { date: input.date }, env: base as never,
+        data: { session, sessionId: input.sessionId, accessToken: session.access_token }, waitUntil: vi.fn(),
+      })
+    },
+  } }
 }
 
 // Chains api/_middleware.ts to the GET entry/[date] handler via a single shared

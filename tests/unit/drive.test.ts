@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
-  ensureFolder, getEntryContent, saveEntry, deleteEntry,
+  ensureFolder, getEntryContent, saveEntry, deleteEntry, trashEntry, generateFileId,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
 } from '../../functions/_shared/drive'
@@ -415,6 +415,28 @@ describe('deleteEntry', () => {
     const call = delFetch.mock.calls[0] as any
     expect(call[0]).toContain('/files/file-1')
     expect(call[1].method).toBe('DELETE')
+  })
+})
+
+describe('recoverable diary deletion and idempotent creation', () => {
+  it('moves a diary file to the trash instead of permanently deleting it', async () => {
+    mockFetch(driveJsonResponse({ id: 'file-1', trashed: true }))
+    await trashEntry('token', 'file-1')
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(url).toContain('/files/file-1')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ trashed: true })
+  })
+
+  it('requests a Drive-generated ID and includes it in the create metadata', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ ids: ['reserved-id'] }))
+      .mockResolvedValueOnce(driveJsonResponse({ id: 'reserved-id', version: '1' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const id = await generateFileId('token')
+    await saveEntry('token', { date: '2026-10-31', content: 'retained' }, 'folder-1', undefined, undefined, id)
+    expect(fetchMock.mock.calls[0][0]).toContain('/files/generateIds?')
+    expect(fetchMock.mock.calls[1][1].body).toContain('"id":"reserved-id"')
   })
 })
 

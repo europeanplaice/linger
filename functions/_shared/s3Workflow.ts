@@ -1,3 +1,5 @@
+import type { DiaryWriterService } from './diaryWriter'
+
 export type S3SyncState = 'pending' | 'synced' | 'failed' | 'unknown'
 
 export interface EntrySyncStatus {
@@ -84,7 +86,7 @@ export interface WorkflowUsage {
 }
 
 /** RPC surface exposed by the dedicated Workflow Worker. */
-export interface S3WorkflowService {
+export interface S3WorkflowService extends DiaryWriterService {
   startBackfill(input: StartBackfillInput): Promise<StartBackfillResult>
   resetAllData(input: S3WorkflowAuth): Promise<void>
   getJob(input: GetJobInput): Promise<BackfillJob | null>

@@ -120,6 +120,7 @@ interface Window {
     setRemoteEntry: (content: string, version: string | null) => void
     setSaveModifiedTime: (modifiedTime: string) => void
     deleteCalls: () => { date: string }[]
+    deleteCallsWithTarget: () => { date: string; fileId?: string; baseVersion?: string }[]
     pendingNavigateCalls: () => { date: string | null }[]
     cancelNavigationCalls: () => { date: string | null }[]
     menuClickCount: () => number

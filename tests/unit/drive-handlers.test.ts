@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestGet as onSearch } from '../../functions/api/drive/search'
 import { onRequestGet as onListEntries } from '../../functions/api/drive/entries'
-import { onRequestGet as onGetEntry, onRequestPost as onPostEntry, onRequestDelete as onDeleteEntry } from '../../functions/api/drive/entry/[date]'
+import { onRequestGet as onGetEntry } from '../../functions/api/drive/entry/[date]'
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
 import { onRequestGet as onGetRevision } from '../../functions/api/drive/revisions/[fileId]/[revisionId]'
 import { onRequestGet as onChanges } from '../../functions/api/drive/changes'
 import { onRequestGet as onGetMilestones, onRequestPut as onPutMilestones } from '../../functions/api/drive/milestones'
+import { saveDiaryEntry as onPostEntry, removeDiaryEntry as onDeleteEntry } from '../../functions/_shared/entryMutation'
 import * as drive from '../../functions/_shared/drive'
 import * as s3Settings from '../../functions/_shared/s3Settings'
 
@@ -33,6 +34,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   readJsonFile: vi.fn().mockResolvedValue([]),
   writeJsonFile: vi.fn().mockResolvedValue({ id: 'milestones-file', name: 'milestones.json' }),
   deleteEntry: vi.fn().mockResolvedValue(undefined),
+  trashEntry: vi.fn().mockResolvedValue(undefined),
 }))
 
 function makeContext(overrides: Record<string, unknown> = {}) {
@@ -537,14 +539,14 @@ describe('post entry handler', () => {
 describe('delete entry handler', () => {
   it('mirrors the delete to S3 after removing the Drive file', async () => {
     const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entry/2026-05-01', { method: 'DELETE' }),
+      request: new Request('http://localhost/api/drive/entry/2026-05-01', { method: 'DELETE', headers: { 'X-Linger-File-Id': 'entry-1', 'If-Match': '7' } }),
       params: { date: '2026-05-01' },
     })
 
     const res = await onDeleteEntry(ctx as any)
 
     expect(res.status).toBe(204)
-    expect(drive.deleteEntry).toHaveBeenCalledWith('tok', 'entry-1')
+    expect(drive.trashEntry).toHaveBeenCalledWith('tok', 'entry-1')
     expect(s3Settings.mirrorEntryDelete).toHaveBeenCalledWith('tok', 'sid', {}, {}, '2026-05-01')
   })
 })

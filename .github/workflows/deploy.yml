@@ -141,13 +141,13 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=linger --commit-hash=${{ github.sha }}
+          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
 
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
+          command: pages deploy dist --project-name=linger --commit-hash=${{ github.sha }}
 
       - name: Verify production deployment
         timeout-minutes: 3
@@ -183,13 +183,13 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=linger-staging --commit-hash=${{ github.sha }} --branch=staging
+          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.staging.jsonc
 
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.staging.jsonc
+          command: pages deploy dist --project-name=linger-staging --commit-hash=${{ github.sha }} --branch=staging
 
       - name: Verify staging deployment
         timeout-minutes: 3

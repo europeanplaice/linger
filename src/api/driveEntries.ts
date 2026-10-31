@@ -123,6 +123,10 @@ async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void>
 
     if (res.ok || res.status === 204) return
     if (res.status === 401) throw new TokenExpiredError()
+    if (res.status === 409) {
+      const result = await res.json() as SaveConflictResponse
+      throw new SaveConflictError(result.conflict ?? null)
+    }
 
     const body = await res.text()
     if (shouldRetry(res.status) && attempt < MAX_RETRIES) {
@@ -183,8 +187,11 @@ export async function saveEntry(date: string, entry: DiaryEntry, optionsOrFileId
   return data as DriveFileMeta
 }
 
-export async function deleteEntry(date: string, signal?: AbortSignal): Promise<void> {
-  await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, { method: 'DELETE', signal })
+export async function deleteEntry(date: string, signal?: AbortSignal, target?: { fileId: string; baseVersion: string }): Promise<void> {
+  await apiFetchNoContent(`${BASE}/entry/${encodeURIComponent(date)}`, {
+    method: 'DELETE', signal,
+    headers: target ? { 'X-Linger-File-Id': target.fileId, 'If-Match': target.baseVersion } : undefined,
+  })
 }
 
 export interface MigrateExtensionsResult {

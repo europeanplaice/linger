@@ -36,11 +36,13 @@ const validRecord = {
   folderId: 'folder-1',
 }
 
+const mutateDiaryEntry = vi.fn()
+
 function makeContext(overrides: Record<string, unknown> = {}) {
   return {
     request: new Request('http://localhost/api/s3/restore', { method: 'POST' }),
     data: { accessToken: 'tok', sessionId: 'sid', session: { google_sub: '123' } },
-    env: {},
+    env: { S3_WORKFLOW_SERVICE: { mutateDiaryEntry } },
     waitUntil: vi.fn(),
     ...overrides,
   }
@@ -49,6 +51,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(s3Settings.loadS3SettingsRecord).mockResolvedValue(validRecord as any)
+  mutateDiaryEntry.mockResolvedValue(new Response(JSON.stringify({ id: 'new-file', name: 'diary-2024-01-02.txt', version: '9' })))
 })
 
 describe('GET /api/s3/restore', () => {
@@ -93,9 +96,8 @@ describe('POST /api/s3/restore', () => {
     const body = await res.json() as any
 
     expect(body.ok).toBe(true)
-    expect(drive.saveEntry).toHaveBeenCalledWith('tok', { date: '2024-01-02', content: 'recovered body' }, 'folder-1')
-    expect(s3Settings.mirrorEntrySave).toHaveBeenCalledWith('tok', 'sid', expect.anything(), {}, '2024-01-02', 'recovered body', 'new-file', '9')
-    expect(ctx.waitUntil).toHaveBeenCalled()
+    expect(mutateDiaryEntry).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '123', date: '2024-01-02', method: 'POST', body: JSON.stringify({ content: 'recovered body', baseVersion: null }) })
+    expect(drive.saveEntry).not.toHaveBeenCalled()
   })
 
   it('refuses to clobber an entry that exists in Drive', async () => {
@@ -108,6 +110,15 @@ describe('POST /api/s3/restore', () => {
 
     expect(res.status).toBe(409)
     expect(body.ok).toBe(false)
+    expect(drive.saveEntry).not.toHaveBeenCalled()
+  })
+
+  it('returns a conflict if an entry appears after the initial existence check', async () => {
+    vi.mocked(s3.getObjectContent).mockResolvedValue('old body')
+    vi.mocked(drive.findEntryMeta).mockResolvedValue(null)
+    mutateDiaryEntry.mockResolvedValueOnce(new Response(JSON.stringify({ conflict: {} }), { status: 409 }))
+    const ctx = makeContext({ request: new Request('http://localhost/api/s3/restore', { method: 'POST', body: JSON.stringify({ date: '2024-01-02' }) }) })
+    expect((await onRequestPost(ctx as any)).status).toBe(409)
     expect(drive.saveEntry).not.toHaveBeenCalled()
   })
 

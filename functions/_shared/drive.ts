@@ -89,6 +89,15 @@ export function getFolderName(sessionDomain?: string): string {
 export async function ensureFolder(token: string, sessionId: string, session: SessionData, env: Env): Promise<string> {
   if (session.folder_id) return session.folder_id
 
+  // Reads can create the first folder too, so they must use the same account
+  // coordinator as saves. The coordinator itself has no service binding.
+  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
+    const folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({ sessionId, accountKey: session.google_sub })
+    session.folder_id = folderId
+    await saveSession(sessionId, session, env)
+    return folderId
+  }
+
   const folderName = getFolderName(env.SESSION_DOMAIN)
   const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`)
   const list = await driveWithRetry(
@@ -359,6 +368,7 @@ export async function saveEntry(
   folderId: string | null,
   fileId?: string,
   ifMatch?: string | null,
+  createFileId?: string,
 ): Promise<DriveFileMeta> {
   const body = serializeEntry(entry)
   const fields = encodeURIComponent('id,name,modifiedTime,version')
@@ -379,7 +389,7 @@ export async function saveEntry(
 
   const filename = `diary-${entry.date}.txt`
   if (!folderId) throw new Error('folderId is required when creating a new entry')
-  const { contentType, data } = buildMultipart({ name: filename, mimeType: 'text/plain', parents: [folderId] }, body)
+  const { contentType, data } = buildMultipart({ name: filename, mimeType: 'text/plain', parents: [folderId], ...(createFileId ? { id: createFileId } : {}) }, body)
   return driveWithRetry(
     () => fetch(`${UPLOAD_BASE}/files?uploadType=multipart&fields=${fields}`, {
       method: 'POST',
@@ -424,6 +434,26 @@ export async function deleteEntry(token: string, fileId: string): Promise<void> 
     () => fetch(`${BASE}/files/${fileId}`, { method: 'DELETE', headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     () => Promise.resolve(),
     true,
+  )
+}
+
+export async function generateFileId(token: string): Promise<string> {
+  const result = await driveWithRetry(
+    () => fetch(`${BASE}/files/generateIds?count=1&space=drive&type=files`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+    r => r.json() as Promise<{ ids: string[] }>,
+  )
+  if (!result.ids?.[0]) throw new Error('Drive did not return a file ID')
+  return result.ids[0]
+}
+
+// User deletions remain recoverable from Google Drive's trash.
+export async function trashEntry(token: string, fileId: string): Promise<void> {
+  await driveWithRetry(
+    () => fetch(`${BASE}/files/${fileId}`, {
+      method: 'PATCH', headers: driveHeaders(token, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ trashed: true }), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
+    }),
+    () => Promise.resolve(),
   )
 }
 

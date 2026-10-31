@@ -29,11 +29,12 @@ export interface DiaryState {
   loading: boolean
   freshListLoaded: boolean
   error: string | null
+  deletionCancelled: boolean
   dates: string[]                                      // sorted desc
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
   getContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
   save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
-  remove: (date: string) => Promise<void>
+  remove: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   search: (query: string) => Promise<SearchResult>
   refreshEntries: () => Promise<void>
   prefetch: (dates: string[], concurrency?: number) => Promise<void>
@@ -146,6 +147,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const [loading, setLoading] = useState(false)
   const [freshListLoaded, setFreshListLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deletionCancelled, setDeletionCancelled] = useState(false)
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
   const cacheRef = useLatestRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
@@ -172,6 +174,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     scopeRef.current = scope
     cacheRef.current = new Map()
     setCache(new Map())
+    setDeletionCancelled(false)
     inflightRef.current.clear()
     saveQueueRef.current.clear()
     pendingSaveRef.current = null
@@ -638,7 +641,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (!scope.active) return false
         try {
           if (item.type === 'REMOVE') {
-            await deleteEntry(item.date, scope.controller.signal)
+            // Legacy queues lack an identity/version precondition. Cancel them
+            // rather than apply an old intention to a newly created entry.
+            if (!item.fileId || !item.baseVersion) { setDeletionCancelled(true); return true }
+            await deleteEntry(item.date, scope.controller.signal, { fileId: item.fileId, baseVersion: item.baseVersion })
             if (!scope.active) return false
             updateCache(prev => {
               const next = new Map(prev)
@@ -650,7 +656,12 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
             broadcastMessage({ type: 'DIARY_REMOVED', date: item.date })
           }
           return true
-        } catch {
+        } catch (e) {
+          if (e instanceof SaveConflictError) {
+            if (!scope.active) return false
+            setDeletionCancelled(true)
+            return true
+          }
           return false
         }
       }).catch(() => {})
@@ -723,16 +734,18 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
   }, [isSignedIn])
 
-  const remove = useCallback(async (date: string): Promise<void> => {
+  const remove = useCallback(async (date: string, target?: { fileId: string; baseVersion: string }): Promise<void> => {
     const scope = getScope()
     if (!isSignedIn || !scope) throw new Error('Not signed in')
     const existing = cacheRef.current.get(date)
-    if (!existing) {
+    if (!existing && !target) {
       deleteDraft(date).catch(() => {})
       return
     }
+    const expected = target ?? (existing?.meta.version ? { fileId: existing.meta.id, baseVersion: existing.meta.version } : undefined)
+    if (!expected) throw new EntryConflictError(null)
     try {
-      await deleteEntry(date, scope.controller.signal)
+      await deleteEntry(date, scope.controller.signal, expected)
       if (!scope.active) return
       updateCache(prev => {
         const next = new Map(prev)
@@ -745,13 +758,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       broadcastMessage({ type: 'DIARY_REMOVED', date })
     } catch (e) {
       if (!scope.active) return
-      if (e instanceof TokenExpiredError) { onExpiredRef.current(); return }
+      if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
+      if (e instanceof SaveConflictError) throw new EntryConflictError(e.remote)
       if (isNetworkFailure(e)) {
         syncQueue.enqueue({
           id: `remove-${date}-${Date.now()}`,
           type: 'REMOVE',
           date,
           timestamp: Date.now(),
+          fileId: expected.fileId,
+          baseVersion: expected.baseVersion,
         }).catch(() => {})
       }
       throw e
@@ -941,5 +957,5 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const dates = useMemo(() => getScope() ? Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)) : [], [cache, getScope])
   const hasLegacyMdFiles = useMemo(() => Boolean(getScope()) && Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache, getScope])
 
-  return { loading, freshListLoaded, error, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }
+  return { loading, freshListLoaded, error, deletionCancelled, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }
 }

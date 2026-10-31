@@ -665,6 +665,7 @@ export default function App() {
         <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
         <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
+        {diary.deletionCancelled && <div className="sidebar-status error" role="status">{t.app.deletionCancelled}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
         )}

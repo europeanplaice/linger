@@ -338,7 +338,7 @@ describe('save-path gate fails open when the usage tracker is unavailable', () =
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(true))
 
-    const { env: envOverride, createWorkflow } = envWithUnavailableUsage(accountKey)
+    const { env: envOverride, createWorkflow } = envWithUnavailableUsage()
     const result = await mirrorEntryForAuth(envOverride, { sessionId: SESSION_ID, accountKey, date: '2026-06-05', driveVersion: '7' })
 
     expect(result.ok).toBe(true)
@@ -351,7 +351,7 @@ describe('save-path gate fails open when the usage tracker is unavailable', () =
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     await runInDurableObject(index, (instance: S3SyncIndex) => instance.setBackupEnabled(true))
 
-    const { env: envOverride, createWorkflow } = envWithUnavailableUsage(accountKey)
+    const { env: envOverride, createWorkflow } = envWithUnavailableUsage()
     const result = await deleteEntryForAuth(envOverride, { sessionId: SESSION_ID, accountKey, date: '2026-06-06' })
 
     expect(result.ok).toBe(true)

@@ -171,11 +171,23 @@ test.describe('driveEntries proxy API', () => {
   test('deleteEntry sends DELETE to /api/drive/entry/:date', async () => {
     fetchMock.mock(textResponse('', 204))
 
-    await expect(deleteEntry('2026-04-29')).resolves.toBeUndefined()
+    await expect(deleteEntry('2026-04-29', undefined, { fileId: 'original-file', baseVersion: '7' })).resolves.toBeUndefined()
 
     expect(fetchMock.calls[0].url).toBe('/api/drive/entry/2026-04-29')
     expect(fetchMock.calls[0].init?.method).toBe('DELETE')
     expect(fetchMock.calls[0].init?.credentials).toBe('include')
+    const headers = new Headers(fetchMock.calls[0].init?.headers)
+    expect(headers.get('X-Linger-File-Id')).toBe('original-file')
+    expect(headers.get('If-Match')).toBe('7')
+  })
+
+  test('deleteEntry reports a version conflict without retrying the deletion', async () => {
+    const remote = { entry: { date: '2026-04-29', content: 'updated' }, meta: { id: 'new-file', version: '8' } }
+    fetchMock.mock(jsonResponse({ conflict: remote }, 409))
+    const error = await deleteEntry('2026-04-29', undefined, { fileId: 'old-file', baseVersion: '7' }).catch(e => e)
+    expect(error).toBeInstanceOf(SaveConflictError)
+    expect(error.remote).toEqual(remote)
+    expect(fetchMock.calls).toHaveLength(1)
   })
 
   test('throws TokenExpiredError on 401', async () => {

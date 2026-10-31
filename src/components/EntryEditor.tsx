@@ -69,7 +69,7 @@ interface Props {
   date: string
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
   onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
-  onDelete: (date: string) => Promise<void>
+  onDelete: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   onMenuClick: () => void
   onDirtyChange: (isDirty: boolean) => void
   autoSave: boolean
@@ -278,6 +278,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const footerRef = useRef<HTMLDivElement>(null)
   const deleteDialogRef = useRef<HTMLDialogElement>(null)
   const fileIdRef = useRef<string | null>(null)
+  const deleteTargetRef = useRef<{ date: string; fileId: string; baseVersion: string } | null>(null)
   // Records when this tab last saved which date, so the load effect's re-poll
   // (fired if it re-runs for a date this tab just saved — e.g. from a future
   // trigger like tab sync) can still pass `since` and get the server's pending
@@ -771,6 +772,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setText(remoteText)
     setSavedTextValue(remoteText)
     setBaseVersionValue(conflictRemote?.meta.version ?? null)
+    fileIdRef.current = conflictRemote?.meta.id ?? null
     setHasConflict(false)
     setConflictRemote(null)
     setPendingOfflineSave(false)
@@ -884,6 +886,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }
 
   const del = async () => {
+    deleteTargetRef.current = fileIdRef.current && baseVersionRef.current
+      ? { date, fileId: fileIdRef.current, baseVersion: baseVersionRef.current } : null
     setDeleteInput('')
     setShowDeleteModal(true)
   }
@@ -891,16 +895,26 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const confirmDelete = async () => {
     setDeleting(true)
     try {
-      await onDelete(date)
+      const target = deleteTargetRef.current
+      if (!target || target.date !== date) throw new Error('Reload the entry before deleting it')
+      const { fileId, baseVersion } = target
+      await onDelete(date, { fileId, baseVersion })
       setShowDeleteModal(false)
       applyLoadedEntry(null)
       resetS3ForVersion(date, null)
       setStatus('')
       haptics.delete()
-    } catch {
-      setStatus(t.entry.deleteFailed)
+    } catch (e) {
+      if (e instanceof EntryConflictError) {
+        setHasConflict(true)
+        setConflictRemote(e.remote)
+        setStatus(t.entry.changedElsewhere)
+      } else {
+        setStatus(t.entry.deleteFailed)
+      }
       setShowDeleteModal(false)
     } finally {
+      deleteTargetRef.current = null
       setDeleting(false)
     }
   }

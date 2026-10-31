@@ -79,6 +79,22 @@ Folder ID is cached in the Cloudflare KV session record after first lookup.
 File upload uses multipart/related to set both metadata and content in one request.
 Drive 429/5xx responses are retried with exponential backoff.
 
+Diary saves, deletes, and S3 restores pass through an account-scoped `DiaryWriter`
+Durable Object in the existing `s3-workflows` Worker. It serializes the version
+check and write across tabs, devices, and login sessions. New files use a
+Drive-generated ID reserved in durable storage before creation, so an ambiguous
+timeout can retry without creating another file for the same date. The object
+stores folder/file IDs only; diary text remains in Drive and the browser cache.
+This coordination covers Linger writes; edits made directly through other Drive
+clients do not participate in its queue.
+
+Deleting an entry requires the file ID and version displayed when its confirmation
+dialog opened. If either changed, the server returns a conflict and preserves the
+entry. Offline delete reservations retain those preconditions; stale reservations
+and legacy reservations without them are cancelled with a notice. User deletions
+move the Drive file to the trash, where it can be recovered under Drive's normal
+retention policy.
+
 ### State
 - `useAuth` (`src/hooks/useAuth.ts`) — calls `/auth/session` on load to check sign-in state;
   exposes `{ status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }`
@@ -143,6 +159,10 @@ The app uses **Cloudflare Web Analytics** — cookie-free, no individual trackin
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
 The workflow runs lint, unit tests, the S3 Worker's test suite, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
 The same job also deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
+The Worker is deployed before Pages so the new diary RPC methods and Durable
+Object migrations are available before the frontend/API starts calling them.
+The `DIARY_WRITER` binding and `v2` SQLite migration are declared for production,
+staging, and preview; Wrangler applies the migration on deployment.
 
 After both deployments, CI checks the custom domain: the Linger HTML page returns 200, `/auth/session` returns signed-out JSON with 200, and `/api/drive/entries` returns an unauthenticated JSON 401. It also checks that `/sw.js` is JavaScript and requires cache revalidation without a positive cache TTL. Requests have a 10-second timeout; the checks retry up to six times with five seconds between attempts, then fail the deployment job. Run them manually with `node scripts/check-deployment.mjs https://linger.europeanplaice.com` (or the staging URL). These checks cover public routing and authentication rejection, not signed-in Drive operations or the backup Worker's execution.
 
@@ -198,6 +218,13 @@ S3 access flows through the Pages Functions at `/api/s3/…` and a dedicated Wor
    - `GOOGLE_CLIENT_SECRET`
    - `SESSION_DOMAIN` (e.g. `https://your-domain.com`)
 
+The `linger-s3-workflows` Worker is also required for normal diary writes. Set its
+`SESSIONS` namespace in `workers/s3-workflows/wrangler.jsonc` to the same namespace
+as Pages, and configure the same three secrets on that Worker. Keep the
+`S3_WORKFLOW_SERVICE` service binding in `wrangler.toml` even if you do not use
+S3 backup. GitHub Actions deploys this Worker, including its Durable Objects,
+before deploying Pages.
+
 ### 4. Configure GitHub Actions
 
 Add these repository secrets (Settings → Secrets and variables → Actions):
@@ -226,8 +253,10 @@ npm run workers:dev       # Wrangler Pages dev server at http://localhost:8788
 S3 backfills run in a separate Worker (`workers/s3-workflows/`), reached from Pages
 Functions via the `S3_WORKFLOW_SERVICE` service binding in `wrangler.toml`. That
 binding only resolves if the Workflows Worker also has a `wrangler dev` session
-running locally — otherwise S3 backup/backfill features are unreachable in dev, even
-though the rest of the app works fine. Run it in a second terminal alongside
+running locally. This Worker also coordinates diary writes, including for users
+who have never enabled S3 backup. If it is unavailable, diary mutations return
+503 and retain unsynced edits as drafts; they never fall back to uncoordinated
+writes. Run it in a second terminal alongside
 `workers:dev`:
 
 ```bash

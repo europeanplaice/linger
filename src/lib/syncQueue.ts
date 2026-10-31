@@ -4,6 +4,7 @@ export interface QueueItem {
   date: string
   content?: string
   baseVersion?: string | null
+  fileId?: string
   timestamp: number
 }
 

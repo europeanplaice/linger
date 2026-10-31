@@ -707,6 +707,27 @@ test.describe('EntryEditor — conflict resolution', () => {
 })
 
 test.describe('EntryEditor — delete confirmation', () => {
+  test('keeps the deletion target captured when confirmation opened if another tab updates the entry', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+    await page.getByRole('button', { name: 'More options' }).click()
+    await page.locator('.more-menu-delete').click()
+    await expect(page.locator('.delete-dialog')).toBeVisible()
+    await page.evaluate(() => {
+      window.editorHarness.setRemoteEntry('updated on another device', '2')
+      window.editorHarness.setRefreshSignal(1)
+    })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('updated on another device')
+    await page.locator('.delete-modal-input').fill('confirm')
+    await page.locator('.delete-modal-actions .btn-delete').click()
+    await expect(page.locator('.delete-dialog')).toHaveCount(0)
+    expect(await page.evaluate(() => window.editorHarness.deleteCallsWithTarget())).toEqual([
+      { date: '2026-05-01', fileId: 'file-1', baseVersion: '1' },
+    ])
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('updated on another device')
+    await expect(page.locator('.conflict-panel')).toBeVisible()
+  })
+
   test('requires confirm before deleting an existing entry', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })

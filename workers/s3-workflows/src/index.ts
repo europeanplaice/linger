@@ -14,8 +14,10 @@ import { S3MirrorWorkflow } from './mirrorWorkflow'
 import { S3SyncIndex } from './syncIndex'
 import { runWorkerFirstPass } from './workerFirstPass'
 import type { DiaryTarget, WorkflowEnv } from './types'
+import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import { DiaryWriter } from './diaryWriter'
 
-export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex }
+export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex, DiaryWriter }
 
 function validateRequestId(requestId: string): void {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) throw new Error('Invalid request ID')
@@ -28,6 +30,16 @@ function validateScope(scope: string[] | undefined): string[] | undefined {
 }
 
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
+  async ensureDiaryFolder(input: DiaryWriterAuth): Promise<string> {
+    await authorizedSession(this.env, input)
+    return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
+  }
+
+  async mutateDiaryEntry(input: DiaryMutationInput): Promise<Response> {
+    await authorizedSession(this.env, input)
+    return this.env.DIARY_WRITER.getByName(input.accountKey).mutate(input)
+  }
+
   async fetch(): Promise<Response> {
     return new Response(null, { status: 404 })
   }

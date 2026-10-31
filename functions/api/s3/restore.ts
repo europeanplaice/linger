@@ -1,8 +1,8 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../_shared/session'
 import { listObjectKeys, getObjectContent, S3Error, describeError } from '../../_shared/s3'
-import { listEntries, findEntryMeta, ensureFolder, saveEntry, DriveError } from '../../_shared/drive'
-import { loadS3SettingsRecord, getAssumedCredentials, entryKey, DIARY_FILENAME_RE, mirrorEntrySave } from '../../_shared/s3Settings'
+import { listEntries, findEntryMeta, DriveError } from '../../_shared/drive'
+import { loadS3SettingsRecord, getAssumedCredentials, entryKey, DIARY_FILENAME_RE } from '../../_shared/s3Settings'
 
 // Restore-from-backup: the mirror is write-only everywhere else, so if an entry
 // disappears from Drive (deleted, trashed, or lost in a botched resync) there was
@@ -79,13 +79,17 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     const existing = await findEntryMeta(accessToken, sessionId, session, context.env, date)
     if (existing) return jsonResponse({ ok: false, error: 'This entry already exists in Drive' }, 409)
 
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const savedMeta = await saveEntry(accessToken, { date, content }, folderId)
-    // Stamp the fresh Drive version back onto the mirror (mirrorEntrySave's
-    // putObjectIfNewer) so the object's linger-version metadata matches the
-    // recreated file and the sync badge resolves to 'synced' — also rewrites
-    // history as a new bucket version, same as any normal save.
-    context.waitUntil(mirrorEntrySave(accessToken, sessionId, session, context.env, date, content, savedMeta.id, savedMeta.version))
+    const writer = context.env.S3_WORKFLOW_SERVICE
+    if (!writer || !session.google_sub) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
+    // Recheck existence inside the same queue used by interactive saves. The
+    // listing above alone cannot prevent a concurrent save from creating a file.
+    const response = await writer.mutateDiaryEntry({
+      sessionId, accountKey: session.google_sub, date, method: 'POST',
+      body: JSON.stringify({ content, baseVersion: null }),
+    })
+    if (response.status === 409) return jsonResponse({ ok: false, error: 'This entry already exists in Drive' }, 409)
+    if (!response.ok) return response
+    const savedMeta = await response.json()
     return jsonResponse({ ok: true, meta: savedMeta })
   } catch (e) {
     if (e instanceof S3Error) {

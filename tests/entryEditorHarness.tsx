@@ -23,6 +23,7 @@ const root = createRoot(document.getElementById('root') as HTMLElement)
 let saveCalls: SaveCall[] = []
 let fullSaveCalls: FullSaveCall[] = []
 let deleteCalls: DeleteCall[] = []
+let deleteCallsWithTarget: { date: string; fileId?: string; baseVersion?: string }[] = []
 let pendingNavigateCalls: NavCall[] = []
 let cancelNavigationCalls: NavCall[] = []
 let windowOpenCalls: WindowOpenCall[] = []
@@ -184,10 +185,17 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
           meta: { id: 'file-1', name: `diary-${d}.json`, version: currentRemoteVersion, modifiedTime: currentSaveModifiedTime ?? new Date().toISOString() },
         }
       }}
-      onDelete={async (d) => {
+      onDelete={async (d, target) => {
         deleteCalls.push({ date: d })
+        deleteCallsWithTarget.push({ date: d, ...target })
         if (currentDeleteDelayMs > 0) await delaySave(currentDeleteDelayMs)
         if (currentDeleteReject === 'error') throw new Error('Network error')
+        if (target && target.baseVersion !== currentRemoteVersion) {
+          throw new EntryConflictError(currentRemoteVersion ? {
+            entry: { date: d, content: currentRemoteContent },
+            meta: { id: 'file-1', name: `diary-${d}.txt`, version: currentRemoteVersion },
+          } : null)
+        }
       }}
       onMenuClick={() => { menuClickCount++ }}
       onGoToToday={() => { goToTodayCount++ }}
@@ -241,6 +249,7 @@ window.editorHarness = {
     saveCalls = []
     fullSaveCalls = []
     deleteCalls = []
+    deleteCallsWithTarget = []
     pendingNavigateCalls = []
     cancelNavigationCalls = []
     windowOpenCalls = []
@@ -291,6 +300,7 @@ window.editorHarness = {
     currentSaveModifiedTime = modifiedTime
   },
   deleteCalls: () => [...deleteCalls],
+  deleteCallsWithTarget: () => [...deleteCallsWithTarget],
   pendingNavigateCalls: () => [...pendingNavigateCalls],
   cancelNavigationCalls: () => [...cancelNavigationCalls],
   menuClickCount: () => menuClickCount,
@@ -303,6 +313,7 @@ window.editorHarness = {
     saveCalls = []
     fullSaveCalls = []
     deleteCalls = []
+    deleteCallsWithTarget = []
     pendingNavigateCalls = []
     cancelNavigationCalls = []
     windowOpenCalls = []

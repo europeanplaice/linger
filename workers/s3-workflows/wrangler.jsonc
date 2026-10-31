@@ -33,6 +33,10 @@
       {
         "name": "S3_SYNC_INDEX",
         "class_name": "S3SyncIndex"
+      },
+      {
+        "name": "DIARY_WRITER",
+        "class_name": "DiaryWriter"
       }
     ]
   },
@@ -40,6 +44,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["S3SyncIndex"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["DiaryWriter"]
     }
   ],
   "secrets": {

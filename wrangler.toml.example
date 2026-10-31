@@ -11,3 +11,8 @@ pages_build_output_dir = "dist"
 binding = "SESSIONS"
 id = "<YOUR_KV_NAMESPACE_ID>"
 preview_id = "<YOUR_PREVIEW_KV_NAMESPACE_ID>"
+
+# Required for diary saves/deletes as well as optional S3 backup.
+[[services]]
+binding = "S3_WORKFLOW_SERVICE"
+service = "linger-s3-workflows"
