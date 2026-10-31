@@ -1,5 +1,6 @@
 import type { Env, SessionData } from '../_shared/session'
-import { saveSession, addEmailSessionIndex, addSubSessionIndex, getRefreshTokenForEmail, getRefreshTokenForSub, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { createSession, addEmailSessionIndex, addSubSessionIndex, getRefreshTokenForEmail, getRefreshTokenForSub, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
 import { sanitizeReturnPath } from '../_shared/returnPath'
 
@@ -25,11 +26,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'Missing code or state' }, 400)
   }
 
-  const stateRecordRaw = await env.SESSIONS.get(`oauth_state:${state}`)
+  const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) {
     return jsonResponse({ error: 'Invalid or expired state' }, 400)
   }
-  await env.SESSIONS.delete(`oauth_state:${state}`)
 
   let stateRecord: { codeVerifier: string; nonce: string; returnPath: string }
   try {
@@ -109,7 +109,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     id_token_verified: true,
     ...(googleSub ? { google_sub: googleSub } : {}),
   }
-  // Written before saveSession: if the index write fails, no session was ever
+  // D1 creates the session and identity indexes atomically. These helpers are
+  // no-ops there; retain the ordering below for KV-only deployments.
+  // Written before createSession: if the index write fails, no session was ever
   // created (fails the login, visibly and retryably); if saveSession instead
   // failed *after* a successful index write, the only trace left is a dangling
   // index entry pointing at a session that doesn't exist — harmless, since
@@ -120,7 +122,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     await addEmailSessionIndex(email, sessionId, env)
   }
   await addSubSessionIndex(googleSub, sessionId, env)
-  await saveSession(sessionId, session, env)
+  await createSession(sessionId, session, env)
 
   const headers = new Headers({
     Location: safeReturnPath,

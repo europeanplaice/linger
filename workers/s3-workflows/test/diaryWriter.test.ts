@@ -1,3 +1,4 @@
+import { createSession, getSession, invalidateSession } from '../../../functions/_shared/session'
 import { env, createExecutionContext, runInDurableObject } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
@@ -57,7 +58,7 @@ async function account() {
   const accountKey = crypto.randomUUID()
   const workflowEnv = env as WorkflowEnv
   const auth = { accountKey, sessionId: `session-${accountKey}` }
-  await workflowEnv.SESSIONS.put(`session:${auth.sessionId}`, JSON.stringify({ google_sub: accountKey, access_token: 'test', refresh_token: 'test', expires_at: Date.now() + 3_600_000 }))
+  await createSession(auth.sessionId, { google_sub: accountKey, access_token: 'test', refresh_token: 'test', expires_at: Date.now() + 3_600_000 }, workflowEnv)
   await workflowEnv.S3_SYNC_INDEX.getByName(accountKey).setBackupEnabled(false)
   const service = new Service(createExecutionContext(), workflowEnv)
   const input = (content: string, options: object = {}): DiaryMutationInput => ({ ...auth, date, method: 'POST', body: JSON.stringify({ content, baseVersion: null, ...options }) })
@@ -79,7 +80,7 @@ describe('account-scoped diary mutations', () => {
     const first = await service.mutateDiaryEntry(input('original'))
     const meta = await first.json() as DriveFileMeta
     const otherSession = `other-${auth.sessionId}`
-    await env.SESSIONS.put(`session:${otherSession}`, (await env.SESSIONS.get(`session:${auth.sessionId}`))!)
+    await createSession(otherSession, (await getSession(auth.sessionId, env))!, env)
     const base = { fileId: meta.id, baseVersion: meta.version, baseContent: 'original' }
     const responses = await Promise.all([
       service.mutateDiaryEntry(input('device A', base)),
@@ -200,7 +201,7 @@ describe('account-scoped diary mutations', () => {
   it('rechecks a revoked session after waiting behind another device write', async () => {
     const { auth, service, input } = await account()
     const otherSession = `other-${auth.sessionId}`
-    await env.SESSIONS.put(`session:${otherSession}`, (await env.SESSIONS.get(`session:${auth.sessionId}`))!)
+    await createSession(otherSession, (await getSession(auth.sessionId, env))!, env)
     let enter!: () => void
     let release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve })
@@ -211,7 +212,7 @@ describe('account-scoped diary mutations', () => {
     await entered
     const queued = service.mutateDiaryEntry({ ...input('revoked device'), sessionId: otherSession })
     const rejected = expect(queued).rejects.toThrow('Unauthorized')
-    await env.SESSIONS.put(`revoked-session:${otherSession}`, '1')
+    await invalidateSession(otherSession, undefined, env)
     release()
     expect((await first).status).toBe(200)
     await rejected

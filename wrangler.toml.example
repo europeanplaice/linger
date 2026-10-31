@@ -16,3 +16,14 @@ preview_id = "<YOUR_PREVIEW_KV_NAMESPACE_ID>"
 [[services]]
 binding = "S3_WORKFLOW_SERVICE"
 service = "linger-s3-workflows"
+
+# Set a shared UTC cutoff at least 30 days after the last KV-only deployment.
+[vars]
+AUTH_KV_FALLBACK_UNTIL = ""
+AUTH_KV_REVOCATION_CHECK_UNTIL = ""
+
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "linger-auth-production"
+database_id = "<YOUR_AUTH_DATABASE_ID>"
+migrations_dir = "migrations/auth"

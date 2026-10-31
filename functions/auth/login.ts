@@ -1,5 +1,6 @@
 import type { Env } from '../_shared/session'
-import { jsonResponse, makeOAuthStateCookie, OAUTH_STATE_TTL } from '../_shared/session'
+import { jsonResponse, makeOAuthStateCookie } from '../_shared/session'
+import { saveOAuthState } from '../_shared/authStore'
 import { sanitizeReturnPath } from '../_shared/returnPath'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
@@ -25,7 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   const rawReturnPath = new URL(request.url).searchParams.get('redirect') ?? '/'
   const returnPath = sanitizeReturnPath(rawReturnPath, env.SESSION_DOMAIN)
-  await env.SESSIONS.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, nonce, returnPath }), { expirationTtl: OAUTH_STATE_TTL })
+  await saveOAuthState(state, JSON.stringify({ codeVerifier, nonce, returnPath }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,

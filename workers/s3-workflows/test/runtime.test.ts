@@ -1,3 +1,4 @@
+import { createSession } from '../../../functions/_shared/session'
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { isAtLeast } from '../../../functions/_shared/s3'
@@ -105,7 +106,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
       id_token: 'i',
       google_sub: accountKey,
     }
-    await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
+    await createSession(accountKey, session, env)
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     await runInDurableObject(index, (instance: S3SyncIndex) => {
       instance.setBackupEnabled(true)
@@ -166,7 +167,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
       id_token: 'i',
       google_sub: accountKey,
     }
-    await env.SESSIONS.put(`session:${accountKey}`, JSON.stringify(session))
+    await createSession(accountKey, session, env)
     const status = await entryStatusForAuth(workflowEnv, { sessionId: accountKey, accountKey, date: '2026-01-01', requestedVersion: '5' })
     expect(status.status).toBe('disabled')
   })

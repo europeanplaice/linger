@@ -1,3 +1,4 @@
+import { createSession } from '../../../functions/_shared/session'
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -46,7 +47,7 @@ async function seedSession(accountKey: string) {
     id_token_verified: true,
     google_sub: accountKey,
   }
-  await env.SESSIONS.put(`session:${sessionIdFor(accountKey)}`, JSON.stringify(session))
+  await createSession(sessionIdFor(accountKey), session, env)
 }
 
 function service() {

@@ -18,8 +18,7 @@ import {
   validateRequestAccount,
 } from '../_shared/session'
 
-// KV writes are capped at 1000/day on the free tier. Writing on every request
-// would exhaust the quota quickly, so we throttle TTL renewal to once per day.
+// Keep authentication writes bounded by renewing the sliding TTL once per day.
 // A token refresh (roughly hourly) is persisted separately by getValidSession
 // itself and doesn't bypass this throttle.
 const RENEW_INTERVAL = 60 * 60 * 24 * 1000 // 24 hours
@@ -80,6 +79,8 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
       if (err instanceof SessionRevokedError) return revokedResponse()
       throw err
     }
+    // KV-only deployments maintain separately expiring identity indexes. D1's
+    // indexes are maintained atomically by the session write (helpers are no-ops).
     // The email index entry (esidx:{email}:{sessionId} — see session.ts) carries its
     // own TTL, separate from the session record's. Re-stamp it in step with the
     // session's own sliding renewal above, or an actively-used session would still

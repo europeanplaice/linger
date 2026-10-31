@@ -3,7 +3,7 @@ import type { MirrorEntryCoreInput } from './runtime'
 // Derived from the `wrangler types`-generated worker-configuration.d.ts (the
 // single source of truth for the Worker's bindings) instead of a hand-written
 // binding list, so regenerating types after a binding change stays consistent.
-// The global `Cloudflare.Env` includes SESSIONS + secrets + the S3_SYNC_INDEX /
+// The global `Cloudflare.Env` includes AUTH_DB, legacy/cache KV, secrets, S3_SYNC_INDEX /
 // workflow bindings this Worker is configured with. (An empty `extends`
 // interface would trip no-empty-object-type, and the alias keeps us equally
 // insulated from worker-configuration.d.ts changes.)

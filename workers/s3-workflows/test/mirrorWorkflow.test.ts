@@ -1,3 +1,4 @@
+import { createSession } from '../../../functions/_shared/session'
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -39,6 +40,7 @@ vi.mock('../../../functions/_shared/s3', () => ({
 const SESSION_ID = 'test-session'
 
 async function seedSession(accountKey: string) {
+  await env.AUTH_DB.prepare('DELETE FROM auth_sessions WHERE id = ?').bind(SESSION_ID).run()
   const session: SessionData = {
     refresh_token: 'refresh',
     access_token: 'access',
@@ -47,7 +49,7 @@ async function seedSession(accountKey: string) {
     id_token_verified: true,
     google_sub: accountKey,
   }
-  await env.SESSIONS.put(`session:${SESSION_ID}`, JSON.stringify(session))
+  await createSession(SESSION_ID, session, env)
 }
 
 async function runMirrorWorkflow(

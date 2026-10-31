@@ -1,5 +1,6 @@
 import type { S3WorkflowService } from './s3Workflow'
 import { verifyGoogleIdToken } from './google'
+import { createD1Session, findD1RefreshToken, finishD1Refresh, isD1SessionRevoked, legacyAuthEnabled, readD1Session, refreshD1Session, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
@@ -9,6 +10,9 @@ export const OAUTH_STATE_TTL = 300
 
 export interface Env {
   SESSIONS: KVNamespace
+  AUTH_DB?: D1Database
+  AUTH_KV_FALLBACK_UNTIL?: string
+  AUTH_KV_REVOCATION_CHECK_UNTIL?: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   SESSION_DOMAIN: string
@@ -21,7 +25,7 @@ export interface SessionData {
   access_token: string
   expires_at: number // ms since epoch
   folder_id?: string
-  renewed_at?: number // ms since epoch — tracks last KV write to throttle sliding TTL renewal
+  renewed_at?: number // ms since epoch — throttles sliding session renewal
   email?: string
   changes_start_page_token?: string // Drive Changes API page token for incremental sync
   client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
@@ -79,6 +83,7 @@ export function parseSessionId(request: Request): string | null {
 }
 
 export async function getSession(sessionId: string, env: Env): Promise<SessionData | null> {
+  if (env.AUTH_DB) return readD1Session(sessionId, { ...env, AUTH_DB: env.AUTH_DB })
   const raw = await env.SESSIONS.get(`session:${sessionId}`)
   if (!raw) return null
   if (await isSessionRevoked(sessionId, env)) return null
@@ -90,6 +95,7 @@ export async function getSession(sessionId: string, env: Env): Promise<SessionDa
 }
 
 export async function saveSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
+  if (env.AUTH_DB) return saveD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
   if (await isSessionRevoked(sessionId, env)) throw new SessionRevokedError('Session revoked')
   await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(session), { expirationTtl: SESSION_TTL })
   // Revocation can finish while put() is in flight. Its separate marker remains
@@ -100,7 +106,16 @@ export async function saveSession(sessionId: string, session: SessionData, env: 
   }
 }
 
+export async function createSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
+  if (env.AUTH_DB) {
+    session.renewed_at = Date.now()
+    return createD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
+  }
+  return saveSession(sessionId, session, env)
+}
+
 export async function isSessionRevoked(sessionId: string, env: Env): Promise<boolean> {
+  if (env.AUTH_DB) return isD1SessionRevoked(sessionId, { ...env, AUTH_DB: env.AUTH_DB })
   return await env.SESSIONS.get(`revoked-session:${sessionId}`) === '1'
 }
 
@@ -141,6 +156,9 @@ export async function getValidSession(sessionId: string, session: SessionData, e
     return session
   }
 
+  if (env.AUTH_DB) return refreshD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB }, !!opts.forceRefresh,
+    owner => refreshAccessToken(sessionId, session, env, owner))
+
   const inFlight = inFlightRefreshes.get(sessionId)
   if (inFlight) {
     // Another request in this isolate is refreshing this same session right now —
@@ -176,7 +194,7 @@ export async function getValidSession(sessionId: string, session: SessionData, e
 // The actual refresh-and-persist loop, extracted from getValidSession so concurrent
 // callers can share a single in-flight attempt (see inFlightRefreshes above). Mutates
 // `session` in place and persists the fresh tokens to KV itself.
-async function refreshAccessToken(sessionId: string, session: SessionData, env: Env): Promise<SessionData> {
+async function refreshAccessToken(sessionId: string, session: SessionData, env: Env, refreshOwner?: string): Promise<SessionData> {
   let resp: Response
   for (let attempt = 0; ; attempt++) {
     try {
@@ -189,6 +207,7 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
           client_secret: env.GOOGLE_CLIENT_SECRET,
           grant_type: 'refresh_token',
         }).toString(),
+        signal: AbortSignal.timeout(15_000),
       })
     } catch (err) {
       if (attempt < REFRESH_RETRY_DELAYS_MS.length) {
@@ -255,7 +274,11 @@ async function refreshAccessToken(sessionId: string, session: SessionData, env: 
     id_token: idToken,
     id_token_verified: idToken ? true : undefined,
   })
-  await saveSession(sessionId, session, env)
+  if (env.AUTH_DB && refreshOwner) {
+    await finishD1Refresh(sessionId, session, refreshOwner, { ...env, AUTH_DB: env.AUTH_DB })
+  } else {
+    await saveSession(sessionId, session, env)
+  }
   return session
 }
 
@@ -345,18 +368,22 @@ function subSessionIndexKey(sub: string, sessionId: string): string {
 // renewed session would still fall out of the index (and out of RISC's reach)
 // after the *original* login's TTL, even though the session itself lives on.
 export async function addEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
+  if (env.AUTH_DB) return // D1 maintains the indexed identity columns atomically.
   await env.SESSIONS.put(emailSessionIndexKey(email, sessionId), '', { expirationTtl: SESSION_TTL })
 }
 
 export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
+  if (env.AUTH_DB && !legacyAuthEnabled(env)) return
   await env.SESSIONS.delete(emailSessionIndexKey(email, sessionId))
 }
 
 export async function addSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {
+  if (env.AUTH_DB) return
   await env.SESSIONS.put(subSessionIndexKey(sub, sessionId), '', { expirationTtl: SESSION_TTL })
 }
 
 export async function removeSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {
+  if (env.AUTH_DB && !legacyAuthEnabled(env)) return
   await env.SESSIONS.delete(subSessionIndexKey(sub, sessionId))
 }
 
@@ -386,6 +413,10 @@ async function listSessionIdsForEmail(email: string, env: Env): Promise<string[]
 // Email addresses can change owners; only a matching stable subject authorizes
 // token reuse. Sessions without a subject must obtain fresh consent instead.
 export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env, googleSub: string): Promise<string | null> {
+  if (env.AUTH_DB) {
+    const token = await findD1RefreshToken('email', email, clientId, googleSub, { ...env, AUTH_DB: env.AUTH_DB })
+    if (token || !legacyAuthEnabled(env)) return token
+  }
   const ids = await listSessionIdsForEmail(email, env)
   for (const id of ids) {
     const session = await getSession(id, env)
@@ -395,6 +426,10 @@ export async function getRefreshTokenForEmail(email: string, clientId: string, e
 }
 
 export async function getRefreshTokenForSub(sub: string, clientId: string, env: Env): Promise<string | null> {
+  if (env.AUTH_DB) {
+    const token = await findD1RefreshToken('google_sub', sub, clientId, sub, { ...env, AUTH_DB: env.AUTH_DB })
+    if (token || !legacyAuthEnabled(env)) return token
+  }
   const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
   for (const id of ids) {
     const session = await getSession(id, env)
@@ -421,6 +456,10 @@ async function listSessionIdsForPrefix(prefix: string, env: Env): Promise<string
 // a late writer can extend the session record beyond its original expiration.
 // KV propagation is still eventually consistent, just as for session deletion.
 export async function invalidateSession(sessionId: string, email: string | undefined, env: Env, googleSub?: string): Promise<void> {
+  if (env.AUTH_DB) {
+    await revokeD1Session(sessionId, { ...env, AUTH_DB: env.AUTH_DB })
+    if (!legacyAuthEnabled(env)) return
+  }
   await env.SESSIONS.put(`revoked-session:${sessionId}`, '1')
   await env.SESSIONS.delete(`session:${sessionId}`)
   if (email) {
@@ -442,11 +481,19 @@ async function revokeSessions(operations: Promise<void>[]): Promise<void> {
 }
 
 export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {
+  if (env.AUTH_DB) {
+    await revokeD1Account('email', email, { ...env, AUTH_DB: env.AUTH_DB })
+    if (!legacyAuthEnabled(env)) return
+  }
   const ids = await listSessionIdsForEmail(email, env)
   await revokeSessions(ids.map(id => invalidateSession(id, email, env)))
 }
 
 export async function deleteAllSessionsForSub(sub: string, env: Env): Promise<void> {
+  if (env.AUTH_DB) {
+    await revokeD1Account('google_sub', sub, { ...env, AUTH_DB: env.AUTH_DB })
+    if (!legacyAuthEnabled(env)) return
+  }
   const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
   await revokeSessions(ids.map(async id => {
     const session = await getSession(id, env)

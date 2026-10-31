@@ -39,10 +39,10 @@ A minimalist personal diary app. Entries are stored as plain-text files in your 
 Uses **OAuth 2.0 Authorization Code Flow with PKCE** via Cloudflare Pages Functions:
 
 1. Clicking "Sign in with Google" redirects to `/auth/login`, which generates a PKCE code verifier,
-   stores it in Cloudflare KV (5-minute TTL), and redirects to Google's OAuth consent screen.
+   stores it in Cloudflare D1 (5-minute lifetime), and redirects to Google's OAuth consent screen.
 2. Google redirects back to `/auth/callback` with an authorization code.
 3. The callback handler exchanges the code for access + refresh tokens (server-side, never exposed
-   to the browser), stores the session in Cloudflare KV (30-day TTL), and sets an `HttpOnly`
+   to the browser), stores the session in Cloudflare D1 (30-day sliding lifetime), and sets an `HttpOnly`
    `Secure` `SameSite=Strict` session cookie (`linger_session`).
 4. Subsequent requests include the session cookie; the Cloudflare middleware resolves the session,
    refreshes the access token if needed, and proxies the Drive API call.
@@ -50,7 +50,20 @@ Uses **OAuth 2.0 Authorization Code Flow with PKCE** via Cloudflare Pages Functi
 Drive scope: `drive.file` — non-sensitive, only accesses files this app created.
 The login flow also requests `openid email` so the app can identify the signed-in account and clear local cache on account switches.
 
-`/auth/risc` receives Google [RISC](https://developers.google.com/identity/protocols/risc) Security Event Tokens (session/token revocation, account disabled, credential change) and revokes all Cloudflare KV sessions for the affected email server-side.
+`/auth/risc` receives Google [RISC](https://developers.google.com/identity/protocols/risc) Security Event Tokens (session/token revocation, account disabled, credential change) and revokes sessions by Google subject and email server-side.
+
+Authentication uses primary D1 reads, indexed identity lookups, atomic OAuth-state
+consumption, and a database lease to coordinate token refresh across Worker
+instances. Metadata saves cannot overwrite refreshed tokens, and revoked sessions
+cannot be recreated by a delayed update. The existing Workflows Worker removes
+expired rows hourly in bounded batches; authorization checks expiry immediately.
+
+Existing KV sessions can be imported on first access without changing their cookie
+or extending their original expiry. `AUTH_KV_FALLBACK_UNTIL` bounds this transition;
+normal D1 requests do not access KV. The `SESSIONS` KV binding remains for public
+holiday caching and migration compatibility. See [D1 migration and activation](D1-MIGRATION.md)
+before deploying: database IDs in the committed configs are local placeholders
+until the remote databases have been provisioned.
 
 ### Drive storage
 All Drive API v3 calls are made server-side by Cloudflare Pages Functions at `/api/drive/…`.
@@ -75,7 +88,7 @@ Entry content here...
 
 Legacy files that still contain YAML frontmatter are also readable; the frontmatter is stripped on load and the date from the filename remains authoritative.
 
-Folder ID is cached in the Cloudflare KV session record after first lookup.
+Folder ID is cached in the D1 session record after first lookup.
 File upload uses multipart/related to set both metadata and content in one request.
 Drive 429/5xx responses are retried with exponential backoff.
 
@@ -158,7 +171,7 @@ The app uses **Cloudflare Web Analytics** — cookie-free, no individual trackin
 ### Deployment
 The app is deployed to **Cloudflare Pages** via GitHub Actions (see `.github/workflows/deploy.yml`).
 The workflow runs lint, unit tests, the S3 Worker's test suite, Playwright e2e tests, and `npm audit`, then deploys with `wrangler pages deploy`.
-The same job also deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
+The same job applies D1 authentication migrations, then deploys the `s3-workflows` Worker (`workers/s3-workflows/`) with `wrangler deploy`.
 The Worker is deployed before Pages so the new diary RPC methods and Durable
 Object migrations are available before the frontend/API starts calling them.
 The `DIARY_WRITER` binding and `v2` SQLite migration are declared for production,
@@ -172,7 +185,7 @@ Pull requests targeting `main` or `staging` run the build and the same lint, tes
 
 Some Cloudflare test dependencies pin older transitive packages. The `package.json` overrides keep Sharp, Undici (within each major version), and the test plugin's Zod on patched releases. Recheck these overrides and the version-specific `allowScripts` entries when upgrading `@cloudflare/vitest-plugin` or Wrangler. TypeScript is constrained to `~6.0.3` because `typescript-eslint` requires `<6.1.0`; defer TypeScript 7 until it is supported. Vitest 5 requires Node.js 22.12+ (CI uses Node.js 22).
 
-Pushes to `main` deploy to the production Pages project (`linger`) and the production `linger-s3-workflows` Worker; pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com` and the `linger-s3-workflows-staging` Worker, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' surrounding Cloudflare resources (KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/` — Terraform no longer owns the Worker script or its Workflow bindings, since CI can't run `terraform apply` (local-only state, no remote backend).
+Pushes to `main` deploy to the production Pages project (`linger`) and the production `linger-s3-workflows` Worker; pushes to `staging` deploy to a separate `linger-staging` Pages project on `staging.linger.europeanplaice.com` and the `linger-s3-workflows-staging` Worker, used to rehearse OAuth branding/consent-screen changes without risking the production app's verified status. Both environments' surrounding Cloudflare resources (D1 databases, KV namespaces, Pages projects, DNS) are managed via Terraform in `infra/` — Terraform no longer owns the Worker script or its Workflow bindings, since CI can't run `terraform apply` (local-only state, no remote backend).
 
 Cloudflare's own Pages Git integration auto-builds a preview deployment for every other branch/PR, backed by a third `linger-s3-workflows-preview` Worker. CI doesn't deploy that one (it only triggers on `main`/`staging` pushes) — deploy it by hand when its code needs to catch up:
 ```bash
@@ -207,19 +220,19 @@ S3 access flows through the Pages Functions at `/api/s3/…` and a dedicated Wor
 ### 3. Set up Cloudflare Pages
 
 1. Create a [Cloudflare](https://cloudflare.com/) account if you don't have one
-2. Create a **KV namespace** for sessions:
+2. Create a **KV namespace** for public holiday caching and legacy session migration:
    ```
    wrangler kv namespace create SESSIONS
    wrangler kv namespace create SESSIONS --preview
    ```
-3. Copy `wrangler.toml.example` to `wrangler.toml` and fill in the KV namespace IDs
+3. Copy `wrangler.toml.example` to `wrangler.toml`, fill in the KV namespace IDs, and provision/bind D1 using [D1-MIGRATION.md](D1-MIGRATION.md)
 4. Add the following secrets via the Cloudflare dashboard or `wrangler pages secret put`:
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_CLIENT_SECRET`
    - `SESSION_DOMAIN` (e.g. `https://your-domain.com`)
 
 The `linger-s3-workflows` Worker is also required for normal diary writes. Set its
-`SESSIONS` namespace in `workers/s3-workflows/wrangler.jsonc` to the same namespace
+`AUTH_DB` database and `SESSIONS` namespace in `workers/s3-workflows/wrangler.jsonc` to the same resources
 as Pages, and configure the same three secrets on that Worker. Keep the
 `S3_WORKFLOW_SERVICE` service binding in `wrangler.toml` even if you do not use
 S3 backup. GitHub Actions deploys this Worker, including its Durable Objects,
@@ -228,7 +241,7 @@ before deploying Pages.
 ### 4. Configure GitHub Actions
 
 Add these repository secrets (Settings → Secrets and variables → Actions):
-- `CLOUDFLARE_API_TOKEN` — Cloudflare API token with Pages edit and Workers Scripts edit permissions (CI also deploys the `s3-workflows` Worker via `wrangler deploy`)
+- `CLOUDFLARE_API_TOKEN` — Cloudflare API token with Pages edit, Workers Scripts edit, and D1 edit permissions (CI also deploys the `s3-workflows` Worker via `wrangler deploy`)
 - `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID
 
 Push to `main` and the app will be deployed automatically.
@@ -243,7 +256,7 @@ npm run dev       # Vite dev server with HMR at http://localhost:5173
 
 For the full stack (auth + Drive proxy) locally:
 ```bash
-# Copy and configure wrangler.toml (set KV IDs, add secrets via wrangler)
+# Configure wrangler.toml (set D1/KV IDs, apply local auth migrations, add secrets)
 npm run dev &             # Start Vite in the background
 npm run workers:dev       # Wrangler Pages dev server at http://localhost:8788
 ```
@@ -272,8 +285,8 @@ same values as your root `.dev.vars` to refresh an expired one (which any real
 backfill run will eventually hit): copy `.dev.vars` to `workers/s3-workflows/.dev.vars`.
 
 The `--persist-to .wrangler/local-state` flag must match on both commands (run from
-the repo root) — each `wrangler dev` process otherwise gets its own local KV/DO
-storage even though both declare the same `SESSIONS` namespace `id`, so a session
+the repo root) — each `wrangler dev` process otherwise gets its own local D1/KV/DO
+storage even though both declare the same database and namespace IDs, so a session
 created by `workers:dev` won't be found by this worker and every backfill call fails
 with `Unauthorized`.
 
@@ -305,7 +318,7 @@ Some UI states are hard to trigger naturally during development. Append `?previe
 - React 19 + TypeScript
 - Vite 8 (with build-time prerendering of the signed-out landing page and CSP inline-hash injection)
 - Cloudflare Pages + Pages Functions (auth + Drive API proxy + S3 proxy)
-- Cloudflare KV (session storage)
+- Cloudflare D1 (authentication), KV (holiday cache and migration compatibility)
 - Cloudflare Workers + Workflows + Durable Objects (`workers/s3-workflows/`, S3 mirror/backfill)
 - Google Drive API v3 (plain `fetch`, server-side via Cloudflare Functions)
 - Google OAuth 2.0 Authorization Code Flow with PKCE (server-side token refresh, `drive.file` scope)

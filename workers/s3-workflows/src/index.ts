@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers'
+import { cleanupAuth } from '../../../functions/_shared/authStore'
 import type {
   DeleteEntryInput,
   GetEntryStatusInput,
@@ -32,6 +33,10 @@ function validateScope(scope: string[] | undefined): string[] | undefined {
 }
 
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
+  async scheduled(): Promise<void> {
+    await cleanupAuth(this.env)
+  }
+
   async saveSettings(input: S3WorkflowAuth & { config: S3Config }) {
     await authorizedSession(this.env, input)
     return indexFor(this.env, input.accountKey).saveBackupSettings(input)

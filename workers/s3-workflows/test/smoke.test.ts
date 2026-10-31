@@ -5,5 +5,6 @@ describe('smoke', () => {
   it('boots the workers runtime with expected bindings', () => {
     expect(env.S3_SYNC_INDEX).toBeDefined()
     expect(env.SESSIONS).toBeDefined()
+    expect(env.AUTH_DB).toBeDefined()
   })
 })
