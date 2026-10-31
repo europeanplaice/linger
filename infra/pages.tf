@@ -63,6 +63,11 @@ resource "cloudflare_pages_project" "linger" {
     ignore_changes = [
       deployment_configs.preview.env_vars,
       deployment_configs.production.env_vars,
+      # Wrangler deploys service bindings; provider 5.22 cannot round-trip their
+      # omitted environment reliably when patching unrelated Pages settings.
+      deployment_configs.preview.services,
+      deployment_configs.production.services,
+      deployment_configs.production.wrangler_config_hash,
     ]
   }
 }
@@ -135,6 +140,11 @@ resource "cloudflare_pages_project" "linger_staging" {
     ignore_changes = [
       deployment_configs.preview.env_vars,
       deployment_configs.production.env_vars,
+      # Wrangler deploys service bindings; provider 5.22 cannot round-trip their
+      # omitted environment reliably when patching unrelated Pages settings.
+      deployment_configs.preview.services,
+      deployment_configs.production.services,
+      deployment_configs.production.wrangler_config_hash,
     ]
   }
 }

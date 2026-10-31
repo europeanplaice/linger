@@ -1,10 +1,18 @@
 # Authentication storage: KV to D1
 
-The implementation and local tests are ready. **No remote D1 database has been
-created, no existing session data has been changed, and this migration has not
-been deployed.** UUIDs starting with `00000000-0000-0000-0000-` in Wrangler configs
-are local placeholders. Replace them before any deployment; the CI migration
-step will fail for an unprovisioned database before deploying application code.
+The three remote authentication databases have been provisioned. The committed
+Wrangler configs use their real IDs, with separate databases for production,
+staging, and preview. No subscription or billing-plan change is part of this setup.
+
+| Environment | Database ID |
+| --- | --- |
+| Production | `9cf1ea9e-9bc5-4fc3-833c-f275a552ad54` |
+| Staging | `151fe69d-7938-41c0-a401-7f2f0a054b76` |
+| Preview | `7ff5f2ac-0dd5-4ad5-8a46-4d689a279300` |
+
+The initial cutover accepts legacy KV sessions until **2026-12-03 09:30:25 UTC**.
+The short mixed-deployment KV revocation check ends **2026-10-31 11:30:25 UTC**.
+If deploying the initial cutover later, review both deadlines before proceeding.
 
 ## Free-tier use
 
@@ -17,13 +25,14 @@ identities, and expiry. An existing account's other databases/usage share its li
 On Workers Free, exceeding the allowance stops D1 queries until the daily reset;
 it does not automatically upgrade the plan. On an already-paid account, excess
 usage can incur charges. This work does not change subscriptions or enable billing.
-The available API token could not read account subscriptions or access D1, so the
-account's actual plan, remaining allowance, and resource count are unverified.
+The updated token can manage D1, and the account had no D1 databases before this
+setup. Subscription details are not readable with that token; the actual account
+plan remains unverified.
 
 Sources: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/),
 [D1 limits](https://developers.cloudflare.com/d1/platform/limits/).
 
-## Provision and activate later
+## Provisioning and deployment procedure
 
 1. Grant the deployment/Terraform token **Account → D1 → Edit**, scoped to the
    existing Linger account. Retain its existing Pages, Workers Scripts, and KV
@@ -32,7 +41,11 @@ Sources: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/),
    `linger-auth-production`, `linger-auth-staging`, and `linger-auth-preview` and
    attach the right database to each Pages environment. Apply only when ready to
    activate; review any unrelated drift separately. D1 resources have
-   `prevent_destroy`. Terraform manages resources, while Wrangler manages SQL.
+   `prevent_destroy`, with read replication explicitly disabled. Terraform manages
+   resources, while Wrangler manages SQL and the Pages service bindings. Provider
+   5.22 cannot reliably round-trip a service binding's omitted environment when
+   patching Pages, so service bindings and the Wrangler config hash are ignored
+   by Terraform and must be maintained in the environment's Wrangler configs.
 3. Copy `terraform -chdir=infra output auth_database_ids` into the matching configs:
 
    | Environment | Pages | Worker |
@@ -46,8 +59,7 @@ Sources: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/),
    legacy KV namespace bindings as they are.
 4. Set the same `AUTH_KV_FALLBACK_UNTIL` UTC timestamp in Pages and its Worker for
    each environment. Choose at least 31 days after the **last deployment still
-   writing sessions to KV**, including any rollback. The checked-in value is
-   empty, which disables import. For a new installation without legacy sessions,
+   writing sessions to KV**, including any rollback. An empty value disables import. For a new installation without legacy sessions,
    leave it empty. Do not extend this window indefinitely. Also set the matching
    `AUTH_KV_REVOCATION_CHECK_UNTIL` to a short cutover window (for example, 30 minutes
    after the deployment starts). During that window D1 authentication checks KV
@@ -120,7 +132,7 @@ processes before signing in:
 npx wrangler d1 migrations apply AUTH_DB --local --persist-to .wrangler/local-state
 ```
 
-The root Pages and production Worker configs use the same local placeholder UUID,
+The root Pages and production Worker configs use the same database UUID,
 so their D1 bindings share storage when both use that persistence directory.
 Workers tests create isolated local D1 databases and apply the SQL migrations
 automatically. Existing KV unit tests also exercise the compatibility path.

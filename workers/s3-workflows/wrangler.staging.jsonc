@@ -63,8 +63,8 @@
     ]
   },
   "vars": {
-    "AUTH_KV_FALLBACK_UNTIL": "",
-    "AUTH_KV_REVOCATION_CHECK_UNTIL": ""
+    "AUTH_KV_FALLBACK_UNTIL": "2026-12-03T09:30:25Z",
+    "AUTH_KV_REVOCATION_CHECK_UNTIL": "2026-10-31T11:30:25Z"
   },
   "triggers": {
     "crons": [
@@ -75,7 +75,7 @@
     {
       "binding": "AUTH_DB",
       "database_name": "linger-auth-staging",
-      "database_id": "00000000-0000-0000-0000-000000000002",
+      "database_id": "151fe69d-7938-41c0-a401-7f2f0a054b76",
       "migrations_dir": "../../migrations/auth"
     }
   ]

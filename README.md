@@ -62,8 +62,7 @@ Existing KV sessions can be imported on first access without changing their cook
 or extending their original expiry. `AUTH_KV_FALLBACK_UNTIL` bounds this transition;
 normal D1 requests do not access KV. The `SESSIONS` KV binding remains for public
 holiday caching and migration compatibility. See [D1 migration and activation](D1-MIGRATION.md)
-before deploying: database IDs in the committed configs are local placeholders
-until the remote databases have been provisioned.
+for the provisioned database IDs, compatibility deadlines, and deployment order.
 
 ### Drive storage
 All Drive API v3 calls are made server-side by Cloudflare Pages Functions at `/api/drive/…`.
