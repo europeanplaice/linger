@@ -27,6 +27,24 @@ test.describe('LoginScreen — language toggle', () => {
     await expect(jaBtn).toBeVisible()
   })
 
+  test('offers an explicit account switch action alongside the normal sign-in button', async ({ page }) => {
+    await loadHarness(page)
+    await render(page)
+    await page.evaluate(() => {
+      ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = ''
+      window.open = ((url?: string | URL) => {
+        ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = String(url ?? '')
+        return { closed: true, close() {} } as WindowProxy
+      }) as typeof window.open
+    })
+    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Use another account' })).toBeVisible()
+    await page.getByRole('button', { name: 'Sign in with Google' }).click()
+    await expect.poll(() => page.evaluate(() => (window as Window & { lastPopupUrl?: string }).lastPopupUrl)).toBe('/auth/login')
+    await page.getByRole('button', { name: 'Use another account' }).click()
+    await expect.poll(() => page.evaluate(() => (window as Window & { lastPopupUrl?: string }).lastPopupUrl)).toBe('/auth/login?select_account=1')
+  })
+
   test('clicking EN switches UI to English', async ({ page }) => {
     await page.goto(`${baseUrl}/tests/loginScreenHarness.html`)
     await page.evaluate(() => localStorage.setItem('linger_language', 'ja'))

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAuth } from '../../src/hooks/useAuth'
 import { AUTH_EVENT_KEY, getAccountSnapshot, setActiveAccount } from '../../src/lib/accountSession'
+import { clearOAuthCredentials, getAccessToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 
 const { mockStartSignIn, mockCheckSession, mockRevokeSession } = vi.hoisted(() => ({
   mockStartSignIn: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('../../src/api/auth', () => ({
 
 beforeEach(() => {
   localStorage.clear()
+  clearOAuthCredentials()
   setActiveAccount(null, true)
   mockStartSignIn.mockReset()
   mockStartSignIn.mockResolvedValue({ signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123', googleClientId: 'client-id' })
@@ -128,6 +130,14 @@ describe('useAuth', () => {
     await act(async () => { result.current.signIn(); await Promise.resolve() })
 
     expect(mockStartSignIn).toHaveBeenCalledOnce()
+    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: false })
+  })
+
+  it('requests account selection for the explicit alternate-account action', async () => {
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedOut'))
+    await act(async () => { result.current.signIn({ selectAccount: true }); await Promise.resolve() })
+    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: true })
   })
 
   it('tracks popup reauthentication and exposes failure for the in-place recovery UI', async () => {
@@ -181,6 +191,34 @@ describe('useAuth', () => {
     await act(async () => { result.current.retryAfterExpired(); await Promise.resolve() })
 
     expect(mockStartSignIn).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a different Google sub during normal reauthentication without activating it', async () => {
+    mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'account-a' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    act(() => result.current.handleExpired())
+    setOAuthCredentials({ accessToken: 'new-account-token', idToken: 'new-account-id', expiresAt: Date.now() + 60_000 })
+    mockStartSignIn.mockResolvedValueOnce({ signedIn: true, email: 'b@example.com', googleSub: 'account-b' })
+    await act(async () => { result.current.retryAfterExpired(); await Promise.resolve() })
+    await waitFor(() => expect(result.current.authError).toBe('account_mismatch'))
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.googleSub).toBe('account-a')
+    expect(result.current.tokenExpired).toBe(true)
+    expect(getAccountSnapshot().account).toBe('sub:account-a')
+    expect(getAccessToken()).toBeNull()
+  })
+
+  it('rejects a different Google sub even when the reauth popup explicitly shows account selection', async () => {
+    mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'account-a' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    act(() => result.current.handleExpired())
+    mockStartSignIn.mockResolvedValueOnce({ signedIn: true, email: 'b@example.com', googleSub: 'account-b' })
+    await act(async () => { result.current.retryAfterExpired(true); await Promise.resolve() })
+    await waitFor(() => expect(result.current.authError).toBe('account_mismatch'))
+    expect(result.current.googleSub).toBe('account-a')
+    expect(getAccountSnapshot().account).toBe('sub:account-a')
   })
 
   it('updates the active account after popup sign-in resolves', async () => {

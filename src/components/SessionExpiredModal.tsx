@@ -5,11 +5,14 @@ import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onReauth: () => void
+  onUseAnotherAccount: () => void
+  switchBlocked?: boolean
+  switchAvailable?: boolean
   signingIn: boolean
   authError: AuthErrorCode | null
 }
 
-export function SessionExpiredModal({ onReauth, signingIn, authError }: Props) {
+export function SessionExpiredModal({ onReauth, onUseAnotherAccount, switchBlocked, switchAvailable, signingIn, authError }: Props) {
   const { t } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
 
@@ -32,9 +35,15 @@ export function SessionExpiredModal({ onReauth, signingIn, authError }: Props) {
     >
       <p id="session-expired-title" className="session-expired-modal-msg">{t.session.expired}</p>
       {authError === 'sign_in_failed' && <p className="session-expired-modal-error" role="alert">{t.session.reLoginFailed}</p>}
+      {authError === 'account_mismatch' && <p className="session-expired-modal-error" role="alert">{t.session.accountMismatch}</p>}
+      {switchBlocked && <p className="session-expired-modal-error" role="status">{t.login.accountSwitchBlocked}</p>}
       <button className="btn-reauth" onClick={onReauth} disabled={signingIn}>
         {signingIn ? t.session.loggingIn : t.session.logInAgain}
       </button>
+      <button className="btn-use-another-account" onClick={onUseAnotherAccount} disabled={signingIn}>
+        {t.login.useAnotherAccount}
+      </button>
+      {switchAvailable && <p className="session-expired-modal-msg">{t.login.switchAccountSignOutHint}</p>}
     </motion.dialog>
   )
 }

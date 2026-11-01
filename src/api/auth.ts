@@ -4,13 +4,14 @@ import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
 
-export function startSignIn(): Promise<SessionInfo> {
+export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<SessionInfo> {
   const generation = ++signInGeneration
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
   clearOAuthCredentials()
   return new Promise((resolve, reject) => {
-    const popup = window.open('/auth/login', 'linger-google-signin', 'popup,width=520,height=680')
+    const loginUrl = options.selectAccount ? '/auth/login?select_account=1' : '/auth/login'
+    const popup = window.open(loginUrl, 'linger-google-signin', 'popup,width=520,height=680')
     if (!popup) {
       reject(new Error('Google sign-in popup was blocked. Allow popups and try again.'))
       return

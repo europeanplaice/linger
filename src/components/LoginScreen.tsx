@@ -4,6 +4,7 @@ import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onSignIn: () => void
+  onUseAnotherAccount?: () => void
   onRetry?: () => void
   tokenExpired?: boolean
   authResolved?: boolean
@@ -11,7 +12,7 @@ interface Props {
   onDismissAuthError?: () => void
 }
 
-export function LoginScreen({ onSignIn, onRetry, tokenExpired, authResolved, authError }: Props) {
+export function LoginScreen({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
@@ -43,6 +44,11 @@ export function LoginScreen({ onSignIn, onRetry, tokenExpired, authResolved, aut
           </svg>
           {t.login.signInWithGoogle}
         </button>
+        {onUseAnotherAccount && (
+          <button className="btn-use-another-account" type="button" onClick={onUseAnotherAccount}>
+            {t.login.useAnotherAccount}
+          </button>
+        )}
         <p className="login-footer">
           <a href="/home" target="_blank" rel="noopener noreferrer">
             {t.login.aboutLinger}

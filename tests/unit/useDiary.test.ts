@@ -63,6 +63,25 @@ function renderUseDiary(opts: { email?: string | null; authStatus?: 'initializin
 }
 
 describe('useDiary initial load parallelization', () => {
+  it('discards an expired pending save when the Google sub changes, even if the email stays the same', async () => {
+    localStorage.clear()
+    const onExpired = vi.fn()
+    const hook = renderHook(({ googleSub }) => useDiary('signedIn', 'same@example.com', onExpired, undefined, undefined, googleSub), {
+      initialProps: { googleSub: 'account-a' },
+    })
+    await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
+    vi.mocked(driveEntries.saveEntry).mockRejectedValueOnce(new driveEntries.TokenExpiredError())
+    await act(async () => {
+      await expect(hook.result.current.save('2026-05-01', 'private edit', null)).rejects.toBeInstanceOf(driveEntries.TokenExpiredError)
+    })
+    expect(onExpired).toHaveBeenCalledOnce()
+    await act(async () => hook.rerender({ googleSub: 'account-b' }))
+    await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
+    await expect(hook.result.current.retryPendingSave()).resolves.toBeNull()
+    expect(diaryCache.getAllDrafts).toHaveBeenCalledWith('same@example.com')
+    expect(driveEntries.saveEntry).toHaveBeenCalledOnce()
+  })
+
   it('calls listEntries and getEntryByDate(today) in parallel', async () => {
     const today = todayStr()
     const todayMeta = meta(today)

@@ -15,7 +15,7 @@ function randomVerifier(): string {
   return base64url(bytes.buffer)
 }
 
-export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
+export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const state = crypto.randomUUID()
   const codeVerifier = randomVerifier()
   const nonce = crypto.randomUUID()
@@ -33,12 +33,16 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
     state,
     nonce,
     access_type: 'online',
-    prompt: 'select_account',
     // Do not union these permissions with broader scopes granted in the past.
     include_granted_scopes: 'false',
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
   })
+  // Let Google use its normal account/session selection for the primary
+  // sign-in action. The explicit secondary action asks Google to show accounts.
+  if (new URL(request.url).searchParams.get('select_account') === '1') {
+    params.set('prompt', 'select_account')
+  }
 
   return new Response(null, {
     status: 302,

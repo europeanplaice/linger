@@ -107,6 +107,8 @@ const dictionaries = {
       signInLoadFailed: 'Google Sign-In could not be loaded. Check your network or browser extensions.',
       loadingSignIn: 'Loading Google Sign-In…',
       useAnotherAccount: 'Use another account',
+      accountSwitchBlocked: 'Save your unsaved changes by signing back in to the same Google account first.',
+      switchAccountSignOutHint: 'You will return to sign-in, where you can choose another account.',
       driveFileScope: 'Only accesses diary files created by this app.',
       privacyPolicy: 'Privacy Policy',
       termsOfService: 'Terms of Service',
@@ -400,6 +402,7 @@ const dictionaries = {
     session: {
       expired: 'Your session has expired. Please log in again.',
       reLoginFailed: 'Re-login failed. Please try again.',
+      accountMismatch: 'Google returned a different account. Your edits are still here; retry and choose the same account to save them.',
       loggingIn: 'Logging in...',
       logInAgain: 'Log in again',
     },
@@ -494,6 +497,8 @@ const dictionaries = {
       signInLoadFailed: 'Google ログインを読み込めませんでした。ネットワークやブラウザ拡張機能を確認してください。',
       loadingSignIn: 'Google ログインを読み込み中...',
       useAnotherAccount: '別のアカウントを使う',
+      accountSwitchBlocked: '未保存の変更があります。同じ Google アカウントで再ログインして、先に保存してください。',
+      switchAccountSignOutHint: 'ログイン画面に戻ってから、別のアカウントを選べます。',
       driveFileScope: 'このアプリが作成した日記ファイル以外にはアクセスしません。',
       privacyPolicy: 'プライバシーポリシー',
       termsOfService: '利用規約',
@@ -787,6 +792,7 @@ const dictionaries = {
     session: {
       expired: 'セッションの有効期限が切れました。もう一度ログインしてください。',
       reLoginFailed: '再ログインに失敗しました。もう一度お試しください。',
+      accountMismatch: '別の Google アカウントが選択されました。編集内容は保持されています。同じアカウントを選んで再ログインしてください。',
       loggingIn: 'ログイン中...',
       logInAgain: 'もう一度ログイン',
     },

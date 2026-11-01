@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { LoginScreen } from '../src/components/LoginScreen'
 import { I18nProvider } from '../src/i18n'
+import { startSignIn } from '../src/api/auth'
 import type { AuthErrorCode } from '../src/hooks/useAuth'
 import '../src/styles.css'
 
@@ -16,7 +17,8 @@ window.loginScreenHarness = {
     root.render(
       <I18nProvider>
         <LoginScreen
-          onSignIn={() => { console.log('sign in clicked') }}
+          onSignIn={() => { void startSignIn().catch(() => {}) }}
+          onUseAnotherAccount={() => { void startSignIn({ selectAccount: true }).catch(() => {}) }}
           tokenExpired={tokenExpired}
           authError={authError}
           onDismissAuthError={() => { window.loginScreenHarness.dismissedAuthError = true }}

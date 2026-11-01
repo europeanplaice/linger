@@ -3,6 +3,7 @@ import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onSignIn: () => void
+  onUseAnotherAccount?: () => void
   onRetry?: () => void
   tokenExpired?: boolean
   authResolved?: boolean
@@ -14,11 +15,12 @@ interface Props {
 // long-form marketing content below makes `/` the canonical, crawlable landing
 // page (it is rendered into the initial HTML by the build-time prerender). The
 // copy here is intentionally English — it is the canonical content for `/`.
-export function Landing({ onSignIn, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
+export function Landing({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
   return (
     <div className="landing">
       <LoginScreen
         onSignIn={onSignIn}
+        onUseAnotherAccount={onUseAnotherAccount}
         onRetry={onRetry}
         tokenExpired={tokenExpired}
         authResolved={authResolved}

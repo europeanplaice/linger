@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { startSignIn, checkSession, revokeSession } from '../api/auth'
 import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
+import { clearOAuthCredentials } from '../lib/oauthCredentials'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
-export type AuthErrorCode = 'sign_in_failed'
+export type AuthErrorCode = 'sign_in_failed' | 'account_mismatch'
+
+interface SignInOptions {
+  selectAccount?: boolean
+  expectedGoogleSub?: string | null
+}
 
 export interface AuthState {
   status: AuthStatus
@@ -16,13 +22,13 @@ export interface AuthState {
   authError: AuthErrorCode | null
   signingIn: boolean
   clearAuthError: () => void
-  signIn: () => void
+  signIn: (options?: SignInOptions) => void
   signOut: () => void
   handleExpired: () => void
-  retryAfterExpired: () => void
+  retryAfterExpired: (selectAccount?: boolean) => void
 }
 
-const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['sign_in_failed']
+const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['sign_in_failed', 'account_mismatch']
 
 function rememberSession(signedIn: boolean): void {
   try { localStorage.setItem('linger_had_session', String(signedIn)) } catch { /* Tracking must not prevent authentication changes. */ }
@@ -112,13 +118,17 @@ export function useAuth(): AuthState {
     return () => { cancelled = true }
   }, [])
 
-  const signIn = useCallback(() => {
+  const signIn = useCallback((options: SignInOptions = {}) => {
     const revision = ++authRevision.current
     restoring.current = false
     setAuthError(null)
     setSigningIn(true)
-    startSignIn().then(info => {
+    startSignIn({ selectAccount: Boolean(options.selectAccount) }).then(info => {
       if (revision !== authRevision.current) return
+      if (options.expectedGoogleSub !== undefined && info.googleSub !== options.expectedGoogleSub) {
+        clearOAuthCredentials()
+        throw new Error('account_mismatch')
+      }
       const account = accountIdentity(info)
       if (!account) throw new Error('Google sign-in did not return an account')
       setActiveAccount(account, getAccountSnapshot().account !== account)
@@ -133,7 +143,7 @@ export function useAuth(): AuthState {
     }).catch(error => {
       if (revision !== authRevision.current) return
       setSigningIn(false)
-      setAuthError('sign_in_failed')
+      setAuthError(error instanceof Error && error.message === 'account_mismatch' ? 'account_mismatch' : 'sign_in_failed')
       console.error('Google sign-in failed:', error)
     })
   }, [])
@@ -158,9 +168,9 @@ export function useAuth(): AuthState {
     setTokenExpired(true)
   }, [])
 
-  const retryAfterExpired = useCallback(() => {
-    signIn()
-  }, [signIn])
+  const retryAfterExpired = useCallback((selectAccount = false) => {
+    signIn({ selectAccount, expectedGoogleSub: googleSub })
+  }, [googleSub, signIn])
 
   return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
 }

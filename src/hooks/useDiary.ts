@@ -25,6 +25,7 @@ interface DiaryScope {
   controller: AbortController
   authStatus: AuthStatus
   email: string | null
+  googleSub: string | null
 }
 
 export interface DiaryState {
@@ -144,7 +145,7 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-export function useDiary(authStatus: AuthStatus, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string): DiaryState {
+export function useDiary(authStatus: AuthStatus, email: string | null, onExpired: () => void, onEntriesEvicted?: (dates: string[]) => void, selectedDate?: string, googleSub: string | null = null): DiaryState {
   const isSignedIn = authStatus === 'signedIn'
   const [loading, setLoading] = useState(false)
   const [freshListLoaded, setFreshListLoaded] = useState(false)
@@ -174,7 +175,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   useEffect(() => {
     let releaseCache!: () => void
     const cacheReady = new Promise<void>(resolve => { releaseCache = resolve })
-    const scope: DiaryScope = { active: true, ready: false, cacheReady, releaseCache, controller: new AbortController(), authStatus, email }
+    const scope: DiaryScope = { active: true, ready: false, cacheReady, releaseCache, controller: new AbortController(), authStatus, email, googleSub }
     scopeRef.current = scope
     cacheRef.current = new Map()
     setCache(new Map())
@@ -187,12 +188,12 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     bgActiveRef.current = 0
     fgActiveRef.current = 0
     return () => { scope.active = false; scope.releaseCache(); scope.controller.abort() }
-  }, [authStatus, email])
+  }, [authStatus, email, googleSub])
 
   const getScope = useCallback(() => {
     const scope = scopeRef.current
-    return scope?.active && scope.authStatus === authStatus && scope.email === email ? scope : null
-  }, [authStatus, email])
+    return scope?.active && scope.authStatus === authStatus && scope.email === email && scope.googleSub === googleSub ? scope : null
+  }, [authStatus, email, googleSub])
 
   // Wipes shared entry cache, the local entry mirror, and this account's offline
   // sync queue. Durable drafts are owner-partitioned and retained for restoration

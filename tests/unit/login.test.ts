@@ -20,7 +20,7 @@ function makeEnv(domain = 'https://example.com') {
 describe('OAuth login popup redirect', () => {
   it('starts an online authorization code flow with least-privilege scope and PKCE', async () => {
     const env = makeEnv()
-    const response = await onRequestGet({ env } as any)
+    const response = await onRequestGet({ env, request: new Request('https://example.com/auth/login') } as any)
     const url = new URL(response.headers.get('Location')!)
     expect(response.status).toBe(302)
     expect(url.origin).toBe('https://accounts.google.com')
@@ -31,7 +31,7 @@ describe('OAuth login popup redirect', () => {
     expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual(['email', 'https://www.googleapis.com/auth/drive.file', 'openid'])
     expect(url.searchParams.get('include_granted_scopes')).toBe('false')
     expect(url.searchParams.get('access_type')).toBe('online')
-    expect(url.searchParams.get('prompt')).toBe('select_account')
+    expect(url.searchParams.has('prompt')).toBe(false)
     expect(url.searchParams.get('nonce')).toBeTruthy()
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBeTruthy()
@@ -39,9 +39,14 @@ describe('OAuth login popup redirect', () => {
     expect(response.headers.get('Set-Cookie')).toContain('SameSite=Lax')
   })
 
+  it('forces account selection only when the caller explicitly requests it', async () => {
+    const response = await onRequestGet({ env: makeEnv(), request: new Request('https://example.com/auth/login?select_account=1') } as any)
+    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account')
+  })
+
   it('stores only PKCE verifier, nonce, and popup intent under the short-lived state key', async () => {
     const env = makeEnv()
-    const response = await onRequestGet({ env } as any)
+    const response = await onRequestGet({ env, request: new Request('https://example.com/auth/login') } as any)
     const url = new URL(response.headers.get('Location')!)
     const [key, value, options] = env.SESSIONS.put.mock.calls.find(call => String(call[0]).startsWith('oauth_state:'))!
     expect(key).toBe(`oauth_state:${url.searchParams.get('state')}`)
@@ -53,7 +58,7 @@ describe('OAuth login popup redirect', () => {
 
   it('does not scan or delete session keys while starting OAuth', async () => {
     const env = makeEnv()
-    await onRequestGet({ env } as any)
+    await onRequestGet({ env, request: new Request('https://example.com/auth/login') } as any)
     expect(env.SESSIONS.list).not.toHaveBeenCalled()
     expect(env.SESSIONS.delete).not.toHaveBeenCalled()
     expect(env.SESSIONS.put).toHaveBeenCalledWith(expect.stringMatching(/^oauth_state:/), expect.any(String), { expirationTtl: 300 })
