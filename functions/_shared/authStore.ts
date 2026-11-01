@@ -6,8 +6,10 @@ interface SessionRow { data: string | null; revoked: number; expires_at: number 
 
 // No Sessions API/read replicas here: logout and RISC must see primary state.
 export function legacyAuthEnabled(env: Env): boolean {
-  const deadline = Date.parse(env.AUTH_KV_FALLBACK_UNTIL ?? '')
-  return Number.isFinite(deadline) && Date.now() < deadline
+  // Credential-bearing KV sessions are no longer supported. Existing D1 sessions
+  // are scrubbed by migration 0002; never import old KV values after that cutover.
+  void env
+  return false
 }
 
 async function revokedDuringCutover(id: string, env: AuthEnv): Promise<boolean> {
@@ -20,12 +22,35 @@ async function revokedDuringCutover(id: string, env: AuthEnv): Promise<boolean> 
 
 function decode(row: SessionRow | null): SessionData | null {
   if (!row?.data || row.revoked || row.expires_at <= Date.now()) return null
-  try { return JSON.parse(row.data) as SessionData } catch { return null }
+  try { return sanitizeSession(JSON.parse(row.data) as SessionData) } catch { return null }
+}
+
+// Persist an explicit metadata-only projection. Credentials are request-scoped and
+// must never be serialized to D1 or KV, even if a caller passes a whole SessionData.
+export function sanitizeSession(session: SessionData): SessionData {
+  return {
+    ...(typeof session.folder_id === 'string' ? { folder_id: session.folder_id } : {}),
+    ...(typeof session.renewed_at === 'number' && Number.isFinite(session.renewed_at) ? { renewed_at: session.renewed_at } : {}),
+    ...(typeof session.email === 'string' ? { email: session.email } : {}),
+    ...(typeof session.changes_start_page_token === 'string' ? { changes_start_page_token: session.changes_start_page_token } : {}),
+    ...(typeof session.client_id === 'string' ? { client_id: session.client_id } : {}),
+    ...(typeof session.google_sub === 'string' ? { google_sub: session.google_sub } : {}),
+    ...(typeof session.s3_settings_negative_cache_at === 'number' && Number.isFinite(session.s3_settings_negative_cache_at) ? { s3_settings_negative_cache_at: session.s3_settings_negative_cache_at } : {}),
+    ...(typeof session.s3_settings_file_id === 'string' ? { s3_settings_file_id: session.s3_settings_file_id } : {}),
+    ...(typeof session.s3_status_file_id === 'string' ? { s3_status_file_id: session.s3_status_file_id } : {}),
+    ...(typeof session.s3_status_negative_cache_at === 'number' && Number.isFinite(session.s3_status_negative_cache_at) ? { s3_status_negative_cache_at: session.s3_status_negative_cache_at } : {}),
+  }
 }
 
 function adopt(session: SessionData, fresh: SessionData): void {
+  const ephemeral = {
+    access_token: session.access_token,
+    expires_at: session.expires_at,
+    id_token: session.id_token,
+    id_token_verified: session.id_token_verified,
+  }
   for (const key of Object.keys(session)) Reflect.deleteProperty(session, key)
-  Object.assign(session, fresh)
+  Object.assign(session, fresh, ephemeral)
 }
 
 export async function readD1Session(id: string, env: AuthEnv): Promise<SessionData | null> {
@@ -59,7 +84,7 @@ export async function readD1Session(id: string, env: AuthEnv): Promise<SessionDa
 async function insertSession(id: string, session: SessionData, expiry: number, env: AuthEnv, importing = false): Promise<void> {
   await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, email, google_sub, client_id, expires_at)
     VALUES (?, ?, ?, ?, ?, ?) ${importing ? 'ON CONFLICT(id) DO NOTHING' : ''}`)
-    .bind(id, JSON.stringify(session), session.email?.trim().toLowerCase() ?? null,
+    .bind(id, JSON.stringify(sanitizeSession(session)), session.email?.trim().toLowerCase() ?? null,
       session.google_sub ?? null, session.client_id ?? null, expiry).run()
 }
 
@@ -67,12 +92,18 @@ export async function createD1Session(id: string, session: SessionData, env: Aut
   await insertSession(id, session, Date.now() + SESSION_TTL * 1000, env)
 }
 
-const TOKEN_FIELDS = new Set(['refresh_token', 'access_token', 'expires_at', 'id_token', 'id_token_verified', 'client_id', 'email', 'google_sub'])
+const MUTABLE_SESSION_METADATA_FIELDS = new Set([
+  'folder_id', 'changes_start_page_token', 's3_settings_negative_cache_at',
+  's3_settings_file_id', 's3_status_file_id', 's3_status_negative_cache_at',
+])
 
 export async function saveD1Session(id: string, session: SessionData, env: AuthEnv): Promise<void> {
-  // Ordinary metadata/TTL writes cannot roll back a token refreshed by another
-  // request. Tokens can only be changed by the holder of the refresh lease.
-  const patch = Object.fromEntries(Object.entries(session).filter(([key]) => !TOKEN_FIELDS.has(key)).map(([key, value]) => [key, value ?? null]))
+  // Persist only metadata whose values change during ordinary Drive/S3 requests.
+  // Identity metadata is established by the OAuth callback and is immutable here.
+  const safe = sanitizeSession(session)
+  // Include every mutable key so `undefined` in the caller clears stale metadata
+  // (notably folder-scoped Drive file IDs after account-folder reconciliation).
+  const patch = Object.fromEntries([...MUTABLE_SESSION_METADATA_FIELDS].map(key => [key, (safe as Record<string, unknown>)[key] ?? null]))
   const now = Date.now()
   const row = await env.AUTH_DB.prepare(`UPDATE auth_sessions SET
     data = json_set(json_patch(data, ?), '$.renewed_at', MAX(COALESCE(json_extract(data, '$.renewed_at'), 0), ?)),
@@ -97,64 +128,10 @@ export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
     .bind(id, until).run()
 }
 
-export async function findD1RefreshToken(field: 'email' | 'google_sub', value: string, clientId: string, sub: string, env: AuthEnv): Promise<string | null> {
-  const row = await env.AUTH_DB.prepare(`SELECT json_extract(data, '$.refresh_token') AS token FROM auth_sessions
-    WHERE ${field} = ? AND google_sub = ? AND client_id = ? AND revoked = 0 AND expires_at > ?
-    AND json_extract(data, '$.refresh_token') IS NOT NULL LIMIT 1`)
-    .bind(field === 'email' ? value.trim().toLowerCase() : value, sub, clientId, Date.now()).first<{ token: string }>()
-  return row?.token ?? null
-}
-
-export async function revokeD1Account(field: 'email' | 'google_sub', value: string, env: AuthEnv): Promise<void> {
-  const until = Math.max(Date.now() + SESSION_TTL * 1000, Date.parse(env.AUTH_KV_FALLBACK_UNTIL ?? '') || 0)
+export async function revokeD1Account(field: "email" | "google_sub", value: string, env: AuthEnv): Promise<void> {
+  const until = Date.now() + SESSION_TTL * 1000
   await env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, revoked = 1, expires_at = MAX(expires_at, ?), refresh_owner = NULL, refresh_until = 0
-    WHERE ${field} = ? AND revoked = 0`).bind(until, field === 'email' ? value.trim().toLowerCase() : value).run()
-}
-
-export async function refreshD1Session(id: string, session: SessionData, env: AuthEnv, force: boolean,
-  refresh: (owner: string) => Promise<SessionData>): Promise<SessionData> {
-  const originalToken = session.access_token
-  const originalExpiry = session.expires_at
-  const originalIdToken = session.id_token
-  // A bounded wait: a slow refresh returns a retryable error to its waiters.
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const fresh = await readD1Session(id, env)
-    if (!fresh) throw new SessionRevokedError('Session revoked or expired')
-    const changed = fresh.access_token !== originalToken || fresh.expires_at !== originalExpiry || fresh.id_token !== originalIdToken
-    if (fresh.expires_at > Date.now() + 60_000 && (!force || changed)) {
-      adopt(session, fresh)
-      return session
-    }
-    const owner = crypto.randomUUID()
-    const now = Date.now()
-    const lease = await env.AUTH_DB.prepare(`UPDATE auth_sessions SET refresh_owner = ?, refresh_until = ?
-      WHERE id = ? AND revoked = 0 AND expires_at > ? AND refresh_until <= ?
-      AND json_extract(data, '$.access_token') = ? AND json_extract(data, '$.expires_at') = ?`)
-      .bind(owner, now + 90_000, id, now, now, fresh.access_token, fresh.expires_at).run()
-    if (lease.meta.changes) {
-      adopt(session, fresh)
-      try { return await refresh(owner) }
-      finally {
-        await env.AUTH_DB.prepare('UPDATE auth_sessions SET refresh_owner = NULL, refresh_until = 0 WHERE id = ? AND refresh_owner = ?')
-          .bind(id, owner).run()
-      }
-    }
-    await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 200))
-  }
-  throw new Error('Token refresh is already in progress')
-}
-
-export async function finishD1Refresh(id: string, session: SessionData, owner: string, env: AuthEnv): Promise<void> {
-  const tokens = Object.fromEntries([...TOKEN_FIELDS].filter(key => key !== 'email' && key !== 'google_sub').map(key => [key, session[key as keyof SessionData] ?? null]))
-  const now = Date.now()
-  const row = await env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = json_patch(data, ?), expires_at = MAX(expires_at, ?)
-    WHERE id = ? AND refresh_owner = ? AND revoked = 0 AND expires_at > ? RETURNING data`)
-    .bind(JSON.stringify(tokens), now + SESSION_TTL * 1000, id, owner, now).first<{ data: string }>()
-  if (!row) {
-    if (await isD1SessionRevoked(id, env)) throw new SessionRevokedError('Session revoked or expired')
-    throw new Error('Session refresh lease lost')
-  }
-  adopt(session, JSON.parse(row.data) as SessionData)
+    WHERE ${field} = ? AND revoked = 0`).bind(until, field === "email" ? value.trim().toLowerCase() : value).run()
 }
 
 export async function saveOAuthState(state: string, data: string, env: Env): Promise<void> {
@@ -193,4 +170,32 @@ export async function cleanupAuth(env: AuthEnv): Promise<void> {
     env.AUTH_DB.prepare('DELETE FROM auth_oauth_states WHERE id IN (SELECT id FROM auth_oauth_states WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM auth_sessions WHERE id IN (SELECT id FROM auth_sessions WHERE expires_at <= ? LIMIT 500)').bind(now),
   ])
+  await purgeLegacyCredentialSessions(env)
+}
+
+export async function purgeLegacyCredentialSessions(env: Env): Promise<void> {
+  // Old deployments kept complete OAuth sessions in KV. Scheduled cleanup removes
+  // at most one bounded page per run and retains an opaque cursor so safe newer
+  // metadata rows at the start of the prefix cannot starve older credential rows.
+  const cursorKey = 'legacy_session_purge_cursor'
+  const cursor = await env.SESSIONS.get(cursorKey) ?? undefined
+  const listing = await env.SESSIONS.list({ prefix: 'session:', limit: 500, cursor })
+  await Promise.all(listing.keys.map(async key => {
+    const raw = await env.SESSIONS.get(key.name)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as SessionData
+      const safe = sanitizeSession(parsed)
+      if (Object.keys(parsed).some(field => !Object.hasOwn(safe, field))) {
+        await env.SESSIONS.delete(key.name)
+      }
+    } catch {
+      await env.SESSIONS.delete(key.name)
+    }
+  }))
+  if (listing.list_complete || !listing.cursor) {
+    await env.SESSIONS.delete(cursorKey)
+  } else {
+    await env.SESSIONS.put(cursorKey, listing.cursor, { expirationTtl: SESSION_TTL })
+  }
 }

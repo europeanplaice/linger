@@ -1,19 +1,19 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest } from '../../functions/api/_middleware'
 
-function makeSession(overrides?: Record<string, unknown>) {
-  return {
-    refresh_token: 'rt',
-    google_sub: 'account-a',
-    access_token: 'at',
-    expires_at: Date.now() + 3600_000,
-    ...overrides,
-  }
+function makeSession(overrides: Record<string, unknown> = {}) {
+  return { google_sub: 'account-a', email: 'a@example.com', renewed_at: Date.now(), folder_id: 'folder-a', ...overrides }
+}
+
+const accessTokenInfo = {
+  aud: 'id', sub: 'account-a', expires_in: 3600,
+  scope: 'openid email https://www.googleapis.com/auth/drive.file',
 }
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(accessTokenInfo), { status: 200 })))
 })
 
 afterEach(() => {
@@ -22,320 +22,110 @@ afterEach(() => {
 })
 
 describe('API auth middleware', () => {
-  function makeContext(overrides?: Record<string, unknown>) {
+  function makeContext(overrides: Record<string, any> = {}) {
+    const session = overrides.session ?? makeSession()
     const baseEnv = {
-      SESSIONS: { get: vi.fn(), put: vi.fn(), delete: vi.fn() },
-      GOOGLE_CLIENT_ID: 'id',
-      GOOGLE_CLIENT_SECRET: 'secret',
-      SESSION_DOMAIN: 'https://example.com',
+      SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn(), delete: vi.fn() },
+      GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret', SESSION_DOMAIN: 'https://example.com',
     }
-    const envOverride = overrides?.env as Record<string, unknown> | undefined
+    const { env: envOverride, ...rest } = overrides
+    const headers = new Headers({
+      Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at',
+    })
     return {
-      request: new Request('http://localhost/api/drive/entries'),
-      data: {} as Record<string, unknown>,
-      next: vi.fn().mockReturnValue(new Response('ok')),
-      ...overrides,
+      request: new Request('https://example.com/api/drive/entries', { headers }),
+      data: {} as Record<string, unknown>, next: vi.fn().mockResolvedValue(new Response('ok')),
+      ...rest,
       env: { ...baseEnv, ...envOverride },
     }
   }
 
   it('returns 401 when no session cookie', async () => {
-    const ctx = makeContext()
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.status).toBe(401)
+    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entries', { headers: { Authorization: 'Bearer at' } }) })
+    expect((await onRequest(ctx as any)).status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
   })
 
   it('rejects cross-site mutation requests before resolving the session', async () => {
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entry/2026-05-01', {
-        method: 'POST',
-        headers: {
-          Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a',
-          Origin: 'https://attacker.example',
-          'Sec-Fetch-Site': 'cross-site',
-        },
-      }),
-    })
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.status).toBe(403)
+    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entry/2026-05-01', {
+      method: 'POST', headers: {
+        Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at',
+        Origin: 'https://attacker.example', 'Sec-Fetch-Site': 'cross-site',
+      },
+    }) })
+    expect((await onRequest(ctx as any)).status).toBe(403)
     expect(ctx.next).not.toHaveBeenCalled()
     expect(ctx.env.SESSIONS.get).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when session not in KV', async () => {
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(null) } },
-    })
+  it('returns 401 when session metadata is absent', async () => {
+    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(null) } } })
+    expect((await onRequest(ctx as any)).status).toBe(401)
+    expect(ctx.next).not.toHaveBeenCalled()
+  })
 
+  it('requires a request-scoped bearer token and does not call the handler without one', async () => {
+    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entries', {
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
+    }) })
     const response = await onRequest(ctx as any)
+    expect(response.status).toBe(401)
+    expect(ctx.next).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
 
+  it.each([
+    ['wrong account', { ...accessTokenInfo, sub: 'account-b' }],
+    ['wrong client', { ...accessTokenInfo, aud: 'other-client' }],
+    ['missing Drive scope', { ...accessTokenInfo, scope: 'openid email' }],
+    ['expired', { ...accessTokenInfo, expires_in: 0 }],
+  ])('rejects an access token with %s', async (_reason, info) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(info), { status: 200 })))
+    const ctx = makeContext()
+    const response = await onRequest(ctx as any)
     expect(response.status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when refresh_token is dead (400 invalid_grant), and invalidates the session', async () => {
-    const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
+  it('returns 503 when Google tokeninfo is temporarily unavailable without revoking the session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })))
     const del = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
-    })
-
+    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(makeSession())), put: vi.fn(), delete: del } } })
     const response = await onRequest(ctx as any)
-
-    expect(response.status).toBe(401)
-    expect(ctx.next).not.toHaveBeenCalled()
-    expect(del).toHaveBeenCalledWith('session:sid123')
-  })
-
-  it('returns 401 (not 503) when the token endpoint returns 400 with a non-invalid_grant error', async () => {
-    // Regression guard: a 400 from Google's token endpoint is always a request/grant/
-    // client problem (never transient — retrying gets the same 400 again), even when
-    // the error code isn't invalid_grant. e.g. invalid_client from a client_id/secret
-    // mismatch after an OAuth blue/green swap must not be treated as self-healing.
-    const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_client' }), { status: 400 })))
-    const del = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
-    })
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.status).toBe(401)
-    expect(ctx.next).not.toHaveBeenCalled()
-    expect(del).toHaveBeenCalledWith('session:sid123')
-  })
-
-  it('removes the invalidated session from its email index when the refresh_token is dead', async () => {
-    const expiredSession = makeSession({ expires_at: Date.now() - 60_000, email: 'user@example.com' })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
-    const del = vi.fn()
-    const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:sid123') return Promise.resolve(JSON.stringify(expiredSession))
-      return Promise.resolve(null)
-    })
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get, put: vi.fn(), delete: del } },
-    })
-
-    await onRequest(ctx as any)
-
-    expect(del).toHaveBeenNthCalledWith(1, 'session:sid123')
-    expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid123')
-  })
-
-  it('returns 503 (not 401) on a transient refresh failure and does NOT invalidate the session', async () => {
-    // Regression guard: a transient Google token-endpoint failure must not surface
-    // as "session expired" — the session itself is fine, so the client should
-    // retry (503 with Retry-After) rather than tear down the session-expired
-    // modal flow. Only a dead refresh_token (400 invalid_grant) gets a 401.
-    const expiredSession = makeSession({ expires_at: Date.now() - 60_000 })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Server Error', { status: 503 })))
-    const del = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put: vi.fn(), delete: del } },
-    })
-
-    const promise = onRequest(ctx as any)
-    await vi.runAllTimersAsync()
-    const response = await promise
-
     expect(response.status).toBe(503)
     expect(response.headers.get('Retry-After')).toBe('1')
     expect(ctx.next).not.toHaveBeenCalled()
     expect(del).not.toHaveBeenCalled()
   })
 
-  it('calls next() with sessionId and accessToken in data', async () => {
-    const session = makeSession()
+  it('passes the validated request token to the handler without persisting credentials', async () => {
     const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
+    const session = makeSession({ renewed_at: Date.now() })
+    const ctx = makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
     const response = await onRequest(ctx as any)
-
     expect(response.status).toBe(200)
     expect(ctx.data.sessionId).toBe('sid123')
     expect(ctx.data.accessToken).toBe('at')
+    expect(ctx.data.session).toMatchObject({ google_sub: 'account-a', access_token: 'at' })
     expect(ctx.next).toHaveBeenCalledOnce()
-    // renewed_at is added on first write (no prior renewed_at)
-    expect(put).toHaveBeenCalledWith(
-      'session:sid123',
-      JSON.stringify({ ...session, renewed_at: Date.now() }),
-      { expirationTtl: 60 * 60 * 24 * 30 },
-    )
+    expect(put).not.toHaveBeenCalled()
     expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
   })
 
-  it('skips KV write when renewed_at is recent', async () => {
-    const session = makeSession({ renewed_at: Date.now() - 60_000 }) // renewed 1 minute ago
+  it('saves renewal metadata without request credentials when the sliding TTL renews', async () => {
     const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
-    await onRequest(ctx as any)
-
-    expect(put).not.toHaveBeenCalled()
-  })
-
-  it('writes to KV when renewed_at is older than 24 hours', async () => {
     const session = makeSession({ renewed_at: Date.now() - 25 * 60 * 60 * 1000 })
-    const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
+    const ctx = makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
     await onRequest(ctx as any)
-
-    expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
-  })
-
-  it('renews the email index TTL alongside the session record when renewal fires and an email is on file', async () => {
-    // Regression guard: the index key (esidx:{email}:{sessionId}, see
-    // session.ts) carries its own TTL, separate from the session record's. If
-    // it isn't re-stamped every time the session's sliding TTL renews, an
-    // actively-used session would still silently fall out of the email index
-    // (and out of /auth/risc's reach) after the *original* login's 30 days,
-    // even though the session itself lives on indefinitely via renewal.
-    const session = makeSession({ email: 'user@example.com' })
-    const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
-    await onRequest(ctx as any)
-
-    expect(put).toHaveBeenCalledWith('esidx:user@example.com:sid123', '', { expirationTtl: 60 * 60 * 24 * 30 })
-  })
-
-  it('does not touch the email index when the session has no email on file', async () => {
-    const session = makeSession()
-    const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
-    await onRequest(ctx as any)
-
-    expect(put).not.toHaveBeenCalledWith(expect.stringMatching(/^esidx:/), expect.anything(), expect.anything())
-    expect(put).toHaveBeenCalledWith('session:sid123', expect.any(String), expect.anything())
-  })
-
-  it('persists a refreshed token even when renewed_at is recent, via getValidSession itself', async () => {
-    // Regression guard: getValidSession now persists a refresh itself rather than
-    // relying on this middleware's own post-next() block to notice and re-save it
-    // (see getValidSession's doc comment) — a session that both needs a token refresh
-    // and has a recent renewed_at (so the renewal block below is skipped) must still
-    // get its fresh token durably written to KV, not lost at the end of the request.
-    const recentRenewal = Date.now() - 60_000
-    const expiredSession = makeSession({ expires_at: Date.now() - 60_000, renewed_at: recentRenewal })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: 'new_at', expires_in: 3600 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
-    const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(expiredSession)), put } },
-    })
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.status).toBe(200)
-    expect(ctx.data.accessToken).toBe('new_at')
     expect(put).toHaveBeenCalledOnce()
-    const stored = JSON.parse(put.mock.calls[0][1])
-    expect(stored.access_token).toBe('new_at')
-    // The renewal block itself was skipped (renewed_at is recent) — this write came
-    // from getValidSession, so it does NOT carry a freshly-stamped renewed_at.
-    expect(stored.renewed_at).toBe(recentRenewal)
+    const saved = JSON.parse(put.mock.calls[0][1])
+    expect(saved).toMatchObject({ google_sub: 'account-a', email: 'a@example.com', folder_id: 'folder-a' })
+    expect(saved).not.toHaveProperty('access_token')
+    expect(saved).not.toHaveProperty('id_token')
   })
 
-  it('does not renew the email index when renewal is skipped (recent renewed_at)', async () => {
-    const session = makeSession({ email: 'user@example.com', renewed_at: Date.now() - 60_000 })
-    const put = vi.fn()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } },
-    })
-
-    await onRequest(ctx as any)
-
-    expect(put).not.toHaveBeenCalled()
-  })
-
-  it('sets X-Deploy-Version header when CF_PAGES_COMMIT_SHA is present in env', async () => {
-    const session = makeSession()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: {
-        SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() },
-        CF_PAGES_COMMIT_SHA: 'abc1234',
-      },
-    })
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.headers.get('X-Deploy-Version')).toBe('abc1234')
-  })
-
-  it('omits X-Deploy-Version header when CF_PAGES_COMMIT_SHA is absent', async () => {
-    const session = makeSession()
-    const ctx = makeContext({
-      request: new Request('http://localhost/api/drive/entries', {
-        headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
-      }),
-      env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn() } },
-    })
-
-    const response = await onRequest(ctx as any)
-
-    expect(response.headers.get('X-Deploy-Version')).toBeNull()
+  it('sets deploy version when configured', async () => {
+    const ctx = makeContext({ env: { CF_PAGES_COMMIT_SHA: 'abc1234' } })
+    expect((await onRequest(ctx as any)).headers.get('X-Deploy-Version')).toBe('abc1234')
   })
 })

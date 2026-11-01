@@ -84,7 +84,13 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     // Recheck existence inside the same queue used by interactive saves. The
     // listing above alone cannot prevent a concurrent save from creating a file.
     const response = await writer.mutateDiaryEntry({
-      sessionId, accountKey: session.google_sub, date, method: 'POST',
+      sessionId,
+      accountKey: session.google_sub,
+      accessToken,
+      expiresAt: session.expires_at ?? 0,
+      idToken,
+      date,
+      method: 'POST',
       body: JSON.stringify({ content, baseVersion: null }),
     })
     if (response.status === 409) return jsonResponse({ ok: false, error: 'This entry already exists in Drive' }, 409)

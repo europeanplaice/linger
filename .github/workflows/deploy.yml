@@ -59,6 +59,21 @@ jobs:
 
       - run: node scripts/check-deployment.test.mjs
 
+  privacy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify credentials never enter persistent storage
+        run: npm run test:privacy
+
   # Tests/builds the s3-workflows Worker only — it does not deploy it. Deployment
   # happens via `wrangler deploy` in the deploy/deploy-staging jobs below, using
   # wrangler.jsonc/wrangler.staging.jsonc. Terraform (infra/) only owns the
@@ -120,7 +135,7 @@ jobs:
       - run: npm run audit
 
   deploy:
-    needs: [build, lint, unit-test, workers-test, e2e-test, npm-audit]
+    needs: [build, lint, unit-test, privacy-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -161,7 +176,7 @@ jobs:
         run: node scripts/check-deployment.mjs https://linger.europeanplaice.com
 
   deploy-staging:
-    needs: [build, lint, unit-test, workers-test, e2e-test, npm-audit]
+    needs: [build, lint, unit-test, privacy-test, workers-test, e2e-test, npm-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:

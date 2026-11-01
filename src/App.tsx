@@ -208,7 +208,7 @@ export default function App() {
   }, [sidebarOpen])
 
   const isSignedIn = status === 'signedIn'
-  const s3Backfill = useS3Backfill(isSignedIn)
+  const s3Backfill = useS3Backfill(isSignedIn, handleExpired, tokenExpired)
   // Settings' own Save/Test/Resync actions rewrite s3_settings.json with no
   // concurrency check against each other (see SettingsModal.tsx) — block the
   // auto-resync while Settings is open to avoid racing one of those.

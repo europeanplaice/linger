@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 const date = '2026-05-01'
 
@@ -7,6 +8,7 @@ async function setup(context: BrowserContext, options: { blockFirstNotifications
   const writes: { account: string; content: string }[] = []
   const rejected: { cookie: string; expected: string | undefined }[] = []
   const deletions: string[] = []
+  await installMockOAuthCredentials(context)
   await context.addCookies([{ name: 'linger_session', value: 'A', url: baseUrl }])
   // WebKit can omit Cookie from intercepted headers, so the mock server reads the
   // browser's URL-scoped cookie jar instead of the intercepted headers.

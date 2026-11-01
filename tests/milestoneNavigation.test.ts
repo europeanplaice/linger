@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 const currentDate = '2026-01-01'
 const milestoneDate = '2020-05-10'
 
 test.beforeEach(async ({ page }) => {
+  await installMockOAuthCredentials(page)
   await page.addInitScript(() => {
     localStorage.setItem('linger_language', 'en')
     localStorage.setItem('linger_autosave', 'false')

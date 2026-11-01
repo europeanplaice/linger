@@ -69,7 +69,7 @@ function context(method: 'POST' | 'DELETE', body?: unknown, headers?: HeadersIni
     params: { date },
     data: {
       sessionId: 'session', accessToken: 'token',
-      session: { access_token: 'token', refresh_token: 'refresh', expires_at: Date.now() + 3_600_000, google_sub: 'google-user', folder_id: folderId },
+      session: { access_token: 'token', expires_at: Date.now() + 3_600_000, google_sub: 'google-user', folder_id: folderId },
     },
     env: { S3_WORKFLOW_SERVICE: { ensureDiaryFolder: vi.fn().mockResolvedValue(folderId) } } as unknown as EntryMutationContext['env'],
     waitUntil: vi.fn(), onSaved: vi.fn().mockResolvedValue(undefined), onRemoved: vi.fn().mockResolvedValue(undefined),

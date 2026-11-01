@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
-  testIgnore: ['**/unit/**'],
+  testIgnore: ['**/unit/**', '**/privacy/**'],
   use: {
     baseURL: 'http://127.0.0.1:5173',
     storageState: 'tests/storageState.en.json',

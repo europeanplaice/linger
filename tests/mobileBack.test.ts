@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 function adjacentDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number)
@@ -11,6 +12,7 @@ function adjacentDate(date: string): string {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installMockOAuthCredentials(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.addInitScript(() => {
     window.localStorage.setItem('linger_language', 'en')

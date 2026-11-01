@@ -56,7 +56,7 @@ describe('account diary folder coordination', () => {
     const resolved = await ensureAccountDiaryFolder(workflowEnv, sessionId, original)
 
     expect(getByName).toHaveBeenCalledWith(accountKey)
-    expect(ensureFolder).toHaveBeenCalledWith({ sessionId, accountKey })
+    expect(ensureFolder).toHaveBeenCalledWith({ sessionId, accountKey, accessToken: 'access', expiresAt: original.expires_at })
     expect(resolved).toBe('canonical-folder')
     expect(original.folder_id).toBe('canonical-folder')
     expect((await getSession(sessionId, env))?.folder_id).toBe('canonical-folder')
@@ -149,11 +149,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
     expect(status?.status).toBe('pending')
   })
 
-  it('re-arms the mirror and reports pending for a stale pending record even on a since-scoped check', async () => {
-    // The old behavior reported 'unconfirmed' here and left recovery to the
-    // client's save-scoped auto-retry; the entry-status path now re-arms the
-    // mirror itself (idempotent self-heal) and reports 'pending' unless the
-    // arm is refused (then it reports 'failed' with the reason instead).
+  it('fails closed when a stale record would need a durable mirror re-arm', async () => {
     await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
     const create = vi.fn().mockResolvedValue(undefined)
     const workflowEnvWithMock = {
@@ -167,12 +163,9 @@ describe('entryStatusForAuth stale-pending aging', () => {
       requestedVersion: '5',
       since: new Date(Date.now() - 60 * 1000).toISOString(),
     })
-    expect(status?.status).toBe('pending')
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-01-01', kind: 'mirror' }),
-      }),
-    )
+    expect(status?.status).toBe('failed')
+    expect(status && 'error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('still reports pending within the save-grace window even if the record itself is old', async () => {

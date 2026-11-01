@@ -1,17 +1,40 @@
 import type { Env, SessionData } from '../_shared/session'
-import { createSession, addEmailSessionIndex, addSubSessionIndex, getRefreshTokenForEmail, getRefreshTokenForSub, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { createSession, addEmailSessionIndex, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 import { consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
-import { sanitizeReturnPath } from '../_shared/returnPath'
 
-// Inserts `key=value` before any `#fragment` in `path` (a query string can't
-// follow a fragment), joining with `&` if `path` already has a query string.
-function withQueryParam(path: string, key: string, value: string): string {
-  const hashIdx = path.indexOf('#')
-  const base = hashIdx === -1 ? path : path.slice(0, hashIdx)
-  const hash = hashIdx === -1 ? '' : path.slice(hashIdx)
-  const separator = base.includes('?') ? '&' : '?'
-  return `${base}${separator}${key}=${encodeURIComponent(value)}${hash}`
+function base64url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number }, origin: string, secure: boolean): Response {
+  const nonce = base64url(crypto.getRandomValues(new Uint8Array(18)))
+  const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)))
+  const html = `<!doctype html><meta charset="utf-8"><title>Google sign-in</title><p>Returning to Linger…</p><script nonce="${nonce}">
+    const encoded = '${encoded}'.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)), c => c.charCodeAt(0));
+    const credential = JSON.parse(new TextDecoder().decode(bytes));
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'linger-oauth-complete', credential }, '${origin}');
+      window.close();
+    } else {
+      document.querySelector('p').textContent = 'Sign-in finished. Return to the Linger tab.';
+    }
+  </script>`
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'`,
+      'Set-Cookie': clearOAuthStateCookie(secure),
+    },
+  })
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
@@ -31,16 +54,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'Invalid or expired state' }, 400)
   }
 
-  let stateRecord: { codeVerifier: string; nonce: string; returnPath: string }
+  let stateRecord: { codeVerifier: string; nonce: string; popup: boolean }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
     stateRecord = parsed.codeVerifier
-      ? { codeVerifier: parsed.codeVerifier, nonce: parsed.nonce ?? '', returnPath: parsed.returnPath ?? '/' }
-      : { codeVerifier: stateRecordRaw, nonce: '', returnPath: '/' }
+      ? { codeVerifier: parsed.codeVerifier, nonce: parsed.nonce ?? '', popup: parsed.popup === true }
+      : { codeVerifier: stateRecordRaw, nonce: '', popup: false }
   } catch {
-    stateRecord = { codeVerifier: stateRecordRaw, nonce: '', returnPath: '/' }
+    stateRecord = { codeVerifier: stateRecordRaw, nonce: '', popup: false }
   }
-  const safeReturnPath = sanitizeReturnPath(stateRecord.returnPath, env.SESSION_DOMAIN)
 
   const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -63,7 +85,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   const tokens = await tokenResp.json() as {
     access_token: string
-    refresh_token?: string
     expires_in: number
     id_token?: string
   }
@@ -78,35 +99,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const email = claims.email?.trim().toLowerCase()
   const googleSub = claims.sub
 
-  // Google only returns a refresh_token on the first authorization. On repeat
-  // sign-ins (no prompt=consent), reuse the one stored from a previous session.
-  let refreshToken = tokens.refresh_token
-  if (!refreshToken) {
-    refreshToken = (await getRefreshTokenForSub(googleSub, env.GOOGLE_CLIENT_ID, env)) ?? undefined
-    if (!refreshToken && email) {
-      // Migrate pre-index sessions only when their stored subject also matches.
-      refreshToken = (await getRefreshTokenForEmail(email, env.GOOGLE_CLIENT_ID, env, googleSub)) ?? undefined
-    }
-  }
-  if (!refreshToken) {
-    // Redirect (rather than a raw JSON error page, which is what the browser would
-    // otherwise render for this full-page navigation) so the frontend can show a
-    // friendly explanation with recovery steps — see App.tsx's `auth_error` handling.
-    return new Response(null, {
-      status: 302,
-      headers: { Location: withQueryParam(safeReturnPath, 'auth_error', 'no_refresh_token'), 'Set-Cookie': clearOAuthStateCookie(secure) },
-    })
-  }
-
   const sessionId = crypto.randomUUID()
   const session: SessionData = {
-    refresh_token: refreshToken,
-    access_token: tokens.access_token,
-    expires_at: Date.now() + tokens.expires_in * 1000,
     client_id: env.GOOGLE_CLIENT_ID,
     ...(email ? { email } : {}),
-    ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
-    id_token_verified: true,
     ...(googleSub ? { google_sub: googleSub } : {}),
   }
   // D1 creates the session and identity indexes atomically. These helpers are
@@ -115,7 +111,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // created (fails the login, visibly and retryably); if saveSession instead
   // failed *after* a successful index write, the only trace left is a dangling
   // index entry pointing at a session that doesn't exist — harmless, since
-  // getSession/getRefreshTokenForEmail already treat a missing session record
+  // getSession already treats a missing session record
   // as absent. The other order risks the opposite and worse case: a live
   // session with no index entry, invisible to /auth/risc's revocation.
   if (email) {
@@ -124,13 +120,16 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   await addSubSessionIndex(googleSub, sessionId, env)
   await createSession(sessionId, session, env)
 
-  const headers = new Headers({
-    Location: safeReturnPath,
-  })
-  headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
-  headers.append('Set-Cookie', clearOAuthStateCookie(secure))
-  return new Response(null, {
-    status: 302,
-    headers,
-  })
+  const credential = {
+    accessToken: tokens.access_token,
+    expiresAt: Date.now() + tokens.expires_in * 1000,
+    idToken: tokens.id_token,
+  }
+  if (stateRecord.popup) {
+    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, secure)
+    const headers = new Headers(response.headers)
+    headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
+    return new Response(response.body, { status: response.status, headers })
+  }
+  return jsonResponse({ error: 'Popup sign-in required' }, 400, { 'Set-Cookie': clearOAuthStateCookie(secure) })
 }

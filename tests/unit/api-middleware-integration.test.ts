@@ -23,10 +23,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
 
 function makeSession(overrides?: Record<string, unknown>) {
   return {
-    refresh_token: 'rt',
     google_sub: 'account-a',
-    access_token: 'at-123',
-    expires_at: Date.now() + 3600_000,
     ...overrides,
   }
 }
@@ -68,6 +65,10 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-05-01T12:00:00.000Z'))
   vi.clearAllMocks()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    aud: 'client-id', sub: 'account-a', expires_in: 3600,
+    scope: 'openid email https://www.googleapis.com/auth/drive.file',
+  }), { status: 200 })))
 })
 
 afterEach(() => {
@@ -83,14 +84,20 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
   ])('blocks updates outside the diary folder through real file authorization with options %j', async (options) => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession({ folder_id: 'diary-folder' })) })
     const env = makeEnv(kv)
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      id: 'externalFile12345678', name: 'diary-2026-05-01.txt', mimeType: 'text/plain',
-      parents: ['another-folder'], version: '7', trashed: false,
-    })))
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (String(input).includes('/tokeninfo')) return Promise.resolve(new Response(JSON.stringify({
+        aud: 'client-id', sub: 'account-a', expires_in: 3600,
+        scope: 'openid email https://www.googleapis.com/auth/drive.file',
+      }), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify({
+        id: 'externalFile12345678', name: 'diary-2026-05-01.txt', mimeType: 'text/plain',
+        parents: ['another-folder'], version: '7', trashed: false,
+      })))
+    })
     vi.stubGlobal('fetch', fetchMock)
     const request = new Request('https://example.com/api/drive/entry/2026-05-01', {
       method: 'POST',
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Origin: 'https://example.com' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123', Origin: 'https://example.com' },
       body: JSON.stringify({ content: 'overwrite', fileId: 'externalFile12345678', ...options }),
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
@@ -101,9 +108,10 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({ conflict: null })
     // Only the metadata GET may reach Google; no content read or PATCH.
-    expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock.mock.calls[0][0]).toContain('/drive/v3/files/externalFile12345678?fields=')
-    expect(fetchMock.mock.calls[0][1].method).toBeUndefined()
+    const driveCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/drive/v3/files/'))
+    expect(driveCalls).toHaveLength(1)
+    expect(driveCalls[0][0]).toContain('/drive/v3/files/externalFile12345678?fields=')
+    expect(driveCalls[0][1].method).toBeUndefined()
     expect(context.waitUntil).not.toHaveBeenCalled()
   })
 
@@ -111,7 +119,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
     const env = makeEnv(kv)
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -147,16 +155,15 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     expect(vi.mocked(drive.findEntryMeta)).not.toHaveBeenCalled()
   })
 
-  it('blocks the handler and deletes the session from KV when the refresh_token is dead', async () => {
-    const kv = createFakeKV({
-      'session:sid123': JSON.stringify(makeSession({ expires_at: Date.now() - 60_000 })),
-    })
+  it('blocks the handler when request credentials are expired and preserves the metadata session', async () => {
+    const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
     const env = makeEnv(kv)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }),
-    ))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      aud: 'client-id', sub: 'account-a', expires_in: 0,
+      scope: 'openid email https://www.googleapis.com/auth/drive.file',
+    }), { status: 200 })))
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer expired' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -165,8 +172,6 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     expect(response.status).toBe(401)
     expect(context.next).not.toHaveBeenCalled()
     expect(vi.mocked(drive.findEntryMeta)).not.toHaveBeenCalled()
-    // Real KV state, not just "delete() was called with this key" — the record
-    // is actually gone from the store.
-    expect(kv.has('session:sid123')).toBe(false)
+    expect(kv.has('session:sid123')).toBe(true)
   })
 })

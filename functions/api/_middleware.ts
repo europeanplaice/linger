@@ -2,11 +2,7 @@ import type { Env, Data } from '../_shared/session'
 import {
   parseSessionId,
   getSession,
-  getValidSession,
   saveSession,
-  invalidateSession,
-  addEmailSessionIndex,
-  addSubSessionIndex,
   makeSessionCookie,
   clearSessionCookie,
   isSessionRevoked,
@@ -14,14 +10,17 @@ import {
   SESSION_TTL,
   jsonResponse,
   validateMutationOrigin,
-  RefreshTokenInvalidError,
   validateRequestAccount,
 } from '../_shared/session'
+import { GoogleAccessTokenValidationError, GoogleIdTokenValidationError, verifyGoogleAccessToken, verifyGoogleIdToken } from '../_shared/google'
 
-// Keep authentication writes bounded by renewing the sliding TTL once per day.
-// A token refresh (roughly hourly) is persisted separately by getValidSession
-// itself and doesn't bypass this throttle.
-const RENEW_INTERVAL = 60 * 60 * 24 * 1000 // 24 hours
+const RENEW_INTERVAL = 60 * 60 * 24 * 1000
+
+function bearerToken(request: Request): string | null {
+  const value = request.headers.get('Authorization') ?? ''
+  const match = /^Bearer\s+([^\s]+)$/i.exec(value)
+  return match?.[1] ?? null
+}
 
 export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   const originError = validateMutationOrigin(context.request, context.env)
@@ -29,36 +28,47 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
 
   const sessionId = parseSessionId(context.request)
   if (!sessionId) return jsonResponse({ error: 'Unauthorized' }, 401)
-
   const session = await getSession(sessionId, context.env)
-  if (!session) return jsonResponse({ error: 'Session not found' }, 401)
+  if (!session || !session.google_sub) return jsonResponse({ error: 'Session not found' }, 401)
   const accountError = validateRequestAccount(context.request, session)
   if (accountError) return accountError
 
-  let validSession: typeof session
+  const accessToken = bearerToken(context.request)
+  if (!accessToken) return jsonResponse({ error: 'Google authorization required' }, 401)
+  let expiresIn: number
   try {
-    validSession = await getValidSession(sessionId, session, context.env)
-  } catch (err) {
-    if (err instanceof RefreshTokenInvalidError) {
-      // Dead refresh_token (e.g. from a retired Blue/Green OAuth client) — drop the
-      // session so it stops being offered as a reuse candidate on the next sign-in.
-      // Best-effort: a KV hiccup here shouldn't turn a clean 401 into a 500.
-      await invalidateSession(sessionId, session.email, context.env, session.google_sub).catch(() => {})
-      return jsonResponse({ error: 'Token refresh failed' }, 401)
+    expiresIn = await verifyGoogleAccessToken(accessToken, context.env.GOOGLE_CLIENT_ID, session.google_sub)
+  } catch (error) {
+    if (error instanceof GoogleAccessTokenValidationError && error.transient) {
+      return jsonResponse({ error: 'Google authorization temporarily unavailable' }, 503, { 'Retry-After': '1' })
     }
-    // Transient refresh failure (network blip between this Worker and Google's
-    // token endpoint, or a 429/5xx from Google that outlasted the in-function
-    // retries) — the session itself is fine, only the refresh didn't land. A 401
-    // here would make the client tear down the whole session-expired flow
-    // (modal + forced re-login) for a session that never died, and the refresh
-    // would just succeed moments later. A 503 instead lets the client's existing
-    // retry-with-backoff handle it and self-heal once Google recovers.
-    return jsonResponse({ error: 'Token refresh temporarily unavailable' }, 503, { 'Retry-After': '1' })
+    if (error instanceof GoogleAccessTokenValidationError) return jsonResponse({ error: 'Google authorization expired or invalid' }, 401)
+    return jsonResponse({ error: 'Google authorization temporarily unavailable' }, 503, { 'Retry-After': '1' })
   }
 
+  const idToken = context.request.headers.get('X-Linger-Google-ID-Token') ?? undefined
+  if (idToken) {
+    try {
+      const claims = await verifyGoogleIdToken(idToken, context.env.GOOGLE_CLIENT_ID)
+      if (claims.sub !== session.google_sub) return jsonResponse({ error: 'Google account changed' }, 401)
+      session.id_token = idToken
+      session.id_token_verified = true
+    } catch (error) {
+      if (error instanceof GoogleIdTokenValidationError && error.transient) {
+        return jsonResponse({ error: 'Google identity validation temporarily unavailable' }, 503, { 'Retry-After': '1' })
+      }
+      return jsonResponse({ error: 'Google identity token expired or invalid' }, 401)
+    }
+  }
+
+  // Credentials live only on this request's context object. saveSession below
+  // projects to a strict metadata allowlist before writing D1 or KV.
+  session.access_token = accessToken
+  session.expires_at = Date.now() + expiresIn * 1000
   context.data.sessionId = sessionId
-  context.data.accessToken = validSession.access_token
-  context.data.session = validSession
+  context.data.accessToken = accessToken
+  context.data.idToken = idToken
+  context.data.session = session
 
   const response = await context.next()
   const secure = !context.env.SESSION_DOMAIN.startsWith('http://')
@@ -67,40 +77,18 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   })
   if (await isSessionRevoked(sessionId, context.env)) return revokedResponse()
 
-  // getValidSession above already persisted a refreshed token itself (mutating and
-  // saving `session` in place — see its own doc comment), so this block only needs to
-  // handle the sliding-TTL renewal stamp; it doesn't also need to detect and re-persist
-  // a refresh that already happened.
-  const needsRenew = !validSession.renewed_at || Date.now() - validSession.renewed_at > RENEW_INTERVAL
-  if (needsRenew) {
+  if (!session.renewed_at || Date.now() - session.renewed_at > RENEW_INTERVAL) {
     try {
-      await saveSession(sessionId, { ...validSession, renewed_at: Date.now() }, context.env)
-    } catch (err) {
-      if (err instanceof SessionRevokedError) return revokedResponse()
-      throw err
-    }
-    // KV-only deployments maintain separately expiring identity indexes. D1's
-    // indexes are maintained atomically by the session write (helpers are no-ops).
-    // The email index entry (esidx:{email}:{sessionId} — see session.ts) carries its
-    // own TTL, separate from the session record's. Re-stamp it in step with the
-    // session's own sliding renewal above, or an actively-used session would still
-    // silently fall out of the index (and out of /auth/risc's reach) after the
-    // *original* login's TTL, even though the session itself lives on indefinitely.
-    if (validSession.email) {
-      await addEmailSessionIndex(validSession.email, sessionId, context.env)
-    }
-    if (validSession.google_sub) {
-      await addSubSessionIndex(validSession.google_sub, sessionId, context.env)
+      session.renewed_at = Date.now()
+      await saveSession(sessionId, session, context.env)
+    } catch (error) {
+      if (error instanceof SessionRevokedError) return revokedResponse()
+      throw error
     }
   }
-  const newHeaders = new Headers(response.headers)
-  newHeaders.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
-  if (context.env.CF_PAGES_COMMIT_SHA) {
-    newHeaders.set('X-Deploy-Version', context.env.CF_PAGES_COMMIT_SHA)
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: newHeaders,
-  })
+
+  const headers = new Headers(response.headers)
+  headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
+  if (context.env.CF_PAGES_COMMIT_SHA) headers.set('X-Deploy-Version', context.env.CF_PAGES_COMMIT_SHA)
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }

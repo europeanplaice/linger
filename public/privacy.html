@@ -17,6 +17,7 @@
     }
     h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
     h2 { font-size: 1.1rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+    h3 { font-size: 1rem; margin-top: 1rem; margin-bottom: 0.25rem; }
     p, li { font-size: 0.95rem; }
     ul { padding-left: 1.4rem; }
     .meta { color: #777; font-size: 0.85rem; margin-bottom: 2rem; }
@@ -32,133 +33,214 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: July 12, 2026</p>
+  <p class="meta">Last updated: November 1, 2026</p>
 
   <h2>1. Overview</h2>
   <p>
-    Linger is a personal diary app. Your diary entries are stored in your own Google Drive.
-    The app uses Cloudflare Pages Functions as a thin backend layer to handle OAuth authentication and
-    to proxy Google Drive API requests — it does not store or process your diary content.
+    Linger is a personal diary web app. Your Google Drive is the primary store for diary entries.
+    Linger's Cloudflare backend handles sign-in and requests to Google Drive. It processes diary
+    text while carrying out those requests, but does not use Cloudflare databases as a diary store.
+    If you enable the optional S3 backup, Linger also sends diary files to the S3 bucket you
+    configure in your own AWS account.
+  </p>
+  <p>
+    This policy describes information Linger processes, the service providers involved, and the
+    choices available to you. Google, Cloudflare, AWS, and other providers may also process
+    information under their own privacy terms.
   </p>
 
-  <h2>2. Information We Access</h2>
-  <p>The app accesses the following via OAuth:</p>
+  <h2>2. Information Linger Processes</h2>
   <ul>
-    <li>A Google OAuth access token and refresh token, used solely to read and write diary files in your Google Drive</li>
-    <li>Files in your Google Drive that were created by this app (plain-text files inside the <code>linger_diary/</code> folder)</li>
+    <li><strong>Google account information:</strong> your email address and a stable Google account identifier, used to sign you in and keep sessions associated with the right account.</li>
+    <li><strong>Diary and app files:</strong> entry text and dates, milestone labels and dates, and (if configured) S3 backup settings and sync status. These files are stored in the Linger folder in your Google Drive, normally <code>linger_diary/</code>. Google Drive may also keep file revisions.</li>
+    <li><strong>Authentication and sync information:</strong> OAuth tokens, session identifiers, Drive file identifiers, and, when S3 backup is configured, the AWS role and bucket settings and entry sync progress or error status.</li>
+    <li><strong>Browser data:</strong> preferences, holiday-calendar selection, milestones, cached diary entries, offline drafts, and pending changes that help the app work across reloads and during network interruptions.</li>
+    <li><strong>Technical information:</strong> website and API request information, service error diagnostics, and the aggregate traffic and performance metrics described below.</li>
+  </ul>
+
+  <h2>3. Google Sign-In and Google Drive</h2>
+  <p>
+    Linger requests the Google OAuth scopes <code>openid</code>, <code>email</code>, and
+    <code>https://www.googleapis.com/auth/drive.file</code>. The first two identify your Google
+    account. The Drive scope lets Linger create and manage the specific files you use with the app;
+    it does not grant general access to your entire Drive. Linger uses this access to read, create,
+    update, search, restore, and move its diary files to Google Drive Trash.
+  </p>
+  <p>
+    Google provides sign-in and stores your diary files, milestones, and any S3 configuration files.
+    Your entries are plain-text files. Google controls its own storage, revision history, and deletion
+    practices. See <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a>.
+  </p>
+
+  <h2>4. Cloudflare Hosting, Sessions, and Sync Metadata</h2>
+  <p>
+    Linger runs on Cloudflare Pages and Workers. When you read or save an entry, its contents pass
+    through Cloudflare's network so the backend can make the authorized Google Drive request. The
+    backend does not use its authentication database or sync index to store diary text.
+  </p>
+  <p>
+    Cloudflare D1 stores session metadata, including your session ID, Google email and account
+    identifier, expiry, and Drive file identifiers. OAuth access, refresh, and identity tokens and
+    AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
+    held in browser memory and sent with authorized requests; the backend uses them transiently.
+    Reloading or closing the page discards those tokens, and expiry requires authorization again.
+    Session records expire 30 days after creation or renewal; sign-out invalidates the session.
+    The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
+    cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
+    <code>Secure</code>, and <code>SameSite=Strict</code>.
+    Sign-in also uses a five-minute OAuth state record and a temporary
+    <code>linger_oauth_state</code> cookie to bind the callback to your browser.
+    On HTTPS that cookie is <code>HttpOnly</code>, <code>Secure</code>, and
+    <code>SameSite=Lax</code>. The state record does not contain Google access,
+    refresh, or identity tokens.
+  </p>
+  <p>
+    Cloudflare's coordination services store operational metadata such as Drive file IDs, entry
+    dates and versions, S3 sync status, and backfill progress so writes and backups can be coordinated
+    and retried. This metadata does not include diary entry text. Cloudflare may also process request
+    logs, error diagnostics, and workflow state under the retention rules for the services and account
+    plan in use. Cloudflare documents Workers Logs retention of up to seven days and Workflow
+    instance-state retention of up to 30 days, depending on plan and settings. See
+    <a href="https://developers.cloudflare.com/workers/observability/logs/workers-logs/" target="_blank" rel="noopener">Workers Logs retention</a>,
+    <a href="https://developers.cloudflare.com/workflows/reference/limits/" target="_blank" rel="noopener">Workflow retention limits</a>, and
+    <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's Privacy Policy</a>.
+  </p>
+
+  <p>
+    Earlier versions stored credentials server-side. Removing live session records does not revoke
+    Google authorization or erase historical backups. Previously stored credentials must be revoked
+    separately; users can remove Linger's access in their Google Account permissions and authorize
+    again. This policy does not claim that deleting a database row removes every historical copy.
+  </p>
+
+  <h2>5. Access by the Linger Host Administrator</h2>
+  <p>
+    Here, "host administrator" means the operator who controls Linger's Cloudflare project and
+    deployed code. Linger has no admin screen for browsing users' diary entries, and its database
+    and sync index are not used to store diary text. However, Linger does not use end-to-end
+    encryption: diary text and request-scoped OAuth tokens pass through its backend.
+  </p>
+  <p>
+    Linger's source code is public on
+    <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">GitHub</a>
+    so users can inspect how the current implementation handles data. The production GitHub Actions
+    workflow deploys from <code>main</code> after its validation jobs and associates the deployment
+    with the triggering commit hash. This makes the normal deployment traceable to public source;
+    it does not remove the host administrator's technical access described below or prevent an
+    administrator with Cloudflare deployment access from changing the running code.
+  </p>
+  <h3>Information the host administrator may access, or cause Linger to access</h3>
+  <ul>
+    <li>Cloudflare session metadata, including your Google email and account identifier. These records do not retain OAuth credentials and cannot by themselves authorize requests to Drive.</li>
+    <li>Diary entries and milestones while processing your authorized requests. The backend receives tokens transiently for these operations. An administrator who changes deployed code could capture those tokens or contents, so we cannot guarantee inaccessibility to an administrator with deployment access.</li>
+    <li>If you enable S3 backup, the configured bucket's contents within the permissions of your AWS IAM role during authorized operations. Linger uses temporary credentials in request memory to mirror and restore entries.</li>
+    <li>Operational records available in Cloudflare, such as sync status, entry dates and versions, backfill progress, and service logs or error details.</li>
+  </ul>
+  <h3>Information the current backend does not receive or grant general access to</h3>
+  <ul>
+    <li>Your Google account password. Google handles the sign-in and does not send the password to Linger.</li>
+    <li>Google Drive files outside the files available to Linger through the <code>drive.file</code> authorization.</li>
+    <li>Browser storage as a whole. An unsaved offline draft that has not been sent to Linger remains on your device; it is sent only when the app syncs or submits it.</li>
+    <li>Local exports, clipboard contents, or other device data that you do not submit or share through the app.</li>
   </ul>
   <p>
-    The refresh token is stored server-side in <strong>Cloudflare KV</strong> (a key-value store provided by
-    Cloudflare) and is used only to obtain fresh access tokens when needed. The browser never receives the
-    access token or refresh token directly.
+    The last list describes what the current backend receives in normal operation; it is not a
+    technical barrier against someone who controls the deployed code. A host administrator could
+    change the app to collect information from browsers when they load it. Do not treat Linger as an
+    end-to-end encrypted diary service.
   </p>
 
-  <h2>3. How We Use Your Information</h2>
+  <h2>6. Optional AWS S3 Backup</h2>
   <p>
-    OAuth tokens are used exclusively to create, read, update, and delete your diary entries in Google Drive
-    on your behalf. They are not used for any other purpose.
+    S3 backup is off unless you configure and enable it in Settings. You provide an AWS IAM role,
+    bucket, and region. Linger stores those settings in your Google Drive and uses your Google
+    sign-in identity to request temporary AWS credentials from AWS Security Token Service. When
+    backup is enabled, Linger backfills existing Drive entries and mirrors later saves and deletions
+    to the configured bucket. Diary text and entry dates are sent to that bucket; AWS also receives
+    the identity token used to assume the role and the requests needed to write the objects. Linger
+    does not ask you for long-term AWS access keys. Backup work advances while the app is open
+    and authorized; credentials are not saved in durable background jobs.
   </p>
   <p>
-    The Cloudflare Pages Functions backend acts as a proxy: your browser sends requests to
-    <code>/api/drive/…</code> endpoints, which add the appropriate Google authorization header and
-    forward the request to the Google Drive API. Diary content passes through Cloudflare's network
-    in transit but is not stored there.
-  </p>
-
-  <h2>4. Session Storage</h2>
-  <p>
-    When you sign in, a session is created and stored in Cloudflare KV with a 30-day expiry.
-    The session record contains your Google refresh token and a cached access token.
-    Your browser receives a session identifier as an <code>HttpOnly</code>, <code>Secure</code>,
-    <code>SameSite=Strict</code> cookie (<code>linger_session</code>). The cookie contains only the
-    session ID — no tokens or diary content.
+    The bucket is in your AWS account and its permissions, region, versioning, lifecycle, and other
+    retention settings are controlled by you and AWS. Turning backup off stops future syncing but
+    does not remove objects already in the bucket. A delete request may leave older object versions
+    or retained copies according to your bucket configuration. See
+    <a href="https://aws.amazon.com/privacy/" target="_blank" rel="noopener">AWS's Privacy Notice</a>.
   </p>
 
-  <h2>5. Local Storage</h2>
-  <p>This app uses <code>localStorage</code> to persist preferences and small UI hints:</p>
-  <ul>
-    <li><code>linger_autosave</code> — whether auto-save is enabled</li>
-    <li><code>linger_theme</code> — theme preference (<code>light</code> / <code>dark</code> / <code>system</code>)</li>
-    <li><code>linger_accent</code> — accent color preference</li>
-    <li><code>linger_font</code> — font preference</li>
-    <li><code>linger_fontsize</code> — font size preference</li>
-    <li><code>linger_language</code> — language preference (<code>en</code> / <code>ja</code>)</li>
-    <li><code>linger_holiday_country</code> — holiday calendar country selection</li>
-    <li><code>linger_milestones</code> — a local copy of your milestone list, kept in sync with Drive</li>
-    <li><code>linger_milestones_pending</code> — a flag indicating a milestone change is waiting to sync to Drive</li>
-    <li><code>linger_had_session</code> — a <code>true</code>/<code>false</code> flag indicating whether the user was previously signed in, used to show a "continue with your previous session" prompt on the login screen</li>
-    <li><code>linger_session_user</code> — the email address of the last signed-in user, used to detect account switches and clear locally cached diary data before another user signs in</li>
-    <li><code>linger_ext_migrated</code> — a one-time flag set after a legacy file-format migration runs</li>
-    <li><code>linger_serendipity_seen</code> — dates of past entries recently surfaced by the "Recollection Journey" feature, kept only to avoid showing the same ones again right away</li>
-    <li><code>gp-save-timings</code> — the last 10 save durations (in milliseconds), used to animate the save progress bar; contains no diary content</li>
-  </ul>
-  <p>None of the keys above contain diary content or authentication tokens.</p>
+  <h2>7. Browser Storage, Exports, and Sharing</h2>
   <p>
-    Two additional keys do store your diary content locally, purely as an offline safety net:
+    Linger uses browser <code>localStorage</code> and IndexedDB for preferences and for local copies
+    of entries, cached content, unsaved drafts, and pending offline saves or deletions. Milestones
+    and a few account and interface hints may also be stored there. In local or offline use, an entry
+    may remain in browser storage until it can be synced. This browser data is not separately
+    encrypted by Linger and may be accessible to someone who can use your browser profile or device.
+    Linger clears diary caches and pending changes when you sign out or switch accounts; some display
+    preferences can remain. You can also remove local data by clearing this site's data in your browser.
   </p>
-  <ul>
-    <li><code>linger_local_entry_&lt;date&gt;</code> / <code>linger_local_entries_index</code> — a local copy of each entry's plain text, written every time you save or delete, so a copy survives on this device even when Drive can't be reached</li>
-    <li><code>linger_pending_sync_queue</code> — a queue of deletions made while offline, replayed against Google Drive automatically once you're back online</li>
-  </ul>
   <p>
-    Both are stored only on your device, are never transmitted anywhere except back to your own Google Drive
-    once syncing resumes, and are cleared automatically when you sign out or switch accounts.
+    If you export a ZIP or portable HTML file, the resulting file is downloaded to a location chosen
+    by your browser. If you use the entry-sharing control, the selected text is passed to your device's
+    share sheet or clipboard. What happens after that depends on the destination app or service you
+    choose.
   </p>
 
-  <h2>5a. IndexedDB Cache</h2>
+  <h2>8. Other Providers and Analytics</h2>
   <p>
-    To enable instant startup, this app caches diary entry metadata and content in your browser's
-    IndexedDB under the key <code>linger_diary_cache</code>. The same database also holds drafts of
-    edits that haven't yet been saved to Drive (for example while offline), so unsaved work survives
-    a reload and is synced automatically once saving succeeds. This data is stored locally on your
-    device and is never transmitted anywhere except back to your own Google Drive when syncing.
-    It is cleared automatically when you sign out or switch accounts.
-    You can also clear it manually via your browser's developer tools or by clearing site data.
+    If you select a holiday calendar, Linger sends the selected country and year through its backend
+    to Nager.Date to retrieve public holiday data. Linger caches those results in Cloudflare KV for
+    up to 90 days.
+    Diary entries are not included in that request. The app also requests fonts from Google Fonts;
+    those browser requests may disclose connection and browser information to Google. See
+    <a href="https://developers.google.com/fonts/faq" target="_blank" rel="noopener">Google Fonts' FAQ</a>.
   </p>
-
-  <h2>6. Data Sharing</h2>
   <p>
-    We do not share, sell, or transmit your data to any third party.
-    Diary entries reside entirely within your own Google Drive account.
-    Session data (OAuth tokens) is held in Cloudflare KV solely to operate the service and is not
-    disclosed to any other party.
+    The website includes Cloudflare Web Analytics for aggregate page-visit and performance
+    measurements, such as page views, referrer, country, browser/device category, and Core Web Vitals.
+    Cloudflare says Web Analytics does not track individual users across websites and does not collect
+    visitors' personal data. It does not use an analytics cookie. Cloudflare keeps unsampled beacon
+    data for seven days, then aggregates it; analytics are available for up to six months. See
+    <a href="https://developers.cloudflare.com/web-analytics/about/" target="_blank" rel="noopener">Cloudflare Web Analytics</a> and its
+    <a href="https://developers.cloudflare.com/web-analytics/faq/" target="_blank" rel="noopener">retention details</a>.
   </p>
+  <p>Linger does not use advertising or behavioral ad tracking.</p>
 
-  <h2>7. OAuth Scope</h2>
+  <h2>9. Retention and Deleting Your Data</h2>
   <p>
-    This app requests only the <code>https://www.googleapis.com/auth/drive.file</code> scope.
-    This scope grants access <strong>only to files created by this app</strong> — it does not
-    provide access to the rest of your Google Drive.
+    Your diary files and milestones remain in Google Drive until you delete them there. Deleting an
+    entry in Linger moves its Drive file to Google Drive Trash; permanently remove it from Trash if
+    you want it deleted from Drive. Google controls the retention of revisions and trashed files.
+    You can also remove the Linger diary folder from Drive.
   </p>
-
-  <h2>8. Analytics &amp; Advertising</h2>
   <p>
-    This app uses <strong>Cloudflare Web Analytics</strong> to collect basic, aggregated traffic data.
-    It is cookie-free and does not track individual users. No personal data is collected or stored.
-    The data collected includes page views, referrers, country, device/browser type, and Core Web Vitals.
-    This data is processed by Cloudflare, Inc. (a US company) and is retained for up to 6 months.
-    For details, see <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's Privacy Policy</a>.
+    When S3 backup is enabled, Linger sends a delete request for the corresponding current object
+    when you delete an entry. You are responsible for removing any remaining S3 object versions and
+    for deleting backups when you no longer want them. Turning off backup alone does not delete them.
   </p>
-  <p>This app uses no advertising or behavioural tracking of any kind.</p>
-
-  <h2>9. Deleting Your Data</h2>
   <p>
-    All diary content is stored in the <code>linger_diary/</code> folder in your Google Drive.
-    You can delete it at any time by removing that folder.<br />
-    To delete your server-side session, sign out from within the app or revoke access via
+    Sign out to invalidate your Linger session and clear locally cached diary data. To revoke Linger's
+    Google authorization, visit
     <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.
-    Revoking access also invalidates the stored refresh token.
+    Revoking access does not delete files already stored in Drive or S3. For questions about personal
+    information held by Linger's services, contact us below.
   </p>
 
   <h2>10. Security</h2>
   <p>
-    Diary content is stored and protected by Google Drive's security infrastructure.
-    Server-side session data is stored in Cloudflare KV, which is isolated per account.
-    OAuth tokens are never exposed to the browser; the browser only holds an opaque session cookie.
-    All communication between the browser, Cloudflare, and Google uses HTTPS.
+    The app uses HTTPS for communication between your browser, Cloudflare, Google, and AWS. OAuth
+    tokens are kept in browser memory and used transiently by the backend. No method of online storage or
+    transmission is completely secure, and the security of your Google account, device, browser, and
+    optional AWS account is also important.
   </p>
 
-  <h2>11. Contact</h2>
+  <h2>11. Changes to This Policy</h2>
+  <p>
+    We may update this policy when the app or its data practices change. The date at the top shows
+    when it was last updated. Continued use after a change means you have seen the updated policy.
+  </p>
+
+  <h2>12. Contact</h2>
   <p>
     For privacy-related questions, please contact:<br />
     <a href="mailto:europeanplaice@gmail.com">europeanplaice@gmail.com</a>

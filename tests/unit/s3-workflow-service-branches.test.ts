@@ -1,358 +1,152 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestGet as entryStatusGet } from '../../functions/api/s3/entry-status/[date]'
-import { onRequestPost as entryResyncPost } from '../../functions/api/s3/entry-resync/[date]'
 import { onRequestPost as resyncPost } from '../../functions/api/s3/resync'
 import { onRequestPost as backfillRetryPost } from '../../functions/api/s3/backfill-retry'
 import { onRequestGet as settingsGet, onRequestPut as settingsPut } from '../../functions/api/s3/settings'
+import { onRequestGet as entryStatusGet } from '../../functions/api/s3/entry-status/[date]'
+import { onRequestPost as entryResyncPost } from '../../functions/api/s3/entry-resync/[date]'
 import * as drive from '../../functions/_shared/drive'
 import * as s3Settings from '../../functions/_shared/s3Settings'
 
-// These endpoints all delegate to the Workflow Worker (via the S3_WORKFLOW_SERVICE
-// service binding) instead of the legacy Drive/S3-direct path whenever the binding
-// is present and the session carries a google_sub — see each handler's own
-// "S3_WORKFLOW_SERVICE" branch. The pre-existing handler tests only ever exercise
-// the legacy fallback (their makeContext() env is always `{}`), so this file covers
-// the now-primary Workflow-backed branch instead.
-
-vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
+vi.mock('../../functions/_shared/drive', async importOriginal => ({
+  ...await importOriginal<typeof import('../../functions/_shared/drive')>(),
   ensureFolder: vi.fn().mockResolvedValue('folder-1'),
-  findJsonFile: vi.fn().mockResolvedValue(null),
-  readJsonFile: vi.fn(),
-  writeJsonFile: vi.fn().mockResolvedValue({ id: 'settings-file', name: 's3_settings.json', version: '1' }),
+  writeJsonFile: vi.fn().mockImplementation(async (_token, _folderId, name) => ({
+    id: name === 's3_settings.json' ? 'settings-file' : 'status-file', name,
+  })),
 }))
 
-vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
-  getS3Settings: vi.fn(),
-}))
-
-vi.mock('../../functions/_shared/session', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../functions/_shared/session')>()),
+vi.mock('../../functions/_shared/session', async importOriginal => ({
+  ...await importOriginal<typeof import('../../functions/_shared/session')>(),
   saveSession: vi.fn().mockResolvedValue(undefined),
+  getValidIdToken: vi.fn().mockResolvedValue(null),
 }))
 
-function makeService(overrides: Record<string, unknown> = {}) {
+vi.mock('../../functions/_shared/s3Settings', async importOriginal => ({
+  ...await importOriginal<typeof import('../../functions/_shared/s3Settings')>(),
+  getS3Settings: vi.fn(),
+  loadS3SettingsRecord: vi.fn(),
+  backfillAllEntries: vi.fn().mockResolvedValue(undefined),
+  isBackfillRunActive: vi.fn().mockReturnValue(false),
+  resyncSingleEntry: vi.fn().mockResolvedValue(undefined),
+}))
+
+const config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
+const settingsRecord = {
+  config,
+  status: {},
+  folderId: 'folder-1',
+  configFileId: 'settings-file',
+  statusFileId: 'status-file',
+}
+
+function makeService() {
   return {
-    saveSettings: vi.fn().mockResolvedValue({ meta: { id: 'settings-file', name: 's3_settings.json', version: '1' }, needsBackfill: true }),
+    getJob: vi.fn().mockResolvedValue(null),
     startBackfill: vi.fn(),
-    resetAllData: vi.fn().mockResolvedValue(undefined),
-    getJob: vi.fn(),
-    getEntryStatus: vi.fn(),
-    setBackupEnabled: vi.fn().mockResolvedValue(undefined),
     mirrorEntry: vi.fn(),
     mirrorEntryNow: vi.fn(),
     deleteEntry: vi.fn(),
-    getWorkflowUsage: vi.fn(),
-    ...overrides,
+    saveSettings: vi.fn(),
+    getEntryStatus: vi.fn(),
   }
 }
 
-// A fresh object per call, not a shared constant — several of these handlers cache
-// Drive file ids onto the session object as a side effect (e.g. loadS3SettingsRecord
-// stamping s3_settings_file_id), and reusing one mutable object across tests would
-// leak that caching between otherwise-unrelated tests.
-function makeSession() {
-  return { google_sub: '1234567890' }
+function makeContext(overrides: Record<string, unknown> = {}) {
+  const service = makeService()
+  const pending: Promise<unknown>[] = []
+  const context = {
+    request: new Request('https://example.com/api/s3/settings'),
+    params: { date: '2026-05-01' },
+    data: { accessToken: 'request-access-token', idToken: 'request-id-token', sessionId: 'sid', session: { google_sub: 'google-sub' } },
+    env: { S3_WORKFLOW_SERVICE: service },
+    waitUntil: vi.fn((promise: Promise<unknown>) => { pending.push(promise) }),
+    ...overrides,
+  }
+  return { context: context as any, service, pending }
 }
-const validSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
-  vi.mocked(drive.findJsonFile).mockResolvedValue(null)
-  vi.mocked(drive.writeJsonFile).mockImplementation(async (_token, _folderId, fileName, _body, existingFileId) => ({
-    id: existingFileId ?? (fileName === 's3_settings.json' ? 'settings-file' : 'status-file'),
-    name: fileName,
-    version: '1',
-  }))
+  vi.mocked(s3Settings.getS3Settings).mockResolvedValue(null)
+  vi.mocked(s3Settings.loadS3SettingsRecord).mockResolvedValue(settingsRecord as any)
+  vi.mocked(s3Settings.backfillAllEntries).mockResolvedValue(undefined)
+  vi.mocked(s3Settings.isBackfillRunActive).mockReturnValue(false)
+  vi.mocked(s3Settings.resyncSingleEntry).mockResolvedValue({ ok: true })
 })
 
-describe('GET /api/s3/entry-status/[date] — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/entry-status/2026-05-01?version=5'),
-      params: { date: '2026-05-01' },
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      ...overrides,
-    }
-  }
+describe('S3 Pages routes do not start durable Workflow jobs', () => {
+  it('uses browser-scoped backfill for resync instead of the Workflow RPC', async () => {
+    const { context, service, pending } = makeContext({ request: new Request('https://example.com/api/s3/resync', { method: 'POST' }) })
+    const response = await resyncPost(context)
 
-  it('delegates to getEntryStatus and returns its result verbatim', async () => {
-    const service = makeService({ getEntryStatus: vi.fn().mockResolvedValue({ status: 'synced' }) })
-    const res = await entryStatusGet(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(await res.json()).toEqual({ status: 'synced' })
-    expect(service.getEntryStatus).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', date: '2026-05-01', requestedVersion: '5' })
-  })
-
-  it('falls back to pending instead of failing the request when the Workflow lookup errors', async () => {
-    const service = makeService({ getEntryStatus: vi.fn().mockRejectedValue(new Error('DO unavailable')) })
-    const res = await entryStatusGet(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ status: 'pending' })
-  })
-
-  it('never calls the Workflow service for a session without google_sub (legacy fallback stays reachable)', async () => {
-    const service = makeService({ getEntryStatus: vi.fn().mockResolvedValue({ status: 'synced' }) })
-    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(null)
-    await entryStatusGet(makeContext({ data: { accessToken: 'tok', sessionId: 'sid', session: {} }, env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(service.getEntryStatus).not.toHaveBeenCalled()
-  })
-})
-
-describe('POST /api/s3/entry-resync/[date] — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/entry-resync/2026-05-01', { method: 'POST' }),
-      params: { date: '2026-05-01' },
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      ...overrides,
-    }
-  }
-
-  it('returns ok on a successful mirror', async () => {
-    const service = makeService({ mirrorEntryNow: vi.fn().mockResolvedValue({ ok: true }) })
-    const res = await entryResyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    expect(service.mirrorEntryNow).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', date: '2026-05-01' })
-  })
-
-  it('surfaces a failed mirror as a 502 with its error message', async () => {
-    const service = makeService({ mirrorEntryNow: vi.fn().mockResolvedValue({ ok: false, error: 'S3 write failed' }) })
-    const res = await entryResyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'S3 write failed' })
-  })
-})
-
-describe('POST /api/s3/resync — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/resync', { method: 'POST' }),
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      waitUntil: vi.fn(),
-      ...overrides,
-    }
-  }
-
-  it('starts a backfill and returns 202 with the jobId', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-1' } }) })
-    const res = await resyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(202)
-    expect(await res.json()).toEqual({ ok: true, jobId: 'job-1' })
-  })
-
-  it('maps an "already running" rejection to 409', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockRejectedValue(new Error('A backfill is already running')) })
-    const res = await resyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(409)
-  })
-
-  it('maps any other startBackfill failure to 502', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockRejectedValue(new Error('boom')) })
-    const res = await resyncPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(502)
-  })
-})
-
-describe('POST /api/s3/backfill-retry — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/backfill-retry', { method: 'POST' }),
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      waitUntil: vi.fn(),
-      ...overrides,
-    }
-  }
-
-  it("retries exactly the previous job's failed dates", async () => {
-    const service = makeService({
-      getJob: vi.fn().mockResolvedValue({ failedDates: ['2026-01-01', '2026-01-02'] }),
-      startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-2' } }),
-    })
-    const res = await backfillRetryPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(202)
-    expect(await res.json()).toEqual({ ok: true, jobId: 'job-2', retrying: 2 })
-    expect(service.startBackfill).toHaveBeenCalledWith(expect.objectContaining({ scope: ['2026-01-01', '2026-01-02'] }))
-  })
-
-  it('returns 400 when there is nothing to retry, without starting a Workflow', async () => {
-    const service = makeService({ getJob: vi.fn().mockResolvedValue(null) })
-    const res = await backfillRetryPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(400)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true })
     expect(service.startBackfill).not.toHaveBeenCalled()
+    expect(context.waitUntil).toHaveBeenCalledOnce()
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
+      'request-access-token', 'sid', context.data.session, context.env, settingsRecord, undefined, 'Resync', 20,
+    )
+    await Promise.all(pending)
   })
 
-  it('maps an "already running" rejection to 409', async () => {
-    const service = makeService({
-      getJob: vi.fn().mockResolvedValue({ failedDates: ['2026-01-01'] }),
-      startBackfill: vi.fn().mockRejectedValue(new Error('A backfill is already running')),
-    })
-    const res = await backfillRetryPost(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(409)
-  })
-})
+  it('uses browser-scoped backfill retry and does not persist OAuth credentials in job params', async () => {
+    const failedRecord = { ...settingsRecord, status: { backfillProgress: { failed: ['2026-05-01'] } } }
+    vi.mocked(s3Settings.loadS3SettingsRecord).mockResolvedValue(failedRecord as any)
+    const { context, service, pending } = makeContext({ request: new Request('https://example.com/api/s3/backfill-retry', { method: 'POST' }) })
+    const response = await backfillRetryPost(context)
 
-describe('GET /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/settings'),
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      ...overrides,
-    }
-  }
-
-  it('merges the current job into the settings response as backfillProgress', async () => {
-    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(validSettings as never)
-    const service = makeService({
-      getJob: vi.fn().mockResolvedValue({ total: 10, completed: 4, failedDates: ['2026-01-01'], startedAt: '2026-01-01T00:00:00.000Z' }),
-    })
-    const res = await settingsGet(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    const body = await res.json() as any
-    expect(body.backfillProgress).toEqual({
-      total: 10,
-      done: 4,
-      failed: ['2026-01-01'],
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    })
+    expect(response.status).toBe(200)
+    expect(service.startBackfill).not.toHaveBeenCalled()
+    expect(context.waitUntil).toHaveBeenCalledOnce()
+    expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
+      'request-access-token', 'sid', context.data.session, context.env, failedRecord, ['2026-05-01'], 'Retry', 20,
+    )
+    await Promise.all(pending)
   })
 
-  it('surfaces a finished job with an error as lastSyncError', async () => {
-    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(validSettings as never)
-    const service = makeService({
-      getJob: vi.fn().mockResolvedValue({
-        total: 10, completed: 9, failedDates: ['2026-01-01'],
-        startedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T00:05:00.000Z', error: 'Backfill target limit exceeded',
-      }),
-    })
-    const res = await settingsGet(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    const body = await res.json() as any
-    expect(body.lastSyncError).toBe('Backfill target limit exceeded')
-    expect(body.lastSyncErrorAt).toBe('2026-01-01T00:05:00.000Z')
-  })
+  it('reads settings directly and does not derive status from a durable job payload', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(config)
+    const { context, service } = makeContext()
+    const response = await settingsGet(context)
 
-  it('returns settings unchanged when there is no settings file yet', async () => {
-    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(null)
-    const service = makeService()
-    const res = await settingsGet(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(await res.json()).toBeNull()
+    expect(await response.json()).toEqual(config)
     expect(service.getJob).not.toHaveBeenCalled()
-  })
-})
-
-describe('PUT /api/s3/settings — via S3_WORKFLOW_SERVICE', () => {
-  function makeContext(overrides: Record<string, unknown> = {}) {
-    return {
-      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify(validSettings) }),
-      data: { accessToken: 'tok', sessionId: 'sid', session: makeSession() },
-      env: { S3_WORKFLOW_SERVICE: makeService() },
-      waitUntil: vi.fn(),
-      ...overrides,
-    }
-  }
-
-  it('starts a Workflow backfill on first enable and returns 202 with the jobId', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-3' } }) })
-    const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
-    const res = await settingsPut(ctx as any)
-    expect(res.status).toBe(202)
-    expect(((await res.json()) as any).jobId).toBe('job-3')
-    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
-    // The legacy in-request backfillAllEntries path must never also fire once the
-    // Workflow Worker is handling this account — that would double-mirror every entry.
-    expect(ctx.waitUntil).not.toHaveBeenCalled()
-  })
-
-  it('re-enables backup without resetting sync history when the bucket is unchanged', async () => {
-    // The settings RPC owns target validation and preserves same-bucket history.
-    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-4' } }) })
-    const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
-    const res = await settingsPut(ctx as any)
-    expect(res.status).toBe(202)
-    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: validSettings })
-    expect(service.startBackfill).toHaveBeenCalled()
-  })
-
-  it('resets sync history when re-enabling against a different bucket', async () => {
-    // Index records describe the previous bucket's contents — keeping them would let
-    // the fresh backfill skip entries that were never mirrored to the new bucket.
-    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-5' } }) })
-    const ctx = makeContext({
-      env: { S3_WORKFLOW_SERVICE: service },
-      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, bucket: 'other-bucket' }) }),
-    })
-    const res = await settingsPut(ctx as any)
-    expect(res.status).toBe(202)
-    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
-    expect(service.startBackfill).toHaveBeenCalled()
-  })
-
-  it('starts a fresh backfill when the target bucket changes while backup is already enabled', async () => {
-    // Previously a bucket swap while enabled never re-backfilled (and never reset the
-    // index), silently leaving the new bucket without the older entries. It must
-    // behave like a first enable: reset + full backfill to the new bucket.
-    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ created: true, job: { jobId: 'job-6' } }) })
-    const ctx = makeContext({
-      env: { S3_WORKFLOW_SERVICE: service },
-      request: new Request('http://localhost/api/s3/settings', { method: 'PUT', body: JSON.stringify({ ...validSettings, bucket: 'other-bucket' }) }),
-    })
-    const res = await settingsPut(ctx as any)
-    expect(res.status).toBe(202)
-    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: expect.objectContaining({ enabled: true }) })
-    expect(service.startBackfill).toHaveBeenCalled()
-  })
-
-  it('only updates backup-enabled state (no new job) when re-saving with backup already enabled', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
-    const service = makeService({ saveSettings: vi.fn().mockResolvedValue({ meta: { id: 'settings-file', version: '1' }, needsBackfill: false }) })
-    const ctx = makeContext({ env: { S3_WORKFLOW_SERVICE: service } })
-    const res = await settingsPut(ctx as any)
-    expect(res.status).toBe(200)
-    expect(service.startBackfill).not.toHaveBeenCalled()
-    // Same-target re-saves need no new job; the settings RPC owns enablement too.
-    expect(service.saveSettings).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: '1234567890', config: validSettings })
-  })
-
-  it('maps an "already running" rejection from startBackfill to 409', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockRejectedValue(new Error('A backfill is already running')) })
-    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(409)
-  })
-
-  it('leaves Drive unchanged when saving settings is rejected by an active backfill', async () => {
-    const service = makeService({ saveSettings: vi.fn().mockRejectedValue(new Error('A backfill is already running')) })
-    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(409)
-    expect(drive.writeJsonFile).not.toHaveBeenCalled()
     expect(service.startBackfill).not.toHaveBeenCalled()
   })
 
-  it('starts a pending backfill on a retry even though the saved bucket is unchanged', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-    vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
-    const service = makeService({ startBackfill: vi.fn().mockResolvedValue({ job: { jobId: 'retry-job' }, created: true }) })
-    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(202)
-    expect(service.startBackfill).toHaveBeenCalled()
-  })
+  it('saves settings on Drive and drives initial backfill in the open browser session', async () => {
+    vi.mocked(s3Settings.loadS3SettingsRecord).mockResolvedValue({ ...settingsRecord, config: { ...config, enabled: false } } as any)
+    const { context, service, pending } = makeContext({
+      request: new Request('https://example.com/api/s3/settings', { method: 'PUT', body: JSON.stringify(config) }),
+    })
+    const response = await settingsPut(context)
 
-  it('maps any other startBackfill failure to 502 without losing the already-saved settings', async () => {
-    const service = makeService({ startBackfill: vi.fn().mockRejectedValue(new Error('boom')) })
-    const res = await settingsPut(makeContext({ env: { S3_WORKFLOW_SERVICE: service } }) as any)
-    expect(res.status).toBe(502)
+    expect(response.status).toBe(200)
     expect(drive.writeJsonFile).toHaveBeenCalled()
+    expect(service.saveSettings).not.toHaveBeenCalled()
+    expect(service.startBackfill).not.toHaveBeenCalled()
+    expect(context.waitUntil).toHaveBeenCalledOnce()
+    await Promise.all(pending)
+  })
+
+  it('does not use legacy Worker mirroring for entry status or manual retry', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue({ ...config, enabled: false })
+    const { context, service } = makeContext({
+      request: new Request('https://example.com/api/s3/entry-status/2026-05-01?version=5'),
+      params: { date: '2026-05-01' },
+    })
+    const statusResponse = await entryStatusGet(context)
+    expect(await statusResponse.json()).toEqual({ status: 'disabled' })
+
+    vi.mocked(s3Settings.loadS3SettingsRecord).mockResolvedValue(settingsRecord as any)
+    const retryResponse = await entryResyncPost(makeContext({
+      request: new Request('https://example.com/api/s3/entry-resync/2026-05-01', { method: 'POST' }),
+      params: { date: '2026-05-01' },
+    }).context)
+    expect(retryResponse.status).toBe(200)
+    expect(s3Settings.resyncSingleEntry).toHaveBeenCalled()
+    for (const method of [service.startBackfill, service.mirrorEntry, service.mirrorEntryNow, service.deleteEntry]) {
+      expect(method).not.toHaveBeenCalled()
+    }
   })
 })

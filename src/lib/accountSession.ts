@@ -1,4 +1,5 @@
 import { broadcastMessage, subscribeTabSync } from '../utils/tabSync'
+import { clearOAuthCredentials } from './oauthCredentials'
 
 export const ACCOUNT_HEADER = 'X-Linger-Account'
 export const AUTH_EVENT_KEY = 'linger_auth_event'
@@ -20,6 +21,7 @@ export function setActiveAccount(account: string | null, clearSharedData = false
 }
 
 export function invalidateAccount(): void {
+  clearOAuthCredentials()
   setActiveAccount(null)
   window.dispatchEvent(new Event(INVALIDATED_EVENT))
 }

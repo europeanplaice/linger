@@ -80,13 +80,16 @@ it('does not show account A data to account B when an older read finishes after 
 })
 
 it('keeps a logged-out session deleted when an earlier API request finishes', async () => {
-  const session = { google_sub: 'account-a', refresh_token: 'r', access_token: 'a', expires_at: Date.now() + 3_600_000 }
+  const session = { google_sub: 'account-a', access_token: 'a', expires_at: Date.now() + 3_600_000 }
   const kv = createFakeKV({ 'session:a': JSON.stringify(session) })
   const env = { SESSIONS: kv, SESSION_DOMAIN: 'https://app.example.com', GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    aud: 'c', sub: 'account-a', scope: 'https://www.googleapis.com/auth/drive.file', expires_in: '3600',
+  }), { status: 200 })))
   const downstream = deferred<Response>()
   const entered = deferred<void>()
   const apiPending = middleware({
-    request: new Request('https://app.example.com/api/drive/entries', { headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a' } }),
+    request: new Request('https://app.example.com/api/drive/entries', { headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer a' } }),
     env, data: {},
     next: () => { entered.resolve(); return downstream.promise },
   } as never)
@@ -248,10 +251,11 @@ it('rejects session data recreated by a stale writer', async () => {
   await invalidateSession('a', undefined, env)
   await kv.put('session:a', JSON.stringify({ access_token: 'stale' }))
   expect(await getSession('a', env)).toBeNull()
-  await expect(saveSession('a', { access_token: 'a', refresh_token: 'r', expires_at: 0 }, env)).rejects.toBeInstanceOf(SessionRevokedError)
+  await expect(saveSession('a', { access_token: 'a', expires_at: 0 }, env)).rejects.toBeInstanceOf(SessionRevokedError)
   // A new sign-in has a different random session ID and remains usable.
-  await saveSession('b', { access_token: 'b', refresh_token: 'r', expires_at: 0 }, env)
-  expect((await getSession('b', env))?.access_token).toBe('b')
+  await saveSession('b', { access_token: 'b', expires_at: 0, email: 'b@example.com' }, env)
+  expect(await getSession('b', env)).toMatchObject({ email: 'b@example.com' })
+  expect((await getSession('b', env))?.access_token).toBeUndefined()
 })
 
 it('keeps authorization revoked when the token-record deletion fails', async () => {
@@ -262,19 +266,11 @@ it('keeps authorization revoked when the token-record deletion fails', async () 
   expect(await getSession('a', env)).toBeNull()
 })
 
-it('rejects a token refresh completing after logout', async () => {
-  const session = { access_token: 'a', refresh_token: 'r', expires_at: 0 }
-  const kv = createFakeKV({ 'session:a': JSON.stringify(session) })
-  const env = { SESSIONS: kv, GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' } as never
-  const refreshed = deferred<Response>()
-  vi.stubGlobal('fetch', vi.fn().mockReturnValueOnce(refreshed.promise))
-  const pending = getValidAccessToken('a', session, env)
-  const rejected = expect(pending).rejects.toBeInstanceOf(SessionRevokedError)
-  await invalidateSession('a', undefined, env)
-  refreshed.resolve(new Response(JSON.stringify({ access_token: 'fresh', expires_in: 3600 })))
-  await rejected
+it('cannot refresh a credential after logout because sessions have no refresh token', async () => {
+  const session = { expires_at: 0 }
+  const env = { SESSIONS: createFakeKV(), GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' } as never
+  await expect(getValidAccessToken('a', session, env)).rejects.toThrow(/request-scoped/)
   expect(await getSession('a', env)).toBeNull()
-  expect(kv.has('session:a')).toBe(false)
 })
 
 it('rejects revocation that races with an already-started KV write', async () => {
@@ -285,7 +281,7 @@ it('rejects revocation that races with an already-started KV write', async () =>
     if (key === 'session:a') { entered.resolve(); await write.promise }
     await kv.put(key, value)
   } } } as never
-  const pending = saveSession('a', { access_token: 'a', refresh_token: 'r', expires_at: 0 }, env)
+  const pending = saveSession('a', { access_token: 'a', expires_at: 0, email: 'a@example.com' }, env)
   const rejected = expect(pending).rejects.toBeInstanceOf(SessionRevokedError)
   await entered.promise
   await invalidateSession('a', undefined, env)

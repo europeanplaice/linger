@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -8,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('valid session skips login screen and shows diary directly', async ({ page }) => {
+  await installMockOAuthCredentials(page)
   await page.route('/auth/session', async route => {
     await route.fulfill({ json: { signedIn: true } })
   })
@@ -24,9 +26,10 @@ test('valid session skips login screen and shows diary directly', async ({ page 
   await expect(page.locator('.login-screen')).toHaveCount(0)
 })
 
-test('reload displays the account cache before Drive responds instead of an empty editor', async ({ page }) => {
+test('reload requires fresh auth while preserving the cached draft', async ({ page }) => {
   const email = 'cached-reader@example.com'
   const content = 'Previously saved diary content'
+  await installMockOAuthCredentials(page, { seedOnModuleLoad: 2 })
   await page.goto(`${baseUrl}/tests/useDiaryHarness.html`)
   const date = await page.evaluate(() => {
     const now = new Date()
@@ -35,6 +38,7 @@ test('reload displays the account cache before Drive responds instead of an empt
   await page.evaluate(async ({ email, content, date }) => {
     localStorage.setItem('linger_session_user', email)
     await window.diaryHarness.seedIdb([{ date, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' }, content: { date, content } }])
+    await window.diaryHarness.seedDrafts([{ date, content: 'Unsaved offline draft', baseVersion: '1', baseContent: content, savedAt: Date.now() }])
   }, { email, content, date })
 
   let releaseDrive!: () => void
@@ -48,19 +52,38 @@ test('reload displays the account cache before Drive responds instead of an empt
     await gate
     await route.fulfill({ json: { entry: { date, content }, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' } } })
   })
-  // Drive stays blocked through both assertions, so only the local cache can
-  // supply the content on the first mount and on the subsequent reload.
+  // The first mount has in-memory credentials. Reload creates a fresh module
+  // instance with no credentials, so it must request sign-in while retaining
+  // the cached diary row in IndexedDB.
   try {
     await page.goto(baseUrl)
-    await expect(page.locator('textarea.editor-textarea')).toHaveValue(content)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('Unsaved offline draft')
     await page.reload()
-    await expect(page.locator('textarea.editor-textarea')).toHaveValue(content)
+    await expect(page.locator('.login-screen')).toBeVisible()
+    const cachedData = await page.evaluate(async date => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('linger_diary_cache', 2)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const transaction = db.transaction(['entries', 'drafts'], 'readonly')
+      const [entry, draft] = await Promise.all(['entries', 'drafts'].map(store => new Promise<any>((resolve, reject) => {
+        const request = transaction.objectStore(store).get(date)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })))
+      db.close()
+      return { entry, draft }
+    }, date)
+    expect(cachedData.entry?.content?.content).toBe(content)
+    expect(cachedData.draft?.content).toBe('Unsaved offline draft')
   } finally {
     releaseDrive()
   }
 })
 
 test('keeps editor header typography stable between skeleton and loaded states', async ({ page }) => {
+  await installMockOAuthCredentials(page)
   await page.setViewportSize({ width: 320, height: 700 })
 
   let releaseEntry!: () => void
@@ -136,8 +159,45 @@ test('no session shows login screen with sign-in button', async ({ page }) => {
   await expect(page.locator('.editor-textarea')).toHaveCount(0)
 })
 
+test('popup sign-in accepts exact-origin credentials in memory and a reload requires sign-in again', async ({ page }) => {
+  const sessionHeaders: Record<string, string>[] = []
+  await page.route('/auth/session', async route => {
+    const headers = await route.request().allHeaders()
+    sessionHeaders.push(headers)
+    await route.fulfill({ json: { signedIn: Boolean(headers.authorization && headers['x-linger-google-id-token']), email: 'popup@example.com', googleSub: 'popup-sub' } })
+  })
+  await page.context().route('**/auth/login', route => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: `<!doctype html><script>
+      window.opener.postMessage({ type: 'linger-oauth-complete', credential: {
+        accessToken: 'popup-access-secret', idToken: 'popup-id-secret', expiresAt: Date.now() + 3600000
+      } }, window.location.origin);
+      window.close();
+    </script>`,
+  }))
+  await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
+  await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404, body: '' }))
+  await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
+
+  await page.goto(baseUrl)
+  await expect(page.locator('.login-screen')).toBeVisible()
+  await page.getByRole('button', { name: 'Sign in with Google' }).click()
+  await expect(page.locator('.editor-textarea')).toBeVisible()
+  expect(sessionHeaders.at(-1)?.authorization).toBe('Bearer popup-access-secret')
+  expect(sessionHeaders.at(-1)?.['x-linger-google-id-token']).toBe('popup-id-secret')
+  const browserStorage = await page.evaluate(() => JSON.stringify({ local: localStorage, session: sessionStorage }))
+  expect(browserStorage).not.toContain('popup-access-secret')
+  expect(browserStorage).not.toContain('popup-id-secret')
+
+  await page.reload()
+  await expect(page.locator('.login-screen')).toBeVisible()
+  expect(sessionHeaders).toHaveLength(1)
+})
+
 
 test('loads the selected entry and shows its content', async ({ page }) => {
+  await installMockOAuthCredentials(page)
   await page.addInitScript(() => {
     const RealDate = Date
     const fixedNow = new RealDate('2026-05-01T12:00:00+09:00').getTime()

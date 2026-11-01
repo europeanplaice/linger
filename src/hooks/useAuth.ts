@@ -4,7 +4,7 @@ import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
-export type AuthErrorCode = 'no_refresh_token'
+export type AuthErrorCode = 'sign_in_failed'
 
 export interface AuthState {
   status: AuthStatus
@@ -21,7 +21,7 @@ export interface AuthState {
   retryAfterExpired: () => void
 }
 
-const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['no_refresh_token']
+const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['sign_in_failed']
 
 function rememberSession(signedIn: boolean): void {
   try { localStorage.setItem('linger_had_session', String(signedIn)) } catch { /* Tracking must not prevent authentication changes. */ }
@@ -110,7 +110,26 @@ export function useAuth(): AuthState {
   }, [])
 
   const signIn = useCallback(() => {
-    startSignIn()
+    const revision = ++authRevision.current
+    restoring.current = false
+    setAuthError(null)
+    startSignIn().then(info => {
+      if (revision !== authRevision.current) return
+      const account = accountIdentity(info)
+      if (!account) throw new Error('Google sign-in did not return an account')
+      setActiveAccount(account, getAccountSnapshot().account !== account)
+      announceAccount(account)
+      rememberSession(true)
+      setEmail(info.email)
+      setGoogleSub(info.googleSub)
+      setGoogleClientId(info.googleClientId)
+      setTokenExpired(false)
+      setStatus('signedIn')
+    }).catch(error => {
+      if (revision !== authRevision.current) return
+      setAuthError('sign_in_failed')
+      console.error('Google sign-in failed:', error)
+    })
   }, [])
 
   const signOut = useCallback(() => {
@@ -133,8 +152,8 @@ export function useAuth(): AuthState {
   }, [])
 
   const retryAfterExpired = useCallback(() => {
-    startSignIn()
-  }, [])
+    signIn()
+  }, [signIn])
 
   return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
 }

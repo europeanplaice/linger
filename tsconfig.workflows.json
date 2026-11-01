@@ -18,5 +18,5 @@
     "functions/_shared/s3Settings.ts",
     "src/utils/folderName.ts"
   ],
-  "exclude": ["workers/s3-workflows/test", "workers/s3-workflows/vitest.config.ts"]
+  "exclude": ["workers/s3-workflows/test", "workers/s3-workflows/vitest.config.ts", "workers/s3-workflows/vitest.privacy.config.ts"]
 }

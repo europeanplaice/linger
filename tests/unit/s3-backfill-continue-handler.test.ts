@@ -24,7 +24,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
   return {
     request: new Request('http://localhost/api/s3/backfill-continue', { method: 'POST' }),
     data: { accessToken: 'tok', sessionId: 'sid', session: {} },
-    env: {},
+    env: { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockResolvedValue(undefined) } },
     waitUntil: vi.fn(),
     ...overrides,
   }
@@ -78,9 +78,9 @@ describe('POST /api/s3/backfill-continue', () => {
 
     expect(body.ok).toBe(true)
     expect(body.remaining).toBe(3)
-    expect(ctx.waitUntil).toHaveBeenCalledOnce()
+    expect(ctx.waitUntil).not.toHaveBeenCalled()
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', expect.anything(), {},
+      'tok', 'sid', expect.anything(), expect.objectContaining({ SESSIONS: expect.anything() }),
       expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
       ['2026-01-03', '2026-01-04', '2026-01-05'],
       'Backfill', 20,
@@ -104,7 +104,7 @@ describe('POST /api/s3/backfill-continue', () => {
 
     expect(body.remaining).toBe(5)
     expect(s3Settings.backfillAllEntries).toHaveBeenCalledWith(
-      'tok', 'sid', expect.anything(), {},
+      'tok', 'sid', expect.anything(), expect.objectContaining({ SESSIONS: expect.anything() }),
       expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
       migrationRemaining,
       'Backfill', 20,

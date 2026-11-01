@@ -15,9 +15,9 @@ A private daily diary that saves plain-text entries to your Google Drive.
 
 ## Your data
 
-Diary entries are stored as one `.txt` file per day in the `linger_diary/` folder in Google Drive. Linger uses Google sign-in; OAuth tokens stay on the server. The browser keeps a local cache and unsaved drafts so the app can load quickly and recover edits. Google Drive remains the primary copy.
+Diary entries are stored as one `.txt` file per day in the `linger_diary/` folder in Google Drive. Short-lived Google tokens stay in browser memory and accompany authorized requests; the backend uses them transiently without saving them to its databases. Reloading the page or token expiry requires authorization again. The browser keeps a local cache and unsaved drafts so the app can load quickly and recover edits. Google Drive remains the primary copy. See [OAuth privacy and migration](OAUTH-PRIVACY.md) for the security boundary and treatment of previously stored credentials.
 
-S3 backup is optional. It uses short-lived AWS credentials and writes to a bucket in your AWS account. See the [S3 setup guide](self-hosted/aws-s3/README.md).
+S3 backup is optional. It uses short-lived AWS credentials and writes to a bucket in your AWS account. Backup work advances while the app is open and authorized. See the [S3 setup guide](self-hosted/aws-s3/README.md).
 
 ## Development
 
@@ -42,7 +42,7 @@ Useful commands:
 
 ```bash
 npm run build
-npm run ci:local     # build, lint, audit, unit, Worker, and end-to-end checks
+npm run ci:local     # build, lint, audit, privacy, unit, Worker, and end-to-end checks
 ```
 
 ## Deployment and self-hosting
@@ -53,4 +53,4 @@ To deploy your own fork, configure a Google Cloud OAuth web client with the Driv
 
 ## Stack
 
-React, TypeScript, and Vite on Cloudflare Pages and Workers. Google Drive stores diary files; D1 stores authentication sessions. The optional S3 mirror uses Cloudflare Workflows and Durable Objects.
+React, TypeScript, and Vite on Cloudflare Pages and Workers. Google Drive stores diary files; D1 stores session metadata. Durable Objects coordinate diary writes. Optional S3 backup uses authorized requests while the app is open.

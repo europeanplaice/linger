@@ -58,7 +58,14 @@ export async function ensureAccountDiaryFolder(
 ): Promise<string> {
   const accountKey = session.google_sub
   if (!accountKey) throw new Error('Google account identity missing; sign in again')
-  const auth: DiaryWriterAuth = { sessionId, accountKey }
+  if (!session.access_token || !session.expires_at) throw new Error('Request-scoped Google credentials are required')
+  const auth: DiaryWriterAuth = {
+    sessionId,
+    accountKey,
+    accessToken: session.access_token,
+    expiresAt: session.expires_at,
+    ...(session.id_token ? { idToken: session.id_token } : {}),
+  }
   const folderId = await env.DIARY_WRITER.getByName(accountKey).ensureFolder(auth)
   if (session.folder_id !== folderId) invalidateFolderScopedS3Cache(session)
   session.folder_id = folderId
@@ -386,7 +393,8 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
 // failure back on the DO index) rather than the fire-and-forget workflow the
 // plain mirrorEntry RPC schedules.
 export async function mirrorEntryForAuthNow(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
-  await authorizedSession(env, input)
+  const session = await authorizedSession(env, input)
+  if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
   const index = indexFor(env, input.accountKey)
   try {
     await index.reconcileEntry(input)
@@ -430,7 +438,8 @@ async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: Mirror
 // 'pending'; entryStatusForAuth's stale-pending aging surfaces it as
 // 'unconfirmed' with a retry affordance rather than an eternal spinner).
 export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
-  await authorizedSession(env, input)
+  const session = await authorizedSession(env, input)
+  if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
   // An account that has never enabled (or explicitly disabled) S3 backup has
   // nothing for a mirror workflow to do: every save would otherwise pay 2 steps
   // plus ~5-7 external Drive/S3 subrequests just to discover config-enablement is
@@ -485,7 +494,8 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
 }
 
 export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: string; accountKey: string; date: string }): Promise<MirrorResult> {
-  await authorizedSession(env, input)
+  const session = await authorizedSession(env, input)
+  if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
   // Same disabled-account short-circuit as mirrorEntryForAuth (see its comment):
   // a backup-off account has nothing for a delete workflow to remove. Fail open on
   // an unexpected flag error (unknown → schedule), exactly as the mirror path does.

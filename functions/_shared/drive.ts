@@ -108,9 +108,21 @@ export async function ensureFolder(
     // ID is a hint from this login session, not the account-wide source of truth.
     let folderId: string
     if (env.S3_WORKFLOW_SERVICE) {
-      folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({ sessionId, accountKey: session.google_sub })
+      folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({
+        sessionId,
+        accountKey: session.google_sub,
+        accessToken: token,
+        expiresAt: session.expires_at ?? 0,
+        idToken: session.id_token,
+      })
     } else if (env.DIARY_WRITER) {
-      folderId = await env.DIARY_WRITER.getByName(session.google_sub).ensureFolder({ sessionId, accountKey: session.google_sub })
+      folderId = await env.DIARY_WRITER.getByName(session.google_sub).ensureFolder({
+        sessionId,
+        accountKey: session.google_sub,
+        accessToken: token,
+        expiresAt: session.expires_at ?? 0,
+        idToken: session.id_token,
+      })
     } else {
       throw new DriveError(503, 'Account folder coordinator unavailable')
     }

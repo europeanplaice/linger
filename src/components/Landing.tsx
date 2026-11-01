@@ -105,7 +105,9 @@ export function Landing({ onSignIn, onRetry, tokenExpired, authResolved, authErr
           <p>
             Diary entries reside entirely in your own Google Drive folder (
             <code>linger_diary/</code>). No diary content is stored on Linger's servers. OAuth
-            tokens are handled server-side and are never exposed to the browser.
+            tokens stay in browser memory and are sent to Linger's API only while requests run;
+            they are not stored in D1 or KV. Reloading the page requires signing in again. S3
+            backfill runs from the open browser tab and pauses if you close or reload it.
           </p>
           <p>
             For full details, see the <a href="/privacy">Privacy Policy</a>.

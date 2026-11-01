@@ -1,6 +1,5 @@
 import type { S3WorkflowService } from './s3Workflow'
-import { verifyGoogleIdToken } from './google'
-import { createD1Session, findD1RefreshToken, finishD1Refresh, isD1SessionRevoked, legacyAuthEnabled, readD1Session, refreshD1Session, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
+import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, revokeD1Account, revokeD1Session, saveD1Session, sanitizeSession } from './authStore'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
@@ -22,20 +21,19 @@ export interface Env {
   // both bindings route folder discovery to the same account-scoped object.
   DIARY_WRITER?: {
     getByName(name: string): {
-      ensureFolder(input: { sessionId: string; accountKey: string }): Promise<string>
+      ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string }): Promise<string>
     }
   }
 }
 
 export interface SessionData {
-  refresh_token: string
-  access_token: string
-  expires_at: number // ms since epoch
+  access_token?: string
+  expires_at?: number // ms since epoch; only in the current request
   folder_id?: string
   renewed_at?: number // ms since epoch — throttles sliding session renewal
   email?: string
   changes_start_page_token?: string // Drive Changes API page token for incremental sync
-  client_id?: string // GOOGLE_CLIENT_ID that minted refresh_token — lets a Blue/Green OAuth swap tell stale tokens apart
+  client_id?: string // OAuth client ID associated with the verified account session
   id_token?: string // Google-signed JWT (openid scope) — handed to AWS STS AssumeRoleWithWebIdentity for self-hosted S3
   id_token_verified?: boolean // true only after local Google signature/claims validation
   google_sub?: string // stable per-user Google account ID, decoded once from id_token; not re-derived on refresh since it never changes
@@ -43,21 +41,6 @@ export interface SessionData {
   s3_settings_file_id?: string // Drive fileId of s3_settings.json, cached like folder_id so every mirror/poll doesn't pay a files.list lookup just to find the settings file — never the settings *content* itself (see s3Settings.ts's loadS3SettingsRecord), since a stale bucket/roleArn/enabled value could mirror content to a bucket the user just disabled or changed
   s3_status_file_id?: string // Drive fileId of s3_sync_status.json (see s3Settings.ts) — split out of s3_settings.json so background sync-status writes never share a file (and thus a last-write-wins overwrite) with the user's own config saves. Cached the same way and for the same reason as s3_settings_file_id
   s3_status_negative_cache_at?: number // ms since epoch — mirrors s3_settings_negative_cache_at, but for "no s3_sync_status.json exists yet". Without this, every mirror on an account that syncs cleanly (recordMirrorSuccess is a no-op when there's no error to clear, so the status file may never even get created) would pay a files.list lookup on every single save, forever
-  // Assumed AWS credentials for self-hosted S3 mirroring, persisted here (see
-  // s3Settings.ts's getAssumedCredentials) so they survive across requests — the
-  // in-isolate Map cache in s3.ts rarely helps a low-traffic personal account, since
-  // Workers isolates go cold between sparse requests far more often than that cache
-  // gets reused. `cacheKey` matches credentialsCacheKey(session, config) — a
-  // roleArn/region change invalidates the cache by no longer matching it. Same
-  // security posture as id_token/refresh_token already stored in this same record:
-  // scoped to the user's own bucket via their own IAM role, and short-lived (1hr).
-  s3_assumed_credentials?: {
-    accessKeyId: string
-    secretAccessKey: string
-    sessionToken: string
-    expiresAt: number // ms since epoch
-    cacheKey: string
-  }
 }
 
 // These Drive file ids and negative lookups are scoped to folder_id. Clear them
@@ -72,6 +55,7 @@ export function invalidateFolderScopedS3Cache(session: SessionData): void {
 export interface Data extends Record<string, unknown> {
   sessionId: string
   accessToken: string
+  idToken?: string
   session: SessionData
 }
 
@@ -104,7 +88,7 @@ export async function getSession(sessionId: string, env: Env): Promise<SessionDa
   if (!raw) return null
   if (await isSessionRevoked(sessionId, env)) return null
   try {
-    return JSON.parse(raw) as SessionData
+    return sanitizeSession(JSON.parse(raw) as SessionData)
   } catch {
     return null
   }
@@ -113,7 +97,7 @@ export async function getSession(sessionId: string, env: Env): Promise<SessionDa
 export async function saveSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
   if (env.AUTH_DB) return saveD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
   if (await isSessionRevoked(sessionId, env)) throw new SessionRevokedError('Session revoked')
-  await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(session), { expirationTtl: SESSION_TTL })
+  await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(sanitizeSession(session)), { expirationTtl: SESSION_TTL })
   // Revocation can finish while put() is in flight. Its separate marker remains
   // authoritative even if another location still reads this late session write.
   if (await isSessionRevoked(sessionId, env)) {
@@ -125,9 +109,9 @@ export async function saveSession(sessionId: string, session: SessionData, env: 
 export async function createSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
   if (env.AUTH_DB) {
     session.renewed_at = Date.now()
-    return createD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
+    return createD1Session(sessionId, sanitizeSession(session), { ...env, AUTH_DB: env.AUTH_DB })
   }
-  return saveSession(sessionId, session, env)
+  return saveSession(sessionId, sanitizeSession(session), env)
 }
 
 export async function isSessionRevoked(sessionId: string, env: Env): Promise<boolean> {
@@ -135,186 +119,23 @@ export async function isSessionRevoked(sessionId: string, env: Env): Promise<boo
   return await env.SESSIONS.get(`revoked-session:${sessionId}`) === '1'
 }
 
-// Thrown only when Google says the refresh_token itself is dead (400 invalid_grant —
-// e.g. revoked, or minted by a since-retired Blue/Green OAuth client). Distinct from
-// transient failures (429/5xx) so callers only tear down the session in this case.
 export class RefreshTokenInvalidError extends Error {}
 export class SessionRevokedError extends RefreshTokenInvalidError {}
 
-// Retry delays for transient refresh failures (network error, 429, 5xx) — mirrors
-// driveWithRetry's backoff (functions/_shared/drive.ts). Without this, a single Google
-// blip during an access-token refresh (which happens on the order of hourly for an
-// active user) surfaced as a full "session expired, please log in again" instead of
-// self-healing, since callers of getValidSession treat any thrown error alike.
-const REFRESH_RETRY_DELAYS_MS = [250, 500, 1000]
-
-// Dedupes concurrent refreshes for the same session within one isolate: on app load
-// or tab wake-up, several API requests fire in parallel, and if the access token has
-// just expired they'd all independently hit Google's token endpoint with the same
-// refresh_token — stampeding it, inflating the odds of a 429 (or of *some* request
-// hitting a transient blip and surfacing a spurious failure), and multiplying KV
-// writes. The first request to need a refresh performs it and persists the result;
-// the rest wait for it and then adopt the tokens it left in KV. Scoped to the
-// isolate — a cold-start isolate can't join another isolate's in-flight refresh, but
-// then each isolate only ever does its own one refresh per expiry window anyway.
-const inFlightRefreshes = new Map<string, Promise<SessionData>>()
-
-// Mutates `session` in place (rather than returning a disconnected copy) and persists
-// it to KV itself whenever it refreshes, so every caller holding this same object
-// reference — including ones further down the call stack that read it well after this
-// call returns — sees the refreshed tokens immediately, and none of them can undo the
-// refresh by later saving their own stale snapshot over it. Previously returned a new
-// object on refresh; a caller (or anything called after it, e.g. a mirror's own
-// saveSession) that kept using its original `session` variable would silently save back
-// the pre-refresh tokens, clobbering the fresh ones this function had just persisted.
-export async function getValidSession(sessionId: string, session: SessionData, env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
-  if (!opts.forceRefresh && session.expires_at > Date.now() + 60_000) {
-    return session
-  }
-
-  if (env.AUTH_DB) return refreshD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB }, !!opts.forceRefresh,
-    owner => refreshAccessToken(sessionId, session, env, owner))
-
-  const inFlight = inFlightRefreshes.get(sessionId)
-  if (inFlight) {
-    // Another request in this isolate is refreshing this same session right now —
-    // wait for it, then adopt whatever tokens it persisted. If the shared refresh
-    // failed (transient blip), rethrow its error rather than handing back an expired
-    // token: a caller proceeding on that would 401 against Drive and re-trigger the
-    // session-expired flow for a session that's perfectly alive, and the error type
-    // matters (RefreshTokenInvalidError must still tear the session down).
-    let sharedError: unknown
-    try {
-      await inFlight
-    } catch (err) {
-      sharedError = err
-    }
-    const fresh = await getSession(sessionId, env)
-    if (fresh?.access_token && fresh.expires_at > Date.now() + 60_000) {
-      Object.assign(session, fresh)
-      return session
-    }
-    if (sharedError) throw sharedError
-    throw new Error('Token refresh failed')
-  }
-
-  const refresh = refreshAccessToken(sessionId, session, env)
-  inFlightRefreshes.set(sessionId, refresh)
-  try {
-    return await refresh
-  } finally {
-    if (inFlightRefreshes.get(sessionId) === refresh) inFlightRefreshes.delete(sessionId)
-  }
-}
-
-// The actual refresh-and-persist loop, extracted from getValidSession so concurrent
-// callers can share a single in-flight attempt (see inFlightRefreshes above). Mutates
-// `session` in place and persists the fresh tokens to KV itself.
-async function refreshAccessToken(sessionId: string, session: SessionData, env: Env, refreshOwner?: string): Promise<SessionData> {
-  let resp: Response
-  for (let attempt = 0; ; attempt++) {
-    try {
-      resp = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          refresh_token: session.refresh_token,
-          client_id: env.GOOGLE_CLIENT_ID,
-          client_secret: env.GOOGLE_CLIENT_SECRET,
-          grant_type: 'refresh_token',
-        }).toString(),
-        signal: AbortSignal.timeout(15_000),
-      })
-    } catch (err) {
-      if (attempt < REFRESH_RETRY_DELAYS_MS.length) {
-        await new Promise(r => setTimeout(r, REFRESH_RETRY_DELAYS_MS[attempt] * (1 + 0.2 * (Math.random() * 2 - 1))))
-        continue
-      }
-      throw err
-    }
-    // Google returns 400 invalid_grant for a dead/revoked/wrong-client refresh_token —
-    // fails immediately, retrying won't help. Anything else (429, 5xx) is transient —
-    // don't destroy an otherwise-valid session over it, retry a few times first.
-    if (!resp.ok && resp.status !== 400 && attempt < REFRESH_RETRY_DELAYS_MS.length) {
-      let delay = REFRESH_RETRY_DELAYS_MS[attempt]
-      const ra = resp.headers.get('Retry-After')
-      if (ra) { const s = parseFloat(ra); if (!isNaN(s)) delay = s * 1000 }
-      await new Promise(r => setTimeout(r, delay * (1 + 0.2 * (Math.random() * 2 - 1))))
-      continue
-    }
-    break
-  }
-  if (!resp.ok) {
-    if (resp.status === 400) {
-      // Any 400 from the token endpoint is a request/grant/client problem, not a
-      // transient one — retrying gets the same 400 again. invalid_grant (dead/revoked/
-      // wrong-client refresh_token) is the expected, routine case. Anything else
-      // (e.g. invalid_client from a client_id/secret mismatch after an OAuth
-      // blue/green swap) is unexpected and env-wide — log it so it doesn't fail
-      // silently, since it'll otherwise look identical to a normal expired session.
-      let errorCode = 'unknown'
-      try {
-        const errJson = await resp.json() as { error?: string }
-        if (errJson.error) errorCode = errJson.error
-      } catch {
-        // non-JSON body, leave errorCode as 'unknown'
-      }
-      if (errorCode !== 'invalid_grant') {
-        console.error(`Token refresh got 400 with unexpected error code: ${errorCode}`)
-      }
-      throw new RefreshTokenInvalidError(`Token refresh failed: ${resp.status} (${errorCode})`)
-    }
-    throw new Error(`Token refresh failed: ${resp.status}`)
-  }
-  const tokens = await resp.json() as { access_token: string; expires_in: number; id_token?: string }
-  let idToken: string | undefined
-  if (tokens.id_token) {
-    try {
-      const claims = await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID)
-      if (!session.google_sub || claims.sub === session.google_sub) idToken = tokens.id_token
-    } catch {
-      // Never persist an unverified ID token. Access-token use can continue,
-      // while callers that require an ID token will request a later refresh.
-    }
-  }
-  Object.assign(session, {
-    access_token: tokens.access_token,
-    expires_at: Date.now() + tokens.expires_in * 1000,
-    // A successful refresh proves refresh_token is valid for the current client —
-    // stamp it so legacy sessions (created before client_id was tracked) self-heal.
-    client_id: env.GOOGLE_CLIENT_ID,
-    // id_token shares this same refresh response's expires_in, so a previous id_token
-    // is expired by definition whenever this branch runs. Carry forward only a freshly
-    // issued one; otherwise drop it rather than handing callers a dead token that would
-    // make every subsequent STS AssumeRoleWithWebIdentity call fail silently.
-    id_token: idToken,
-    id_token_verified: idToken ? true : undefined,
-  })
-  if (env.AUTH_DB && refreshOwner) {
-    await finishD1Refresh(sessionId, session, refreshOwner, { ...env, AUTH_DB: env.AUTH_DB })
-  } else {
-    await saveSession(sessionId, session, env)
-  }
-  return session
+export async function getValidSession(_sessionId: string, session: SessionData, _env: Env, opts: { forceRefresh?: boolean } = {}): Promise<SessionData> {
+  if (!opts.forceRefresh && session.access_token && session.expires_at && session.expires_at > Date.now() + 60_000) return session
+  throw new Error("Google credentials are request-scoped; sign in again")
 }
 
 export async function getValidAccessToken(sessionId: string, session: SessionData, env: Env): Promise<string> {
   const validSession = await getValidSession(sessionId, session, env)
+  if (!validSession.access_token) throw new Error("Google access token is not available in this request")
   return validSession.access_token
 }
 
-// id_token shares the same expiry as access_token (both minted in the same token
-// response), so freshness normally reuses getValidSession's expires_at check rather
-// than tracking a second timestamp. But Google's refresh-token grant doesn't always
-// re-include id_token (see the comment above on dropping a stale one) — when that
-// happens, id_token stays missing until access_token itself next expires, up to ~1hr
-// later, silently breaking every S3 mirror attempt in the meantime with no way to
-// self-heal sooner. Force a refresh here whenever id_token is missing, since only
-// getValidIdToken callers actually need it — a plain getValidAccessToken caller has no
-// reason to pay for an early refresh just because id_token happens to be absent.
 export async function getValidIdToken(sessionId: string, session: SessionData, env: Env): Promise<string | null> {
-  const validSession = await getValidSession(sessionId, session, env, { forceRefresh: !session.id_token || session.id_token_verified !== true })
-  return validSession.id_token ?? null
+  const validSession = await getValidSession(sessionId, session, env)
+  return validSession.id_token_verified && validSession.id_token ? validSession.id_token : null
 }
 
 export function makeSessionCookie(sessionId: string, maxAge: number, secure = true): string {
@@ -419,39 +240,6 @@ async function listSessionIdsForEmail(email: string, env: Env): Promise<string[]
     cursor = result.cursor
   }
   return ids
-}
-
-// Only reuses a refresh_token minted by the currently-live OAuth client — after a
-// Blue/Green client swap, a token from the retired client is rejected by Google
-// (invalid_grant) on every refresh, so blindly reusing the oldest surviving session
-// forces the user into a repeated fail-then-relogin loop instead of a single relogin.
-// The email index is only a lookup aid for sessions that predate sub indexing.
-// Email addresses can change owners; only a matching stable subject authorizes
-// token reuse. Sessions without a subject must obtain fresh consent instead.
-export async function getRefreshTokenForEmail(email: string, clientId: string, env: Env, googleSub: string): Promise<string | null> {
-  if (env.AUTH_DB) {
-    const token = await findD1RefreshToken('email', email, clientId, googleSub, { ...env, AUTH_DB: env.AUTH_DB })
-    if (token || !legacyAuthEnabled(env)) return token
-  }
-  const ids = await listSessionIdsForEmail(email, env)
-  for (const id of ids) {
-    const session = await getSession(id, env)
-    if (session?.refresh_token && session.client_id === clientId && session.google_sub === googleSub) return session.refresh_token
-  }
-  return null
-}
-
-export async function getRefreshTokenForSub(sub: string, clientId: string, env: Env): Promise<string | null> {
-  if (env.AUTH_DB) {
-    const token = await findD1RefreshToken('google_sub', sub, clientId, sub, { ...env, AUTH_DB: env.AUTH_DB })
-    if (token || !legacyAuthEnabled(env)) return token
-  }
-  const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
-  for (const id of ids) {
-    const session = await getSession(id, env)
-    if (session?.refresh_token && session.client_id === clientId && session.google_sub === sub) return session.refresh_token
-  }
-  return null
 }
 
 async function listSessionIdsForPrefix(prefix: string, env: Env): Promise<string[]> {

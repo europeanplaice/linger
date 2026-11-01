@@ -52,6 +52,10 @@ export async function retryS3Backfill(): Promise<void> {
   await apiFetch('/api/s3/backfill-retry', { method: 'POST', headers: { 'X-Request-ID': crypto.randomUUID() } })
 }
 
+export async function continueS3Backfill(): Promise<void> {
+  await apiFetch('/api/s3/backfill-continue', { method: 'POST' })
+}
+
 // Re-mirrors every entry against S3, not just previously-failed ones — catches
 // individual per-save mirror misses that never made it into a failed list.
 export async function resyncS3Backfill(): Promise<void> {

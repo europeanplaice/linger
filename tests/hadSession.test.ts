@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 // Default storageState (storageState.en.json) does NOT include linger_had_session,
 // so each test starts without a prior-session hint unless explicitly set.
+
+test.beforeEach(async ({ page }) => installMockOAuthCredentials(page))
 
 test('no app shell shown during auth check when no prior session', async ({ page }) => {
   let releaseSession!: () => void

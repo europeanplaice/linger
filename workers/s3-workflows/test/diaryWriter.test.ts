@@ -12,6 +12,11 @@ vi.mock('../../../functions/_shared/drive', async original => ({
   ensureFolder: vi.fn(), findEntryMeta: vi.fn(), getDiaryFileMeta: vi.fn(),
   getEntryContent: vi.fn(), getEntryMeta: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
 }))
+vi.mock('../../../functions/_shared/s3Settings', async original => ({
+  ...await original<typeof import('../../../functions/_shared/s3Settings')>(),
+  mirrorEntrySave: vi.fn(async () => {}),
+  mirrorEntryDelete: vi.fn(async () => {}),
+}))
 const { default: Service } = await import('../src/index')
 
 const date = '2026-10-31'
@@ -57,7 +62,13 @@ afterEach(() => vi.restoreAllMocks())
 async function account() {
   const accountKey = crypto.randomUUID()
   const workflowEnv = env as WorkflowEnv
-  const auth = { accountKey, sessionId: `session-${accountKey}` }
+  const auth = {
+    accountKey,
+    sessionId: `session-${accountKey}`,
+    accessToken: 'test-access-token',
+    expiresAt: Date.now() + 3_600_000,
+    idToken: 'test-id-token',
+  }
   await createSession(auth.sessionId, { google_sub: accountKey, access_token: 'test', refresh_token: 'test', expires_at: Date.now() + 3_600_000 }, workflowEnv)
   await workflowEnv.S3_SYNC_INDEX.getByName(accountKey).setBackupEnabled(false)
   const service = new Service(createExecutionContext(), workflowEnv)
@@ -95,7 +106,7 @@ describe('account-scoped diary mutations', () => {
     await createSession(secondSessionId, { ...firstSession, folder_id: 'legacy-folder-b' }, env)
 
     const firstFolder = await service.ensureDiaryFolder(auth)
-    const secondFolder = await service.ensureDiaryFolder({ sessionId: secondSessionId, accountKey: auth.accountKey })
+    const secondFolder = await service.ensureDiaryFolder({ ...auth, sessionId: secondSessionId })
 
     expect(firstFolder).toBe('legacy-folder-a')
     expect(secondFolder).toBe(firstFolder)

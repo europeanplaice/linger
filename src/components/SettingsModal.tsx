@@ -392,7 +392,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   // Unlike handleS3RetryBackfill (just the previously-failed dates), this re-mirrors
   // every entry — the only way to recover an entry whose per-save mirror silently missed
   // without ever being recorded in backfillProgress.failed (e.g. a dropped Google
-  // id_token on refresh outliving that one save). Safe to run any time: putObjectIfNewer
+  // id_token expiry outliving that one save). Safe to run any time: putObjectIfNewer
   // skips anything already at least as new as Drive.
   const handleS3Resync = useCallback(async () => {
     setS3Resyncing(true)

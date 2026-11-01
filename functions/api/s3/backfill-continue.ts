@@ -16,10 +16,6 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   const { accessToken, sessionId, session } = context.data
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
-  if (context.env.S3_WORKFLOW_SERVICE) {
-    return jsonResponse({ error: 'Backfill continuation is now managed by Cloudflare Workflows' }, 410)
-  }
-
   try {
     const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
@@ -49,13 +45,12 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
       return jsonResponse({ ok: true, done: true })
     }
 
-    // Fire-and-forget inside waitUntil so the response returns immediately. backfillAllEntries
-    // does its own chunking (BACKFILL_CHUNK_SIZE) over the full remaining scope, and persists
-    // whatever's left afterward — the client's polling loop calls this endpoint again for it.
-    context.waitUntil(backfillAllEntries(
+    // Process one bounded chunk while this browser request supplies its in-memory
+    // credentials. The active page will request the next chunk after polling status.
+    await backfillAllEntries(
       accessToken, sessionId, session, context.env,
       record, progress.remaining, 'Backfill', BACKFILL_CHUNK_SIZE,
-    ))
+    )
 
     return jsonResponse({ ok: true, remaining: progress.remaining.length })
   } catch (e) {

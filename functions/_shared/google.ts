@@ -20,6 +20,54 @@ export interface GoogleIdTokenClaims {
   iat?: number
 }
 
+export interface GoogleAccessTokenInfo {
+  aud?: string | string[]
+  azp?: string
+  sub?: string
+  exp?: string | number
+  issued_to?: string
+  audience?: string
+  user_id?: string
+  scope?: string
+  expires_in?: string | number
+}
+
+export class GoogleAccessTokenValidationError extends Error {
+  constructor(message: string, readonly transient: boolean) { super(message) }
+}
+export class GoogleIdTokenValidationError extends Error {
+  constructor(message: string, readonly transient: boolean) { super(message) }
+}
+
+// Access tokens are opaque. Ask Google's tokeninfo endpoint over POST (never put
+// the credential in a URL) and bind it to this OAuth client, user, scope, and expiry.
+export async function verifyGoogleAccessToken(token: string, clientId: string, expectedSub: string): Promise<number> {
+  let response: Response
+  try {
+    response = await fetch('https://oauth2.googleapis.com/tokeninfo', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    throw new GoogleAccessTokenValidationError('Google access token validation unavailable', true)
+  }
+  if (!response.ok) throw new GoogleAccessTokenValidationError(`Google access token validation failed: ${response.status}`, response.status === 429 || response.status >= 500)
+  let info: GoogleAccessTokenInfo
+  try { info = await response.json() as GoogleAccessTokenInfo }
+  catch { throw new GoogleAccessTokenValidationError('Google access token validation unavailable', true) }
+  const scopes = new Set((info.scope ?? '').split(/\s+/).filter(Boolean))
+  const audiences = Array.isArray(info.aud) ? info.aud : info.aud ? [info.aud] : []
+  const tokenClient = audiences.includes(clientId) || info.azp === clientId || info.issued_to === clientId || info.audience === clientId
+  const tokenSub = info.sub ?? info.user_id
+  if (!tokenClient || tokenSub !== expectedSub || !scopes.has('https://www.googleapis.com/auth/drive.file')) {
+    throw new GoogleAccessTokenValidationError('Google access token client, account, or scope mismatch', false)
+  }
+  const expiresIn = Number(info.expires_in ?? (info.exp ? Number(info.exp) - Math.floor(Date.now() / 1000) : 0))
+  if (!Number.isFinite(expiresIn) || expiresIn <= 0) throw new GoogleAccessTokenValidationError('Google access token expired', false)
+  return expiresIn
+}
+
 function base64UrlToBytes(input: string): Uint8Array<ArrayBuffer> {
   const padded = input + '='.repeat((4 - (input.length % 4)) % 4)
   const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'))
@@ -33,20 +81,27 @@ function decodeJson<T>(input: string): T {
 }
 
 async function fetchJwks(forceRefresh = false): Promise<GoogleJwk[]> {
-  const request = new Request(GOOGLE_JWKS_URL)
-  const cache = await caches.open('google-id-token-jwks')
-  if (!forceRefresh) {
-    const cached = await cache.match(request)
-    if (cached) return (await cached.json() as { keys: GoogleJwk[] }).keys
-  }
+  try {
+    const request = new Request(GOOGLE_JWKS_URL)
+    const cache = await caches.open('google-id-token-jwks')
+    if (!forceRefresh) {
+      const cached = await cache.match(request)
+      if (cached) return (await cached.json() as { keys: GoogleJwk[] }).keys
+    }
 
-  const response = await fetch(GOOGLE_JWKS_URL)
-  if (!response.ok) throw new Error(`Google JWKS fetch failed: ${response.status}`)
-  const body = await response.json() as { keys: GoogleJwk[] }
-  await cache.put(request, new Response(JSON.stringify(body), {
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${JWKS_CACHE_TTL_SEC}` },
-  }))
-  return body.keys
+    const response = await fetch(GOOGLE_JWKS_URL)
+    if (!response.ok) throw new GoogleIdTokenValidationError(`Google JWKS fetch failed: ${response.status}`, response.status === 429 || response.status >= 500)
+    const body = await response.json() as { keys: GoogleJwk[] }
+    try {
+      await cache.put(request, new Response(JSON.stringify(body), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${JWKS_CACHE_TTL_SEC}` },
+      }))
+    } catch { /* A cache write failure must not reject a verified identity token. */ }
+    return body.keys
+  } catch (error) {
+    if (error instanceof GoogleIdTokenValidationError) throw error
+    throw new GoogleIdTokenValidationError('Google identity validation unavailable', true)
+  }
 }
 
 export async function verifyGoogleIdToken(token: string, clientId: string, expectedNonce?: string): Promise<GoogleIdTokenClaims> {

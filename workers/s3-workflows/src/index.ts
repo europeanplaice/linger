@@ -9,28 +9,17 @@ import type {
   StartBackfillResult,
   SetBackupEnabledInput,
 } from '../../../functions/_shared/s3Workflow'
-import { assertWithinDailyStepBudget, authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, loadS3Config, mirrorEntryForAuth, mirrorEntryForAuthNow, deleteEntryForAuth, freshGoogleTokens, safeError, setBackupEnabledForAuth } from './runtime'
+import { authorizedSession, entryStatusForAuth, getJobForAuth, getWorkflowUsage, indexFor, isValidDate, mirrorEntryForAuthNow, deleteEntryForAuth, setBackupEnabledForAuth } from './runtime'
 import { S3BackfillWorkflow } from './workflow'
 import { S3MirrorWorkflow } from './mirrorWorkflow'
 import { S3SyncIndex } from './syncIndex'
-import { runWorkerFirstPass } from './workerFirstPass'
-import type { DiaryTarget, WorkflowEnv } from './types'
+import type { WorkflowEnv } from './types'
 import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { DiaryWriter } from './diaryWriter'
 import type { S3Config } from './runtime'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 
 export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex, DiaryWriter }
-
-function validateRequestId(requestId: string): void {
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) throw new Error('Invalid request ID')
-}
-
-function validateScope(scope: string[] | undefined): string[] | undefined {
-  if (scope === undefined) return undefined
-  if (scope.length > 10_000 || scope.some(date => !/^\d{4}-\d{2}-\d{2}$/.test(date))) throw new Error('Invalid backfill scope')
-  return [...new Set(scope)]
-}
 
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
   async scheduled(): Promise<void> {
@@ -57,70 +46,8 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
   }
 
   async startBackfill(input: StartBackfillInput): Promise<StartBackfillResult> {
-    validateRequestId(input.requestId)
-    const scope = validateScope(input.scope)
-    const session = await authorizedSession(this.env, input)
-    const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, this.env)
-    const config = await loadS3Config(accessToken, input.sessionId, session, this.env)
-    if (!config || !config.enabled) throw new Error('S3 backup is not enabled')
-    await assertWithinDailyStepBudget(this.env)
-
-    const jobId = crypto.randomUUID()
-    const workflowId = crypto.randomUUID()
-    const index = indexFor(this.env, input.accountKey)
-    await index.setBackupEnabled(config.enabled)
-    const reservation = await index.startJob(input.requestId, jobId, workflowId, config.enabled, new Date().toISOString(), config.bucket)
-    if (!reservation.created) return reservation
-
-    let remainingScope: DiaryTarget[] | undefined = scope?.map(date => ({ date }))
-    if (scope && scope.length > 0) {
-      try {
-        const firstPassResult = await runWorkerFirstPass(
-          this.env,
-          input.sessionId,
-          session,
-          input.accountKey,
-          jobId,
-          config,
-          accessToken,
-          idToken,
-          remainingScope,
-        )
-        remainingScope = firstPassResult.remainingScope
-
-        if (firstPassResult.isFinished) {
-          await index.finishJob(jobId, new Date().toISOString())
-          await index.markBackfillStarted(config.bucket)
-          const finishedJob = await index.getJob(jobId)
-          return { job: finishedJob!, created: true }
-        }
-      } catch (e) {
-        console.warn('Worker first pass encountered non-fatal error, delegating to Workflow:', e)
-      }
-    }
-
-    try {
-      await this.env.S3_BACKFILL_WORKFLOW.create({
-        id: workflowId,
-        params: {
-          sessionId: input.sessionId,
-          accountKey: input.accountKey,
-          jobId,
-          config,
-          ...(remainingScope ? { scope: remainingScope } : {}),
-        },
-        // Matches createChainedInstance in workflow.ts — a job's scope is carried in
-        // every chained instance's params, so the default 3-day Free retention would
-        // hold it all for days after the job finishes; an hour on success (still well
-        // above any chain-step retry window) is enough for duplicate-create detection.
-        retention: { successRetention: '1 hour', errorRetention: '1 day' },
-      })
-      await index.markBackfillStarted(config.bucket)
-      return reservation
-    } catch (error) {
-      await index.markStartFailed(jobId, safeError(error), new Date().toISOString())
-      throw error
-    }
+    void input
+    throw new Error('S3 background workflows are disabled; continue backup from the open browser session')
   }
 
   async getJob(input: GetJobInput) {
@@ -154,8 +81,8 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
   // its budget, and transient Drive/STS/S3 failures are retried by the
   // workflow's steps instead of failing the mirror on the first attempt.
   async mirrorEntry(input: MirrorEntryInput) {
-    if (!isValidDate(input.date)) throw new Error('Invalid date')
-    return mirrorEntryForAuth(this.env, input)
+    void input
+    throw new Error('Durable S3 mirroring is disabled; use the request-scoped API')
   }
 
   // Awaited variant used by api/s3/entry-resync's manual retry, which needs a

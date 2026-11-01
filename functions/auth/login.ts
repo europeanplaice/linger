@@ -1,7 +1,6 @@
 import type { Env } from '../_shared/session'
 import { jsonResponse, makeOAuthStateCookie } from '../_shared/session'
 import { saveOAuthState } from '../_shared/authStore'
-import { sanitizeReturnPath } from '../_shared/returnPath'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
 
@@ -16,7 +15,7 @@ function randomVerifier(): string {
   return base64url(bytes.buffer)
 }
 
-export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
+export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const state = crypto.randomUUID()
   const codeVerifier = randomVerifier()
   const nonce = crypto.randomUUID()
@@ -24,9 +23,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier))
   )
 
-  const rawReturnPath = new URL(request.url).searchParams.get('redirect') ?? '/'
-  const returnPath = sanitizeReturnPath(rawReturnPath, env.SESSION_DOMAIN)
-  await saveOAuthState(state, JSON.stringify({ codeVerifier, nonce, returnPath }), env)
+  await saveOAuthState(state, JSON.stringify({ codeVerifier, nonce, popup: true }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -35,8 +32,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     scope: SCOPE,
     state,
     nonce,
-    access_type: 'offline',
-    prompt: 'consent',
+    access_type: 'online',
+    prompt: 'select_account',
     // Do not union these permissions with broader scopes granted in the past.
     include_granted_scopes: 'false',
     code_challenge: codeChallenge,

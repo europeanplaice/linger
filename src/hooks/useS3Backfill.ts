@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BackfillProgress } from '../types'
-import { loadS3Settings } from '../api/s3Settings'
+import { continueS3Backfill, loadS3Settings } from '../api/s3Settings'
+import { TokenExpiredError } from '../api/driveEntries'
 
 export interface UseS3BackfillResult {
   backfillProgress: BackfillProgress | null
@@ -17,11 +18,10 @@ export interface UseS3BackfillResult {
   clearSyncError: () => void
 }
 
-// Drives S3 backfill progress from the top of the app (not from inside the Settings
-// modal) so a running backfill keeps advancing even while Settings is closed — only
-// closing the tab/app itself stops it. Workflows continue independently of this
-// poller; the browser only reads the Durable Object-backed job snapshot.
-export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
+// Drives S3 backfill progress from the open page. Each bounded chunk receives the
+// current in-memory Google credentials from this tab; closing/reloading the page
+// pauses the run until the user signs in again.
+export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, tokenExpired = false): UseS3BackfillResult {
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null)
   const [lastSyncError, setLastSyncError] = useState<string | null>(null)
   const [lastSyncErrorAt, setLastSyncErrorAt] = useState<string | null>(null)
@@ -31,16 +31,19 @@ export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
   const [expectingBackfill, setExpectingBackfill] = useState(false)
 
   useEffect(() => {
-    if (!isSignedIn) return
+    if (!isSignedIn || tokenExpired) return
     let cancelled = false
     loadS3Settings().then(settings => {
       if (cancelled || !settings) return
       setLastSyncError(settings.lastSyncError ?? null)
       setLastSyncErrorAt(settings.lastSyncErrorAt ?? null)
       setBackfillProgress(settings.backfillProgress ?? null)
-    }).catch(e => console.error('Failed to load S3 backfill state:', e))
+    }).catch(e => {
+      if (e instanceof TokenExpiredError) onTokenExpired?.()
+      else console.error('Failed to load S3 backfill state:', e)
+    })
     return () => { cancelled = true }
-  }, [isSignedIn])
+  }, [isSignedIn, tokenExpired])
 
   const startBackfill = useCallback(() => {
     setBackfillProgress(null)
@@ -52,27 +55,35 @@ export function useS3Backfill(isSignedIn: boolean): UseS3BackfillResult {
     setLastSyncErrorAt(null)
   }, [])
 
-  const backfillActive = isSignedIn && (expectingBackfill || (backfillProgress !== null && !backfillProgress.finishedAt))
+  const backfillActive = isSignedIn && !tokenExpired && (expectingBackfill || (backfillProgress !== null && !backfillProgress.finishedAt))
   useEffect(() => {
     if (!backfillActive) return
     let cancelled = false
-    const poll = () => {
-      loadS3Settings().then(settings => {
+    let polling = false
+    const poll = async () => {
+      if (polling) return
+      polling = true
+      try {
+        const settings = await loadS3Settings()
         if (cancelled || !settings) return
         setLastSyncError(settings.lastSyncError ?? null)
         setLastSyncErrorAt(settings.lastSyncErrorAt ?? null)
-        // The job is visible as soon as the start RPC succeeds, even while it is
-        // still queued and before the first entry is processed.
         if (settings.backfillProgress) {
           setBackfillProgress(settings.backfillProgress)
           setExpectingBackfill(false)
+          if (!settings.backfillProgress.finishedAt) await continueS3Backfill()
         }
-      }).catch(e => console.error('Failed to poll S3 backfill progress:', e))
+      } catch (e) {
+        if (!cancelled && e instanceof TokenExpiredError) onTokenExpired?.()
+        else if (!cancelled) console.error('Failed to advance S3 backfill:', e)
+      } finally {
+        polling = false
+      }
     }
     poll()
     const id = setInterval(poll, 5000)
     return () => { cancelled = true; clearInterval(id) }
-  }, [backfillActive])
+  }, [backfillActive, onTokenExpired])
 
   return { backfillProgress, lastSyncError, lastSyncErrorAt, backfillActive, startBackfill, clearSyncError }
 }

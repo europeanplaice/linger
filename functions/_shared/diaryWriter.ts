@@ -4,6 +4,9 @@ import { jsonResponse } from './session'
 export interface DiaryWriterAuth {
   sessionId: string
   accountKey: string
+  accessToken: string
+  expiresAt: number
+  idToken?: string
 }
 
 export interface DiaryMutationInput extends DiaryWriterAuth {
@@ -52,7 +55,11 @@ export const forwardDiaryMutation: PagesFunction<Env, 'date', Data> = async cont
   }
   try {
     return await writer.mutateDiaryEntry({
-      sessionId: context.data.sessionId, accountKey, date,
+      sessionId: context.data.sessionId, accountKey,
+      accessToken: context.data.accessToken,
+      expiresAt: context.data.session.expires_at ?? 0,
+      idToken: context.data.idToken,
+      date,
       method: context.request.method === 'DELETE' ? 'DELETE' : 'POST', body,
       fileId: context.request.headers.get('X-Linger-File-Id') ?? undefined,
       baseVersion: context.request.headers.get('If-Match') ?? undefined,

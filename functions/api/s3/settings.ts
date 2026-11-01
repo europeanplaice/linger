@@ -11,29 +11,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    let settings = await getS3Settings(accessToken, sessionId, session, context.env)
-    if (settings && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-      try {
-        await context.env.S3_WORKFLOW_SERVICE.setBackupEnabled({ sessionId, accountKey: session.google_sub, enabled: settings.enabled })
-        const job = await context.env.S3_WORKFLOW_SERVICE.getJob({ sessionId, accountKey: session.google_sub })
-        if (job) {
-          const finishedAt = job.finishedAt
-          settings = {
-            ...settings,
-            backfillProgress: {
-              total: job.total,
-              done: job.completed,
-              failed: job.failedDates,
-              ...(finishedAt ? { finishedAt } : {}),
-              updatedAt: finishedAt ?? job.startedAt,
-            },
-            ...(job.error ? { lastSyncError: job.error, lastSyncErrorAt: finishedAt ?? job.startedAt } : {}),
-          }
-        }
-      } catch (e) {
-        console.error('s3/settings.ts: failed to read Workflow job', e)
-      }
-    }
+    const settings = await getS3Settings(accessToken, sessionId, session, context.env)
     return jsonResponse(settings)
   } catch (e) {
     console.error('s3/settings.ts: GET failed', e)
@@ -62,12 +40,21 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     const previouslyEnabled = existing?.config.enabled ?? false
 
     const config: S3Config = { enabled: body.enabled, roleArn: body.roleArn, bucket: body.bucket, region: body.region }
-    // The DO checks active jobs before writing Drive and serializes target changes
-    // against S3 mutations. It also remembers an unstarted backfill across retries.
-    const workflowSave = context.env.S3_WORKFLOW_SERVICE && session.google_sub
-      ? await context.env.S3_WORKFLOW_SERVICE.saveSettings({ sessionId, accountKey: session.google_sub, config })
-      : undefined
-    const meta = workflowSave?.meta ?? await writeJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME, config, existing?.configFileId)
+    const targetChanged = !!existing && (
+      existing.config.roleArn !== config.roleArn ||
+      existing.config.bucket !== config.bucket ||
+      existing.config.region !== config.region
+    )
+    let workflowJobActive = false
+    if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
+      const job = await context.env.S3_WORKFLOW_SERVICE.getJob({ sessionId, accountKey: session.google_sub })
+      workflowJobActive = job?.state === 'queued' || job?.state === 'running'
+    }
+    if (targetChanged && (isBackfillRunActive(existing?.status.backfillProgress) || workflowJobActive)) {
+      return jsonResponse({ error: 'Wait for the active backup run to finish before changing its target' }, 409)
+    }
+
+    const meta = await writeJsonFile(accessToken, folderId, S3_SETTINGS_FILE_NAME, config, existing?.configFileId)
 
     // Keep the session's cached fileId/negative-cache (see s3Settings.ts's
     // loadS3SettingsRecord) in sync with what was actually just written, rather
@@ -103,26 +90,9 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     // Uses chunkSize so the backfill completes within Cloudflare's execution timeout;
     // the client's polling loop will call /api/s3/backfill-continue for the rest.
     //
-    // Workflow settings saves preserve same-target history, reset a changed
-    // target, and carry a durable backfill-required marker until startup succeeds.
-    let startedJobId: string | undefined
     const bucketChanged = !!existing && existing.config.bucket !== body.bucket
-    const needsFreshBackfill = workflowSave?.needsBackfill ?? (config.enabled && (!previouslyEnabled || bucketChanged))
-    if (needsFreshBackfill && context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-      try {
-        const result = await context.env.S3_WORKFLOW_SERVICE.startBackfill({
-          sessionId,
-          accountKey: session.google_sub,
-          requestId: context.request.headers.get('X-Request-ID') ?? crypto.randomUUID(),
-        })
-        startedJobId = result.job.jobId
-      } catch (e) {
-        const message = e instanceof Error ? e.message : ''
-        if (message.includes('already running')) return jsonResponse({ error: message }, 409)
-        console.error('s3/settings.ts: failed to start Workflow backfill', e)
-        return jsonResponse({ error: 'Settings saved, but backfill could not be started' }, 502)
-      }
-    } else if (needsFreshBackfill) {
+    const needsFreshBackfill = config.enabled && (!previouslyEnabled || bucketChanged)
+    if (needsFreshBackfill) {
       const alreadyRunning = isBackfillRunActive(existing?.status.backfillProgress)
       if (!alreadyRunning) {
         const record: S3SettingsRecord = { config, status: {}, folderId, configFileId: meta.id, statusFileId }
@@ -130,9 +100,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       }
     }
 
-    return startedJobId
-      ? jsonResponse({ ...meta, jobId: startedJobId }, 202)
-      : jsonResponse(meta)
+    return jsonResponse(meta)
   } catch (e) {
     if (e instanceof Error && e.message.includes('already running')) return jsonResponse({ error: e.message }, 409)
     console.error('s3/settings.ts: PUT failed', e)

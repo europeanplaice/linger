@@ -1,19 +1,27 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest as middleware } from '../../functions/api/_middleware'
 import { onRequestPost as logout } from '../../functions/auth/logout'
 import { createFakeKV } from '../helpers/fakeKV'
 
 function context(path: string, method: string, account?: string) {
-  const session = { google_sub: 'account-B', email: 'b@example.com', access_token: 'b-token', refresh_token: 'r', expires_at: Date.now() + 3_600_000, renewed_at: Date.now() }
+  const session = { google_sub: 'account-B', email: 'b@example.com', renewed_at: Date.now() }
   const kv = createFakeKV({ 'session:B': JSON.stringify(session) })
-  const headers = new Headers({ Cookie: 'linger_session=B', Origin: 'https://example.com' })
+  const headers = new Headers({ Cookie: 'linger_session=B', Origin: 'https://example.com', Authorization: 'Bearer b-token' })
   if (account !== undefined) headers.set('X-Linger-Account', account)
   return {
     request: new Request(`https://example.com${path}`, { method, headers }),
-    env: { SESSIONS: kv, SESSION_DOMAIN: 'https://example.com' },
+    env: { SESSIONS: kv, GOOGLE_CLIENT_ID: 'client-id', SESSION_DOMAIN: 'https://example.com' },
     data: {}, next: vi.fn(async () => new Response('{}')), kv,
   }
 }
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    aud: 'client-id', sub: 'account-B', expires_in: 3600,
+    scope: 'https://www.googleapis.com/auth/drive.file',
+  }), { status: 200 })))
+})
+afterEach(() => vi.unstubAllGlobals())
 
 describe('account binding before private handlers', () => {
   it.each([

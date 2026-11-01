@@ -11,9 +11,9 @@ import { getS3Settings, entryKey, getAssumedCredentials, type S3Settings } from 
 // briefly is safe *specifically because* this endpoint is read-only: the one
 // signal that actually resolves the badge (a fresh S3 HEAD via
 // headObjectVersion, below) is never cached and always reflects the live
-// bucket. Module-scope and keyed by session, same pattern as the credentials
-// cache in s3.ts — best-effort, not persisted, never used by any mirror/write
-// path (those must always see current config; see loadS3SettingsRecord).
+// bucket. This module-scope cache holds only settings metadata, is keyed by
+// session, and is never used by any mirror/write path (those must always see
+// current config; see loadS3SettingsRecord).
 const settingsCheckCache = new Map<string, { settings: S3Settings | null; expiresAt: number }>()
 const SETTINGS_CHECK_CACHE_MS = 5_000
 
@@ -59,25 +59,6 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
   const version = url.searchParams.get('version')
   const since = url.searchParams.get('since')
   if (!version) return jsonResponse({ error: 'version is required' }, 400)
-
-  // The Workflow Worker owns the authoritative per-entry index. The old
-  // Drive/S3-HEAD path remains below only for local environments that predate
-  // the service binding.
-  if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-    try {
-      const result = await context.env.S3_WORKFLOW_SERVICE.getEntryStatus({
-        sessionId,
-        accountKey: session.google_sub,
-        date,
-        requestedVersion: version,
-        ...(since ? { since } : {}),
-      })
-      return jsonResponse(result)
-    } catch (e) {
-      console.error('s3/entry-status.ts: Workflow status lookup failed', e)
-      return jsonResponse({ status: 'pending' })
-    }
-  }
 
   try {
     const settings = await getS3SettingsForStatusCheck(accessToken, sessionId, session, context.env)

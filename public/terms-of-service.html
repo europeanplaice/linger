@@ -32,50 +32,116 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Terms of Service</h1>
-  <p class="meta">Effective Date: May 9, 2026</p>
+  <p class="meta">Effective Date: November 1, 2026</p>
 
   <h2>1. Acceptance of Terms</h2>
-  <p>By accessing or using Linger (the "Service"), you agree to these Terms of Service ("Terms"). If you disagree, do not use the Service.</p>
+  <p>
+    By accessing or using Linger (the "Service"), you agree to these Terms of Service ("Terms").
+    If you do not agree, do not use the Service.
+  </p>
 
   <h2>2. Service Description</h2>
   <p>
-    Linger is a personal diary application. The frontend is a React single-page app hosted
-    on Cloudflare Pages. A lightweight backend (Cloudflare Pages Functions) handles OAuth authentication
-    and proxies Google Drive API requests on your behalf. Session data (OAuth tokens) is stored in
-    Cloudflare KV with a 30-day expiry. All diary entries are stored in your personal Google Drive
-    folder (<code>linger_diary/</code>) using the Google Drive API with <code>drive.file</code> scope.
+    Linger is a personal diary web app. It uses Google sign-in and Google Drive to store diary
+    entries as plain-text files in your Google Drive. Cloudflare Pages and Workers provide the app's
+    hosting, authentication, and backend requests to Google Drive. Your entry contents pass through
+    the backend while it handles those requests.
+  </p>
+  <p>
+    Linger also offers an optional S3 backup. If you configure and enable it, Linger copies existing
+    entries to the AWS S3 bucket you specify and mirrors subsequent saves and deletions. Google Drive
+    remains the primary copy. Backup processing requires the app to remain open and authorized.
+    Reloading the app or token expiry may require Google authorization again.
+    See the <a href="/privacy">Privacy Policy</a> for details about data
+    processing and service providers.
   </p>
 
-  <h2>3. User Responsibilities</h2>
-  <p>You are responsible for:</p>
+  <h2>3. Accounts and Authorization</h2>
+  <p>
+    You sign in with a Google account and authorize Linger to use the Google permissions shown during
+    sign-in. You are responsible for keeping your Google account credentials secure and for activity
+    carried out through your account. You may revoke Linger's access through
+    <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.
+  </p>
+
+  <h2>4. Your Content and Optional Backup</h2>
+  <p>
+    You retain ownership of the diary entries and other content you create. You give Linger permission
+    to process that content as needed to provide the features you use, including saving, searching,
+    displaying, exporting, restoring, and deleting entries in Google Drive and, if you enable it,
+    backing them up to your configured S3 bucket. Linger does not claim ownership of your content.
+  </p>
+  <p>
+    You are responsible for the content you store and for complying with applicable laws. If you
+    enable S3 backup, you are responsible for the AWS account, IAM role, bucket permissions, bucket
+    settings, and any AWS charges. Turning off S3 backup stops future syncing but does not delete
+    objects already stored in the bucket. AWS bucket versioning or retention settings may preserve
+    previous copies after a delete request.
+  </p>
+
+  <h2>5. Acceptable Use</h2>
+  <p>You agree not to:</p>
   <ul>
-    <li>Maintaining the confidentiality of your Google account credentials</li>
-    <li>Ensuring all diary content you store complies with applicable laws</li>
-    <li>Not using the Service for any unlawful or harmful purpose</li>
+    <li>Use the Service for an unlawful purpose or to infringe another person's rights</li>
+    <li>Attempt to disrupt, damage, or gain unauthorized access to the Service or its infrastructure</li>
+    <li>Use the Service in a way that violates the terms of Google, Cloudflare, or AWS</li>
   </ul>
 
-  <h2>4. Intellectual Property</h2>
-  <p>You retain full ownership of all diary content you create. Linger does not claim rights to your content. The Service code, design, and branding are the property of its developer.</p>
+  <h2>6. Third-Party Services</h2>
+  <p>
+    Linger relies on third-party services, including Google, Cloudflare, and, when you enable S3
+    backup, AWS. Holiday data and fonts may also be requested from third-party providers. Those
+    providers operate under their own terms and privacy policies. Linger is not responsible for
+    services or content they provide, or for their availability, security, or data handling.
+  </p>
 
-  <h2>5. Disclaimer of Warranties</h2>
-  <p>The Service is provided "as is" without warranties of any kind. We do not guarantee uninterrupted, error-free, or secure operation.</p>
+  <h2>7. Intellectual Property</h2>
+  <p>
+    The Service's code, design, and branding are the property of its developer. These Terms do not
+    grant you ownership of them. You may use the Service while complying with these Terms.
+  </p>
 
-  <h2>6. Limitation of Liability</h2>
-  <p>The developer of Linger shall not be liable for any indirect, incidental, or consequential damages arising from your use of the Service, including data loss caused by third-party services (Google Drive, Cloudflare).</p>
+  <h2>8. Availability and Disclaimer of Warranties</h2>
+  <p>
+    The Service is provided "as is" and "as available," without warranties of any kind to the extent
+    permitted by law. We do not guarantee uninterrupted or error-free operation, that every save or
+    backup will succeed, or that data stored by Google Drive or AWS will always be available. Keep
+    your own copies of important information.
+  </p>
 
-  <h2>7. Privacy</h2>
-  <p>Your use is also governed by our <a href="/privacy">Privacy Policy</a>. We only access Google Drive data you explicitly authorize via the OAuth consent screen.</p>
+  <h2>9. Limitation of Liability</h2>
+  <p>
+    To the extent permitted by law, Linger's developer will not be liable for indirect, incidental,
+    special, or consequential damages arising from your use of the Service. This includes loss of
+    data or access caused by outages, account changes, deletion, or retention practices of Google,
+    Cloudflare, AWS, or your browser or device. Nothing in these Terms limits liability that cannot
+    be limited under applicable law.
+  </p>
 
-  <h2>8. Termination</h2>
-  <p>We may suspend access for violations of these Terms. You may stop using the Service at any time and revoke the app's Google OAuth access via <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.</p>
+  <h2>10. Suspension and Termination</h2>
+  <p>
+    You may stop using Linger at any time and sign out or revoke its Google authorization. Stopping
+    use does not delete your Google Drive files, local exports, or S3 backups; you must remove those
+    separately. We may suspend access if reasonably necessary to protect the Service or address a
+    violation of these Terms.
+  </p>
 
-  <h2>9. Changes to Terms</h2>
-  <p>We may update these Terms at any time. Continued use after changes constitutes acceptance.</p>
+  <h2>11. Privacy</h2>
+  <p>
+    Your use of Linger is also governed by our <a href="/privacy">Privacy Policy</a>, which explains
+    what information the Service processes, where it is stored, and how to manage or delete it.
+  </p>
 
-  <h2>10. Governing Law</h2>
+  <h2>12. Changes to These Terms</h2>
+  <p>
+    We may update these Terms as the Service changes. The effective date above shows when they were
+    last updated. If you continue to use Linger after an update, you agree to the revised Terms.
+  </p>
+
+  <h2>13. Governing Law</h2>
   <p>These Terms are governed by the laws of Japan.</p>
 
-  <h2>11. Contact</h2>
-  <p>For questions, contact: <a href="mailto:europeanplaice@gmail.com">europeanplaice@gmail.com</a></p>
+  <h2>14. Contact</h2>
+  <p>For questions about these Terms, contact: <a href="mailto:europeanplaice@gmail.com">europeanplaice@gmail.com</a></p>
 </body>
 </html>

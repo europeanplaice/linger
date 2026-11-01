@@ -57,57 +57,40 @@ function service() {
   return new S3WorkflowsService(createExecutionContext(), workflowEnv)
 }
 
-describe('S3WorkflowsService.startBackfill', () => {
+describe('retired durable Workflow entry points', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('rejects a request whose session does not belong to the claimed account', async () => {
+  function withWorkflowSpies() {
+    const workflowEnv = {
+      ...(env as unknown as WorkflowEnv),
+      S3_BACKFILL_WORKFLOW: { create: vi.fn(), get: vi.fn() },
+      S3_MIRROR_WORKFLOW: { create: vi.fn(), get: vi.fn() },
+    } as unknown as WorkflowEnv
+    return { workflowEnv, service: new S3WorkflowsService(createExecutionContext(), workflowEnv) }
+  }
+
+  it('fails closed on backfill start without creating a Workflow or reserving a job', async () => {
     const accountKey = 'auth-mismatch-1'
     await seedSession(accountKey)
-    const svc = service()
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey: 'someone-else', requestId: 'req-1' })).rejects.toThrow('Unauthorized')
+    const { workflowEnv, service: svc } = withWorkflowSpies()
+    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-1' }))
+      .rejects.toThrow(/background workflows are disabled/i)
+    expect(workflowEnv.S3_BACKFILL_WORKFLOW.create).not.toHaveBeenCalled()
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getJob())).toBeNull()
   })
 
-  it('creates a job and starts the underlying Workflow', async () => {
-    const accountKey = 'backfill-1'
+  it('fails closed on mirror scheduling without creating a Workflow or pending record', async () => {
+    const accountKey = 'retired-mirror-1'
     await seedSession(accountKey)
-    const svc = service()
-    const result = await svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-1' })
-    expect(result.created).toBe(true)
-    expect(result.job.state).toBe('queued')
-  })
-
-  it('dedups a retried startBackfill call with the same requestId', async () => {
-    const accountKey = 'backfill-2'
-    await seedSession(accountKey)
-    const svc = service()
-    const first = await svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-dedup' })
-    const retry = await svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-dedup' })
-    expect(retry.created).toBe(false)
-    expect(retry.job.jobId).toBe(first.job.jobId)
-  })
-
-  it('rejects a second concurrent backfill for the same account', async () => {
-    const accountKey = 'backfill-3'
-    await seedSession(accountKey)
-    const svc = service()
-    await svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-a' })
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-b' })).rejects.toThrow('already running')
-  })
-
-  it('rejects a malformed requestId before touching the index', async () => {
-    const accountKey = 'backfill-4'
-    await seedSession(accountKey)
-    const svc = service()
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'not valid!' })).rejects.toThrow('Invalid request ID')
-  })
-
-  it('rejects a scope containing a non-date entry', async () => {
-    const accountKey = 'backfill-5'
-    await seedSession(accountKey)
-    const svc = service()
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-scope', scope: ['2026-01-01', 'not-a-date'] })).rejects.toThrow('Invalid backfill scope')
+    const { workflowEnv, service: svc } = withWorkflowSpies()
+    await expect(svc.mirrorEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-03', driveVersion: '9' }))
+      .rejects.toThrow(/durable s3 mirroring is disabled/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-03'))).toBeNull()
   })
 })
 
@@ -160,19 +143,21 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     vi.clearAllMocks()
   })
 
-  it('mirrorEntryNow mirrors inline and reports success', async () => {
+  it('mirrorEntryNow refuses to use credentials absent from metadata-only session storage', async () => {
     const accountKey = 'mirror-now-1'
     await seedSession(accountKey)
     const svc = service()
     const result = await svc.mirrorEntryNow({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-01' })
-    expect(result.ok).toBe(true)
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/request-scoped Google credentials/i)
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
     const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-01'))
-    expect(entry?.state).toBe('synced')
+    expect(entry).toBeNull()
+    expect(drive.findEntryMeta).not.toHaveBeenCalled()
   })
 
-  it('mirrorEntryNow records a permanent failure and reports it', async () => {
+  it('mirrorEntryNow does not persist a failure for an unavailable request credential', async () => {
     const accountKey = 'mirror-now-2'
     await seedSession(accountKey)
     vi.mocked(drive.findEntryMeta).mockImplementationOnce(async () => {
@@ -181,14 +166,15 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     const svc = service()
     const result = await svc.mirrorEntryNow({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-02' })
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('forbidden')
+    expect(result.error).toMatch(/request-scoped Google credentials/i)
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
     const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-02'))
-    expect(entry?.state).toBe('failed')
+    expect(entry).toBeNull()
+    expect(drive.findEntryMeta).not.toHaveBeenCalled()
   })
 
-  it('mirrorEntry marks the entry pending and schedules a mirror workflow without running it inline', async () => {
+  it('mirrorEntry rejects legacy durable scheduling without touching the sync index', async () => {
     const accountKey = 'mirror-ff-1'
     await seedSession(accountKey)
     const workflowEnv = {
@@ -200,21 +186,16 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     } as unknown as WorkflowEnv
     const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
 
-    const result = await svc.mirrorEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-03', driveVersion: '9' })
-    expect(result.ok).toBe(true)
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-07-03', driveVersion: '9', kind: 'mirror' }),
-      }),
-    )
+    await expect(svc.mirrorEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-03', driveVersion: '9' }))
+      .rejects.toThrow(/durable S3 mirroring is disabled/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
     const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-03'))
-    expect(entry?.state).toBe('pending')
-    expect(entry?.driveVersion).toBe('9')
+    expect(entry).toBeNull()
   })
 
-  it('deleteEntry schedules a delete workflow', async () => {
+  it('deleteEntry does not schedule work without request-scoped Google credentials', async () => {
     const accountKey = 'del-ff-1'
     await seedSession(accountKey)
     const workflowEnv = {
@@ -227,12 +208,11 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
 
     const result = await svc.deleteEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-04' })
-    expect(result.ok).toBe(true)
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-07-04', kind: 'delete' }),
-      }),
-    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/request-scoped Google credentials/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-04'))).toBeNull()
   })
 })
 
@@ -251,7 +231,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     } as unknown as WorkflowEnv
   }
 
-  it('starts a mirror workflow and reports pending when a plain open finds no index record', async () => {
+  it('fails closed when a plain open would re-arm a missing mirror from stored metadata', async () => {
     const accountKey = 'lazy-open-1'
     await seedSession(accountKey)
     const workflowEnv = lazyEnv()
@@ -259,19 +239,16 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     await svc.setBackupEnabled({ sessionId: sessionIdFor(accountKey), accountKey, enabled: true })
 
     const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-05', requestedVersion: '7' })
-    expect(status.status).toBe('pending')
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-01-05', kind: 'mirror' }),
-      }),
-    )
+    expect(status.status).toBe('failed')
+    expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
     const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-05'))
-    expect(entry?.state).toBe('pending')
+    expect(entry).toBeNull()
   })
 
-  it('self-heals a since-scoped check past its grace window by re-arming the mirror and reporting pending', async () => {
+  it('fails closed on a since-scoped check past its grace window without re-arming a mirror', async () => {
     const accountKey = 'lazy-open-2'
     await seedSession(accountKey)
     const workflowEnv = lazyEnv()
@@ -285,15 +262,12 @@ describe('getEntryStatus lazy mirror-on-read', () => {
       requestedVersion: '7',
       since: new Date(Date.now() - 60 * 1000).toISOString(),
     })
-    expect(status.status).toBe('pending')
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-01-06', kind: 'mirror' }),
-      }),
-    )
+    expect(status.status).toBe('failed')
+    expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
   })
 
-  it('re-arms the mirror and reports pending when a plain open finds a stale pending record', async () => {
+  it('fails closed when a plain open finds a stale pending record', async () => {
     const accountKey = 'lazy-open-3'
     await seedSession(accountKey)
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
@@ -305,21 +279,17 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
 
     const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-07', requestedVersion: '3' })
-    expect(status.status).toBe('pending')
-    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ date: '2026-01-07', kind: 'mirror' }),
-      }),
-    )
+    expect(status.status).toBe('failed')
+    expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
+    expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-07')))
+      .toMatchObject({ state: 'pending' })
   })
 })
 
-describe('S3WorkflowsService daily step budget', () => {
-  // Moved to the end of the file on purpose: it fills the shared __workflow_usage__
-  // counter to the daily budget, and every schedule/mirror RPC now gates on that
-  // counter, so tests after this one would be refused (see the budget gate in
-  // runtime.ts's mirrorEntryForAuth/deleteEntryForAuth/startBackfill).
-  it('refuses to start a new backfill once the daily step budget is exhausted', async () => {
+describe('retired scheduling with exhausted workflow budget', () => {
+  // Keep this last because it fills the shared __workflow_usage__ counter.
+  it('does not create a durable backfill even when the daily step budget is exhausted', async () => {
     const accountKey = 'backfill-budget-1'
     await seedSession(accountKey)
     const workflowEnv = env as unknown as WorkflowEnv
@@ -330,19 +300,15 @@ describe('S3WorkflowsService daily step budget', () => {
     })
 
     const svc = service()
-    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-budget' })).rejects.toThrow('budget')
+    await expect(svc.startBackfill({ sessionId: sessionIdFor(accountKey), accountKey, requestId: 'req-budget' }))
+      .rejects.toThrow(/background workflows are disabled/i)
 
     // No job should have been reserved for this account as a side effect of the refusal.
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getJob())).toBeNull()
   })
 
-  it('reports a refused lazy re-arm as failed with the reason, without leaving a poisoned record', async () => {
-    // This describe's first test already exhausted the shared daily budget counter,
-    // so a lazy re-arm below is refused. The refusal is a *transient* condition that
-    // self-heals at the next UTC day, so it must not leave a permanent failed row
-    // behind: after a reset, simply opening the date re-arms and syncs it. The
-    // failure is still surfaced to this check as 'failed' with the concrete reason.
+  it('reports a missing request-scoped credential without creating a failed sync record', async () => {
     const accountKey = 'backfill-budget-arm'
     await seedSession(accountKey)
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
@@ -365,9 +331,8 @@ describe('S3WorkflowsService daily step budget', () => {
     })
 
     expect(status.status).toBe('failed')
-    expect('error' in status ? status.error : '').toMatch(/budget/i)
-    // Nothing scheduled, and no persistent failed record written (so a post-reset
-    // open can still self-heal rather than being stuck on a stale failure).
+    expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
+    // Nothing was scheduled and no persistent failed record was written.
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
     expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-09'))).toBeNull()
   })

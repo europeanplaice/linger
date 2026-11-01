@@ -7,32 +7,14 @@ export class S3Error extends Error {
   }
 }
 
-// `expiresAt` (ms since epoch, from STS's own Expiration) is exposed to callers so a
-// longer-lived cache than this module's own in-isolate one (see s3Settings.ts's
-// getAssumedCredentials, which persists this in the user's KV session — isolates for a
-// low-traffic app go cold between requests far more often than this in-memory Map ever
-// gets to help) can also tell a still-good credential from an expired one.
+// `expiresAt` is used only during the current request to avoid starting work with
+// nearly expired STS credentials. Credentials are never cached or persisted.
 export interface AssumedCredentials {
   accessKeyId: string
   secretAccessKey: string
   sessionToken: string
   expiresAt: number
 }
-
-// Opportunistic cross-request cache: Cloudflare Workers isolates commonly persist
-// module-scope state across requests while warm (not guaranteed — purely a best-effort
-// optimization, never relied on for correctness). Avoids re-assuming the role on every
-// save/delete mirror and every entry-status poll (up to 4 per save) within the same
-// warm isolate. Keyed by caller-supplied `cacheKey` — callers must key this uniquely
-// per user (e.g. `${google_sub}:${roleArn}:${region}`) so credentials for one account
-// can never be handed out for another; omit the key to opt out of caching entirely.
-const credentialsCache = new Map<string, AssumedCredentials>()
-// Treat cached credentials as expired this far ahead of their real STS expiry, so a
-// cache hit never hands out credentials that could die mid-operation. Generous enough
-// that backfillAllEntries — which assumes a role once and then runs a multi-minute
-// chunked operation on those same credentials — never starts a chunk with too little
-// runway left on them.
-export const CREDENTIALS_EXPIRY_MARGIN_MS = 15 * 60 * 1000
 
 // Bounds every outbound STS/S3 request (headers *and* body — an AbortSignal cancels
 // the whole exchange, unlike racing a wrapper promise around just the fetch() call)
@@ -47,12 +29,7 @@ const S3_FETCH_TIMEOUT_MS = 20_000
 // sts:AssumeRoleWithWebIdentity is unauthenticated (that's the point of web
 // identity federation) — no request signing needed for this call itself, only
 // for the S3 requests made afterwards with the credentials it returns.
-export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string, region: string, cacheKey?: string): Promise<AssumedCredentials> {
-  if (cacheKey) {
-    const cached = credentialsCache.get(cacheKey)
-    if (cached && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) return cached
-  }
-
+export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string, region: string): Promise<AssumedCredentials> {
   const params = new URLSearchParams({
     Action: 'AssumeRoleWithWebIdentity',
     Version: '2011-06-15',
@@ -71,8 +48,8 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
   })
 
   if (!resp.ok) {
-    const body = await resp.text()
-    throw new S3Error(resp.status, `STS AssumeRoleWithWebIdentity failed: ${body}`)
+    // Provider error bodies can echo request details; retain status only.
+    throw new S3Error(resp.status, `STS AssumeRoleWithWebIdentity failed (HTTP ${resp.status})`)
   }
 
   const data = await resp.json() as {
@@ -99,8 +76,6 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     sessionToken: raw.SessionToken,
     expiresAt: isNaN(parsedExpiration) ? Date.now() + 43200 * 1000 : parsedExpiration,
   }
-
-  if (cacheKey) credentialsCache.set(cacheKey, creds)
 
   return creds
 }

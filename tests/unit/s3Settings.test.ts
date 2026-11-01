@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME,
   isValidS3Settings, getS3Settings, loadS3SettingsRecord, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
-  writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry, isBackfillRunActive,
+  writeBackfillProgress, finishBackfill, resyncSingleEntry, isBackfillRunActive,
   getAssumedCredentials,
 } from '../../functions/_shared/s3Settings'
 import type { S3SettingsRecord, S3Config, S3SyncStatus } from '../../functions/_shared/s3Settings'
@@ -50,7 +50,7 @@ const CONFIG_FILE_ID = 'settings-file'
 const STATUS_FILE_ID = 'status-file'
 
 function makeSession(overrides: Partial<SessionData> = {}): SessionData {
-  return { refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 100_000, ...overrides }
+  return { access_token: 'at', expires_at: Date.now() + 100_000, ...overrides }
 }
 
 // Config (s3_settings.json) and status (s3_sync_status.json) are two separate Drive
@@ -257,92 +257,31 @@ describe('getS3Settings fileId caching', () => {
   })
 })
 
-describe('credentialsCacheKey', () => {
-  it('combines google_sub, roleArn, and region so it is unique per account', () => {
-    const key = credentialsCacheKey(makeSession({ google_sub: '112233' }), baseSettings)
-    expect(key).toBe(`112233:${baseSettings.roleArn}:${baseSettings.region}`)
-  })
-
-  it('omits the key (opts out of caching) when the session has no google_sub', () => {
-    expect(credentialsCacheKey(makeSession(), baseSettings)).toBeUndefined()
-  })
-})
-
-describe('getAssumedCredentials', () => {
-  const cacheKey = `112233:${baseSettings.roleArn}:${baseSettings.region}`
-
-  it('assumes fresh and persists to the session when nothing is cached yet', async () => {
+describe('getAssumedCredentials request scope', () => {
+  it('assumes fresh credentials per operation without mutating or saving them in the session', async () => {
     const sess = makeSession({ google_sub: '112233' })
+    const before = { ...sess }
 
-    const result = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+    const first = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
+    const second = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
 
-    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', baseSettings.roleArn, baseSettings.region, cacheKey)
-    expect(result).toEqual({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
-    expect(sess.s3_assumed_credentials).toEqual({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT, cacheKey })
-    expect(session.saveSession).toHaveBeenCalledWith('sid', sess, {})
-  })
-
-  it('reuses a cached credential without calling STS or writing the session again', async () => {
-    const sess = makeSession({
-      google_sub: '112233',
-      s3_assumed_credentials: { accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st', expiresAt: Date.now() + 3600_000, cacheKey },
-    })
-
-    const result = await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
-
-    expect(result).toEqual({ accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st', expiresAt: expect.any(Number), cacheKey })
-    expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
-    expect(session.saveSession).not.toHaveBeenCalled()
-  })
-
-  it('re-assumes when the cached credential is within the expiry margin', async () => {
-    const sess = makeSession({
-      google_sub: '112233',
-      s3_assumed_credentials: {
-        accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st',
-        expiresAt: Date.now() + s3.CREDENTIALS_EXPIRY_MARGIN_MS - 1000, cacheKey,
-      },
-    })
-
-    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
-
-    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledOnce()
-  })
-
-  it('re-assumes when the cached credential belongs to a different role/region (stale cacheKey)', async () => {
-    const sess = makeSession({
-      google_sub: '112233',
-      s3_assumed_credentials: {
-        accessKeyId: 'cached-ak', secretAccessKey: 'cached-sk', sessionToken: 'cached-st',
-        expiresAt: Date.now() + 3600_000, cacheKey: 'stale:different-role:different-region',
-      },
-    })
-
-    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
-
-    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledOnce()
-  })
-
-  it('does not cache when the session has no google_sub (no cache key)', async () => {
-    const sess = makeSession()
-
-    await getAssumedCredentials('id-token', 'sid', sess, {} as any, baseSettings)
-
-    expect(sess.s3_assumed_credentials).toBeUndefined()
+    expect(first).toEqual({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
+    expect(second).toEqual(first)
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenNthCalledWith(1, 'id-token', baseSettings.roleArn, baseSettings.region)
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenNthCalledWith(2, 'id-token', baseSettings.roleArn, baseSettings.region)
+    expect(sess).toEqual(before)
     expect(session.saveSession).not.toHaveBeenCalled()
   })
 })
 
 describe('mirrorEntrySave', () => {
-  it('passes a per-account cache key through to assumeRoleWithWebIdentity', async () => {
+  it('assumes request-scoped credentials without a persistent cache key', async () => {
     mockS3Files(baseSettings, null)
     const sess = makeSession({ google_sub: '112233' })
 
     await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
-    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith(
-      'id-token', baseSettings.roleArn, baseSettings.region, `112233:${baseSettings.roleArn}:${baseSettings.region}`,
-    )
+    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', baseSettings.roleArn, baseSettings.region)
   })
 })
 

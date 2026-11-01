@@ -1,5 +1,6 @@
 // Shared fetch-mocking helper for Playwright specs that exercise `src/api/*`
 // client modules directly (no browser page) by stubbing `globalThis.fetch`.
+import { clearOAuthCredentials, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 
 export type FetchCall = { url: string; init?: RequestInit }
 
@@ -34,10 +35,15 @@ export function textResponse(body: string, status: number, extraHeaders?: Record
 export class FetchMock {
   calls: FetchCall[] = []
   private readonly originalFetch = globalThis.fetch
+  private readonly originalWindow = (globalThis as typeof globalThis & { window?: Window }).window
   private responses: MockResponse[] = []
 
   /** Queue responses (returned in order) and install the fetch stub. */
   mock(...nextResponses: MockResponse[]): void {
+    setOAuthCredentials({ accessToken: 'test-access-token', idToken: 'test-id-token', expiresAt: Date.now() + 60_000 })
+    if (typeof window === 'undefined') {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { origin: 'http://localhost' } } })
+    }
     this.responses = [...nextResponses]
     this.calls = []
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -56,6 +62,9 @@ export class FetchMock {
 
   /** Restore the real global fetch; call from `test.afterEach`. */
   restore(): void {
+    clearOAuthCredentials()
     globalThis.fetch = this.originalFetch
+    if (this.originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window')
+    else Object.defineProperty(globalThis, 'window', { configurable: true, value: this.originalWindow })
   }
 }

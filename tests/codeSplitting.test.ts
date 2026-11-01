@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 test.describe('code splitting', () => {
   test.beforeEach(async ({ page }) => {
+    await installMockOAuthCredentials(page)
     await page.addInitScript(() => {
       window.localStorage.setItem('linger_language', 'en')
     })

@@ -1,7 +1,7 @@
 import type { Env, SessionData } from './session'
 import { getValidIdToken, saveSession } from './session'
 import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getDiaryFileMeta, getEntryMeta, findEntryMeta, DriveError } from './drive'
-import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError, CREDENTIALS_EXPIRY_MARGIN_MS, type AssumedCredentials } from './s3'
+import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError, type AssumedCredentials } from './s3'
 
 export const S3_SETTINGS_FILE_NAME = 's3_settings.json'
 // Sync status (lastSyncError*/backfillProgress) lives in its own file, separate from
@@ -278,40 +278,11 @@ export async function getS3Settings(token: string, sessionId: string, session: S
   return record ? { ...record.config, ...record.status } : null
 }
 
-// Cache key for assumeRoleWithWebIdentity's opportunistic cross-request credential
-// cache (see s3.ts) — unique per Google account so cached credentials can never be
-// handed out across accounts. Omitted (no caching, just no optimization) when the
-// session has no decoded google_sub, e.g. an older session predating that field.
-export function credentialsCacheKey(session: SessionData, config: Pick<S3Config, 'roleArn' | 'region'>): string | undefined {
-  return session.google_sub ? `${session.google_sub}:${config.roleArn}:${config.region}` : undefined
-}
-
-// Wraps assumeRoleWithWebIdentity with a cache in the user's own durable KV session
-// record (session.s3_assumed_credentials), on top of s3.ts's own in-isolate Map cache.
-// The in-isolate cache rarely helps here: a low-traffic personal account's requests
-// tend to land on cold isolates, so nearly every save and every entry-status poll (up
-// to 7 per save, see EntryEditor.tsx's S3_POLL_DELAYS_MS) was paying a full STS
-// round trip. The session is already loaded into memory by the request middleware
-// before this ever runs, so a cache hit here costs nothing — not even a KV read.
+// STS credentials are request-local and discarded when the current operation ends.
 export async function getAssumedCredentials(
-  idToken: string, sessionId: string, session: SessionData, env: Env, config: Pick<S3Config, 'roleArn' | 'region'>,
+  idToken: string, _sessionId: string, _session: SessionData, _env: Env, config: Pick<S3Config, "roleArn" | "region">,
 ): Promise<AssumedCredentials> {
-  const cacheKey = credentialsCacheKey(session, config)
-  const cached = session.s3_assumed_credentials
-  if (cached && cacheKey && cached.cacheKey === cacheKey && cached.expiresAt - CREDENTIALS_EXPIRY_MARGIN_MS > Date.now()) {
-    return cached
-  }
-
-  const creds = await assumeRoleWithWebIdentity(idToken, config.roleArn, config.region, cacheKey)
-  if (cacheKey) {
-    session.s3_assumed_credentials = { ...creds, cacheKey }
-    try {
-      await saveSession(sessionId, session, env)
-    } catch (e) {
-      console.error('s3Settings.ts: failed to persist assumed-credentials cache', e)
-    }
-  }
-  return creds
+  return assumeRoleWithWebIdentity(idToken, config.roleArn, config.region)
 }
 
 export function entryKey(date: string): string {
@@ -441,19 +412,6 @@ export async function mirrorEntrySave(
   fileId: string,
   driveVersion?: string,
 ): Promise<void> {
-  // New deployments mirror through the dedicated Workflow Worker. Keep the
-  // legacy implementation below as a compatibility fallback for local/dev
-  // environments where the service binding is intentionally absent.
-  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
-    await env.S3_WORKFLOW_SERVICE.mirrorEntry({
-      sessionId,
-      accountKey: session.google_sub,
-      date,
-      fileId,
-      ...(driveVersion ? { driveVersion } : {}),
-    }).catch(error => console.error('s3Settings.ts: Workflow mirror failed', error))
-    return
-  }
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
@@ -491,11 +449,6 @@ export async function mirrorEntryDelete(
   env: Env,
   date: string,
 ): Promise<void> {
-  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
-    await env.S3_WORKFLOW_SERVICE.deleteEntry({ sessionId, accountKey: session.google_sub, date })
-      .catch(error => console.error('s3Settings.ts: Workflow delete mirror failed', error))
-    return
-  }
   let record: S3SettingsRecord | null = null
   try {
     record = await loadS3SettingsRecord(accessToken, sessionId, session, env)

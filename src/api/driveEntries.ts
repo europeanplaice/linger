@@ -1,5 +1,6 @@
 import type { ChangesResult, DiaryEntry, DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { accountRequest, invalidateAccount } from '../lib/accountSession'
+import { getAccessToken, getIdToken } from '../lib/oauthCredentials'
 
 const BASE = '/api/drive'
 
@@ -58,6 +59,13 @@ function retryDelay(attempt: number): number {
 
 const MAX_RETRIES = 3
 
+function assertAuthenticatedApiUrl(url: string): void {
+  const target = new URL(url, window.location.origin)
+  if (target.origin !== window.location.origin || !target.pathname.startsWith('/api/')) {
+    throw new TypeError('Authenticated API requests must use this site’s /api/ routes')
+  }
+}
+
 function waitForRetry(delay: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => {
@@ -75,11 +83,18 @@ function waitForRetry(delay: number, signal?: AbortSignal | null): Promise<void>
 }
 
 export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatuses: number[] = []): Promise<{ data: T; status: number }> {
+  assertAuthenticatedApiUrl(url)
   const account = accountRequest(init)
+  const headers = new Headers(account.init.headers)
+  const accessToken = getAccessToken()
+  const idToken = getIdToken()
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
+  const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-    const res = await fetch(url, { ...account.init, credentials: 'include', cache: 'no-store' })
+    const res = await fetch(url, { ...requestInit, credentials: 'include', cache: 'no-store' })
     account.assertCurrent()
     if (res.headers.get('X-Linger-Account-Changed') === '1') {
       invalidateAccount()
@@ -110,11 +125,18 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
 }
 
 async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void> {
+  assertAuthenticatedApiUrl(url)
   const account = accountRequest(init)
+  const headers = new Headers(account.init.headers)
+  const accessToken = getAccessToken()
+  const idToken = getIdToken()
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
+  const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-    const res = await fetch(url, { ...account.init, credentials: 'include', cache: 'no-store' })
+    const res = await fetch(url, { ...requestInit, credentials: 'include', cache: 'no-store' })
     account.assertCurrent()
     if (res.headers.get('X-Linger-Account-Changed') === '1') {
       invalidateAccount()

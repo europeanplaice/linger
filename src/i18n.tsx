@@ -98,6 +98,7 @@ const dictionaries = {
     login: {
       continueWithGoogle: 'Continue with Google',
       signInWithGoogle: 'Sign in with Google',
+      signInFailed: 'Google sign-in could not be completed. Allow popups and try again.',
       continuePrevious: 'Continue with your previous Google session.',
       privateDiary: 'Your private diary, stored in your Google Drive.',
       sessionExpired: 'Session expired. Please sign in again.',
@@ -110,12 +111,6 @@ const dictionaries = {
       privacyPolicy: 'Privacy Policy',
       termsOfService: 'Terms of Service',
       aboutLinger: 'About',
-      authErrorTitle: "Google didn't renew access",
-      authErrorBody: 'Google only grants ongoing access the first time you sign in to Linger. It looks like that access has lapsed, so you\'ll need to grant it again.',
-      authErrorStep1: 'Open Google Account → Permissions and remove Linger\'s access.',
-      authErrorStep2: 'Come back here and sign in again — Google will grant fresh access this time.',
-      openGooglePermissions: 'Open Google Permissions',
-      dismiss: 'Dismiss',
     },
     entry: {
       savedStatus: 'Saved.',
@@ -266,7 +261,7 @@ const dictionaries = {
       ] as ReactNode[],
       viewInDrive: 'View diary folder in Google Drive',
       sectionS3: 'S3 backup',
-      s3Help: 'Optionally mirror your entries to an S3 bucket in your own AWS account. In short:',
+      s3Help: 'Optionally mirror your entries to an S3 bucket in your own AWS account. Backfills pause when you close or reload this tab, so keep Linger open until they finish. In short:',
       s3Steps: [
         "Run Terraform in your AWS account to create an IAM role and S3 bucket, using linger's Client ID and your Google account ID below.",
         'Paste the resulting Role ARN, bucket name, and region into the fields below.',
@@ -490,6 +485,7 @@ const dictionaries = {
     login: {
       continueWithGoogle: 'Google で続行',
       signInWithGoogle: 'Google でログイン',
+      signInFailed: 'Google にログインできませんでした。ポップアップを許可して、もう一度お試しください。',
       continuePrevious: '前回の Google セッションで続行します。',
       privateDiary: 'Google Drive に保存する、自分だけの日記です。',
       sessionExpired: 'セッションの有効期限が切れました。もう一度ログインしてください。',
@@ -502,12 +498,6 @@ const dictionaries = {
       privacyPolicy: 'プライバシーポリシー',
       termsOfService: '利用規約',
       aboutLinger: 'Lingerについて',
-      authErrorTitle: 'Googleからのアクセス更新がありませんでした',
-      authErrorBody: 'Googleは初回サインイン時にのみ継続的なアクセス権を発行します。その権限が失効しているようなので、もう一度許可し直す必要があります。',
-      authErrorStep1: 'Googleアカウント → 権限を開き、Lingerへのアクセスを削除してください。',
-      authErrorStep2: 'ここに戻ってもう一度サインインしてください。今度はGoogleが新しいアクセス権を発行します。',
-      openGooglePermissions: 'Googleの権限ページを開く',
-      dismiss: '閉じる',
     },
     entry: {
       savedStatus: '保存しました。',
@@ -658,7 +648,7 @@ const dictionaries = {
       ] as ReactNode[],
       viewInDrive: 'Google Drive でフォルダを開く',
       sectionS3: 'S3バックアップ',
-      s3Help: '自分のAWSアカウントのS3バケットに日記をミラーできます。手順の概要:',
+      s3Help: '自分のAWSアカウントのS3バケットに日記をミラーできます。タブを閉じたり再読み込みするとバックアップが一時停止するため、完了までLingerを開いたままにしてください。手順の概要:',
       s3Steps: [
         '下記のClient IDとGoogleアカウントIDを使い、AWSアカウント上でTerraformを実行してIAMロールとS3バケットを作成します。',
         '作成されたRole ARN、バケット名、リージョンを下の入力欄に貼り付けます。',

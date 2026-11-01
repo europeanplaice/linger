@@ -7,7 +7,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function render(
   page: import('@playwright/test').Page,
-  opts: { tokenExpired?: boolean; authError?: 'no_refresh_token' | null } = {},
+  opts: { tokenExpired?: boolean; authError?: 'sign_in_failed' | null } = {},
 ) {
   await page.evaluate((opts) => {
     window.loginScreenHarness.render(opts)
@@ -60,29 +60,17 @@ test.describe('LoginScreen — auth error panel', () => {
     await expect(page.locator('.auth-error-panel')).toHaveCount(0)
   })
 
-  test('shows recovery panel when Google omits a refresh token', async ({ page }) => {
+  test('shows an error when popup sign-in fails', async ({ page }) => {
     await loadHarness(page)
-    await render(page, { authError: 'no_refresh_token' })
+    await render(page, { authError: 'sign_in_failed' })
 
-    const panel = page.locator('.auth-error-panel')
-    await expect(panel).toBeVisible()
-    await expect(panel).toHaveAttribute('role', 'alert')
-    await expect(panel.locator('h2')).toContainText("Google didn't renew access")
-
-    const permissionsLink = panel.locator('.btn-open-permissions')
-    await expect(permissionsLink).toHaveAttribute('href', 'https://myaccount.google.com/permissions')
-    await expect(permissionsLink).toHaveAttribute('target', '_blank')
-    await expect(permissionsLink).toHaveAttribute('rel', 'noopener noreferrer')
+    await expect(page.getByRole('alert')).toContainText('Google sign-in could not be completed')
   })
 
-  test('dismiss button calls onDismissAuthError', async ({ page }) => {
+  test('shows popup failure until auth error is cleared', async ({ page }) => {
     await loadHarness(page)
-    await render(page, { authError: 'no_refresh_token' })
-
-    await page.locator('.btn-dismiss-auth-error').click()
-
-    const dismissed = await page.evaluate(() => window.loginScreenHarness.dismissedAuthError)
-    expect(dismissed).toBe(true)
+    await render(page, { authError: 'sign_in_failed' })
+    await expect(page.getByRole('alert')).toContainText('Google sign-in could not be completed')
   })
 })
 

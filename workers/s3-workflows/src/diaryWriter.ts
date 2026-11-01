@@ -1,11 +1,12 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
+import { mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
 import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
-import { getValidSession, invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
+import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
-import { authorizedSession, mirrorEntryForAuth, deleteEntryForAuth } from './runtime'
+import { authorizedSession } from './runtime'
 import type { WorkflowEnv } from './types'
 
 // One object per Google subject and deployment environment. All sessions/devices
@@ -26,10 +27,16 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   private async session(auth: DiaryWriterAuth): Promise<SessionData> {
     // Recheck after waiting in the queue: logout must cancel queued writes.
     const session = await authorizedSession(this.env, auth)
-    return getValidSession(auth.sessionId, session, this.env)
+    if (!auth.accessToken || auth.expiresAt <= Date.now()) throw new Error('Google access token expired')
+    session.access_token = auth.accessToken
+    session.expires_at = auth.expiresAt
+    session.id_token = auth.idToken
+    session.id_token_verified = Boolean(auth.idToken)
+    return session
   }
 
   private async folder(auth: DiaryWriterAuth, session: SessionData): Promise<string> {
+    const token = auth.accessToken
     const sessionFolderId = session.folder_id
     let stored = await this.ctx.storage.get<string>('folder')
     if (stored) session.folder_id = stored
@@ -38,7 +45,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     // or a non-folder invalidates the pointer.
     if (session.folder_id) {
       try {
-        const meta = await getEntryMeta(session.access_token, session.folder_id)
+        const meta = await getEntryMeta(token, session.folder_id)
         if (meta.trashed || meta.mimeType !== 'application/vnd.google-apps.folder') throw new DriveError(404, 'not_found')
       } catch (error) {
         if (!(error instanceof DriveError && error.status === 404)) throw error
@@ -47,7 +54,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         stored = undefined
         if (session.folder_id) {
           try {
-            const fallbackMeta = await getEntryMeta(session.access_token, session.folder_id)
+            const fallbackMeta = await getEntryMeta(token, session.folder_id)
             if (fallbackMeta.trashed || fallbackMeta.mimeType !== 'application/vnd.google-apps.folder') {
               throw new DriveError(404, 'not_found')
             }
@@ -58,7 +65,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         }
       }
     }
-    const id = await ensureFolder(session.access_token, auth.sessionId, session, this.env, {
+    const id = await ensureFolder(token, auth.sessionId, session, this.env, {
       withinCoordinator: true,
       discoverByName: !stored,
     })
@@ -84,7 +91,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       }
       const session = await this.session(input)
       await this.folder(input, session)
-      const token = session.access_token
+      const token = input.accessToken
       const key = `file:${input.date}`
       const reservationKey = `create:${input.date}`
       const findEntry = async (): Promise<DriveFileMeta | null> => {
@@ -123,15 +130,14 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const headers = new Headers()
       if (input.fileId) headers.set('X-Linger-File-Id', input.fileId)
       if (input.baseVersion) headers.set('If-Match', input.baseVersion)
-      const mirrorAuth = { sessionId: input.sessionId, accountKey: input.accountKey, date: input.date }
       const context = {
         request: new Request('https://diary-writer.internal/', { method: input.method, headers, ...(input.method === 'POST' ? { body: input.body } : {}) }),
         params: { date: input.date }, env: this.env,
         data: { sessionId: input.sessionId, accessToken: token, session },
         waitUntil: (promise: Promise<unknown>) => this.ctx.waitUntil(promise),
         findEntry, createEntry,
-        onSaved: (meta: DriveFileMeta) => mirrorEntryForAuth(this.env, { ...mirrorAuth, fileId: meta.id, driveVersion: meta.version }).catch(error => console.error('Diary mirror scheduling failed', error)),
-        onRemoved: () => deleteEntryForAuth(this.env, mirrorAuth).catch(error => console.error('Diary deletion mirror scheduling failed', error)),
+        onSaved: (meta: DriveFileMeta) => mirrorEntrySave(token, input.sessionId, session, this.env, input.date, (input.body ? JSON.parse(input.body) as { content?: string } : {}).content ?? '', meta.id, meta.version),
+        onRemoved: () => mirrorEntryDelete(token, input.sessionId, session, this.env, input.date),
       }
       const response = await (input.method === 'POST' ? saveDiaryEntry(context) : removeDiaryEntry(context))
       if (session.folder_id) await this.ctx.storage.put('folder', session.folder_id)

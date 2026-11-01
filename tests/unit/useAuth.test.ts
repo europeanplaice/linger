@@ -19,6 +19,7 @@ beforeEach(() => {
   localStorage.clear()
   setActiveAccount(null, true)
   mockStartSignIn.mockReset()
+  mockStartSignIn.mockResolvedValue({ signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123', googleClientId: 'client-id' })
   mockCheckSession.mockReset()
   mockCheckSession.mockResolvedValue({ signedIn: false, email: null })
   mockRevokeSession.mockReset()
@@ -124,7 +125,7 @@ describe('useAuth', () => {
     const { result } = renderHook(() => useAuth())
     await waitFor(() => expect(result.current.status).toBe('signedOut'))
 
-    act(() => result.current.signIn())
+    await act(async () => { result.current.signIn(); await Promise.resolve() })
 
     expect(mockStartSignIn).toHaveBeenCalledOnce()
   })
@@ -166,9 +167,31 @@ describe('useAuth', () => {
     const { result } = renderHook(() => useAuth())
     await waitFor(() => expect(result.current.status).toBe('signedOut'))
 
-    act(() => result.current.retryAfterExpired())
+    await act(async () => { result.current.retryAfterExpired(); await Promise.resolve() })
 
     expect(mockStartSignIn).toHaveBeenCalledOnce()
+  })
+
+  it('updates the active account after popup sign-in resolves', async () => {
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedOut'))
+    await act(async () => { result.current.signIn(); await Promise.resolve() })
+    await waitFor(() => expect(result.current.status).toBe('signedIn'))
+    expect(result.current.googleSub).toBe('google-sub-123')
+    expect(getAccountSnapshot().account).toBe('sub:google-sub-123')
+  })
+
+  it('does not restore a popup sign-in that resolves after sign-out', async () => {
+    let resolve!: (info: { signedIn: boolean; email: string; googleSub: string }) => void
+    mockStartSignIn.mockReturnValue(new Promise(r => { resolve = r }))
+    mockRevokeSession.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedOut'))
+    act(() => result.current.signIn())
+    act(() => result.current.signOut())
+    await act(async () => { resolve({ signedIn: true, email: 'a@example.com', googleSub: 'a' }) })
+    expect(result.current.status).toBe('signedOut')
+    expect(getAccountSnapshot().account).toBeNull()
   })
 
   it('cancels checkSession on unmount', async () => {
@@ -186,12 +209,12 @@ describe('useAuth', () => {
     })
 
     it('picks up a known auth_error from the URL and strips it from the URL bar', async () => {
-      window.history.pushState(null, '', '/?foo=bar&auth_error=no_refresh_token#2026-01-01')
+      window.history.pushState(null, '', '/?foo=bar&auth_error=sign_in_failed#2026-01-01')
 
       const { result } = renderHook(() => useAuth())
       await waitFor(() => expect(result.current.status).toBe('signedOut'))
 
-      expect(result.current.authError).toBe('no_refresh_token')
+      expect(result.current.authError).toBe('sign_in_failed')
       expect(window.location.search).toBe('?foo=bar')
       expect(window.location.hash).toBe('#2026-01-01')
     })
@@ -206,10 +229,10 @@ describe('useAuth', () => {
     })
 
     it('clearAuthError resets authError to null', async () => {
-      window.history.pushState(null, '', '/?auth_error=no_refresh_token')
+      window.history.pushState(null, '', '/?auth_error=sign_in_failed')
 
       const { result } = renderHook(() => useAuth())
-      await waitFor(() => expect(result.current.authError).toBe('no_refresh_token'))
+      await waitFor(() => expect(result.current.authError).toBe('sign_in_failed'))
 
       act(() => result.current.clearAuthError())
 
@@ -217,11 +240,11 @@ describe('useAuth', () => {
     })
 
     it('signOut clears a stale authError so it does not resurface on a later sign-out', async () => {
-      window.history.pushState(null, '', '/?auth_error=no_refresh_token')
+      window.history.pushState(null, '', '/?auth_error=sign_in_failed')
       mockRevokeSession.mockResolvedValue(undefined)
 
       const { result } = renderHook(() => useAuth())
-      await waitFor(() => expect(result.current.authError).toBe('no_refresh_token'))
+      await waitFor(() => expect(result.current.authError).toBe('sign_in_failed'))
 
       act(() => result.current.signOut())
 

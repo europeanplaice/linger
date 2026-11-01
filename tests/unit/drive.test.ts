@@ -97,7 +97,9 @@ describe('ensureFolder', () => {
 
     const result = await ensureFolder('token', 'sid', session, env as any)
 
-    expect(service.ensureDiaryFolder).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: 'google-user' })
+    expect(service.ensureDiaryFolder).toHaveBeenCalledWith({
+      sessionId: 'sid', accountKey: 'google-user', accessToken: 'token', expiresAt: 1000, idToken: undefined,
+    })
     expect(result).toBe('account-folder')
     expect(session.folder_id).toBe('account-folder')
     expect(session).toMatchObject({
@@ -134,7 +136,9 @@ describe('ensureFolder', () => {
     const result = await ensureFolder('token', 'sid', session, env as any)
 
     expect(getByName).toHaveBeenCalledWith('google-user')
-    expect(ensureDiaryFolder).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: 'google-user' })
+    expect(ensureDiaryFolder).toHaveBeenCalledWith({
+      sessionId: 'sid', accountKey: 'google-user', accessToken: 'token', expiresAt: 1000, idToken: undefined,
+    })
     expect(result).toBe('worker-account-folder')
     expect(session.folder_id).toBe('worker-account-folder')
   })
