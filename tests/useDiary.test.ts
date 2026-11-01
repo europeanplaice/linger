@@ -1337,14 +1337,16 @@ test.describe('useDiary offline drafts — multi-draft replay', () => {
 
     // Come back online: first draft save fails (400 — throws without retrying),
     // second succeeds
-    await context.setOffline(false)
     await page.evaluate(({ meta }) => {
       window.diaryHarness.q(
         { status: 400, body: { error: 'server error' } },
         { status: 200, body: meta },
       )
-      window.dispatchEvent(new Event('online'))
     }, { meta: datedFileMeta('2026-05-02', '1') })
+    // Queue responses before connectivity returns: the browser may dispatch
+    // its own online event immediately when setOffline(false) resolves.
+    await context.setOffline(false)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
 
     // Second draft replayed successfully and removed; first stays (will retry later)
     await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts()), { timeout: 3000 })

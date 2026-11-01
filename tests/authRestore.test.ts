@@ -60,21 +60,21 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('Unsaved offline draft')
     await page.reload()
     await expect(page.locator('.login-screen')).toBeVisible()
-    const cachedData = await page.evaluate(async date => {
+    const cachedData = await page.evaluate(async ({ date, email }) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open('linger_diary_cache', 2)
+        const request = indexedDB.open('linger_diary_cache', 3)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
-      const transaction = db.transaction(['entries', 'drafts'], 'readonly')
-      const [entry, draft] = await Promise.all(['entries', 'drafts'].map(store => new Promise<any>((resolve, reject) => {
-        const request = transaction.objectStore(store).get(date)
+      const transaction = db.transaction(['entries', 'accountDrafts'], 'readonly')
+      const [entry, draft] = await Promise.all(['entries', 'accountDrafts'].map(store => new Promise<any>((resolve, reject) => {
+        const request = transaction.objectStore(store).get(store === 'entries' ? date : `${email}\u0000${date}`)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })))
       db.close()
       return { entry, draft }
-    }, date)
+    }, { date, email })
     expect(cachedData.entry?.content?.content).toBe(content)
     expect(cachedData.draft?.content).toBe('Unsaved offline draft')
   } finally {
