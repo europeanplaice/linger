@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   parseSessionId, getSession, saveSession, getValidAccessToken, getValidIdToken,
   makeSessionCookie, clearSessionCookie, jsonResponse,
-  removeEmailSessionIndex, invalidateSession, SESSION_TTL,
+  removeEmailSessionIndex, invalidateSession,
 } from '../../functions/_shared/session'
 
 describe('jsonResponse', () => {
