@@ -1,5 +1,5 @@
 import type { Env, SessionData } from '../_shared/session'
-import { createSession, addEmailSessionIndex, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { createSession, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 import { consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
 
@@ -96,13 +96,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   } catch {
     return jsonResponse({ error: 'Authentication failed. Please try again.' }, 500)
   }
-  const email = claims.email?.trim().toLowerCase()
   const googleSub = claims.sub
 
   const sessionId = crypto.randomUUID()
   const session: SessionData = {
     client_id: env.GOOGLE_CLIENT_ID,
-    ...(email ? { email } : {}),
     ...(googleSub ? { google_sub: googleSub } : {}),
   }
   // D1 creates the session and identity indexes atomically. These helpers are
@@ -114,9 +112,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // getSession already treats a missing session record
   // as absent. The other order risks the opposite and worse case: a live
   // session with no index entry, invisible to /auth/risc's revocation.
-  if (email) {
-    await addEmailSessionIndex(email, sessionId, env)
-  }
   await addSubSessionIndex(googleSub, sessionId, env)
   await createSession(sessionId, session, env)
 

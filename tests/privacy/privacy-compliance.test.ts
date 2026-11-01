@@ -65,7 +65,6 @@ describe('OAuth persistence boundary', () => {
       unrecognized_future_field: { token: 'future-secret' },
     } as never)).toEqual({
       folder_id: 'folder-123',
-      email: 'user@example.com',
       google_sub: 'google-sub-123',
     })
   })
@@ -89,7 +88,7 @@ describe('OAuth persistence boundary', () => {
     } as never, env)
 
     const serialized = stored.get('session:session-1') ?? ''
-    expect(serialized).toContain('user@example.com')
+    expect(serialized).not.toContain('user@example.com')
     expect(serialized).not.toContain(accessToken)
     expect(serialized).not.toContain(refreshToken)
     expect(serialized).not.toContain(idToken)
@@ -126,6 +125,30 @@ describe('D1 privacy migration', () => {
     const db = migratedDatabase()
     const row = db.prepare('SELECT data, revoked FROM auth_sessions WHERE id = ?').get('legacy') as { data: string | null; revoked: number }
     expect(row).toEqual({ data: null, revoked: 1 })
+    db.close()
+  })
+
+  it('scrubs identity from existing revoked sessions without changing active sessions', () => {
+    const db = migratedDatabase()
+    db.prepare('INSERT INTO auth_sessions (id, data, email, google_sub, client_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('active', JSON.stringify({ email: 'active@example.com' }), 'active@example.com', 'active-sub', 'client', Date.now() + 60_000)
+    db.exec(readFileSync('migrations/auth/0003_scrub_revoked_identity.sql', 'utf8'))
+    expect(db.prepare('SELECT data, email, google_sub, client_id, revoked FROM auth_sessions WHERE id = ?').get('legacy'))
+      .toEqual({ data: null, email: null, google_sub: null, client_id: null, revoked: 1 })
+    expect(db.prepare('SELECT email, revoked FROM auth_sessions WHERE id = ?').get('active'))
+      .toEqual({ email: 'active@example.com', revoked: 0 })
+    db.close()
+  })
+
+  it('removes emails from active sessions and prevents new writes', () => {
+    const db = migratedDatabase()
+    db.prepare('INSERT INTO auth_sessions (id, data, email, google_sub, expires_at) VALUES (?, ?, ?, ?, ?)')
+      .run('active', JSON.stringify({ email: 'active@example.com', google_sub: 'sub' }), 'active@example.com', 'sub', Date.now() + 60_000)
+    db.exec(readFileSync('migrations/auth/0004_remove_session_email.sql', 'utf8'))
+    expect(db.prepare('SELECT data, email, revoked FROM auth_sessions WHERE id = ?').get('active'))
+      .toEqual({ data: JSON.stringify({ google_sub: 'sub' }), email: null, revoked: 0 })
+    expect(() => db.prepare('UPDATE auth_sessions SET email = ? WHERE id = ?').run('x@example.com', 'active')).toThrow()
+    expect(() => db.prepare('UPDATE auth_sessions SET data = ? WHERE id = ?').run(JSON.stringify({ email: 'x@example.com' }), 'active')).toThrow()
     db.close()
   })
 

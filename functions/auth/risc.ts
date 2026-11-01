@@ -1,5 +1,5 @@
 import type { Env } from '../_shared/session'
-import { deleteAllSessionsForEmail, deleteAllSessionsForSub, jsonResponse } from '../_shared/session'
+import { deleteAllSessionsForSub, jsonResponse } from '../_shared/session'
 
 const GOOGLE_ISSUER = 'https://accounts.google.com'
 const GOOGLE_RISC_JWKS_URL = 'https://accounts.google.com/o/oauth2/risc/jwks'
@@ -185,6 +185,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
     const sub = extractSub(payload)
     const email = extractEmail(payload)
+    if (!sub && email) {
+      // An email-only event cannot identify sessions without an email index.
+      console.error('RISC: subject identifier required for session revocation')
+      failed = true
+      continue
+    }
     if (!sub && !email) {
       console.log('RISC: no subject identifier available; skipping')
       continue
@@ -195,7 +201,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       // revocations finish, leaving failed sessions indexed for redelivery.
       const results = await Promise.allSettled([
         ...(sub ? [deleteAllSessionsForSub(sub, env)] : []),
-        ...(email ? [deleteAllSessionsForEmail(email, env)] : []),
       ])
       if (results.some(result => result.status === 'rejected')) throw new Error('Session revocation incomplete')
       revoked++

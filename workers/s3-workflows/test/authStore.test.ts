@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanupAuth, consumeOAuthState, saveOAuthState } from '../../../functions/_shared/authStore'
-import { createSession, deleteAllSessionsForEmail, deleteAllSessionsForSub, getSession, invalidateSession, isSessionRevoked, saveSession, SessionRevokedError } from '../../../functions/_shared/session'
+import { createSession, deleteAllSessionsForSub, getSession, invalidateSession, isSessionRevoked, saveSession, SessionRevokedError } from '../../../functions/_shared/session'
 import type { Env, SessionData } from '../../../functions/_shared/session'
 import { onRequest as middleware } from '../../../functions/api/_middleware'
 import { onRequestGet as login } from '../../../functions/auth/login'
@@ -129,7 +129,9 @@ describe('D1 authentication and metadata-only persistence', () => {
       .bind(id).first<{ data: string; email: string; google_sub: string; client_id: string }>()
     for (const value of Object.values(secrets)) expect(JSON.stringify(row)).not.toContain(value)
     const persisted = JSON.parse(row!.data)
-    expect(persisted).toMatchObject({ folder_id: 'updated-folder', email: 'person@example.com', google_sub: '12345' })
+    expect(persisted).toMatchObject({ folder_id: 'updated-folder', google_sub: '12345' })
+    expect(persisted).not.toHaveProperty('email')
+    expect(row?.email).toBeNull()
     for (const key of ['access_token', 'refresh_token', 'id_token', 'expires_at', 'id_token_verified']) {
       expect(persisted).not.toHaveProperty(key)
     }
@@ -173,25 +175,25 @@ describe('D1 authentication and metadata-only persistence', () => {
     await invalidateSession(id, data.email, bindings, data.google_sub)
     expect(await getSession(id, bindings)).toBeNull()
     expect(await isSessionRevoked(id, bindings)).toBe(true)
-    const row = await bindings.AUTH_DB.prepare('SELECT data, revoked, refresh_owner FROM auth_sessions WHERE id = ?')
-      .bind(id).first<{ data: string | null; revoked: number; refresh_owner: string | null }>()
-    expect(row).toMatchObject({ data: null, revoked: 1, refresh_owner: null })
+    const row = await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id, revoked, refresh_owner FROM auth_sessions WHERE id = ?')
+      .bind(id).first()
+    expect(row).toMatchObject({ data: null, email: null, google_sub: null, client_id: null, revoked: 1, refresh_owner: null })
     await expect(saveSession(id, data, bindings)).rejects.toBeInstanceOf(SessionRevokedError)
   })
 
-  it.each(['email', 'sub'] as const)('revokes all D1 sessions by indexed %s identity', async kind => {
+  it('revokes all D1 sessions by indexed Google subject', async () => {
     const subject = crypto.randomUUID()
     const email = `${subject}@example.com`
     const bindings = authEnv()
     const ids = [crypto.randomUUID(), crypto.randomUUID()]
     for (const id of ids) await createSession(id, session({ email, google_sub: subject }), bindings)
 
-    if (kind === 'email') await deleteAllSessionsForEmail(email.toUpperCase(), bindings)
-    else await deleteAllSessionsForSub(subject, bindings)
+    await deleteAllSessionsForSub(subject, bindings)
     for (const id of ids) {
       expect(await getSession(id, bindings)).toBeNull()
       expect(await isSessionRevoked(id, bindings)).toBe(true)
-      expect(await bindings.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(id).first('data')).toBeNull()
+      expect(await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?').bind(id).first())
+        .toMatchObject({ data: null, email: null, google_sub: null, client_id: null })
     }
   })
 
@@ -229,5 +231,13 @@ describe('D1 authentication and metadata-only persistence', () => {
     await expect(saveSession(id, data, bindings)).rejects.toBeInstanceOf(SessionRevokedError)
     expect(await getSession(id, bindings)).toBeNull()
     expect(await bindings.AUTH_DB.prepare('SELECT id FROM auth_oauth_states WHERE id = ?').bind(state).first()).toBeNull()
+  })
+
+  it('removes legacy email index keys during scheduled cleanup', async () => {
+    const bindings = authEnv()
+    const key = `esidx:legacy-${crypto.randomUUID()}@example.com:session`
+    await bindings.SESSIONS.put(key, '', { expirationTtl: 120 })
+    await cleanupAuth(bindings)
+    expect(await bindings.SESSIONS.get(key)).toBeNull()
   })
 })

@@ -87,8 +87,9 @@
     verifier are temporarily stored separately to complete sign-in, as described below.
   </p>
   <p>
-    Cloudflare D1 stores session metadata, including your session ID, Google email and account
-    identifier, expiry, and Drive file identifiers. OAuth access, refresh, and identity tokens and
+    Cloudflare D1 stores session metadata, including your session ID and Google account
+    identifier, expiry, and Drive file identifiers. Your email is read from the verified identity token
+    for display and is not stored in session records. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
     Reloading or closing the page discards those tokens, and expiry requires authorization again.
@@ -114,6 +115,12 @@
     <a href="https://developers.cloudflare.com/workers/observability/logs/workers-logs/" target="_blank" rel="noopener">Workers Logs retention</a>,
     <a href="https://developers.cloudflare.com/workflows/reference/limits/" target="_blank" rel="noopener">Workflow retention limits</a>, and
     <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's Privacy Policy</a>.
+  </p>
+  <p>
+    When a session is invalidated, Linger removes its stored account identifiers and keeps an opaque
+    revoked-session record until it expires to prevent reuse. Completed or failed S3 backfill job
+    history older than 30 days is removed when a new backfill starts; inactive accounts may retain
+    this history longer. Other sync metadata may remain to support synchronization and retries.
   </p>
 
   <p>
@@ -141,7 +148,7 @@
   </p>
   <h3>Information the host administrator may access, or cause Linger to access</h3>
   <ul>
-    <li>Cloudflare session metadata, including your Google email and account identifier. These records do not retain OAuth credentials and cannot by themselves authorize requests to Drive.</li>
+    <li>Cloudflare session metadata, including your Google account identifier. These records do not retain your email or OAuth credentials and cannot by themselves authorize requests to Drive.</li>
     <li>Diary entries and milestones while processing your authorized requests. The backend receives tokens transiently for these operations. An administrator who changes deployed code could capture those tokens or contents, so we cannot guarantee inaccessibility to an administrator with deployment access.</li>
     <li>If you enable S3 backup, the configured bucket's contents within the permissions of your AWS IAM role during authorized operations. Linger uses temporary credentials in request memory to mirror and restore entries.</li>
     <li>Operational records available in Cloudflare, such as sync status, entry dates and versions, backfill progress, and service logs or error details.</li>

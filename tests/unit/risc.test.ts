@@ -262,15 +262,17 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
-  it('returns 202 and revokes all sessions for the user', async () => {
+  it('returns 202 and revokes sessions through the subject index', async () => {
     mockCrypto(true)
     mockJwks()
     const del = vi.fn()
     const env = makeEnv({
-      list: vi.fn().mockResolvedValue({
-        keys: [{ name: 'esidx:user@example.com:sid1' }, { name: 'esidx:user@example.com:sid2' }],
+      list: vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
+        keys: prefix === 'ssidx:12345:'
+          ? [{ name: 'ssidx:12345:sid1' }, { name: 'ssidx:12345:sid2' }]
+          : [],
         list_complete: true,
-      }),
+      })),
       delete: del,
     })
     const jwt = makeJwt(VALID_HEADER, validPayload())
@@ -282,14 +284,35 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(body).toMatchObject({ ok: true, handled: 1, revoked: 1 })
     expect(del).toHaveBeenCalledWith('session:sid1')
     expect(del).toHaveBeenCalledWith('session:sid2')
-    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid1')
-    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid2')
+    expect(del).toHaveBeenCalledWith('ssidx:12345:sid1')
+    expect(del).toHaveBeenCalledWith('ssidx:12345:sid2')
   })
 
-  it.each(['email', 'subject'])('returns a retryable error when %s session deletion fails', async (index) => {
+  it('returns a retryable error for an email-only event without enumerating sessions', async () => {
     mockCrypto(true)
     mockJwks()
-    const prefix = index === 'email' ? 'esidx:user@example.com:' : 'ssidx:12345:'
+    const env = makeEnv()
+    const payload = validPayload({
+      events: {
+        'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked': {
+          hint_identifier: 'user@example.com',
+        },
+      },
+    })
+
+    const response = await postRisc(makeJwt(VALID_HEADER, payload), env)
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Retry-After')).toBe('1')
+    expect(await response.json()).toEqual({ error: 'Session revocation temporarily unavailable' })
+    expect(env.SESSIONS.list).not.toHaveBeenCalled()
+    expect(env.SESSIONS.delete).not.toHaveBeenCalled()
+  })
+
+  it('returns a retryable error when subject session deletion fails', async () => {
+    mockCrypto(true)
+    mockJwks()
+    const prefix = 'ssidx:12345:'
     const env = makeEnv({
       list: vi.fn().mockImplementation(({ prefix: requested }: { prefix: string }) => Promise.resolve({
         keys: requested === prefix ? [{ name: `${prefix}sid1` }] : [], list_complete: true,
@@ -386,17 +409,20 @@ describe('onRequestPost (RISC webhook)', () => {
     ['oauth', 'tokens-revoked'],
     ['risc', 'account-disabled'],
     ['risc', 'account-credential-change-required'],
-  ])('revokes sessions for event %s/%s', async (ns, eventSlug) => {
+  ])('revokes sessions by subject for event %s/%s', async (ns, eventSlug) => {
     mockCrypto(true)
     mockJwks()
     const del = vi.fn()
     const env = makeEnv({
-      list: vi.fn().mockResolvedValue({ keys: [{ name: 'esidx:user@example.com:sid1' }], list_complete: true }),
+      list: vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
+        keys: prefix === 'ssidx:12345:' ? [{ name: 'ssidx:12345:sid1' }] : [], list_complete: true,
+      })),
       delete: del,
     })
     const payload = validPayload({
       events: {
         [`https://schemas.openid.net/secevent/${ns}/event-type/${eventSlug}`]: {
+          subject: { subject_type: 'iss-sub', iss: 'https://accounts.google.com', sub: '12345' },
           hint_identifier: 'user@example.com',
         },
       },
@@ -409,6 +435,7 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(response.status).toBe(202)
     expect(body.revoked).toBe(1)
     expect(del).toHaveBeenCalledWith('session:sid1')
+    expect(del).toHaveBeenCalledWith('ssidx:12345:sid1')
   })
 })
 

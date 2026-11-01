@@ -57,6 +57,9 @@ function parseFailedDates(value: string): string[] {
 // this is sized against the theoretical bound, not the common case. 10 minutes
 // leaves comfortable margin above that.
 const JOB_ORPHAN_TIMEOUT_MS = 10 * 60 * 1000
+// Keep enough history for the status UI and ordinary client retries without
+// letting one row and its batch idempotency keys accumulate forever.
+const COMPLETED_JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 function isOrphaned(row: JobRow): boolean {
   const lastActiveStr = (row.updated_at as string | null) ?? (row.started_at as string)
@@ -263,6 +266,23 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return rows[0] ?? null
   }
 
+  private pruneCompletedJobs(now: number): void {
+    const cutoff = new Date(now - COMPLETED_JOB_RETENTION_MS).toISOString()
+    // Only terminal rows are candidates; keep the full retry window even during bursts.
+    this.ctx.storage.sql.exec(
+      `DELETE FROM processed_batches WHERE job_id IN (
+         SELECT job_id FROM jobs
+         WHERE state IN ('complete', 'failed', 'cancelled')
+           AND finished_at < ?
+       )`, cutoff,
+    )
+    this.ctx.storage.sql.exec(
+      `DELETE FROM jobs
+       WHERE state IN ('complete', 'failed', 'cancelled')
+         AND finished_at < ?`, cutoff,
+    )
+  }
+
   startJob(requestId: string, jobId: string, workflowId: string, enabled: boolean, startedAt: string, expectedBucket?: string): JobReservation {
     if (this.settingsUpdating) throw new Error('A settings update is already running')
     if (expectedBucket && this.configValue('bucket') && this.configValue('bucket') !== expectedBucket) throw new Error('S3 backup target changed')
@@ -272,6 +292,8 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     ).toArray()[0]
     if (existingRequest) return { job: this.jobFromRow(existingRequest), created: false }
     if (!enabled) throw new Error('S3 backup is not enabled')
+
+    this.pruneCompletedJobs(Date.now())
 
     const active = this.ctx.storage.sql.exec<JobRow>(
       "SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE state IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1",

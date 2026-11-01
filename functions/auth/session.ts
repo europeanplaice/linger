@@ -11,10 +11,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   const session = await getSession(sessionId, env)
   if (!session?.google_sub) return signedOutResponse()
+  let email: string | null = null
   try {
     const expiresIn = await verifyGoogleAccessToken(token, env.GOOGLE_CLIENT_ID, session.google_sub)
     const claims = await verifyGoogleIdToken(idToken, env.GOOGLE_CLIENT_ID)
     if (claims.sub !== session.google_sub) return signedOutResponse()
+    email = claims.email?.trim().toLowerCase() ?? null
     // These values are request-local only. The metadata projection in authStore.ts
     // prevents them from being written even if this object is later saved.
     session.access_token = token
@@ -46,7 +48,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
   return new Response(JSON.stringify({
     signedIn: true,
-    email: session.email ?? null,
+    email,
     googleSub: session.google_sub ?? null,
     googleClientId: session.client_id ?? env.GOOGLE_CLIENT_ID,
   }), { status: 200, headers })

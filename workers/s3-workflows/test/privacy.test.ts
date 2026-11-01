@@ -53,7 +53,6 @@ describe('OAuth credential storage privacy', () => {
     expect(persisted).not.toContain('expires_at')
     expect(JSON.parse(String(row!.data))).toMatchObject({
       folder_id: 'folder-metadata',
-      email: 'privacy@example.com',
       google_sub: session.google_sub,
     })
 

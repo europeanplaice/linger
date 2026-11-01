@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   parseSessionId, getSession, saveSession, getValidAccessToken, getValidIdToken,
   makeSessionCookie, clearSessionCookie, jsonResponse,
-  addEmailSessionIndex, removeEmailSessionIndex, invalidateSession, SESSION_TTL,
+  removeEmailSessionIndex, invalidateSession, SESSION_TTL,
 } from '../../functions/_shared/session'
 
 describe('jsonResponse', () => {
@@ -29,7 +29,7 @@ describe('session storage', () => {
   it('reads valid session metadata and rejects invalid or absent records', async () => {
     const valid = { email: 'user@example.com', google_sub: 'sub-1', folder_id: 'folder-1' }
     const env = { SESSIONS: { get: vi.fn(async (key: string) => key === 'session:valid' ? JSON.stringify(valid) : key === 'session:bad' ? 'not-json' : null) } }
-    expect(await getSession('valid', env as any)).toMatchObject(valid)
+    expect(await getSession('valid', env as any)).toEqual({ google_sub: 'sub-1', folder_id: 'folder-1' })
     expect(await getSession('bad', env as any)).toBeNull()
     expect(await getSession('missing', env as any)).toBeNull()
   })
@@ -44,7 +44,8 @@ describe('session storage', () => {
     } as any, env as any)
     expect(put).toHaveBeenCalledOnce()
     const stored = JSON.parse(put.mock.calls[0][1])
-    expect(stored).toMatchObject({ email: 'user@example.com', google_sub: 'sub-1', folder_id: 'folder-1' })
+    expect(stored).toMatchObject({ google_sub: 'sub-1', folder_id: 'folder-1' })
+    expect(stored).not.toHaveProperty('email')
     expect(stored).not.toHaveProperty('access_token')
     expect(stored).not.toHaveProperty('id_token')
     expect(stored).not.toHaveProperty('refresh_token')
@@ -101,11 +102,6 @@ describe('session cookies', () => {
 })
 
 describe('session indexes and revocation', () => {
-  it('writes a normalized per-session email index with the session TTL', async () => {
-    const put = vi.fn()
-    await addEmailSessionIndex('User@Example.COM', 'sid', { SESSIONS: { put } } as any)
-    expect(put).toHaveBeenCalledWith('esidx:user@example.com:sid', '', { expirationTtl: SESSION_TTL })
-  })
   it('removes the email index entry for one session', async () => {
     const del = vi.fn()
     await removeEmailSessionIndex('user@example.com', 'sid', { SESSIONS: { delete: del } } as any)

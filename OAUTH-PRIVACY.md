@@ -13,6 +13,13 @@ request memory and synchronous service calls, but may persist only session and
 sync metadata. A session cookie or a database dump alone must not authorize a
 Drive operation. Server-side refresh tokens are no longer part of this design.
 
+Session storage does not retain Google email addresses. The session endpoint reads
+the email for display from the verified request-scoped identity token. RISC events
+with a Google subject revoke matching sessions; email-only events cannot be mapped
+without retaining an email index and receive a retryable error. Migration 0004
+clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
+Historical backups and logs require separate retention and deletion review.
+
 Reloading or closing the page discards its credentials. Expired tokens require
 another Google authorization. S3 work advances while the app is open and the
 user's authorization remains valid; progress metadata can survive a pause, but

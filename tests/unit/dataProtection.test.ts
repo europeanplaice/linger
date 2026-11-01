@@ -263,8 +263,8 @@ it('rejects session data recreated by a stale writer', async () => {
   expect(await getSession('a', env)).toBeNull()
   await expect(saveSession('a', { access_token: 'a', expires_at: 0 }, env)).rejects.toBeInstanceOf(SessionRevokedError)
   // A new sign-in has a different random session ID and remains usable.
-  await saveSession('b', { access_token: 'b', expires_at: 0, email: 'b@example.com' }, env)
-  expect(await getSession('b', env)).toMatchObject({ email: 'b@example.com' })
+  await saveSession('b', { access_token: 'b', expires_at: 0, google_sub: 'b-sub' }, env)
+  expect(await getSession('b', env)).toMatchObject({ google_sub: 'b-sub' })
   expect((await getSession('b', env))?.access_token).toBeUndefined()
 })
 

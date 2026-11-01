@@ -198,6 +198,44 @@ describe('S3SyncIndex backfill jobs', () => {
       expect(instance.getJob('job-x')?.state).toBe('complete')
     })
   })
+
+  it('prunes old completed jobs while keeping recent request deduplication', async () => {
+    const stub = stubFor('account-job-retention')
+    await runInDurableObject(stub, async (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      for (let index = 0; index < 2; index++) {
+        const id = `retained-${index}`
+        const at = new Date(Date.now() - (index === 0 ? 31 * 86400_000 : 0)).toISOString()
+        instance.startJob(`request-${id}`, id, `workflow-${id}`, true, at)
+        instance.markRunning(id)
+        instance.recordProgress(id, 'batch-0', 1, [])
+        instance.finishJob(id, at)
+      }
+      expect(instance.getJob('retained-0')).toBeNull()
+      expect(instance.getJob('retained-1')?.state).toBe('complete')
+      expect(instance.startJob('request-retained-1', 'unused', 'unused', true, new Date().toISOString()).created).toBe(false)
+      // A replayed old request can no longer return its deleted job row.
+      const replay = instance.startJob('request-retained-0', 'replacement', 'replacement-wf', true, new Date().toISOString())
+      expect(replay.created).toBe(true)
+    })
+  })
+
+  it('does not prune a live job while retaining completed history', async () => {
+    const stub = stubFor('account-job-retention-active')
+    await runInDurableObject(stub, async (instance: S3SyncIndex) => {
+      instance.setBackupEnabled(true)
+      for (let index = 0; index < 101; index++) {
+        const id = `finished-${index}`
+        const at = new Date(Date.now() + index).toISOString()
+        instance.startJob(`request-${id}`, id, `workflow-${id}`, true, at)
+        instance.markRunning(id)
+        instance.finishJob(id, at)
+      }
+      instance.startJob('live-request', 'live-job', 'live-wf', true, new Date().toISOString())
+      instance.markRunning('live-job')
+      expect(instance.getJob('live-job')?.state).toBe('running')
+    })
+  })
 })
 
 describe('S3SyncIndex account isolation', () => {

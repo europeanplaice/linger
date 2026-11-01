@@ -31,7 +31,6 @@ export function sanitizeSession(session: SessionData): SessionData {
   return {
     ...(typeof session.folder_id === 'string' ? { folder_id: session.folder_id } : {}),
     ...(typeof session.renewed_at === 'number' && Number.isFinite(session.renewed_at) ? { renewed_at: session.renewed_at } : {}),
-    ...(typeof session.email === 'string' ? { email: session.email } : {}),
     ...(typeof session.changes_start_page_token === 'string' ? { changes_start_page_token: session.changes_start_page_token } : {}),
     ...(typeof session.client_id === 'string' ? { client_id: session.client_id } : {}),
     ...(typeof session.google_sub === 'string' ? { google_sub: session.google_sub } : {}),
@@ -84,7 +83,7 @@ export async function readD1Session(id: string, env: AuthEnv): Promise<SessionDa
 async function insertSession(id: string, session: SessionData, expiry: number, env: AuthEnv, importing = false): Promise<void> {
   await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, email, google_sub, client_id, expires_at)
     VALUES (?, ?, ?, ?, ?, ?) ${importing ? 'ON CONFLICT(id) DO NOTHING' : ''}`)
-    .bind(id, JSON.stringify(sanitizeSession(session)), session.email?.trim().toLowerCase() ?? null,
+    .bind(id, JSON.stringify(sanitizeSession(session)), null,
       session.google_sub ?? null, session.client_id ?? null, expiry).run()
 }
 
@@ -124,13 +123,13 @@ export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
   // are update-only, so delayed refreshes cannot recreate even a cleaned-up row.
   const until = Math.max(Date.now() + SESSION_TTL * 1000, Date.parse(env.AUTH_KV_FALLBACK_UNTIL ?? '') || 0)
   await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, expires_at, revoked) VALUES (?, NULL, ?, 1)
-    ON CONFLICT(id) DO UPDATE SET data = NULL, revoked = 1, expires_at = MAX(expires_at, excluded.expires_at), refresh_owner = NULL, refresh_until = 0`)
+    ON CONFLICT(id) DO UPDATE SET data = NULL, email = NULL, google_sub = NULL, client_id = NULL, revoked = 1, expires_at = MAX(expires_at, excluded.expires_at), refresh_owner = NULL, refresh_until = 0`)
     .bind(id, until).run()
 }
 
 export async function revokeD1Account(field: "email" | "google_sub", value: string, env: AuthEnv): Promise<void> {
   const until = Date.now() + SESSION_TTL * 1000
-  await env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, revoked = 1, expires_at = MAX(expires_at, ?), refresh_owner = NULL, refresh_until = 0
+  await env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, email = NULL, google_sub = NULL, client_id = NULL, revoked = 1, expires_at = MAX(expires_at, ?), refresh_owner = NULL, refresh_until = 0
     WHERE ${field} = ? AND revoked = 0`).bind(until, field === "email" ? value.trim().toLowerCase() : value).run()
 }
 
@@ -171,6 +170,16 @@ export async function cleanupAuth(env: AuthEnv): Promise<void> {
     env.AUTH_DB.prepare('DELETE FROM auth_sessions WHERE id IN (SELECT id FROM auth_sessions WHERE expires_at <= ? LIMIT 500)').bind(now),
   ])
   await purgeLegacyCredentialSessions(env)
+  await purgeLegacyEmailIndexes(env)
+}
+
+async function purgeLegacyEmailIndexes(env: Env): Promise<void> {
+  const cursorKey = 'legacy_email_index_purge_cursor'
+  const cursor = await env.SESSIONS.get(cursorKey) ?? undefined
+  const listing = await env.SESSIONS.list({ prefix: 'esidx:', limit: 500, cursor })
+  await Promise.all(listing.keys.map(key => env.SESSIONS.delete(key.name)))
+  if (listing.list_complete || !listing.cursor) await env.SESSIONS.delete(cursorKey)
+  else await env.SESSIONS.put(cursorKey, listing.cursor, { expirationTtl: SESSION_TTL })
 }
 
 export async function purgeLegacyCredentialSessions(env: Env): Promise<void> {

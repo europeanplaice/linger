@@ -173,17 +173,7 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
 }
 
-// Each session gets its own KV key under an email-prefixed namespace, rather than
-// one aggregate key holding a JSON array of session IDs. That aggregate design
-// required a read-modify-write on every add/remove with no locking — two devices
-// signing in for the same email at close to the same time (or even ~60s apart,
-// given KV's edge-cache/propagation delay) could both read the same stale array
-// and each append their own session ID, silently dropping the other's from the
-// index on whichever `put` landed last. The dropped session's own `session:{id}`
-// record stayed valid — it just became unreachable via the index, so it survived
-// deleteAllSessionsForEmail (used by /auth/risc's revocation) and was invisible to
-// getRefreshTokenForEmail. Keying by session ID makes every add/remove a single
-// put/delete with nothing to read first, so this class of lost update can't happen.
+// Legacy email indexes are only read or removed; new sessions never create them.
 function emailSessionIndexPrefix(email: string): string {
   return `esidx:${normalizeEmail(email)}:`
 }
@@ -198,15 +188,6 @@ function subSessionIndexPrefix(sub: string): string {
 
 function subSessionIndexKey(sub: string, sessionId: string): string {
   return `${subSessionIndexPrefix(sub)}${sessionId}`
-}
-
-// Also called on every sliding TTL renewal (see _middleware.ts) to re-stamp this
-// key's own TTL in step with the session record's — otherwise an actively-used,
-// renewed session would still fall out of the index (and out of RISC's reach)
-// after the *original* login's TTL, even though the session itself lives on.
-export async function addEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {
-  if (env.AUTH_DB) return // D1 maintains the indexed identity columns atomically.
-  await env.SESSIONS.put(emailSessionIndexKey(email, sessionId), '', { expirationTtl: SESSION_TTL })
 }
 
 export async function removeEmailSessionIndex(email: string, sessionId: string, env: Env): Promise<void> {

@@ -4,7 +4,7 @@ import { onRequestGet as onSessionCheck } from '../../functions/auth/session'
 
 const { mockVerifyAccess, mockVerifyId } = vi.hoisted(() => ({
   mockVerifyAccess: vi.fn().mockResolvedValue(3600),
-  mockVerifyId: vi.fn().mockResolvedValue({ sub: 'google-sub-123' }),
+  mockVerifyId: vi.fn().mockResolvedValue({ sub: 'google-sub-123', email: 'user@example.com' }),
 }))
 vi.mock('../../functions/_shared/google', () => ({
   verifyGoogleAccessToken: mockVerifyAccess,
@@ -15,15 +15,15 @@ vi.mock('../../functions/_shared/google', () => ({
 afterEach(() => {
   vi.unstubAllGlobals()
   mockVerifyAccess.mockReset().mockResolvedValue(3600)
-  mockVerifyId.mockReset().mockResolvedValue({ sub: 'google-sub-123' })
+  mockVerifyId.mockReset().mockResolvedValue({ sub: 'google-sub-123', email: 'user@example.com' })
 })
 
 describe('logout handler', () => {
   it('deletes session and clears cookie', async () => {
     const del = vi.fn()
-    const get = vi.fn().mockResolvedValue(JSON.stringify({ email: 'user@example.com' }))
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ google_sub: 'google-sub-123' }))
     const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'email:user%40example.com' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:google-sub-123' },
     })
     const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
@@ -35,22 +35,22 @@ describe('logout handler', () => {
     expect(cookie).toContain('Max-Age=0')
   })
 
-  it('removes email index entry on logout', async () => {
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 9999999999999, email: 'user@example.com' }
+  it('removes subject index entry on logout', async () => {
+    const session = { google_sub: 'google-sub-123' }
     const get = vi.fn().mockImplementation((key: string) => {
       if (key === 'session:sid123') return Promise.resolve(JSON.stringify(session))
       return Promise.resolve(null)
     })
     const del = vi.fn()
     const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'email:user%40example.com' },
+      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:google-sub-123' },
     })
     const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
 
     await onLogout({ request, env } as any)
 
     expect(del).toHaveBeenNthCalledWith(1, 'session:sid123')
-    expect(del).toHaveBeenNthCalledWith(2, 'esidx:user@example.com:sid123')
+    expect(del).toHaveBeenNthCalledWith(2, 'ssidx:google-sub-123:sid123')
   })
 
   it('works without a session cookie', async () => {
@@ -83,9 +83,9 @@ describe('logout handler', () => {
   })
 
   it('omits Secure flag on HTTP domains', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify({ email: 'user@example.com' }))
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ google_sub: 'google-sub-123' }))
     const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid', 'X-Linger-Account': 'email:user%40example.com' },
+      headers: { Cookie: 'linger_session=sid', 'X-Linger-Account': 'sub:google-sub-123' },
     })
     const env = { SESSIONS: { get, put: vi.fn(), delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
 

@@ -73,7 +73,9 @@ describe('OAuth callback popup flow', () => {
 
     const sessionCall = put.mock.calls.find(call => String(call[0]).startsWith('session:'))!
     const savedSession = JSON.parse(sessionCall[1] as string)
-    expect(savedSession).toMatchObject({ email: 'user@example.com', google_sub: 'google-sub-123', client_id: 'client-id' })
+    expect(savedSession).toMatchObject({ google_sub: 'google-sub-123', client_id: 'client-id' })
+    expect(savedSession).not.toHaveProperty('email')
+    expect(put.mock.calls.some(call => String(call[0]).startsWith('esidx:'))).toBe(false)
     expect(savedSession).not.toHaveProperty('access_token')
     expect(savedSession).not.toHaveProperty('id_token')
     expect(savedSession).not.toHaveProperty('refresh_token')
