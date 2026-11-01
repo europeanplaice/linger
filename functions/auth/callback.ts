@@ -18,7 +18,6 @@ function popupCredentialResponse(payload: { accessToken: string; idToken: string
     const credential = JSON.parse(new TextDecoder().decode(bytes));
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage({ type: 'linger-oauth-complete', credential }, '${origin}');
-      window.close();
     } else {
       document.querySelector('p').textContent = 'Sign-in finished. Return to the Linger tab.';
     }

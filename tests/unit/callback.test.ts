@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequestGet } from '../../functions/auth/callback'
 import { verifyGoogleIdToken } from '../../functions/_shared/google'
+import { startSignIn } from '../../src/api/auth'
+import { clearOAuthCredentials } from '../../src/lib/oauthCredentials'
 
 vi.mock('../../functions/_shared/google', () => ({
   verifyGoogleIdToken: vi.fn().mockResolvedValue({ sub: 'google-sub-123', email: 'user@example.com', email_verified: true }),
@@ -11,7 +13,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
   vi.stubGlobal('crypto', { randomUUID: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', getRandomValues: (bytes: Uint8Array) => { bytes.fill(1); return bytes } })
 })
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks() })
+afterEach(() => { clearOAuthCredentials(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 function makeEnv(overrides: Record<string, any> = {}) {
   return {
@@ -30,6 +32,28 @@ function mockTokenResponse(overrides: Record<string, unknown> = {}) {
 }
 
 describe('OAuth callback popup flow', () => {
+  it('completes sign-in when the popup message is delivered after a cancellation poll', async () => {
+    mockTokenResponse()
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv({ SESSION_DOMAIN: window.location.origin }) } as any)
+    const html = await response.text()
+    const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)![1]
+
+    const popup = { closed: false, close: vi.fn(function (this: { closed: boolean }) { this.closed = true }) }
+    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ signedIn: true, googleSub: 'google-sub-123' }))))
+    const pending = startSignIn()
+    const opener = { closed: false, postMessage: (data: unknown, origin: string) => {
+      setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data, origin, source: popup as never })), 300)
+    } }
+    new Function('window', 'document', script)({ opener, close: popup.close.bind(popup) }, document)
+
+    await vi.advanceTimersByTimeAsync(250)
+    expect(popup.closed).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    await expect(pending).resolves.toMatchObject({ signedIn: true, googleSub: 'google-sub-123' })
+    expect(popup.close).toHaveBeenCalledOnce()
+  })
+
   it('rejects missing code or state', async () => {
     expect((await onRequestGet({ request: callbackRequest({ state: 'valid-state' }), env: makeEnv() } as any)).status).toBe(400)
     expect((await onRequestGet({ request: callbackRequest({ code: 'abc' }), env: makeEnv() } as any)).status).toBe(400)
@@ -68,6 +92,9 @@ describe('OAuth callback popup flow', () => {
     expect(html).toContain('window.opener.postMessage')
     expect(html).toContain("'https://example.com'")
     expect(html).toContain('linger-oauth-complete')
+    // The opener closes the popup after receiving the message. Closing here can
+    // race its cancellation poll before the queued message is delivered.
+    expect(html).not.toContain('window.close()')
     const credentialJson = JSON.parse(atob(html.match(/const encoded = '([^']+)'/)![1].replace(/-/g, '+').replace(/_/g, '/')))
     expect(credentialJson).toMatchObject({ accessToken: 'short-lived-access', idToken: 'verified-id-token', expiresAt: expect.any(Number) })
 
