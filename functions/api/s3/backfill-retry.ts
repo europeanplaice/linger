@@ -36,7 +36,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, failed, 'Retry', 20))
     return jsonResponse({ ok: true, retrying: failed.length })
   } catch (e) {
-    console.error('s3/backfill-retry.ts: POST failed', e)
+    console.error('s3/backfill-retry.ts: POST failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

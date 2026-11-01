@@ -5,6 +5,7 @@ import { isAtLeast } from '../../../functions/_shared/s3'
 import type { SessionData } from '../../../functions/_shared/session'
 import {
   assertWithinDailyStepBudget,
+  countedStep,
   DAILY_WORKFLOW_STEP_BUDGET,
   ensureAccountDiaryFolder,
   entryKey,
@@ -107,15 +108,30 @@ describe('isPermanentEntryError / isMissingEntryError', () => {
 })
 
 describe('safeError', () => {
-  it('never leaks bearer tokens, secrets, or access keys into the message', () => {
-    const message = safeError(new Error('Authorization: Bearer ya29.abcdef123 rejected, secret=shh, access_key AKIAFOO'))
-    expect(message).not.toMatch(/ya29\.abcdef123/)
-    expect(message).not.toMatch(/shh/)
-    expect(message).not.toMatch(/AKIAFOO/)
+  it('never leaks token, credential, or diary content from the error message', () => {
+    const message = safeError(new Error('Authorization: Bearer ya29.abcdef123 secret=shh AKIAFOO diary entry text'))
+    expect(message).toBe('Error occurred')
+    expect(message).not.toContain('diary entry text')
+    const error = new Error('failure')
+    error.name = 'diary entry text'
+    expect(safeError(error)).toBe('Error occurred')
   })
 
-  it('truncates to 200 characters', () => {
-    expect(safeError(new Error('x'.repeat(500))).length).toBeLessThanOrEqual(200)
+  it('retains only HTTP status for provider errors', () => {
+    expect(safeError({ status: 403, message: 'diary text in provider response' })).toBe('Request failed (HTTP 403)')
+  })
+})
+
+describe('countedStep error serialization', () => {
+  it('sanitizes errors before returning them to Workflow step.do', async () => {
+    const leaked = 'diary text Bearer ya29.secret and AWS key AKIASECRET'
+    const env = {
+      S3_SYNC_INDEX: { getByName: () => ({ recordWorkflowStep: async () => { throw new Error(leaked) } }) },
+    }
+    const step = { do: (_name: string, fnOrConfig: unknown, maybeFn?: () => Promise<unknown>) =>
+      (typeof fnOrConfig === 'function' ? fnOrConfig as () => Promise<unknown> : maybeFn!)() }
+    await expect(countedStep(env as never, step as never, 'privacy-test', async () => 'ok'))
+      .rejects.toThrow('Error occurred')
   })
 })
 

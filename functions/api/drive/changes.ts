@@ -36,7 +36,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     }
   } catch (e) {
     const status = (e instanceof Error && 'status' in e) ? (e as { status: number }).status : 500
-    console.error('changes.ts: Failed to get changes', e)
+    console.error('changes.ts: Failed to get changes')
     return jsonResponse({ error: 'Internal server error' }, status)
   }
 }

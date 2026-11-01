@@ -32,7 +32,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, undefined, 'Resync', 20))
     return jsonResponse({ ok: true })
   } catch (e) {
-    console.error('s3/resync.ts: POST failed', e)
+    console.error('s3/resync.ts: POST failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

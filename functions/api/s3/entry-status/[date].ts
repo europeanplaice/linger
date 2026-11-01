@@ -73,7 +73,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
         const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
         if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
       } catch (e) {
-        console.error('s3/entry-status.ts: S3/STS operation failed', e)
+        console.error('s3/entry-status.ts: S3/STS operation failed')
         stsError = e
       }
     } else {
@@ -166,7 +166,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
   } catch (e) {
     // A transient failure of this status check itself (network blip, STS hiccup)
     // is not the same as a recorded mirror failure — don't surface it as one.
-    console.error('s3/entry-status.ts: check failed', e)
+    console.error('s3/entry-status.ts: check failed')
     return jsonResponse({ status: 'pending' })
   }
 }

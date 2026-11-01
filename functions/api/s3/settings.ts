@@ -14,7 +14,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     const settings = await getS3Settings(accessToken, sessionId, session, context.env)
     return jsonResponse(settings)
   } catch (e) {
-    console.error('s3/settings.ts: GET failed', e)
+    console.error('s3/settings.ts: GET failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }
@@ -82,7 +82,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       const statusMeta = await writeJsonFile(accessToken, folderId, S3_SYNC_STATUS_FILE_NAME, {}, statusFileId ?? undefined)
       statusFileId = statusMeta.id
     } catch (e) {
-      console.error('s3/settings.ts: failed to clear sync status after settings save', e)
+      console.error('s3/settings.ts: failed to clear sync status after settings save')
     }
 
     // Mirror every existing entry the first time backup is enabled — otherwise only
@@ -103,7 +103,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     return jsonResponse(meta)
   } catch (e) {
     if (e instanceof Error && e.message.includes('already running')) return jsonResponse({ error: e.message }, 409)
-    console.error('s3/settings.ts: PUT failed', e)
+    console.error('s3/settings.ts: PUT failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

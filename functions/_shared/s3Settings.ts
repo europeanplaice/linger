@@ -230,7 +230,7 @@ export async function loadS3SettingsRecord(token: string, sessionId: string, ses
     try {
       await saveSession(sessionId, session, env)
     } catch (e) {
-      console.error('s3Settings.ts: failed to persist negative cache', e)
+      console.error('s3Settings.ts: failed to persist negative cache')
     }
     return null
   }
@@ -260,7 +260,7 @@ export async function loadS3SettingsRecord(token: string, sessionId: string, ses
     try {
       await saveSession(sessionId, session, env)
     } catch (e) {
-      console.error('s3Settings.ts: failed to persist settings/status fileId cache', e)
+      console.error('s3Settings.ts: failed to persist settings/status fileId cache')
     }
   }
 
@@ -323,7 +323,7 @@ async function withFreshS3Status(
         if (isValidS3SyncStatus(content)) base = content
         baseVersion = meta.version
       } catch (e) {
-        console.error('s3Settings.ts: fresh re-read before sync-status update failed, using in-memory snapshot', e)
+        console.error('s3Settings.ts: fresh re-read before sync-status update failed, using in-memory snapshot')
       }
     }
 
@@ -341,7 +341,7 @@ async function withFreshS3Status(
         return
       }
     } catch (e) {
-      console.error('s3Settings.ts: failed to write sync-status update', e)
+      console.error('s3Settings.ts: failed to write sync-status update')
       return
     }
   }
@@ -392,7 +392,7 @@ async function entryStillExistsInDrive(
     return true
   } catch (e) {
     if (e instanceof DriveError && e.status === 404) return false
-    console.error('s3Settings.ts: post-mirror existence re-check failed, leaving mirror as-is', e)
+    console.error('s3Settings.ts: post-mirror existence re-check failed, leaving mirror as-is')
     return true
   }
 }
@@ -437,7 +437,7 @@ export async function mirrorEntrySave(
 
     await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
-    console.error('s3Settings.ts: mirrorEntrySave failed', e)
+    console.error('s3Settings.ts: mirrorEntrySave failed')
     if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
   }
 }
@@ -461,7 +461,7 @@ export async function mirrorEntryDelete(
     await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
     await recordMirrorSuccess(accessToken, record, date)
   } catch (e) {
-    console.error('s3Settings.ts: mirrorEntryDelete failed', e)
+    console.error('s3Settings.ts: mirrorEntryDelete failed')
     if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
   }
 }
@@ -528,7 +528,7 @@ export async function resyncSingleEntry(
     await recordMirrorSuccess(accessToken, record, date)
     return { ok: true }
   } catch (e) {
-    console.error('s3Settings.ts: resyncSingleEntry failed', e)
+    console.error('s3Settings.ts: resyncSingleEntry failed')
     const message = describeError(e)
     await recordMirrorFailure(accessToken, record, message, date)
     return { ok: false, error: message }
@@ -651,7 +651,7 @@ export async function backfillAllEntries(
           const failedIdx = failed.indexOf(date)
           if (failedIdx !== -1) failed.splice(failedIdx, 1)
         } catch (e) {
-          console.error(`s3Settings.ts: backfill failed for ${date}`, e)
+          console.error('s3Settings.ts: backfill failed')
           if (!failed.includes(date)) failed.push(date)
         }
       } else {
@@ -673,7 +673,7 @@ export async function backfillAllEntries(
       await finishBackfill(accessToken, record, totalAll, failed, runLabel)
     }
   } catch (e) {
-    console.error('s3Settings.ts: backfillAllEntries failed', e)
+    console.error('s3Settings.ts: backfillAllEntries failed')
     await recordMirrorFailure(accessToken, record, `${runLabel} failed: ${describeError(e)}`)
   }
 }

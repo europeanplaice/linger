@@ -13,7 +13,7 @@ export default defineConfig({
   root,
   plugins: [cloudflareTest(poolOptions)],
   test: {
-    include: ['test/privacy.test.ts', 'test/index.test.ts'],
+    include: ['test/privacy.test.ts', 'test/index.test.ts', 'test/runtime.test.ts'],
     setupFiles: ['test/setup.ts'],
   },
 })

@@ -199,7 +199,7 @@ async function withFolderFallback<T>(
       const freshId = await ensureFolder(token, sessionId, session, env, folderOptions)
       return op(freshId)
     }
-    console.error('drive.ts: withFolderFallback failed', e)
+    console.error('drive.ts: withFolderFallback failed')
     throw e
   }
 }

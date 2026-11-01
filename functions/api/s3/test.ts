@@ -39,10 +39,10 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     return jsonResponse({ ok: true })
   } catch (e) {
     if (e instanceof S3Error) {
-      console.error('s3/test.ts: connection test failed', e)
+      console.error('s3/test.ts: connection test failed')
       return jsonResponse({ ok: false, error: describeError(e) })
     }
-    console.error('s3/test.ts: unexpected failure', e)
+    console.error('s3/test.ts: unexpected failure')
     return jsonResponse({ ok: false, error: 'Unexpected error' })
   }
 }

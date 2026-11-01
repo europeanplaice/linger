@@ -52,7 +52,7 @@ async function createChainedInstance(env: WorkflowEnv, id: string, params: S3Bac
       await env.S3_BACKFILL_WORKFLOW.get(id)
       return
     } catch {
-      throw error
+      throw new Error(safeError(error))
     }
   }
 }
@@ -92,10 +92,10 @@ async function processBatch(
           if (target.fileId && known?.fileId === target.fileId && target.version && known.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
           await index.reconcileEntry({ sessionId: params.sessionId, accountKey: params.accountKey, date: target.date, expectedBucket: config.bucket, jobId: params.jobId })
         } catch (error) {
-          if (error instanceof Error && error.name === 'SupersededBackfillError') throw new NonRetryableError(error.message)
+          if (error instanceof Error && error.name === 'SupersededBackfillError') throw new NonRetryableError('Backfill was superseded')
           // A 4xx from Drive/S3 is an entry-specific failure. Network/5xx errors
           // escape the batch so Workflow retry can repeat the whole idempotent batch.
-          if (!isPermanentEntryError(error)) throw error
+          if (!isPermanentEntryError(error)) throw new Error(safeError(error))
           const message = safeError(error)
           failedDates.push(target.date)
           await index.markFailed(target.date, (await index.getEntry(target.date))?.driveVersion, message, new Date().toISOString())
@@ -210,7 +210,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
         await index.failJob(params.jobId, message, new Date().toISOString())
         return null
       })
-      throw error
+      throw new Error(message)
     }
   }
 }

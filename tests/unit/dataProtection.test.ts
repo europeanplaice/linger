@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { useDiary } from '../../src/hooks/useDiary'
 import * as api from '../../src/api/driveEntries'
-import { clearCache, getAllCached, getAllDrafts } from '../../src/lib/diaryCache'
+import { clearCache, deleteDraft, getAllCached, getAllDrafts } from '../../src/lib/diaryCache'
 import * as diaryCache from '../../src/lib/diaryCache'
 import { onRequest as middleware } from '../../functions/api/_middleware'
 import { onRequestPost as logout } from '../../functions/auth/logout'
@@ -40,8 +40,13 @@ beforeEach(async () => {
   vi.mocked(api.getEntryByDate).mockResolvedValue(null)
   localStorage.clear()
   await clearCache()
+  await Promise.all((await getAllDrafts()).map(draft => deleteDraft(draft.date, draft.owner)))
 })
-afterEach(async () => { cleanup(); vi.restoreAllMocks(); await clearCache(); vi.unstubAllGlobals() })
+afterEach(async () => {
+  cleanup(); vi.restoreAllMocks(); await clearCache()
+  await Promise.all((await getAllDrafts()).map(draft => deleteDraft(draft.date, draft.owner)))
+  vi.unstubAllGlobals()
+})
 
 function diary() {
   return renderHook(({ status, email }) => useDiary(status, email, vi.fn()), {
@@ -146,7 +151,7 @@ it('discards account A initial listing after account B finishes loading', async 
   expect(await getAllCached()).toEqual([])
 })
 
-it.each(['success', 'network failure'] as const)('does not persist a save finishing after logout: %s', async (outcome) => {
+it.each(['success', 'network failure'] as const)('retains an account-scoped draft when a save finishes after logout: %s', async (outcome) => {
   const hook = diary()
   await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
   const write = deferred<typeof secret.meta>()
@@ -157,7 +162,9 @@ it.each(['success', 'network failure'] as const)('does not persist a save finish
   await act(async () => hook.rerender({ status: 'signedOut', email: 'a@example.com' }))
   await act(async () => { write.resolve(secret.meta); await rejected })
   expect(await getAllCached()).toEqual([])
-  expect(await getAllDrafts()).toEqual([])
+  expect(await getAllDrafts('a@example.com')).toEqual([expect.objectContaining({
+    owner: 'a@example.com', date: secret.entry.date, content: secret.entry.content,
+  })])
   expect(localStorage.getItem(`linger_local_entry_${secret.entry.date}`)).toBeNull()
 })
 
@@ -228,16 +235,19 @@ it('clears a pending expired-session save before a different account signs in', 
   expect(api.saveEntry).toHaveBeenCalledOnce()
 })
 
-it('does not replay old drafts while clearing the previous account cache', async () => {
+it('does not replay account A drafts for account B while clearing the shared cache', async () => {
   const hook = diary()
   await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
-  await diaryCache.putDraft({ date: secret.entry.date, content: secret.entry.content, baseContent: null, baseVersion: null, savedAt: 1 })
+  await diaryCache.putDraft({ owner: 'a@example.com', date: secret.entry.date, content: secret.entry.content, baseContent: null, baseVersion: null, savedAt: 1 })
   const clearing = deferred<void>()
   const clear = vi.spyOn(diaryCache, 'clearCache').mockImplementationOnce(() => clearing.promise)
   await act(async () => hook.rerender({ status: 'signedIn', email: 'b@example.com' }))
   expect(clear).toHaveBeenCalledOnce()
-  await act(async () => { window.dispatchEvent(new Event('online')) })
+  await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(false))
+  await act(async () => { await Promise.resolve(); window.dispatchEvent(new Event('online')) })
   expect(api.saveEntry).not.toHaveBeenCalled()
+  expect(await getAllDrafts('a@example.com')).toHaveLength(1)
+  expect(await getAllDrafts('b@example.com')).toEqual([])
   // Complete the pending cache wipe before allowing account B to load.
   await clearCache()
   await act(async () => { clearing.resolve() })

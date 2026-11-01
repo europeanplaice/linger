@@ -61,7 +61,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     const cached = await context.env.SESSIONS.get(cacheKey)
     if (cached) return jsonResponse({ holidays: JSON.parse(cached) as Record<string, HolidayInfo> })
   } catch (e) {
-    console.error('holidays.ts: KV read failed', e)
+    console.error('holidays.ts: KV read failed')
   }
 
   const holidays: Record<string, HolidayInfo> = {}
@@ -81,14 +81,14 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
       }
     }
   } catch (e) {
-    console.error('holidays.ts: upstream fetch failed', e)
+    console.error('holidays.ts: upstream fetch failed')
     return jsonResponse({ error: 'Upstream error' }, 500)
   }
 
   try {
     await context.env.SESSIONS.put(cacheKey, JSON.stringify(holidays), { expirationTtl: CACHE_TTL })
   } catch (e) {
-    console.error('holidays.ts: KV write failed', e)
+    console.error('holidays.ts: KV write failed')
   }
 
   return jsonResponse({ holidays })

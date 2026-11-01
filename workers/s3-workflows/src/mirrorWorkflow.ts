@@ -53,11 +53,11 @@ export class S3MirrorWorkflow extends WorkflowEntrypoint<WorkflowEnv, MirrorWork
             await index.markFailed(params.date, params.driveVersion, message, new Date().toISOString())
             return { ok: false, error: message }
           }
-          throw error
+          throw new Error(safeError(error))
         }
       },
     )
 
-    if (!result.ok) console.warn(`S3 ${kind} for ${params.date} failed permanently:`, result.error)
+    if (!result.ok) console.warn('S3 mirror operation failed permanently')
   }
 }

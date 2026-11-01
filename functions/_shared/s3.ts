@@ -378,17 +378,33 @@ export async function deleteObject(creds: AssumedCredentials, bucket: string, re
   }
 }
 
-// Extracts a short human-readable message from an S3/STS error (XML or JSON error body),
-// or from any other Error, truncated so it's safe to surface to the user and to store.
+// Summarizes failures without exposing provider response bodies or arbitrary messages,
+// which can contain credentials or diary content and may be persisted in sync status.
 export function describeError(e: unknown): string {
-  let detail: string
-  if (e instanceof S3Error) {
-    const match = e.message.match(/<Message>([^<]+)<\/Message>/) ?? e.message.match(/"message"\s*:\s*"([^"]+)"/i)
-    detail = match?.[1] ?? e.message
-  } else if (e instanceof Error) {
-    detail = e.message
-  } else {
-    detail = 'Unknown error'
+  if (e instanceof S3Error && Number.isInteger(e.status) && e.status >= 100 && e.status <= 599) {
+    const code = safeProviderCode(e.message)
+    return code ?? `Request failed (HTTP ${e.status})`
   }
-  return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail
+  if (e instanceof Error) {
+    const code = safeProviderCode(e.message)
+    if (code) return code
+    if (e.message === 'No Google ID token in this session — sign out and sign in again') return e.message
+    return 'Error occurred'
+  }
+  return 'Unknown error'
+}
+
+// AWS error codes are a fixed machine vocabulary, unlike response messages and
+// arbitrary exceptions which may echo request data or diary content.
+export function safeProviderCode(message: string): string | null {
+  const match = message.match(/<Code>([^<]+)<\/Code>/i)
+    ?? message.match(/"Code"\s*:\s*"([A-Za-z0-9]+)"/i)
+    ?? message.match(/^([A-Za-z][A-Za-z0-9]+)$/)
+  const code = match?.[1]
+  const safeCodes = new Set([
+    'AccessDenied', 'InvalidIdentityToken', 'ExpiredToken', 'ExpiredTokenException',
+    'Throttling', 'ThrottlingException', 'SlowDown', 'RequestTimeout',
+    'SignatureDoesNotMatch', 'NoSuchBucket', 'NoSuchKey', 'InternalError',
+  ])
+  return code && safeCodes.has(code) ? code : null
 }

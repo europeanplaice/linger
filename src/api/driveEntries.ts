@@ -168,7 +168,9 @@ export async function listEntries(signal?: AbortSignal): Promise<DriveFileMeta[]
 }
 
 export async function searchEntries(query: string, signal?: AbortSignal): Promise<DriveFileMeta[]> {
-  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/search?q=${encodeURIComponent(query)}`, { signal })
+  const { data } = await apiFetch<{ files: DriveFileMeta[] }>(`${BASE}/search`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }), signal,
+  })
   return data?.files ?? []
 }
 

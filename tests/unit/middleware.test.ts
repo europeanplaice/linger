@@ -104,6 +104,7 @@ describe('API auth middleware', () => {
     const ctx = makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
     const response = await onRequest(ctx as any)
     expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(ctx.data.sessionId).toBe('sid123')
     expect(ctx.data.accessToken).toBe('at')
     expect(ctx.data.session).toMatchObject({ google_sub: 'account-a', access_token: 'at' })

@@ -1,4 +1,5 @@
 import type { WorkflowStep, WorkflowStepConfig } from 'cloudflare:workers'
+import { NonRetryableError } from 'cloudflare:workflows'
 import type { SessionData } from '../../../functions/_shared/session'
 import { getSession, getValidAccessToken, getValidIdToken, invalidateFolderScopedS3Cache } from '../../../functions/_shared/session'
 import {
@@ -8,7 +9,7 @@ import {
   getEntryContent,
   readJsonFile,
 } from '../../../functions/_shared/drive'
-import { deleteObject, describeError, isAtLeast, putObjectIfNewer, S3Error, type AssumedCredentials } from '../../../functions/_shared/s3'
+import { deleteObject, isAtLeast, putObjectIfNewer, safeProviderCode, S3Error, type AssumedCredentials } from '../../../functions/_shared/s3'
 import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
@@ -143,17 +144,21 @@ export function countedStep<T extends Rpc.Serializable<T>>(
   configOrFn: WorkflowStepConfig | (() => Promise<T>),
   maybeFn?: () => Promise<T>,
 ): Promise<T> {
-  if (typeof configOrFn === 'function') {
-    return step.do(name, async () => {
+  const runSafely = async (fn: () => Promise<T>): Promise<T> => {
+    try {
       await recordWorkflowStep(env)
-      return configOrFn()
-    })
+      return await fn()
+    } catch (error) {
+      const message = safeError(error)
+      if (error instanceof NonRetryableError) throw new NonRetryableError(message)
+      throw new Error(message)
+    }
+  }
+  if (typeof configOrFn === 'function') {
+    return step.do(name, () => runSafely(configOrFn))
   }
   const fn = maybeFn as () => Promise<T>
-  return step.do(name, configOrFn, async () => {
-    await recordWorkflowStep(env)
-    return fn()
-  })
+  return step.do(name, configOrFn, () => runSafely(fn))
 }
 
 function parseS3Config(value: unknown): S3Config | null {
@@ -212,16 +217,21 @@ export async function assumeS3Credentials(
 }
 
 export function safeError(error: unknown): string {
-  const message = describeError(error)
-  // Two passes: the first strips "Bearer <value>" specifically, since "Bearer" is
-  // itself one of the second pass's trigger words and would otherwise be consumed
-  // as if it were the *value* of a preceding "Authorization:" (leaving the actual
-  // token untouched right after it). The second pass then handles the remaining
-  // "keyword[:=]? value" shapes (Authorization:, secret=, access_key ...).
-  return message
-    .replace(/\bBearer\s+\S+/gi, 'Bearer redacted')
-    .replace(/(Authorization|token|secret|access.?key)\s*[:=]?\s*\S*/gi, '$1 redacted')
-    .slice(0, 200)
+  // Error messages can contain OAuth/AWS credentials or diary content. Keep only
+  // stable error metadata when recording retry/status information.
+  if (error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599) {
+    const code = error instanceof Error ? safeProviderCode(error.message) : null
+    return code ?? `Request failed (HTTP ${error.status})`
+  }
+  if (error instanceof Error) {
+    const code = safeProviderCode(error.message)
+    if (code) return code
+  }
+  if (error instanceof Error && error.message === 'No Google ID token in this session — sign out and sign in again') {
+    return 'No Google ID token in this session — sign out and sign in again'
+  }
+  if (error instanceof Error) return 'Error occurred'
+  return 'Unknown error'
 }
 
 // Drive quota errors (userRateLimitExceeded/rateLimitExceeded/quotaExceeded) and
@@ -424,7 +434,7 @@ async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: Mirror
       await env.S3_MIRROR_WORKFLOW.get(id)
       return
     } catch {
-      throw error
+      throw new Error(safeError(error))
     }
   }
 }
@@ -460,7 +470,7 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   try {
     backupEnabled = await index.getBackupEnabled()
   } catch (error) {
-    console.warn('s3Workflows: could not read backup-enabled flag; mirroring anyway', error)
+    console.warn('s3Workflows: could not read backup-enabled flag; mirroring anyway')
     backupEnabled = null
   }
   if (backupEnabled === false) {
@@ -478,17 +488,17 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
     await assertWithinDailyStepBudget(env)
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
-      console.warn('s3Workflows: mirror refused — daily Workflow step budget reached', error)
+      console.warn('s3Workflows: mirror refused — daily Workflow step budget reached')
       return { ok: false, error: error.message }
     }
-    console.warn('s3Workflows: could not determine daily step budget; mirroring anyway', error)
+    console.warn('s3Workflows: could not determine daily step budget; mirroring anyway')
   }
   await index.markPending(input.date, input.driveVersion, new Date().toISOString(), input.fileId)
   try {
     await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'mirror' })
     return { ok: true }
   } catch (error) {
-    console.error('s3Workflows: failed to start mirror workflow', error)
+    console.error('s3Workflows: failed to start mirror workflow')
     return { ok: true }
   }
 }
@@ -504,7 +514,7 @@ export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: s
   try {
     backupEnabled = await index.getBackupEnabled()
   } catch (error) {
-    console.warn('s3Workflows: could not read backup-enabled flag; deleting anyway', error)
+    console.warn('s3Workflows: could not read backup-enabled flag; deleting anyway')
     backupEnabled = null
   }
   if (backupEnabled === false) {
@@ -516,18 +526,18 @@ export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: s
     await assertWithinDailyStepBudget(env)
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
-      console.warn('s3Workflows: delete refused — daily Workflow step budget reached', error)
+      console.warn('s3Workflows: delete refused — daily Workflow step budget reached')
       await index.deferDeletion(input.date, deletionId, Date.parse(`${todayUTC()}T00:00:00.000Z`) + 86_400_000)
       return { ok: false, error: error.message }
     }
-    console.warn('s3Workflows: could not determine daily step budget; deleting anyway', error)
+    console.warn('s3Workflows: could not determine daily step budget; deleting anyway')
   }
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
     await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'delete', deletionId })
     return { ok: true }
   } catch (error) {
-    console.error('s3Workflows: failed to start delete workflow', error)
+    console.error('s3Workflows: failed to start delete workflow')
     return { ok: true }
   }
 }

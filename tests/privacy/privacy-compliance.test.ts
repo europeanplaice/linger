@@ -1,16 +1,54 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import ts from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { legacyAuthEnabled, sanitizeSession } from '../../functions/_shared/authStore'
 import { createSession, getSession } from '../../functions/_shared/session'
 import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
-import { apiFetch } from '../../src/api/driveEntries'
+import { apiFetch, searchEntries } from '../../src/api/driveEntries'
+import { jsonResponse } from '../../functions/_shared/session'
+import { describeError, S3Error } from '../../functions/_shared/s3'
 import { revokeSession, startSignIn } from '../../src/api/auth'
 
 const accessToken = 'sentinel-google-access-token'
 const refreshToken = 'sentinel-google-refresh-token'
 const idToken = 'sentinel-google-id-token'
 const awsSecret = 'sentinel-aws-secret-key'
+const diaryText = 'sentinel-private-diary-text'
+
+describe('diagnostic privacy boundary', () => {
+  it('does not persist arbitrary provider errors or error names in status summaries', () => {
+    const error = new Error(`${accessToken} ${diaryText}`)
+    error.name = `${awsSecret} ${diaryText}`
+    expect(describeError(error)).toBe('Error occurred')
+    expect(describeError(new S3Error(403, `${idToken} ${diaryText}`))).toBe('Request failed (HTTP 403)')
+  })
+
+  it('allows only fixed string literals in backend console calls', () => {
+    function files(dir: string): string[] {
+      return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+        const path = join(dir, entry.name)
+        return entry.isDirectory() ? files(path) : path.endsWith('.ts') ? [path] : []
+      })
+    }
+    const violations: string[] = []
+    for (const file of [...files('functions'), ...files('workers/s3-workflows/src')]) {
+      const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+      function visit(node: ts.Node): void {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'console' &&
+          node.arguments.some(arg => !ts.isStringLiteral(arg) && !ts.isNoSubstitutionTemplateLiteral(arg))) {
+          const position = source.getLineAndCharacterOfPosition(node.getStart(source))
+          violations.push(`${file}:${position.line + 1}`)
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(source)
+    }
+    expect(violations).toEqual([])
+  })
+})
 
 describe('OAuth persistence boundary', () => {
   it('projects session values through an explicit metadata allowlist', () => {
@@ -20,6 +58,7 @@ describe('OAuth persistence boundary', () => {
       id_token: idToken,
       expires_at: Date.now() + 60_000,
       s3_assumed_credentials: { secretAccessKey: awsSecret },
+      diary_content: diaryText,
       folder_id: 'folder-123',
       email: 'user@example.com',
       google_sub: 'google-sub-123',
@@ -151,6 +190,18 @@ describe('browser credential lifetime', () => {
     }))
     expect((fetchSpy.mock.calls[0][1]?.headers as Headers).get('Authorization')).toBe(`Bearer ${accessToken}`)
     fetchSpy.mockRestore()
+  })
+
+  it('keeps diary search terms out of the request URL and forbids API response caching', async () => {
+    setOAuthCredentials({ accessToken, idToken, expiresAt: Date.now() + 60_000 })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"files":[]}'))
+    await searchEntries(diaryText)
+    const [url, options] = fetchSpy.mock.calls[0]
+    expect(String(url)).toBe('/api/drive/search')
+    expect(String(url)).not.toContain(diaryText)
+    expect(options?.method).toBe('POST')
+    expect(JSON.parse(String(options?.body))).toEqual({ query: diaryText })
+    expect(jsonResponse({ entry: diaryText }).headers.get('Cache-Control')).toBe('no-store')
   })
 
   it('accepts popup credentials only from the same-origin popup window', async () => {

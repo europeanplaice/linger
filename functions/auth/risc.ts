@@ -171,7 +171,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
     claims = await verifyJwt(body, env.GOOGLE_CLIENT_ID)
   } catch (err) {
-    console.error('RISC SET verification failed:', err instanceof Error ? err.message : err)
+    console.error('RISC SET verification failed')
     return jsonResponse({ error: 'invalid SET' }, 400)
   }
 
@@ -186,7 +186,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const sub = extractSub(payload)
     const email = extractEmail(payload)
     if (!sub && !email) {
-      console.log(`RISC ${eventType}: no subject identifier available; skipping`)
+      console.log('RISC: no subject identifier available; skipping')
       continue
     }
 
@@ -199,10 +199,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       ])
       if (results.some(result => result.status === 'rejected')) throw new Error('Session revocation incomplete')
       revoked++
-      console.log(`RISC ${eventType}: revoked sessions`)
+      console.log('RISC: revoked sessions')
     } catch (err) {
       failed = true
-      console.error(`RISC ${eventType}: failed to revoke sessions: ${err instanceof Error ? err.message : err}`)
+      console.error('RISC: failed to revoke sessions')
     }
   }
 

@@ -71,7 +71,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Verify credentials never enter persistent storage
+      - name: Check privacy storage and request boundaries
         run: npm run test:privacy
 
   # Tests/builds the s3-workflows Worker only — it does not deploy it. Deployment

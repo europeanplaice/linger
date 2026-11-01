@@ -29,7 +29,7 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     await resyncSingleEntry(accessToken, sessionId, session, context.env, record, date)
     return jsonResponse({ ok: true })
   } catch (e) {
-    console.error('s3/entry-resync.ts: POST failed', e)
+    console.error('s3/entry-resync.ts: POST failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
-import { authorizedSession, ensureAccountDiaryFolder, mirrorEntryCore, safeError, type MirrorEntryCoreInput, type S3Config } from './runtime'
+import { authorizedSession, ensureAccountDiaryFolder, mirrorEntryCore, type MirrorEntryCoreInput, type S3Config } from './runtime'
 import { findJsonFile, readJsonFile, writeJsonFile } from '../../../functions/_shared/drive'
 import { getValidAccessToken } from '../../../functions/_shared/session'
 import { isValidS3Settings } from '../../../functions/_shared/s3Settings'
@@ -173,7 +173,7 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
         await this.completeDeletion(row.date, row.request_id)
       }
     } catch (error) {
-      console.warn('S3 deletion retry deferred', safeError(error))
+      console.warn('S3 deletion retry deferred')
       if (row) {
         const delay = Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(row.attempts, 5))
         this.ctx.storage.sql.exec('UPDATE pending_deletions SET attempts = attempts + 1, next_attempt = ? WHERE date = ? AND request_id = ?', Date.now() + delay, row.date, row.request_id)

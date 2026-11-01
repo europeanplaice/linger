@@ -13,7 +13,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
   try {
     migratedDates = await migrateMdToTxt(accessToken, sessionId, session, context.env)
   } catch (e) {
-    console.error('migrate.ts: Failed to migrate entries', e)
+    console.error('migrate.ts: Failed to migrate entries')
     return jsonResponse({ error: 'Internal error' }, 500)
   }
 
@@ -42,7 +42,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
         s3Resyncing = true
       }
     } catch (e) {
-      console.error('migrate.ts: Failed to start S3 re-mirror for migrated entries', e)
+      console.error('migrate.ts: Failed to start S3 re-mirror for migrated entries')
     }
   }
 

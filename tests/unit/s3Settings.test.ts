@@ -765,7 +765,7 @@ describe('backfillAllEntries', () => {
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
-      expect.objectContaining({ lastSyncError: expect.stringContaining('Drive is down') }),
+      expect.objectContaining({ lastSyncError: expect.stringContaining('Error occurred') }),
       STATUS_FILE_ID,
     )
   })

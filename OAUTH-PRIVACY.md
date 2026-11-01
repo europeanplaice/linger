@@ -25,6 +25,27 @@ and deployment commit provide transparency, not a cryptographic proof that the
 running code is identical. Protecting against a malicious code publisher requires
 an independently trusted client distribution mechanism.
 
+## Diagnostics and deployment checks
+
+Application logs and persisted error summaries must not contain diary text,
+OAuth credentials, AWS temporary credentials, request bodies, or raw provider
+errors. Search requests carry their query in the request body rather than the
+application URL. Authentication and API responses containing private data must
+not be cached. Do not add sensitive values to logs, traces, error reports, or
+Workflow step outputs. Keep error summaries to fixed text or bounded HTTP status.
+
+CI's `npm run test:privacy` exercises selected D1, KV, Durable Object, browser,
+request and diagnostic boundaries with sentinel values. It is a regression check,
+not proof that all code paths or provider configurations comply. Before release,
+review Pages and Workers invocation logs, query-string and header capture,
+traces, Logpush, Tail Workers, analytics, and any third-party error reporting in
+the actual Cloudflare account. In particular the OAuth callback URL carries an
+authorization code and state: verify that URLs and credentials are not retained
+or exported by those settings. Do not use real user tokens or diary text in the
+review. Audit and remediate any historical logs, backups, or deployments separately;
+source changes cannot erase them. Document the settings and repeat this review
+when observability or hosting configuration changes.
+
 ## Existing credentials and rollout
 
 Removing a token from a live database does not revoke its Google authorization.

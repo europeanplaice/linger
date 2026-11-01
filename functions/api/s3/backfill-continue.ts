@@ -54,7 +54,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
 
     return jsonResponse({ ok: true, remaining: progress.remaining.length })
   } catch (e) {
-    console.error('s3/backfill-continue.ts: POST failed', e)
+    console.error('s3/backfill-continue.ts: POST failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

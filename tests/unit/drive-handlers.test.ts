@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestGet as onSearch } from '../../functions/api/drive/search'
+import { onRequestPost as onSearch } from '../../functions/api/drive/search'
 import { onRequestGet as onListEntries } from '../../functions/api/drive/entries'
 import { onRequestGet as onGetEntry } from '../../functions/api/drive/entry/[date]'
 import { onRequestGet as onListRevisions } from '../../functions/api/drive/revisions/[fileId]'
@@ -101,8 +101,11 @@ describe('list entries handler', () => {
 })
 
 describe('search handler', () => {
+  function searchRequest(query: string) {
+    return new Request('http://localhost/api/drive/search', { method: 'POST', body: JSON.stringify({ query }) })
+  }
   it('returns empty array for blank query', async () => {
-    const ctx = makeContext({ request: new Request('http://localhost/api/drive/search?q=') })
+    const ctx = makeContext({ request: searchRequest('') })
     const res = await onSearch(ctx as any)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ files: [] })
@@ -110,7 +113,7 @@ describe('search handler', () => {
 
   it('returns empty array when query exceeds 500 characters', async () => {
     const q = 'a'.repeat(501)
-    const ctx = makeContext({ request: new Request(`http://localhost/api/drive/search?q=${q}`) })
+    const ctx = makeContext({ request: searchRequest(q) })
     const res = await onSearch(ctx as any)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ files: [] })
@@ -118,7 +121,7 @@ describe('search handler', () => {
 
   it('accepts a query of exactly 500 characters', async () => {
     const q = 'a'.repeat(500)
-    const ctx = makeContext({ request: new Request(`http://localhost/api/drive/search?q=${q}`) })
+    const ctx = makeContext({ request: searchRequest(q) })
     const res = await onSearch(ctx as any)
     expect(res.status).toBe(200)
     const body = await res.json() as { files: unknown[] }

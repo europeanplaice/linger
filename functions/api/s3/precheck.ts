@@ -42,10 +42,10 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     return jsonResponse({ ok: true, collisions })
   } catch (e) {
     if (e instanceof S3Error) {
-      console.error('s3/precheck.ts: precheck failed', e)
+      console.error('s3/precheck.ts: precheck failed')
       return jsonResponse({ ok: false, error: describeError(e) })
     }
-    console.error('s3/precheck.ts: unexpected failure', e)
+    console.error('s3/precheck.ts: unexpected failure')
     return jsonResponse({ ok: false, error: 'Unexpected error' })
   }
 }

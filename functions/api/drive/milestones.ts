@@ -26,7 +26,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
       data = await readJsonFile<unknown>(accessToken, fileId)
     } catch (e) {
       if (e instanceof SyntaxError) {
-        console.warn('milestones.ts: corrupted JSON, returning [] so next PUT can heal', e)
+        console.warn('milestones.ts: corrupted JSON, returning [] so next PUT can heal')
         return jsonResponse([])
       }
       throw e
@@ -34,7 +34,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     if (!Array.isArray(data)) return jsonResponse([])
     return jsonResponse(data)
   } catch (e) {
-    console.error('milestones.ts: GET failed', e)
+    console.error('milestones.ts: GET failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }
@@ -125,7 +125,7 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
 
     return jsonResponse(meta)
   } catch (e) {
-    console.error('milestones.ts: PUT failed', e)
+    console.error('milestones.ts: PUT failed')
     return jsonResponse({ error: 'Internal server error' }, 500)
   }
 }

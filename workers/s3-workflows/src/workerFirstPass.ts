@@ -73,7 +73,7 @@ export async function runWorkerFirstPass(
         }
         processed++
       } catch (e) {
-        console.warn(`Worker first pass failed for date ${target.date}, delegating to Workflow retry:`, e)
+        console.warn('Worker first pass failed, delegating to Workflow retry')
         failedTargets.push(target)
         remainingScope.push(target)
       }
@@ -85,7 +85,7 @@ export async function runWorkerFirstPass(
     const isFinished = remainingScope.length === 0 && failedTargets.length === 0
     return { isFinished, remainingScope }
   } catch (e) {
-    console.warn('Worker first pass STS/batch execution failed, delegating all to Workflow:', e)
+    console.warn('Worker first pass STS/batch execution failed, delegating all to Workflow:')
     return { isFinished: false, remainingScope: scope ?? remainingScope }
   }
 }

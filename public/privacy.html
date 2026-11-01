@@ -79,6 +79,14 @@
     backend does not use its authentication database or sync index to store diary text.
   </p>
   <p>
+    Linger's application is designed to process diary text, Google OAuth access, refresh and identity
+    tokens, and AWS temporary credentials only in memory for the operation that needs them, including
+    its short-lived asynchronous work. It does not intentionally save these values to its databases,
+    KV, Durable Object storage, Workflow state, application logs, or server-side caches. Google Drive
+    and your optional S3 bucket store the diary files you choose to save. OAuth state and the PKCE
+    verifier are temporarily stored separately to complete sign-in, as described below.
+  </p>
+  <p>
     Cloudflare D1 stores session metadata, including your session ID, Google email and account
     identifier, expiry, and Drive file identifiers. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
@@ -99,7 +107,9 @@
     dates and versions, S3 sync status, and backfill progress so writes and backups can be coordinated
     and retried. This metadata does not include diary entry text. Cloudflare may also process request
     logs, error diagnostics, and workflow state under the retention rules for the services and account
-    plan in use. Cloudflare documents Workers Logs retention of up to seven days and Workflow
+    plan in use. The application avoids deliberately logging sensitive values, but provider-side
+    diagnostics and account settings require separate operational review; a fault or misconfiguration
+    could expose data. Cloudflare documents Workers Logs retention of up to seven days and Workflow
     instance-state retention of up to 30 days, depending on plan and settings. See
     <a href="https://developers.cloudflare.com/workers/observability/logs/workers-logs/" target="_blank" rel="noopener">Workers Logs retention</a>,
     <a href="https://developers.cloudflare.com/workflows/reference/limits/" target="_blank" rel="noopener">Workflow retention limits</a>, and
@@ -176,8 +186,9 @@
     and a few account and interface hints may also be stored there. In local or offline use, an entry
     may remain in browser storage until it can be synced. This browser data is not separately
     encrypted by Linger and may be accessible to someone who can use your browser profile or device.
-    Linger clears diary caches and pending changes when you sign out or switch accounts; some display
-    preferences can remain. You can also remove local data by clearing this site's data in your browser.
+    Linger clears shared diary caches and pending changes when you sign out or switch accounts. Owned
+    unsynced drafts remain in this browser and are restored only after the matching account signs in;
+    display preferences can also remain. You can remove local data by clearing this site's data in your browser.
   </p>
   <p>
     If you export a ZIP or portable HTML file, the resulting file is downloaded to a location chosen

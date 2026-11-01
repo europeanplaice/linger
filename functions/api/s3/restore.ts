@@ -38,10 +38,10 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     return jsonResponse({ dates })
   } catch (e) {
     if (e instanceof S3Error) {
-      console.error('s3/restore.ts: candidate listing failed', e)
+      console.error('s3/restore.ts: candidate listing failed')
       return jsonResponse({ ok: false, error: describeError(e) }, 500)
     }
-    console.error('s3/restore.ts: unexpected failure listing candidates', e)
+    console.error('s3/restore.ts: unexpected failure listing candidates')
     return jsonResponse({ ok: false, error: 'Unexpected error' }, 500)
   }
 }
@@ -99,14 +99,14 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     return jsonResponse({ ok: true, meta: savedMeta })
   } catch (e) {
     if (e instanceof S3Error) {
-      console.error('s3/restore.ts: restore failed', e)
+      console.error('s3/restore.ts: restore failed')
       return jsonResponse({ ok: false, error: describeError(e) })
     }
     if (e instanceof DriveError) {
-      console.error('s3/restore.ts: Drive write failed', e)
+      console.error('s3/restore.ts: Drive write failed')
       return jsonResponse({ ok: false, error: e.message }, e.status)
     }
-    console.error('s3/restore.ts: unexpected failure', e)
+    console.error('s3/restore.ts: unexpected failure')
     return jsonResponse({ ok: false, error: 'Unexpected error' })
   }
 }

@@ -470,28 +470,22 @@ describe('deleteObject', () => {
 })
 
 describe('describeError', () => {
-  it('extracts the message from an XML S3Error body', () => {
+  it('keeps only status metadata from an XML S3Error body', () => {
     const e = new S3Error(403, '<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>')
-    expect(describeError(e)).toBe('Access Denied')
+    expect(describeError(e)).toBe('AccessDenied')
   })
 
-  it('extracts the message from a JSON error body', () => {
-    const e = new S3Error(400, '{"message": "Invalid request"}')
-    expect(describeError(e)).toBe('Invalid request')
+  it('does not expose an arbitrary provider response body', () => {
+    const e = new S3Error(500, 'diary entry containing secret content')
+    expect(describeError(e)).toBe('Request failed (HTTP 500)')
+    expect(describeError(e)).not.toContain('secret content')
   })
 
-  it('falls back to the raw message when no pattern matches', () => {
-    const e = new S3Error(500, 'totally unstructured failure text')
-    expect(describeError(e)).toBe('totally unstructured failure text')
-  })
-
-  it('truncates to 200 characters', () => {
-    const e = new S3Error(500, 'x'.repeat(300))
-    expect(describeError(e)).toBe(`${'x'.repeat(200)}…`)
-  })
-
-  it('uses the message of a plain Error', () => {
-    expect(describeError(new Error('plain failure'))).toBe('plain failure')
+  it('does not expose a plain Error message', () => {
+    expect(describeError(new Error('diary content and OAuth bearer secret'))).toBe('Error occurred')
+    const error = new Error('message')
+    error.name = 'diary content and OAuth bearer secret'
+    expect(describeError(error)).toBe('Error occurred')
   })
 
   it('returns a generic message for a non-Error value', () => {

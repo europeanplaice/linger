@@ -42,15 +42,16 @@ test.describe('driveEntries proxy API', () => {
     expect(result).toEqual([])
   })
 
-  test('searchEntries calls /api/drive/search with encoded query', async () => {
+  test('searchEntries sends the query in the request body, not the URL', async () => {
     const files: DriveFileMeta[] = [{ id: 'e-1', name: 'diary-2026-05-01.json', version: '1' }]
     fetchMock.mock(jsonResponse({ files }))
 
     const result = await searchEntries('hello world')
 
     expect(result).toEqual(files)
-    expect(fetchMock.calls[0].url).toContain('/api/drive/search?q=')
-    expect(decodeURIComponent(fetchMock.calls[0].url)).toContain('hello world')
+    expect(fetchMock.calls[0].url).toBe('/api/drive/search')
+    expect(fetchMock.calls[0].init?.method).toBe('POST')
+    expect(JSON.parse(String(fetchMock.calls[0].init?.body))).toEqual({ query: 'hello world' })
     expect(fetchMock.calls[0].init?.credentials).toBe('include')
   })
 

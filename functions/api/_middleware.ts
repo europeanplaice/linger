@@ -88,6 +88,9 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
   }
 
   const headers = new Headers(response.headers)
+  // API responses may contain diary text or account data, even when a handler
+  // forgets to set caching headers (for example a 304 or 204 response).
+  headers.set('Cache-Control', 'no-store')
   headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
   if (context.env.CF_PAGES_COMMIT_SHA) headers.set('X-Deploy-Version', context.env.CF_PAGES_COMMIT_SHA)
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })

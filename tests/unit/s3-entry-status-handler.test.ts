@@ -217,7 +217,7 @@ describe('GET /api/s3/entry-status/[date]', () => {
 
     const res = await onRequestGet(makeContext() as any)
 
-    expect(await res.json()).toEqual({ status: 'failed', error: 'network blip' })
+    expect(await res.json()).toEqual({ status: 'failed', error: 'Error occurred' })
   })
 
   it('still reports failed when this exact save is scoped after a fresh error recorded during an active backfill', async () => {
@@ -360,7 +360,7 @@ describe('GET /api/s3/entry-status/[date]', () => {
 
     const res = await onRequestGet(makeContext() as any)
 
-    expect(await res.json()).toEqual({ status: 'failed', error: 'network blip' })
+    expect(await res.json()).toEqual({ status: 'failed', error: 'Error occurred' })
   })
 
   it('reports failed when STS fails with InvalidIdentityToken and no other error is recorded', async () => {

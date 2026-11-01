@@ -2,9 +2,11 @@ import type { Env, Data } from '../../_shared/session'
 import { jsonResponse } from '../../_shared/session'
 import { searchEntries } from '../../_shared/drive'
 
-export const onRequestGet: PagesFunction<Env, string, Data> = async (context) => {
+export const onRequestPost: PagesFunction<Env, string, Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
-  const query = new URL(context.request.url).searchParams.get('q') ?? ''
+  let body: unknown
+  try { body = await context.request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
+  const query = typeof body === 'object' && body !== null && 'query' in body && typeof body.query === 'string' ? body.query : ''
   if (!query.trim()) return jsonResponse({ files: [] })
   if (query.length > 500) return jsonResponse({ files: [] })
 
@@ -15,7 +17,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     return jsonResponse({ files })
   } catch (e) {
     const status = (e instanceof Error && 'status' in e) ? (e as { status: number }).status : 500
-    console.error('search.ts: Failed to search entries', e)
+    console.error('search.ts: Failed to search entries')
     return jsonResponse({ error: 'Internal server error' }, status)
   }
 }
