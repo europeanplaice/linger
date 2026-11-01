@@ -641,9 +641,21 @@ html.session-restoring .landing {
   height: 100dvh;
 }
 
+/* viewport-fit=cover (index.html) makes the layout viewport extend under the
+   notch and home indicator. Inset the app shell once here; fixed-position
+   children (FABs, banners) opt in to the safe area separately. Insets are 0px
+   on devices without cutouts, so this is a no-op there. */
+.app {
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
 .update-banner {
   position: fixed;
-  bottom: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 200;
@@ -2831,8 +2843,8 @@ dialog.settings-dialog::backdrop {
 @media (max-width: 700px) {
   dialog.settings-dialog {
     width: calc(100vw - 16px);
-    height: calc(100dvh - 24px);
-    max-height: calc(100dvh - 24px);
+    height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     border-radius: 12px;
   }
   .settings-modal-header {
@@ -4952,8 +4964,10 @@ dialog.history-dialog::backdrop {
 /* ── Mobile ── */
 @media (max-width: 640px) {
   :root {
+    /* Clearance for the fixed save FAB. The bottom safe-area inset is already
+       applied by .app padding, so it is not added again here. */
     --mobile-save-action-space: calc(
-      4.5rem + env(safe-area-inset-bottom) + var(--mobile-keyboard-inset-bottom, 0px)
+      4.5rem + var(--mobile-keyboard-inset-bottom, 0px)
     );
   }
 
@@ -4996,6 +5010,9 @@ dialog.history-dialog::backdrop {
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 4px 0 24px var(--sidebar-box-shadow);
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
   .sidebar.open {
     transform: translateX(0);
@@ -5098,12 +5115,12 @@ dialog.history-dialog::backdrop {
   }
 
   .unsaved-nav-banner {
-    bottom: max(1rem, env(safe-area-inset-bottom));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
     box-shadow: 0 10px 28px var(--shadow-heavy);
-    left: 1rem;
+    left: calc(1rem + env(safe-area-inset-left));
     margin: 0;
     position: fixed;
-    right: 1rem;
+    right: calc(1rem + env(safe-area-inset-right));
     z-index: 110;
   }
 
@@ -5121,7 +5138,7 @@ dialog.history-dialog::backdrop {
   .btn-text { display: none; }
   .editor-actions .btn-save {
     position: fixed;
-    right: max(1rem, env(safe-area-inset-right));
+    right: calc(1rem + env(safe-area-inset-right));
     bottom: calc(1rem + env(safe-area-inset-bottom) + var(--mobile-keyboard-inset-bottom, 0px));
     z-index: 90;
     width: 3.5rem;
@@ -5162,10 +5179,10 @@ dialog.history-dialog::backdrop {
     justify-content: center;
     gap: 0.35rem;
     position: fixed;
-    right: max(1rem, env(safe-area-inset-right));
+    right: calc(1rem + env(safe-area-inset-right));
     bottom: max(
       calc(1rem + env(safe-area-inset-bottom) + 3.5rem + 0.85rem),
-      calc(1rem + var(--editor-footer-inset, 0px) + 0.75rem)
+      calc(1rem + env(safe-area-inset-bottom) + var(--editor-footer-inset, 0px) + 0.75rem)
     );
     z-index: 89;
     height: 2.1rem;
@@ -5219,6 +5236,10 @@ dialog.history-dialog::backdrop {
     height: 100dvh;
     border-radius: 0;
     border: none;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
   .history-modal-body { flex-direction: column; }
   .history-revision-list {
