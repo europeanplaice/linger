@@ -76,8 +76,124 @@ describe('ensureFolder', () => {
   it('returns cached folder_id from session', async () => {
     const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'cached' }
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } }
-    const result = await ensureFolder('token', 'sid', session, env as any)
+    const result = await ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true })
     expect(result).toBe('cached')
+  })
+
+  it('uses the account coordinator even when the session has a stale cached folder id', async () => {
+    const service = { ensureDiaryFolder: vi.fn().mockResolvedValue('account-folder') }
+    const put = vi.fn()
+    const env = {
+      SESSIONS: { get: vi.fn().mockResolvedValue(null), put },
+      SESSION_DOMAIN: 'https://linger.europeanplaice.com',
+      S3_WORKFLOW_SERVICE: service,
+    }
+    const session: any = {
+      refresh_token: 'rt', access_token: 'at', expires_at: 1000,
+      google_sub: 'google-user', folder_id: 'stale-device-folder',
+      s3_settings_file_id: 'old-settings', s3_status_file_id: 'old-status',
+      s3_settings_negative_cache_at: Date.now(), s3_status_negative_cache_at: Date.now(),
+    }
+
+    const result = await ensureFolder('token', 'sid', session, env as any)
+
+    expect(service.ensureDiaryFolder).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: 'google-user' })
+    expect(result).toBe('account-folder')
+    expect(session.folder_id).toBe('account-folder')
+    expect(session).toMatchObject({
+      s3_settings_file_id: undefined,
+      s3_status_file_id: undefined,
+      s3_settings_negative_cache_at: undefined,
+      s3_status_negative_cache_at: undefined,
+    })
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the account coordinator is unavailable', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'google-user' }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+
+    await expect(ensureFolder('token', 'sid', session, env as any)).rejects.toMatchObject({ status: 503 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('uses the Workflow Worker DiaryWriter binding when no Pages service binding exists', async () => {
+    const ensureDiaryFolder = vi.fn().mockResolvedValue('worker-account-folder')
+    const getByName = vi.fn().mockReturnValue({ ensureFolder: ensureDiaryFolder })
+    const session: any = {
+      refresh_token: 'rt', access_token: 'at', expires_at: 1000,
+      google_sub: 'google-user', folder_id: 'stale-device-folder',
+    }
+    const env = {
+      SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() },
+      DIARY_WRITER: { getByName },
+    }
+
+    const result = await ensureFolder('token', 'sid', session, env as any)
+
+    expect(getByName).toHaveBeenCalledWith('google-user')
+    expect(ensureDiaryFolder).toHaveBeenCalledWith({ sessionId: 'sid', accountKey: 'google-user' })
+    expect(result).toBe('worker-account-folder')
+    expect(session.folder_id).toBe('worker-account-folder')
+  })
+
+  it('fails closed when the session has no account identity', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+
+    await expect(ensureFolder('token', 'sid', session, env as any)).rejects.toMatchObject({ status: 401 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects ambiguous existing diary folders instead of picking an arbitrary one', async () => {
+    mockFetch(driveJsonResponse({ files: [{ id: 'folder-a' }, { id: 'folder-b' }] }))
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+    const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+
+    await expect(ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true }))
+      .rejects.toMatchObject({ status: 409 })
+  })
+
+  it('rejects a cached folder id that conflicts with the unique named folder during account discovery', async () => {
+    mockFetch(driveJsonResponse({ files: [{ id: 'named-folder' }] }))
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
+    const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'different-folder' }
+
+    await expect(ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true, discoverByName: true }))
+      .rejects.toMatchObject({ status: 409 })
+  })
+
+  it('follows short and empty pages before accepting a unique folder', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ files: [], nextPageToken: 'empty/page' }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'only-folder' }], nextPageToken: 'last/page' }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+
+    await expect(ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true }))
+      .resolves.toBe('only-folder')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('pageToken')).toBe('empty/page')
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('pageToken')).toBe('last/page')
+  })
+
+  it('rejects duplicate folders found on separate pages without persisting a choice', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'folder-a' }], nextPageToken: 'next' }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'folder-b' }] })))
+    const put = vi.fn()
+    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
+
+    await expect(ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true }))
+      .rejects.toMatchObject({ status: 409 })
+    expect(put).not.toHaveBeenCalled()
   })
 
   it('finds existing folder on Drive', async () => {
@@ -86,7 +202,7 @@ describe('ensureFolder', () => {
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
-    const result = await ensureFolder('token', 'sid', session, env as any)
+    const result = await ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true })
 
     expect(result).toBe('existing-folder')
     expect(session.folder_id).toBe('existing-folder')
@@ -101,7 +217,7 @@ describe('ensureFolder', () => {
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
-    const result = await ensureFolder('token', 'sid', session, env as any)
+    const result = await ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true })
     expect(result).toBe('new-folder')
   })
 
@@ -113,7 +229,7 @@ describe('ensureFolder', () => {
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://staging.linger.europeanplaice.com' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
-    const result = await ensureFolder('token', 'sid', session, env as any)
+    const result = await ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true })
 
     expect(result).toBe('staging-folder')
     const searchUrl: string = fetchMock.mock.calls[0][0]
@@ -131,7 +247,7 @@ describe('ensureFolder', () => {
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
     const session: any = { refresh_token: 'rt', access_token: 'at', expires_at: 1000 }
 
-    const result = await ensureFolder('token', 'sid', session, env as any)
+    const result = await ensureFolder('token', 'sid', session, env as any, { withinCoordinator: true })
 
     expect(result).toBe('dev-folder')
     const searchUrl: string = fetchMock.mock.calls[0][0]
@@ -245,9 +361,9 @@ describe('getDiaryFileMeta', () => {
       version: '2',
     }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
 
-    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01')
+    const result = await getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01')
 
     expect(result).toEqual(meta)
   })
@@ -260,9 +376,9 @@ describe('getDiaryFileMeta', () => {
       parents: ['other-folder'],
       trashed: false,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 
@@ -276,9 +392,9 @@ describe('getDiaryFileMeta', () => {
       version: '2',
     }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
 
-    const result = await getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01')
+    const result = await getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01')
 
     expect(result).toEqual(meta)
   })
@@ -291,9 +407,9 @@ describe('getDiaryFileMeta', () => {
       parents: ['folder-1'],
       trashed: false,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 
@@ -305,9 +421,9 @@ describe('getDiaryFileMeta', () => {
       parents: ['folder-1'],
       trashed: true,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
 
-    await expect(getDiaryFileMeta('token', 'sid', session, { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any, 'file-1', '2026-05-01'))
+    await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
   })
 })
@@ -455,8 +571,11 @@ describe('getRevisionContent', () => {
   })
 })
 
-const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, folder_id: 'folder-1' })
-const envStub = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } } as any
+const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, google_sub: 'test-user', folder_id: 'folder-1' })
+const envStub = {
+  SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() },
+  S3_WORKFLOW_SERVICE: { ensureDiaryFolder: vi.fn().mockResolvedValue('folder-1') },
+} as any
 
 describe('listEntries pagination', () => {
   it('uses pageSize=100 and orderBy=name', async () => {

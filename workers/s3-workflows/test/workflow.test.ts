@@ -8,8 +8,10 @@ import type { S3Config } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv, S3BackfillParams } from '../src/types'
 
-vi.mock('../../../functions/_shared/drive', () => ({
+vi.mock('../../../functions/_shared/drive', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(async () => 'folder-1'),
+  getEntryMeta: vi.fn(async (_token: string, id: string) => ({ id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder' })),
   findJsonFile: vi.fn(async () => 'settings-file-1'),
   readJsonFile: vi.fn(async () => ({ enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' })),
   // A scope-based backfill (this file only exercises that path) looks up each date's

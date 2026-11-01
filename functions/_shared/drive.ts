@@ -1,5 +1,5 @@
 import type { Env, SessionData } from './session'
-import { saveSession, SESSION_TTL } from './session'
+import { invalidateFolderScopedS3Cache, saveSession, SESSION_TTL } from './session'
 import { folderNameForOrigin } from '../../src/utils/folderName'
 const BASE = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
@@ -85,28 +85,71 @@ export function getFolderName(sessionDomain?: string): string {
   return folderNameForOrigin(sessionDomain)
 }
 
-export async function ensureFolder(token: string, sessionId: string, session: SessionData, env: Env): Promise<string> {
-  if (session.folder_id) return session.folder_id
+export interface EnsureFolderOptions {
+  // Set only by the account-scoped Durable Object after it has serialized this
+  // request. Workflow code must otherwise resolve through the Pages service.
+  withinCoordinator?: boolean
+  // On first assignment, check Drive even when this session has a cached ID so
+  // pre-coordinator sessions cannot silently establish a split account root.
+  discoverByName?: boolean
+}
 
-  // Reads can create the first folder too, so they must use the same account
-  // coordinator as saves. The coordinator itself has no service binding.
-  if (env.S3_WORKFLOW_SERVICE && session.google_sub) {
-    const folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({ sessionId, accountKey: session.google_sub })
+export async function ensureFolder(
+  token: string,
+  sessionId: string,
+  session: SessionData,
+  env: Env,
+  options: EnsureFolderOptions = {},
+): Promise<string> {
+  if (!options.withinCoordinator) {
+    if (!session.google_sub) throw new DriveError(401, 'Google account identity missing; sign in again')
+
+    // Route even a cached session through the account-level pointer. A cached
+    // ID is a hint from this login session, not the account-wide source of truth.
+    let folderId: string
+    if (env.S3_WORKFLOW_SERVICE) {
+      folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({ sessionId, accountKey: session.google_sub })
+    } else if (env.DIARY_WRITER) {
+      folderId = await env.DIARY_WRITER.getByName(session.google_sub).ensureFolder({ sessionId, accountKey: session.google_sub })
+    } else {
+      throw new DriveError(503, 'Account folder coordinator unavailable')
+    }
+    if (session.folder_id !== folderId) invalidateFolderScopedS3Cache(session)
     session.folder_id = folderId
-    await saveSession(sessionId, session, env)
     return folderId
   }
 
+  if (session.folder_id && !options.discoverByName) return session.folder_id
+
   const folderName = getFolderName(env.SESSION_DOMAIN)
   const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`)
-  const list = await driveWithRetry(
-    () => fetch(`${BASE}/files?q=${q}&fields=files(id,name)`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-    r => r.json() as Promise<{ files: { id: string }[] }>,
-  )
+  const folders: { id: string }[] = []
+  let pageToken: string | undefined
+  do {
+    const pageUrl = `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=2${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    const page = await driveWithRetry(
+      () => fetch(pageUrl, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+      r => r.json() as Promise<{ files: { id: string }[]; nextPageToken?: string }>,
+    )
+    folders.push(...page.files)
+    if (folders.length > 1) {
+      throw new DriveError(409, `Multiple Drive folders named "${folderName}" need to be resolved`)
+    }
+    // Drive can return a short or empty page before the end of the listing.
+    // A continuation token alone does not prove that another folder exists.
+    pageToken = page.nextPageToken
+  } while (pageToken)
 
   let folderId: string
-  if (list.files.length > 0) {
-    folderId = list.files[0].id
+  if (folders.length > 0) {
+    folderId = folders[0].id
+    if (session.folder_id && session.folder_id !== folderId) {
+      throw new DriveError(409, 'This session points to a different diary folder; resolve the folders before syncing')
+    }
+  } else if (session.folder_id) {
+    // The user may have renamed or moved the cached folder. Keep using the
+    // validated account pointer rather than create a second diary folder.
+    folderId = session.folder_id
   } else {
     const created = await driveWithRetry(
       () => fetch(`${BASE}/files`, {
@@ -120,6 +163,7 @@ export async function ensureFolder(token: string, sessionId: string, session: Se
     folderId = created.id
   }
 
+  if (session.folder_id !== folderId) invalidateFolderScopedS3Cache(session)
   const updated = { ...session, folder_id: folderId }
   await saveSession(sessionId, updated, env)
   session.folder_id = folderId
@@ -132,14 +176,15 @@ async function withFolderFallback<T>(
   session: SessionData,
   env: Env,
   op: (folderId: string) => Promise<T>,
+  folderOptions?: EnsureFolderOptions,
 ): Promise<T> {
-  const folderId = await ensureFolder(token, sessionId, session, env)
+  const folderId = await ensureFolder(token, sessionId, session, env, folderOptions)
   try {
     return await op(folderId)
   } catch (e) {
     if (e instanceof DriveError && e.status === 404) {
       session.folder_id = undefined
-      const freshId = await ensureFolder(token, sessionId, session, env)
+      const freshId = await ensureFolder(token, sessionId, session, env, folderOptions)
       return op(freshId)
     }
     console.error('drive.ts: withFolderFallback failed', e)
@@ -166,12 +211,12 @@ async function listAllFiles(token: string, baseUrl: string): Promise<DriveFileMe
   return files
 }
 
-export async function listEntries(token: string, sessionId: string, session: SessionData, env: Env): Promise<DriveFileMeta[]> {
+export async function listEntries(token: string, sessionId: string, session: SessionData, env: Env, folderOptions?: EnsureFolderOptions): Promise<DriveFileMeta[]> {
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain'`)
     const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version)')
     return listAllFiles(token, `${BASE}/files?q=${q}&fields=${fields}&orderBy=name&pageSize=${FILES_PAGE_SIZE}`)
-  })
+  }, folderOptions)
 }
 
 // Workflow backfills use this page-sized variant so no complete Drive listing is
@@ -183,6 +228,7 @@ export async function listEntryPage(
   session: SessionData,
   env: Env,
   pageToken?: string,
+  folderOptions?: EnsureFolderOptions,
 ): Promise<{ files: DriveFileMeta[]; nextPageToken?: string }> {
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain'`)
@@ -195,16 +241,16 @@ export async function listEntryPage(
       }),
       r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
     )
-  })
+  }, folderOptions)
 }
 
-export async function searchEntries(token: string, sessionId: string, session: SessionData, env: Env, query: string): Promise<DriveFileMeta[]> {
+export async function searchEntries(token: string, sessionId: string, session: SessionData, env: Env, query: string, folderOptions?: EnsureFolderOptions): Promise<DriveFileMeta[]> {
   const escapedQuery = query.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   return withFolderFallback(token, sessionId, session, env, async folderId => {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType='text/plain' and fullText contains '${escapedQuery}'`)
     const fields = encodeURIComponent('nextPageToken,files(id,name,modifiedTime,version)')
     return listAllFiles(token, `${BASE}/files?q=${q}&fields=${fields}&pageSize=${FILES_PAGE_SIZE}`)
-  })
+  }, folderOptions)
 }
 
 export interface DriveChange {
@@ -258,7 +304,7 @@ export async function getChanges(token: string, pageToken: string): Promise<Chan
   return { changes, newStartPageToken }
 }
 
-export async function findEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<DriveFileMeta | null> {
+export async function findEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string, folderOptions?: EnsureFolderOptions): Promise<DriveFileMeta | null> {
   // `date` is validated as YYYY-MM-DD by the calling endpoint, so it is safe to
   // interpolate directly. Accept both the legacy `.md` and current `.txt` names.
   return withFolderFallback(token, sessionId, session, env, async folderId => {
@@ -274,7 +320,7 @@ export async function findEntryMeta(token: string, sessionId: string, session: S
     const meta = res.files[0]
     if (meta && !isExpectedDiaryFile(meta, folderId, date)) throw new DriveError(409, 'Diary file metadata does not match the requested date and folder')
     return meta ?? null
-  })
+  }, folderOptions)
 }
 
 export async function getEntryMeta(token: string, fileId: string): Promise<DriveFileMeta> {
@@ -310,9 +356,10 @@ export async function getDiaryFileMeta(
   env: Env,
   fileId: string,
   date?: string,
+  folderOptions?: EnsureFolderOptions,
 ): Promise<DriveFileMeta> {
   const [folderId, meta] = await Promise.all([
-    ensureFolder(token, sessionId, session, env),
+    ensureFolder(token, sessionId, session, env, folderOptions),
     getEntryMeta(token, fileId),
   ])
 

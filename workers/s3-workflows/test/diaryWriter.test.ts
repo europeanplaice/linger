@@ -1,4 +1,4 @@
-import { createSession, getSession, invalidateSession } from '../../../functions/_shared/session'
+import { createSession, getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
 import { env, createExecutionContext, runInDurableObject } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
@@ -66,6 +66,43 @@ async function account() {
 }
 
 describe('account-scoped diary mutations', () => {
+  it('clears folder-scoped S3 caches when a session adopts the account folder', async () => {
+    const { auth, service } = await account()
+    const accountFolder = await service.ensureDiaryFolder(auth)
+    const session = (await getSession(auth.sessionId, env))!
+    session.folder_id = 'old-device-folder'
+    session.s3_settings_file_id = 'old-settings-file'
+    session.s3_status_file_id = 'old-status-file'
+    session.s3_settings_negative_cache_at = Date.now()
+    session.s3_status_negative_cache_at = Date.now()
+    await saveSession(auth.sessionId, session, env)
+
+    expect(await service.ensureDiaryFolder(auth)).toBe(accountFolder)
+    const reconciled = (await getSession(auth.sessionId, env))!
+    expect(reconciled.folder_id).toBe(accountFolder)
+    expect(reconciled.s3_settings_file_id).toBeUndefined()
+    expect(reconciled.s3_status_file_id).toBeUndefined()
+    expect(reconciled.s3_settings_negative_cache_at).toBeUndefined()
+    expect(reconciled.s3_status_negative_cache_at).toBeUndefined()
+  })
+
+  it('reconciles a second device session to the account folder pointer', async () => {
+    const { auth, service, writer } = await account()
+    const firstSession = (await getSession(auth.sessionId, env))!
+    firstSession.folder_id = 'legacy-folder-a'
+    await saveSession(auth.sessionId, firstSession, env)
+    const secondSessionId = `other-${auth.sessionId}`
+    await createSession(secondSessionId, { ...firstSession, folder_id: 'legacy-folder-b' }, env)
+
+    const firstFolder = await service.ensureDiaryFolder(auth)
+    const secondFolder = await service.ensureDiaryFolder({ sessionId: secondSessionId, accountKey: auth.accountKey })
+
+    expect(firstFolder).toBe('legacy-folder-a')
+    expect(secondFolder).toBe(firstFolder)
+    expect((await getSession(secondSessionId, env))?.folder_id).toBe(firstFolder)
+    expect(await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get('folder'))).toBe(firstFolder)
+  })
+
   it('allows one of two concurrent first saves and retains one Drive file despite listing lag', async () => {
     const { service, input } = await account()
     const responses = await Promise.all(['device A', 'device B'].map(content => service.mutateDiaryEntry(input(content))))
@@ -185,7 +222,9 @@ describe('account-scoped diary mutations', () => {
   it('recovers when the folder persisted by an earlier write was trashed in Drive', async () => {
     const { service, input, writer } = await account()
     await service.mutateDiaryEntry(input('old entry'))
-    vi.mocked(drive.getEntryMeta).mockResolvedValueOnce({ id: 'old-folder', name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
+    vi.mocked(drive.getEntryMeta)
+      .mockResolvedValueOnce({ id: 'old-folder', name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
+      .mockResolvedValueOnce({ id: 'old-folder', name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
     vi.mocked(drive.ensureFolder).mockImplementationOnce(async (_token, _id, session) => {
       expect(session.folder_id).toBeUndefined()
       session.folder_id = 'replacement-folder'

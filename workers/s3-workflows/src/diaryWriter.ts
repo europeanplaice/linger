@@ -3,7 +3,7 @@ import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_sh
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
-import { getValidSession, jsonResponse } from '../../../functions/_shared/session'
+import { getValidSession, invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
 import { authorizedSession, mirrorEntryForAuth, deleteEntryForAuth } from './runtime'
 import type { WorkflowEnv } from './types'
@@ -30,7 +30,8 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   }
 
   private async folder(auth: DiaryWriterAuth, session: SessionData): Promise<string> {
-    const stored = await this.ctx.storage.get<string>('folder')
+    const sessionFolderId = session.folder_id
+    let stored = await this.ctx.storage.get<string>('folder')
     if (stored) session.folder_id = stored
     // A persisted pointer must not pin an account to a folder the user has
     // since deleted/trashed in Drive. Preserve transient errors; only absence
@@ -41,12 +42,34 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         if (meta.trashed || meta.mimeType !== 'application/vnd.google-apps.folder') throw new DriveError(404, 'not_found')
       } catch (error) {
         if (!(error instanceof DriveError && error.status === 404)) throw error
-        session.folder_id = undefined
+        session.folder_id = stored ? sessionFolderId : undefined
         await this.ctx.storage.delete('folder')
+        stored = undefined
+        if (session.folder_id) {
+          try {
+            const fallbackMeta = await getEntryMeta(session.access_token, session.folder_id)
+            if (fallbackMeta.trashed || fallbackMeta.mimeType !== 'application/vnd.google-apps.folder') {
+              throw new DriveError(404, 'not_found')
+            }
+          } catch (fallbackError) {
+            if (!(fallbackError instanceof DriveError && fallbackError.status === 404)) throw fallbackError
+            session.folder_id = undefined
+          }
+        }
       }
     }
-    const id = await ensureFolder(session.access_token, auth.sessionId, session, this.env)
+    const id = await ensureFolder(session.access_token, auth.sessionId, session, this.env, {
+      withinCoordinator: true,
+      discoverByName: !stored,
+    })
+    session.folder_id = id
     await this.ctx.storage.put('folder', id)
+    // A stored account pointer may replace a different per-session cache. Keep
+    // the session aligned so later requests do not resurrect the stale ID.
+    if (sessionFolderId !== id) {
+      invalidateFolderScopedS3Cache(session)
+      await saveSession(auth.sessionId, session, this.env)
+    }
     return id
   }
 
@@ -67,11 +90,11 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const findEntry = async (): Promise<DriveFileMeta | null> => {
         const known = await this.ctx.storage.get<string>(key)
         if (known) {
-          try { return await getDiaryFileMeta(token, input.sessionId, session, this.env, known, input.date) }
+          try { return await getDiaryFileMeta(token, input.sessionId, session, this.env, known, input.date, { withinCoordinator: true }) }
           catch (e) { if (!(e instanceof DriveError && e.status === 404)) throw e }
           await this.ctx.storage.delete(key)
         }
-        const meta = await findEntryMeta(token, input.sessionId, session, this.env, input.date)
+        const meta = await findEntryMeta(token, input.sessionId, session, this.env, input.date, { withinCoordinator: true })
         if (meta) await this.ctx.storage.put(key, meta.id)
         return meta
       }
@@ -88,7 +111,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         try { meta = await saveEntry(token, entry, folderId, undefined, undefined, id) }
         catch (e) {
           if (!(e instanceof DriveError && e.status === 409)) throw e
-          meta = await getDiaryFileMeta(token, input.sessionId, session, this.env, id, input.date)
+          meta = await getDiaryFileMeta(token, input.sessionId, session, this.env, id, input.date, { withinCoordinator: true })
           await this.ctx.storage.put(key, meta.id)
           const existing = await getEntryContent(token, meta.id, input.date)
           if (existing.content !== entry.content) throw new DriveConflictError()

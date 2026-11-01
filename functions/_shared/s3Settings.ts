@@ -201,9 +201,11 @@ async function resolveDriveJson<T>(
 // folder_id, and negatively caches a missing config file, so repeated calls (every
 // mirror/poll) don't each pay a files.list lookup — see S3_SETTINGS_NEGATIVE_CACHE_MS.
 export async function loadS3SettingsRecord(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3SettingsRecord | null> {
+  const folderId = await ensureFolder(token, sessionId, session, env)
+  // Folder reconciliation can invalidate a negative result cached for a prior
+  // folder, so resolve the canonical account folder before honoring this cache.
   if (isNegativelyCached(session)) return null
 
-  const folderId = await ensureFolder(token, sessionId, session, env)
   let sessionChanged = false
 
   // Config and status live in two independent Drive files — resolving them

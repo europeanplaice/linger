@@ -77,11 +77,11 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
     // metadata before writing because Drive v3 does not document version as an
     // If-Match token.
     if (body.fileId && (body.force || body.baseVersion !== null)) {
-      const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
+      const folderId = await ensureFolder(accessToken, sessionId, session, context.env, { withinCoordinator: true })
       // Force only overrides conflict detection, never file authorization.
       let currentMeta: DriveFileMeta
       try {
-        currentMeta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date)
+        currentMeta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date, { withinCoordinator: true })
       } catch (e) {
         if (e instanceof DriveError && e.status === 404) return jsonResponse({ conflict: null }, 409)
         throw e
@@ -103,7 +103,7 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
           // 412: remote version changed — fetch current state and check for real conflict
           let meta: DriveFileMeta
           try {
-            meta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date)
+            meta = await getDiaryFileMeta(accessToken, sessionId, session, context.env, body.fileId, date, { withinCoordinator: true })
           } catch (e2) {
             if (e2 instanceof DriveError && e2.status === 404) return jsonResponse({ conflict: null }, 409)
             throw e2
@@ -123,8 +123,8 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
     }
 
     // No fileId: search by filename (first save on this device or new entry)
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date))
+    const folderId = await ensureFolder(accessToken, sessionId, session, context.env, { withinCoordinator: true })
+    const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date, { withinCoordinator: true }))
     const fileId = meta?.id
     if (!meta && !body.force && body.baseVersion != null) return jsonResponse({ conflict: null }, 409)
 
@@ -148,7 +148,7 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
     return jsonResponse(savedMeta)
   } catch (e) {
     if (e instanceof DriveConflictError) {
-      const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date))
+      const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date, { withinCoordinator: true }))
       const entry = meta ? await getEntryContent(accessToken, meta.id, date) : null
       return jsonResponse({ conflict: meta && entry ? { entry, meta } : null }, 409)
     }
@@ -166,7 +166,7 @@ export async function removeDiaryEntry(context: EntryMutationContext): Promise<R
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date))
+    const meta = await (context.findEntry?.() ?? findEntryMeta(accessToken, sessionId, session, context.env, date, { withinCoordinator: true }))
     if (!meta) return new Response(null, { status: 204 })
 
     const fileId = context.request.headers.get('X-Linger-File-Id')

@@ -1,8 +1,7 @@
 import type { WorkflowStep, WorkflowStepConfig } from 'cloudflare:workers'
 import type { SessionData } from '../../../functions/_shared/session'
-import { getSession, getValidAccessToken, getValidIdToken } from '../../../functions/_shared/session'
+import { getSession, getValidAccessToken, getValidIdToken, invalidateFolderScopedS3Cache } from '../../../functions/_shared/session'
 import {
-  ensureFolder,
   findEntryMeta,
   findJsonFile,
   getDiaryFileMeta,
@@ -14,6 +13,7 @@ import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
 import type { S3SyncIndex } from './syncIndex'
+import type { DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 
 export interface S3Config {
   enabled: boolean
@@ -49,6 +49,20 @@ export async function authorizedSession(env: WorkflowEnv, auth: S3WorkflowAuth):
   const session = await getSession(auth.sessionId, env)
   if (!session || session.google_sub !== auth.accountKey) throw new Error('Unauthorized')
   return session
+}
+
+export async function ensureAccountDiaryFolder(
+  env: WorkflowEnv,
+  sessionId: string,
+  session: SessionData,
+): Promise<string> {
+  const accountKey = session.google_sub
+  if (!accountKey) throw new Error('Google account identity missing; sign in again')
+  const auth: DiaryWriterAuth = { sessionId, accountKey }
+  const folderId = await env.DIARY_WRITER.getByName(accountKey).ensureFolder(auth)
+  if (session.folder_id !== folderId) invalidateFolderScopedS3Cache(session)
+  session.folder_id = folderId
+  return folderId
 }
 
 export function indexFor(env: WorkflowEnv, accountKey: string): DurableObjectStub<S3SyncIndex> {
@@ -156,7 +170,7 @@ export async function loadS3Config(
   session: SessionData,
   env: WorkflowEnv,
 ): Promise<S3Config | null> {
-  const folderId = await ensureFolder(accessToken, sessionId, session, env)
+  const folderId = await ensureAccountDiaryFolder(env, sessionId, session)
   const fileId = await findJsonFile(accessToken, folderId, 's3_settings.json')
   if (!fileId) return null
   return parseS3Config(await readJsonFile<unknown>(accessToken, fileId))

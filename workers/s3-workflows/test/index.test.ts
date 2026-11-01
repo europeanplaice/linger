@@ -7,8 +7,10 @@ import { DAILY_WORKFLOW_STEP_BUDGET } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
 
-vi.mock('../../../functions/_shared/drive', () => ({
+vi.mock('../../../functions/_shared/drive', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(async () => 'folder-1'),
+  getEntryMeta: vi.fn(async (_token: string, id: string) => ({ id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder' })),
   findJsonFile: vi.fn(async () => 'settings-file-1'),
   readJsonFile: vi.fn(async () => ({ enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger', bucket: 'my-bucket', region: 'us-east-1' })),
   findEntryMeta: vi.fn(async () => ({ id: 'file-1', name: 'diary-2026-01-01.txt', version: '1' })),

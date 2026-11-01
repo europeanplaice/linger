@@ -18,6 +18,13 @@ export interface Env {
   SESSION_DOMAIN: string
   CF_PAGES_COMMIT_SHA?: string
   S3_WORKFLOW_SERVICE?: S3WorkflowService
+  // Present inside the Workflow Worker. Pages uses S3_WORKFLOW_SERVICE instead;
+  // both bindings route folder discovery to the same account-scoped object.
+  DIARY_WRITER?: {
+    getByName(name: string): {
+      ensureFolder(input: { sessionId: string; accountKey: string }): Promise<string>
+    }
+  }
 }
 
 export interface SessionData {
@@ -51,6 +58,15 @@ export interface SessionData {
     expiresAt: number // ms since epoch
     cacheKey: string
   }
+}
+
+// These Drive file ids and negative lookups are scoped to folder_id. Clear them
+// whenever account-level folder reconciliation moves a session to another folder.
+export function invalidateFolderScopedS3Cache(session: SessionData): void {
+  session.s3_settings_file_id = undefined
+  session.s3_status_file_id = undefined
+  session.s3_settings_negative_cache_at = undefined
+  session.s3_status_negative_cache_at = undefined
 }
 
 export interface Data extends Record<string, unknown> {

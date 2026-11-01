@@ -13,8 +13,10 @@ const config: S3Config = { enabled: true, bucket: 'my-bucket', region: 'us-east-
 const date = '2026-10-01'
 const meta = { id: 'current-file', name: `diary-${date}.txt`, version: '1' }
 
-vi.mock('../../../functions/_shared/drive', () => ({
+vi.mock('../../../functions/_shared/drive', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(async () => 'folder'),
+  getEntryMeta: vi.fn(async (_token: string, id: string) => ({ id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder' })),
   findJsonFile: vi.fn(async () => 'settings'),
   readJsonFile: vi.fn(),
   writeJsonFile: vi.fn(async () => ({ id: 'settings', name: 's3_settings.json', version: '2' })),

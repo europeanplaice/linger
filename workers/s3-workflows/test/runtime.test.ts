@@ -1,4 +1,4 @@
-import { createSession } from '../../../functions/_shared/session'
+import { createSession, getSession, saveSession } from '../../../functions/_shared/session'
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { isAtLeast } from '../../../functions/_shared/s3'
@@ -6,6 +6,7 @@ import type { SessionData } from '../../../functions/_shared/session'
 import {
   assertWithinDailyStepBudget,
   DAILY_WORKFLOW_STEP_BUDGET,
+  ensureAccountDiaryFolder,
   entryKey,
   entryStatusForAuth,
   getWorkflowUsage,
@@ -31,6 +32,34 @@ describe('entryKey / isValidDate', () => {
     expect(isValidDate('2026-01-05')).toBe(true)
     expect(isValidDate('2026-1-5')).toBe(false)
     expect(isValidDate('not-a-date')).toBe(false)
+  })
+})
+
+describe('account diary folder coordination', () => {
+  it('routes workflow folder lookups through the account DiaryWriter', async () => {
+    const accountKey = `folder-account-${crypto.randomUUID()}`
+    const sessionId = `folder-session-${crypto.randomUUID()}`
+    const original = {
+      refresh_token: 'refresh', access_token: 'access', expires_at: Date.now() + 3_600_000,
+      google_sub: accountKey, folder_id: 'old-session-folder',
+    }
+    await createSession(sessionId, original, env)
+    const ensureFolder = vi.fn(async () => {
+      const persisted = (await getSession(sessionId, env))!
+      persisted.folder_id = 'canonical-folder'
+      await saveSession(sessionId, persisted, env)
+      return 'canonical-folder'
+    })
+    const getByName = vi.fn().mockReturnValue({ ensureFolder })
+    const workflowEnv = { DIARY_WRITER: { getByName } } as unknown as WorkflowEnv
+
+    const resolved = await ensureAccountDiaryFolder(workflowEnv, sessionId, original)
+
+    expect(getByName).toHaveBeenCalledWith(accountKey)
+    expect(ensureFolder).toHaveBeenCalledWith({ sessionId, accountKey })
+    expect(resolved).toBe('canonical-folder')
+    expect(original.folder_id).toBe('canonical-folder')
+    expect((await getSession(sessionId, env))?.folder_id).toBe('canonical-folder')
   })
 })
 

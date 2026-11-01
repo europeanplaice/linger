@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME,
-  isValidS3Settings, getS3Settings, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
+  isValidS3Settings, getS3Settings, loadS3SettingsRecord, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
   writeBackfillProgress, finishBackfill, credentialsCacheKey, resyncSingleEntry, isBackfillRunActive,
   getAssumedCredentials,
 } from '../../functions/_shared/s3Settings'
@@ -130,6 +130,31 @@ describe('isValidS3Settings', () => {
 })
 
 describe('getS3Settings negative caching', () => {
+  it('reconciles folder-scoped IDs and negative caches before loading settings', async () => {
+    mockS3Files(baseSettings, null)
+    const sess = makeSession({
+      folder_id: 'old-folder',
+      s3_settings_file_id: 'old-settings-file',
+      s3_status_file_id: 'old-status-file',
+      s3_settings_negative_cache_at: Date.now(),
+      s3_status_negative_cache_at: Date.now(),
+    })
+    vi.mocked(drive.ensureFolder).mockImplementation(async (_token, _sessionId, current) => {
+      session.invalidateFolderScopedS3Cache(current)
+      current.folder_id = 'canonical-folder'
+      return 'canonical-folder'
+    })
+
+    const result = await loadS3SettingsRecord('tok', 'sid', sess, {} as any)
+
+    expect(result?.folderId).toBe('canonical-folder')
+    expect(result?.configFileId).toBe(CONFIG_FILE_ID)
+    expect(drive.findJsonFile).toHaveBeenCalledWith('tok', 'canonical-folder', S3_SETTINGS_FILE_NAME)
+    expect(drive.readJsonFile).toHaveBeenCalledWith('tok', CONFIG_FILE_ID)
+    expect(sess.s3_settings_file_id).toBe(CONFIG_FILE_ID)
+    expect(sess.s3_settings_negative_cache_at).toBeUndefined()
+  })
+
   it('caches the "no settings file" result on the session so the next call skips the Drive lookup', async () => {
     mockS3Files(null, null)
     const sess = makeSession()

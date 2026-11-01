@@ -2,8 +2,8 @@ import { DurableObject } from 'cloudflare:workers'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
-import { authorizedSession, mirrorEntryCore, safeError, type MirrorEntryCoreInput, type S3Config } from './runtime'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile } from '../../../functions/_shared/drive'
+import { authorizedSession, ensureAccountDiaryFolder, mirrorEntryCore, safeError, type MirrorEntryCoreInput, type S3Config } from './runtime'
+import { findJsonFile, readJsonFile, writeJsonFile } from '../../../functions/_shared/drive'
 import { getValidAccessToken } from '../../../functions/_shared/session'
 import { isValidS3Settings } from '../../../functions/_shared/s3Settings'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
@@ -86,7 +86,7 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return this.serialize(async () => {
       const session = await authorizedSession(this.env, input)
       const accessToken = await getValidAccessToken(input.sessionId, session, this.env)
-      const folder = await ensureFolder(accessToken, input.sessionId, session, this.env)
+      const folder = await ensureAccountDiaryFolder(this.env, input.sessionId, session)
       const file = await findJsonFile(accessToken, folder, 's3_settings.json')
       const old = file ? await readJsonFile<S3Config>(accessToken, file) : null
       // Retain the old target before remote I/O so a lost Drive response cannot

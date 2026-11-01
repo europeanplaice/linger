@@ -387,7 +387,7 @@ describe('post entry handler', () => {
     const res = await onPostEntry(ctx as any)
 
     expect(res.status).toBe(200)
-    expect(drive.getDiaryFileMeta).toHaveBeenCalledWith('tok', 'sid', {}, {}, 'validFileId1234567890', '2026-05-01')
+    expect(drive.getDiaryFileMeta).toHaveBeenCalledWith('tok', 'sid', {}, {}, 'validFileId1234567890', '2026-05-01', { withinCoordinator: true })
     expect(drive.saveEntry).toHaveBeenCalledWith('tok', { date: '2026-05-01', content: 'overwrite' }, 'folder-1', 'entry-1')
     expect(drive.getEntryContent).not.toHaveBeenCalled()
   })
@@ -425,6 +425,7 @@ describe('post entry handler', () => {
       {},
       'validFileId1234567890',
       '2026-05-01',
+      { withinCoordinator: true },
     )
     expect(drive.saveEntry).toHaveBeenCalledWith(
       'tok',
