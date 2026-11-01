@@ -146,6 +146,7 @@ export default function App() {
     googleSub,
     googleClientId,
     authError,
+    signingIn,
     clearAuthError,
     signIn,
     signOut,
@@ -639,7 +640,7 @@ export default function App() {
     </a>
     <div className="app">
       <AnimatePresence>
-        {tokenExpired && <SessionExpiredModal onReauth={handleReauth} />}
+        {tokenExpired && <SessionExpiredModal onReauth={handleReauth} signingIn={signingIn} authError={authError} />}
       </AnimatePresence>
       {updatePending && (
         <div className="update-banner" role="status">
@@ -798,6 +799,7 @@ export default function App() {
           onCancelNavigation={handleCancelNavigation}
           reauthSaveResult={reauthSaveResult}
           isSignedIn={!tokenExpired}
+          draftOwner={status === 'signedIn' ? email : null}
           isOnline={isOnline}
           onExpired={handleExpired}
           onGoToToday={() => selectDate(todayYmd())}

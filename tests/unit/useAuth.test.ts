@@ -130,6 +130,17 @@ describe('useAuth', () => {
     expect(mockStartSignIn).toHaveBeenCalledOnce()
   })
 
+  it('tracks popup reauthentication and exposes failure for the in-place recovery UI', async () => {
+    mockStartSignIn.mockRejectedValueOnce(new Error('popup blocked'))
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedOut'))
+
+    await act(async () => { result.current.signIn() })
+
+    expect(result.current.signingIn).toBe(false)
+    expect(result.current.authError).toBe('sign_in_failed')
+  })
+
   it('signOut calls revokeSession and resets status', async () => {
     mockRevokeSession.mockResolvedValue(undefined)
     const { result } = renderHook(() => useAuth())

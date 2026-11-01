@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
-import { getDraft, deleteDraft } from '../lib/diaryCache'
+import { getDraft, putDraft, deleteDraft } from '../lib/diaryCache'
 import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
 import { getS3EntryStatus, retryS3EntrySync } from '../api/s3Settings'
@@ -81,6 +81,7 @@ interface Props {
   onCancelNavigation: () => void
   reauthSaveResult: LoadedDiaryEntry | null
   isSignedIn: boolean
+  draftOwner: string | null
   isOnline: boolean
   onExpired: () => void
   onGoToToday?: () => void
@@ -219,7 +220,7 @@ function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeP
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, onS3StaleEntryDetected }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, onS3StaleEntryDetected }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -565,14 +566,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setLoading(false)
         return
       }
-      const draft = await getDraft(date).catch(() => undefined)
+      const draft = draftOwner ? await getDraft(date, draftOwner).catch(() => undefined) : undefined
       if (cancelled) return
       if (loadError === null) {
         if (draft && draft.content !== (entry?.entry.content ?? '')) {
           applyDraft(draft, entry?.meta.id ?? null)
         } else {
           // No draft, or the draft already made it to Drive — drop it.
-          if (draft) deleteDraft(date).catch(() => {})
+          if (draft && draftOwner) deleteDraft(date, draftOwner, draft.content).catch(() => {})
           applyLoadedEntry(entry)
           if (entry?.meta.version) {
             // Defence in depth alongside dropping dateKnownAbsent from this effect's
@@ -601,7 +602,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [date, applyLoadedEntry, applyDraft, pollS3Status])
+  }, [date, draftOwner, applyLoadedEntry, applyDraft, pollS3Status])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
@@ -636,6 +637,29 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [s3Retrying, pollS3Status])
 
   const isDirty = text !== savedText
+
+  // Keep a small, account-scoped local recovery point while typing. This runs
+  // independently of Drive auto-save, so an expired session or failed request
+  // cannot be the first time we try to preserve the editor contents.
+  useEffect(() => {
+    if (!draftOwner || !isDirty || loading || hasConflict) return
+    const content = text
+    const timer = window.setTimeout(() => {
+      void getDraft(date, draftOwner).then(existing => {
+        if (textRef.current !== content || currentDateRef.current !== date) return
+        return putDraft({
+          owner: draftOwner,
+          date,
+          content,
+          baseVersion: baseVersionRef.current,
+          baseContent: savedTextRef.current,
+          savedAt: Date.now(),
+          conflicted: existing?.conflicted,
+        })
+      }).catch(() => {})
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [date, draftOwner, isDirty, loading, hasConflict, text])
 
   useEffect(() => {
     onDirtyChange(isDirty)
@@ -776,7 +800,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setHasConflict(false)
     setConflictRemote(null)
     setPendingOfflineSave(false)
-    deleteDraft(date).catch(() => {})
+    if (draftOwner) deleteDraft(date, draftOwner).catch(() => {})
     setStatus(conflictRemote ? t.entry.loadedLatest : t.entry.remoteDeleted)
   }
 
@@ -863,7 +887,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const previous = text
     setText(savedTextRef.current)
     setStatus('')
-    deleteDraft(date).catch(() => {})
+    if (draftOwner) deleteDraft(date, draftOwner).catch(() => {})
     if (pendingOfflineSaveRef.current) {
       setPendingOfflineSave(false)
       // A restored draft's base may lag the latest cached entry — reload it.

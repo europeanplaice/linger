@@ -14,6 +14,7 @@ export interface AuthState {
   googleSub: string | null
   googleClientId: string | null
   authError: AuthErrorCode | null
+  signingIn: boolean
   clearAuthError: () => void
   signIn: () => void
   signOut: () => void
@@ -37,6 +38,7 @@ export function useAuth(): AuthState {
     () => { try { return localStorage.getItem('linger_had_session') === 'true' } catch { return false } }
   )
   const [authError, setAuthError] = useState<AuthErrorCode | null>(null)
+  const [signingIn, setSigningIn] = useState(false)
   const authRevision = useRef(0)
   const restoring = useRef(true)
 
@@ -53,6 +55,7 @@ export function useAuth(): AuthState {
       setStatus('signedOut')
       setTokenExpired(false)
       setAuthError(null)
+      setSigningIn(false)
     })
     return unsubscribe
   }, [])
@@ -113,6 +116,7 @@ export function useAuth(): AuthState {
     const revision = ++authRevision.current
     restoring.current = false
     setAuthError(null)
+    setSigningIn(true)
     startSignIn().then(info => {
       if (revision !== authRevision.current) return
       const account = accountIdentity(info)
@@ -125,8 +129,10 @@ export function useAuth(): AuthState {
       setGoogleClientId(info.googleClientId)
       setTokenExpired(false)
       setStatus('signedIn')
+      setSigningIn(false)
     }).catch(error => {
       if (revision !== authRevision.current) return
+      setSigningIn(false)
       setAuthError('sign_in_failed')
       console.error('Google sign-in failed:', error)
     })
@@ -145,6 +151,7 @@ export function useAuth(): AuthState {
     setStatus('signedOut')
     setTokenExpired(false)
     setAuthError(null)
+    setSigningIn(false)
   }, [])
 
   const handleExpired = useCallback(() => {
@@ -155,5 +162,5 @@ export function useAuth(): AuthState {
     signIn()
   }, [signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
 }

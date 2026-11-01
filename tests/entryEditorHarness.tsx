@@ -214,6 +214,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
       }}
       reauthSaveResult={currentReauthSaveResult}
       isSignedIn={token !== null}
+      draftOwner={token ? 'test@example.com' : null}
       isOnline={isOnline}
       onExpired={onExpired}
       milestones={milestones}

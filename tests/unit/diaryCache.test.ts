@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { getAllCached, putCached, deleteCached, clearCache, getDraft, getAllDrafts, putDraft, deleteDraft } from '../../src/lib/diaryCache'
+import { getAllCached, putCached, deleteCached, clearCache, getDraft, getAllDrafts, putDraft, deleteDraft, markDraftConflicted } from '../../src/lib/diaryCache'
 import type { CachedEntry, DraftEntry } from '../../src/lib/diaryCache'
 
 const meta = (v: string, id = 'f1') => ({
@@ -16,7 +16,10 @@ const entry: CachedEntry = {
   snippet: 'hello',
 }
 
-beforeEach(async () => { await clearCache() })
+beforeEach(async () => {
+  await clearCache()
+  await Promise.all(['alice@example.com', 'bob@example.com'].map(owner => deleteDraft('2026-05-01', owner)))
+})
 
 describe('diaryCache', () => {
   it('roundtrips a cached entry', async () => {
@@ -102,11 +105,43 @@ describe('diaryCache drafts', () => {
     expect(await getDraft('2026-05-01')).toEqual(draft)
   })
 
-  it('clearCache wipes drafts as well as entries', async () => {
+  it('keeps same-date drafts separate by verified account owner', async () => {
+    await putDraft({ ...draft, owner: 'alice@example.com' })
+    await putDraft({ ...draft, owner: 'bob@example.com', content: 'Bob private draft' })
+    expect((await getAllDrafts('alice@example.com')).map(d => d.content)).toEqual(['offline edit'])
+    expect((await getDraft('2026-05-01', 'bob@example.com'))?.content).toBe('Bob private draft')
+  })
+
+  it('does not delete a newer draft when an older save completes', async () => {
+    await putDraft({ ...draft, owner: 'alice@example.com' })
+    await putDraft({ ...draft, owner: 'alice@example.com', content: 'newer typing', savedAt: draft.savedAt + 1 })
+    await deleteDraft(draft.date, 'alice@example.com', draft.content)
+    expect((await getDraft(draft.date, 'alice@example.com'))?.content).toBe('newer typing')
+  })
+
+  it('does not mark a newer cross-tab draft conflicted from a stale replay', async () => {
+    const stale = { ...draft, owner: 'alice@example.com' }
+    await putDraft(stale)
+    await putDraft({ ...stale, content: 'newer cross-tab edit', savedAt: stale.savedAt + 1 })
+    expect(await markDraftConflicted(stale)).toBe(false)
+    const current = await getDraft(draft.date, 'alice@example.com')
+    expect(current?.content).toBe('newer cross-tab edit')
+    expect(current?.conflicted).toBeUndefined()
+  })
+
+  it('clearCache wipes entries and unscoped legacy drafts', async () => {
     await putCached(entry)
     await putDraft(draft)
     await clearCache()
     expect(await getAllCached()).toEqual([])
     expect(await getAllDrafts()).toEqual([])
+  })
+
+  it('clearCache preserves account-scoped recovery drafts for later verified sign-in', async () => {
+    await putCached(entry)
+    await putDraft({ ...draft, owner: 'alice@example.com' })
+    await clearCache()
+    expect(await getAllCached()).toEqual([])
+    expect(await getAllDrafts('alice@example.com')).toMatchObject([{ content: 'offline edit' }])
   })
 })

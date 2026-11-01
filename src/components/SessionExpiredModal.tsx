@@ -1,12 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'motion/react'
 import { useI18n } from '../i18n'
+import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onReauth: () => void
+  signingIn: boolean
+  authError: AuthErrorCode | null
 }
 
-export function SessionExpiredModal({ onReauth }: Props) {
+export function SessionExpiredModal({ onReauth, signingIn, authError }: Props) {
   const { t } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
 
@@ -28,8 +31,9 @@ export function SessionExpiredModal({ onReauth }: Props) {
       transition={{ type: 'spring', stiffness: 420, damping: 32 }}
     >
       <p id="session-expired-title" className="session-expired-modal-msg">{t.session.expired}</p>
-      <button className="btn-reauth" onClick={onReauth}>
-        {t.session.logInAgain}
+      {authError === 'sign_in_failed' && <p className="session-expired-modal-error" role="alert">{t.session.reLoginFailed}</p>}
+      <button className="btn-reauth" onClick={onReauth} disabled={signingIn}>
+        {signingIn ? t.session.loggingIn : t.session.logInAgain}
       </button>
     </motion.dialog>
   )

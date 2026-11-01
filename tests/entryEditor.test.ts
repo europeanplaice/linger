@@ -2366,6 +2366,7 @@ test.describe('EntryEditor — Today FAB', () => {
 })
 
 type TestDraft = {
+  owner?: string
   date: string
   content: string
   baseVersion: string | null
@@ -2384,15 +2385,17 @@ async function clearDraftDb(page: import('@playwright/test').Page) {
 
 async function seedDraft(page: import('@playwright/test').Page, draft: TestDraft) {
   await page.evaluate((d) => new Promise<void>((resolve, reject) => {
-    const req = indexedDB.open('linger_diary_cache', 2)
+    const req = indexedDB.open('linger_diary_cache', 3)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
       if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
+      if (!db.objectStoreNames.contains('accountDrafts')) db.createObjectStore('accountDrafts', { keyPath: 'key' })
     }
     req.onsuccess = () => {
       const db = req.result
-      const put = db.transaction('drafts', 'readwrite').objectStore('drafts').put(d)
+      const value = { ...d, owner: d.owner ?? 'test@example.com', key: `${d.owner ?? 'test@example.com'}\u0000${d.date}` }
+      const put = db.transaction('accountDrafts', 'readwrite').objectStore('accountDrafts').put(value)
       put.onsuccess = () => { db.close(); resolve() }
       put.onerror = () => { db.close(); reject(put.error) }
     }
@@ -2402,15 +2405,16 @@ async function seedDraft(page: import('@playwright/test').Page, draft: TestDraft
 
 async function getDrafts(page: import('@playwright/test').Page): Promise<TestDraft[]> {
   return page.evaluate(() => new Promise<TestDraft[]>((resolve, reject) => {
-    const req = indexedDB.open('linger_diary_cache', 2)
+    const req = indexedDB.open('linger_diary_cache', 3)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
       if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
+      if (!db.objectStoreNames.contains('accountDrafts')) db.createObjectStore('accountDrafts', { keyPath: 'key' })
     }
     req.onsuccess = () => {
       const db = req.result
-      const all = db.transaction('drafts', 'readonly').objectStore('drafts').getAll()
+      const all = db.transaction('accountDrafts', 'readonly').objectStore('accountDrafts').getAll()
       all.onsuccess = () => { db.close(); resolve(all.result as TestDraft[]) }
       all.onerror = () => { db.close(); reject(all.error) }
     }
@@ -2439,6 +2443,36 @@ test.describe('EntryEditor — offline drafts', () => {
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCallsWithBaseContent())).toMatchObject([
       { date: '2026-05-01', content: 'draft text written offline', baseVersion: '1', baseContent: 'saved text' },
     ])
+  })
+
+  test('persists current typing and restores it after a page reload under the same account', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+    await page.locator('textarea.editor-textarea').fill('typing that must survive reload')
+    await expect.poll(() => getDrafts(page)).toMatchObject([
+      { owner: 'test@example.com', date: '2026-05-01', content: 'typing that must survive reload' },
+    ])
+
+    await page.reload()
+    await page.waitForLoadState('domcontentloaded')
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('typing that must survive reload')
+  })
+
+  test('does not restore another account’s draft for the same date', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await seedDraft(page, {
+      owner: 'different@example.com',
+      date: '2026-05-01',
+      content: 'private to another account',
+      baseVersion: '1',
+      baseContent: 'saved text',
+      savedAt: Date.now(),
+    })
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('saved text')
   })
 
   test('drops a stale draft that matches the loaded content', async ({ page }) => {
