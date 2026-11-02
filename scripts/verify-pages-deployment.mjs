@@ -147,12 +147,18 @@ async function verifyAsset(deploymentUrl, asset) {
     readFile(asset.absolutePath),
     fetch(url, {
       cache: 'no-store',
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }),
   ])
 
-  if (!response.ok) throw new Error(`${asset.relativePath}: deployment returned HTTP ${response.status}`)
+  if (!response.ok) {
+    const redirectLocation = response.status >= 300 && response.status < 400
+      ? response.headers.get('location')
+      : null
+    const redirectDetails = redirectLocation ? ` redirect to ${redirectLocation}` : ''
+    throw new Error(`${asset.relativePath}: deployment returned HTTP ${response.status}${redirectDetails}`)
+  }
   const deployedBytes = Buffer.from(await response.arrayBuffer())
   const expectedHash = sha256(expectedBytes)
   const deployedHash = sha256(deployedBytes)
