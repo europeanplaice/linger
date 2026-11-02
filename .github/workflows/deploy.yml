@@ -151,6 +151,7 @@ jobs:
       - run: npm run build
         env:
           DEPLOY_VERSION: ${{ github.sha }}
+          DEPLOY_BRANCH: main
 
       - name: Apply authentication database migrations
         uses: cloudflare/wrangler-action@v3
@@ -211,6 +212,7 @@ jobs:
       - run: npm run build
         env:
           DEPLOY_VERSION: ${{ github.sha }}
+          DEPLOY_BRANCH: staging
 
       # `wrangler pages deploy` rejects `--config <path>` ("Pages does not
       # support custom paths for the Wrangler configuration file"), so the

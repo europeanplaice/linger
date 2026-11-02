@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 declare const __DEPLOY_VERSION__: string
+declare const __DEPLOY_BRANCH__: string
 
 declare namespace React {
   namespace JSX {

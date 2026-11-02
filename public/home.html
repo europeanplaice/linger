@@ -195,10 +195,12 @@
       Visit
       <a href="https://securityheaders.com/?q=linger.europeanplaice.com&followRedirects=on" target="_blank" rel="noopener noreferrer">securityheaders.com</a>
       and enter <code>linger.europeanplaice.com</code>.
-      The <strong>Content-Security-Policy</strong> header restricts all network connections to
-      <code>'self'</code>, <code>googleapis.com</code>, and <code>accounts.google.com</code> only —
-      meaning the browser is physically prevented from sending your data anywhere else, even if
-      someone injected malicious code into the page.
+      The <strong>Content-Security-Policy</strong> header restricts browser connections to a short
+      allowlist. It includes Google for sign-in and Drive, Cloudflare for aggregate analytics, and
+      <code>api.github.com</code> for the optional deployment check. That check runs only when you
+      press its button and requests public workflow metadata; it does not send diary or account data
+      to GitHub. The policy blocks connections to unlisted origins, but it is not a guarantee against
+      code changed by someone who controls the deployment.
     </li>
     <li>
       <strong>Check what Google permissions you granted</strong> —
@@ -211,9 +213,12 @@
     </li>
     <li>
       <strong>Inspect network requests in your browser</strong> —
-      Open DevTools (F12) → Network tab while using the app. Every request goes to
+      Open DevTools (F12) → Network tab while using the app. Diary requests go to
       <code>/api/drive/…</code> (the Cloudflare proxy on this domain) or
-      <code>accounts.google.com</code> (OAuth). No requests are made to any third-party server.
+      <code>accounts.google.com</code> (OAuth). If you choose the deployment check, your browser
+      also requests public status metadata from <code>api.github.com</code>. GitHub receives normal
+      connection metadata such as your IP address, but not diary contents, Google account details,
+      or credentials from that request.
     </li>
     <li>
       <strong>Read the source code</strong> —

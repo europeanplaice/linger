@@ -12,6 +12,7 @@
   --today-text: #6f4a00;
   --selected-bg: #e8e7f8;
   --danger: #c0392b;
+  --deployment-success: #2e6b39;
   --sidebar-w: 280px;
   --mobile-save-action-space: 0px;
   --font-body: 'Inter', 'LINE Seed JP', sans-serif;
@@ -83,6 +84,7 @@
   --today-text: #d19a66;
   --selected-bg: #2d3058;
   --danger: #e06c75;
+  --deployment-success: #8bcf96;
   --card-bg: #2c313c;
   --input-bg: #21252b;
   --shadow: rgba(0,0,0,0.3);
@@ -602,6 +604,102 @@ html.session-restoring .landing {
 }
 .landing-footer a:hover {
   text-decoration: underline;
+}
+
+.deployment-verification {
+  align-items: start;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+  gap: 0.25rem 0.65rem;
+  margin: 0.25rem 0 1rem;
+  text-align: left;
+}
+.deployment-verification-mark {
+  color: var(--text-muted);
+  display: flex;
+  justify-content: center;
+  padding-top: 0.05rem;
+}
+.deployment-verification-mark svg { height: 1.2rem; width: 1.2rem; }
+.deployment-verification--verified .deployment-verification-mark,
+.deployment-verification--verified .deployment-verification-status {
+  color: var(--deployment-success);
+}
+.deployment-verification--failed .deployment-verification-mark,
+.deployment-verification--failed .deployment-verification-status {
+  color: var(--danger);
+}
+.deployment-verification--loading .deployment-verification-mark svg,
+.deployment-verification--pending .deployment-verification-mark svg {
+  animation: deployment-verification-spin 1s linear infinite;
+}
+.deployment-verification-content { min-width: 0; }
+.deployment-verification-title {
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0 0 0.15rem;
+}
+.deployment-verification-build,
+.deployment-verification-run {
+  align-items: center;
+  color: var(--text-muted);
+  display: inline-flex;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+.deployment-verification-build:hover,
+.deployment-verification-run:hover { color: var(--accent); text-decoration: underline; }
+.deployment-verification-build code {
+  background: var(--code-bg);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  padding: 0.05rem 0.25rem;
+}
+.deployment-verification-status,
+.deployment-verification-scope {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  margin: 0.2rem 0 0;
+}
+.deployment-verification-scope { font-size: 0.68rem; }
+.deployment-verification-run { margin-top: 0.2rem; }
+.deployment-verification-button {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  line-height: 1.25;
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+}
+.deployment-verification-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.deployment-verification-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.deployment-verification-button:disabled { cursor: not-allowed; opacity: 0.6; }
+@keyframes deployment-verification-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .deployment-verification--loading .deployment-verification-mark svg,
+  .deployment-verification--pending .deployment-verification-mark svg { animation: none; }
+}
+@media (max-width: 520px) {
+  .deployment-verification { grid-template-columns: 1.5rem minmax(0, 1fr); }
+  .deployment-verification-button { grid-column: 2; justify-self: start; }
+}
+@media (pointer: coarse) {
+  .deployment-verification-button { min-height: 2.75rem; padding-inline: 0.75rem; }
 }
 
 /* ── Skip link ── */

@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
+import { DeploymentVerification } from './DeploymentVerification'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
 import { folderNameForHostname } from '../utils/folderName'
@@ -1358,6 +1359,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         </div>
 
         <footer className="settings-footer">
+          <DeploymentVerification />
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
             <button className="settings-action-btn" onClick={handleShareApp}>

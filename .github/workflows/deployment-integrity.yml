@@ -13,9 +13,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  audit-production:
+  resolve-production-target:
+    name: Resolve production deployment
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.latest.outputs.sha }}
+      skip: ${{ steps.latest.outputs.skip }}
     steps:
       - name: Checkout the audit scripts
         uses: actions/checkout@v4
@@ -29,37 +32,51 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/latest-successful-production-run.mjs
 
-      - name: Checkout the deployed source revision
-        if: steps.latest.outputs.skip == 'false'
+  verify-production-deployment:
+    name: Verify production deployment ${{ needs.resolve-production-target.outputs.sha }}
+    needs: resolve-production-target
+    if: needs.resolve-production-target.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the audit scripts
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.latest.outputs.sha }}
+          ref: main
+          persist-credentials: false
+
+      - name: Checkout the deployed source revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-production-target.outputs.sha }}
+          path: source
           persist-credentials: false
 
       - name: Set up Node.js
-        if: steps.latest.outputs.skip == 'false'
         uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version-file: source/.nvmrc
+          cache: npm
+          cache-dependency-path: source/package-lock.json
 
       - name: Install dependencies
-        if: steps.latest.outputs.skip == 'false'
+        working-directory: source
         run: npm ci
 
       - name: Rebuild the expected production assets
-        if: steps.latest.outputs.skip == 'false'
+        working-directory: source
         env:
-          DEPLOY_VERSION: ${{ steps.latest.outputs.sha }}
+          DEPLOY_VERSION: ${{ needs.resolve-production-target.outputs.sha }}
+          DEPLOY_BRANCH: main
         run: npm run build
 
       - name: Compare Cloudflare production deployment with GitHub Actions
-        if: steps.latest.outputs.skip == 'false'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_READ_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PAGES_PROJECT: linger
-          EXPECTED_COMMIT_SHA: ${{ steps.latest.outputs.sha }}
+          EXPECTED_COMMIT_SHA: ${{ needs.resolve-production-target.outputs.sha }}
           EXPECTED_BRANCH: main
           EXPECTED_COMMIT_DIRTY: 'false'
-          DIST_DIRECTORY: dist
+          DIST_DIRECTORY: source/dist
         run: node scripts/verify-pages-deployment.mjs

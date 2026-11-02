@@ -1,4 +1,5 @@
 import { LoginScreen } from './LoginScreen'
+import { DeploymentVerification } from './DeploymentVerification'
 import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
@@ -139,9 +140,12 @@ export function Landing({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, 
             </li>
             <li>
               <strong>Inspect network requests in your browser</strong> — Open DevTools → Network
-              while using the app. Every request goes to <code>/api/drive/…</code> (the Cloudflare
-              proxy on this domain) or <code>accounts.google.com</code> (OAuth). No requests are
-              made to any third-party server.
+              while using the app. Diary requests go to <code>/api/drive/…</code> (the Cloudflare
+              proxy on this domain) or <code>accounts.google.com</code> (OAuth). If you choose the
+              deployment check below, your browser also requests public workflow status from{' '}
+              <code>api.github.com</code>. GitHub receives normal connection metadata such as your
+              IP address, but not diary contents, Google account details, or credentials from that
+              request.
             </li>
             <li>
               <strong>Read the source code</strong> — The entire codebase is open source on{' '}
@@ -158,6 +162,7 @@ export function Landing({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, 
         </section>
 
         <footer className="landing-footer">
+          <DeploymentVerification />
           <a href="/privacy">Privacy Policy</a>
           {' · '}
           <a href="/terms-of-service">Terms of Service</a>

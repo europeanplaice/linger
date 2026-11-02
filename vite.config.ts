@@ -47,6 +47,7 @@ export default defineConfig({
   base: '/',
   define: {
     __DEPLOY_VERSION__: JSON.stringify(process.env.DEPLOY_VERSION ?? 'dev'),
+    __DEPLOY_BRANCH__: JSON.stringify(process.env.DEPLOY_BRANCH ?? 'local'),
   },
   server: {
     proxy: {
@@ -150,6 +151,8 @@ export default defineConfig({
             'import.meta.env.PROD': 'true',
             'import.meta.env.MODE': '"production"',
             'process.env.NODE_ENV': '"production"',
+            __DEPLOY_VERSION__: JSON.stringify(process.env.DEPLOY_VERSION ?? 'dev'),
+            __DEPLOY_BRANCH__: JSON.stringify(process.env.DEPLOY_BRANCH ?? 'local'),
           },
           logLevel: 'silent',
         })
