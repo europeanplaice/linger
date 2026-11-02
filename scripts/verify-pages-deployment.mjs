@@ -46,8 +46,6 @@ async function getProductionDeployments(accountId, projectName, apiToken) {
     `/pages/projects/${encodeURIComponent(projectName)}/deployments`,
   )
   url.searchParams.set('env', 'production')
-  url.searchParams.set('page', '1')
-  url.searchParams.set('per_page', '100')
 
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${apiToken}` },
