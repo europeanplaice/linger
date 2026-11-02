@@ -85,7 +85,6 @@ export function useServiceWorkerUpdate(editorDirty: boolean): ServiceWorkerUpdat
       document.removeEventListener('visibilitychange', handleVisibility)
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return {
