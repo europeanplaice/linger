@@ -1,7 +1,7 @@
 import type { WorkflowStep, WorkflowStepConfig } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import type { SessionData } from '../../../functions/_shared/session'
-import { getSession, getValidAccessToken, getValidIdToken, invalidateFolderScopedS3Cache } from '../../../functions/_shared/session'
+import { getSession, getSessionByStorageId, getValidAccessToken, getValidIdToken, invalidateFolderScopedS3Cache } from '../../../functions/_shared/session'
 import {
   findEntryMeta,
   findJsonFile,
@@ -15,6 +15,7 @@ import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } f
 import type { MirrorWorkflowParams, WorkflowEnv } from './types'
 import type { S3SyncIndex } from './syncIndex'
 import type { DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import { durableSessionHandle } from '../../../functions/_shared/authStore'
 
 export interface S3Config {
   enabled: boolean
@@ -47,7 +48,11 @@ export function isValidDate(date: string): boolean {
 
 export async function authorizedSession(env: WorkflowEnv, auth: S3WorkflowAuth): Promise<SessionData> {
   if (!auth.sessionId || !auth.accountKey) throw new Error('Unauthorized')
-  const session = await getSession(auth.sessionId, env)
+  // A digest can only arrive here through a trusted workflow/DO payload. Pages
+  // requests authenticate their raw cookie sessionId before making this RPC.
+  const session = auth.sessionId.startsWith('sha256:')
+    ? await getSessionByStorageId(auth.sessionId, env)
+    : await getSession(auth.sessionId, env)
   if (!session || session.google_sub !== auth.accountKey) throw new Error('Unauthorized')
   return session
 }
@@ -495,7 +500,7 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   }
   await index.markPending(input.date, input.driveVersion, new Date().toISOString(), input.fileId)
   try {
-    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'mirror' })
+    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, sessionId: await durableSessionHandle(input.sessionId, env), kind: 'mirror' })
     return { ok: true }
   } catch (error) {
     console.error('s3Workflows: failed to start mirror workflow')
@@ -534,7 +539,7 @@ export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: s
   }
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
-    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, kind: 'delete', deletionId })
+    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, sessionId: await durableSessionHandle(input.sessionId, env), kind: 'delete', deletionId })
     return { ok: true }
   } catch (error) {
     console.error('s3Workflows: failed to start delete workflow')

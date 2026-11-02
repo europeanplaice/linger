@@ -44,13 +44,17 @@ describe('OAuth login popup redirect', () => {
     expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account')
   })
 
-  it('stores only PKCE verifier, nonce, and popup intent under the short-lived state key', async () => {
+  it('keeps PKCE verifier in a short-lived HttpOnly cookie and stores only callback metadata', async () => {
     const env = makeEnv()
     const response = await onRequestGet({ env, request: new Request('https://example.com/auth/login') } as any)
     const url = new URL(response.headers.get('Location')!)
     const [key, value, options] = env.SESSIONS.put.mock.calls.find(call => String(call[0]).startsWith('oauth_state:'))!
     expect(key).toBe(`oauth_state:${url.searchParams.get('state')}`)
-    expect(JSON.parse(value as string)).toMatchObject({ codeVerifier: expect.any(String), nonce: expect.any(String), popup: true })
+    expect(JSON.parse(value as string)).toMatchObject({ nonce: expect.any(String), popup: true })
+    expect(JSON.parse(value as string)).not.toHaveProperty('codeVerifier')
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('HttpOnly')
+    expect(response.headers.get('Set-Cookie')).toContain('Path=/auth/callback')
     expect(options).toEqual({ expirationTtl: 300 })
     expect(value).not.toContain('access_token')
     expect(value).not.toContain('refresh_token')

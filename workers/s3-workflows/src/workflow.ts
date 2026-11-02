@@ -1,6 +1,7 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getValidAccessToken } from '../../../functions/_shared/session'
+import { durableSessionHandle } from '../../../functions/_shared/authStore'
 import { listEntryPage } from '../../../functions/_shared/drive'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { S3BackfillParams, EntryPage, DiaryTarget, EntryProcessResult, WorkflowEnv } from './types'
@@ -44,7 +45,9 @@ async function createChainedInstance(env: WorkflowEnv, id: string, params: S3Bac
   try {
     await env.S3_BACKFILL_WORKFLOW.create({
       id,
-      params,
+      // Workflow payloads are durable storage. Keep the session handle opaque
+      // while preserving getSession() compatibility with both hashed and old IDs.
+      params: { ...params, sessionId: await durableSessionHandle(params.sessionId, env) },
       retention: { successRetention: '1 hour', errorRetention: '1 day' },
     })
   } catch (error) {

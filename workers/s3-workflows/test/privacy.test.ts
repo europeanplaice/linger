@@ -1,6 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
-import { createSession, getSession, saveSession } from '../../../functions/_shared/session'
+import { createSession, getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
+import { sessionStorageId } from '../../../functions/_shared/authStore'
 import type { SessionData } from '../../../functions/_shared/session'
 import type { DiaryWriter } from '../src/diaryWriter'
 import type { WorkflowEnv } from '../src/types'
@@ -46,8 +47,9 @@ describe('OAuth credential storage privacy', () => {
     await createSession(id, session, env)
 
     const row = await env.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?')
-      .bind(id).first<Record<string, unknown>>()
+      .bind(await sessionStorageId(id)).first<Record<string, unknown>>()
     expect(row).not.toBeNull()
+    expect(await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(id).first()).toBeNull()
     const persisted = rawD1(row)
     for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
     expect(persisted).not.toContain('expires_at')
@@ -70,11 +72,28 @@ describe('OAuth credential storage privacy', () => {
     session.folder_id = 'updated-folder'
     await saveSession(id, session, env)
 
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(id).first<{ data: string }>()
+    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first<{ data: string }>()
     const persisted = rawD1(row)
     for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
     expect(JSON.parse(row!.data)).toMatchObject({ folder_id: 'updated-folder' })
     expect(await getSession(id, env)).not.toHaveProperty('access_token')
+  })
+
+  it('rejects a hashed identifier at the cookie-facing session save boundary', async () => {
+    const id = `privacy-hash-cookie-${crypto.randomUUID()}`
+    const session = authSession()
+    await createSession(id, session, env)
+    const digest = await sessionStorageId(id)
+    await expect(saveSession(digest, { ...session, folder_id: 'forged-update' }, env)).rejects.toThrow()
+    expect(await getSession(id, env)).toMatchObject({ folder_id: 'folder-metadata' })
+  })
+
+  it('rejects hashed identifiers at the caller-facing revoke boundary', async () => {
+    const id = `privacy-hash-revoke-${crypto.randomUUID()}`
+    await createSession(id, authSession(), env)
+    const digest = await sessionStorageId(id)
+    await expect(invalidateSession(digest, undefined, env)).rejects.toThrow()
+    expect(await getSession(id, env)).not.toBeNull()
   })
 
   it('rejects unknown, nested, and wrong-type fields at the D1 boundary', async () => {
@@ -99,7 +118,7 @@ describe('OAuth credential storage privacy', () => {
     await env.SESSIONS.put(`session:${id}`, JSON.stringify(authSession()), { expirationTtl: 300 })
 
     expect(await getSession(id, env)).toBeNull()
-    expect(await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(id).first()).toBeNull()
+    expect(await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first()).toBeNull()
   })
 
   it('passes OAuth credentials transiently to DiaryWriter without persisting them in Durable Object storage', async () => {
@@ -123,7 +142,7 @@ describe('OAuth credential storage privacy', () => {
     const persisted = rawD1(stored)
     for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
     expect(stored).toEqual({ folder: 'privacy-folder' })
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(sessionId).first<{ data: string }>()
+    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(sessionId)).first<{ data: string }>()
     for (const secret of Object.values(sentinel)) expect(row!.data).not.toContain(secret)
   })
 })

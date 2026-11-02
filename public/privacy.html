@@ -83,25 +83,28 @@
     tokens, and AWS temporary credentials only in memory for the operation that needs them, including
     its short-lived asynchronous work. It does not intentionally save these values to its databases,
     KV, Durable Object storage, Workflow state, application logs, or server-side caches. Google Drive
-    and your optional S3 bucket store the diary files you choose to save. OAuth state and the PKCE
-    verifier are temporarily stored separately to complete sign-in, as described below.
+    and your optional S3 bucket store the diary files you choose to save. OAuth state is temporarily
+    stored to complete sign-in, while the PKCE verifier is kept in a short-lived browser cookie.
   </p>
   <p>
-    Cloudflare D1 stores session metadata, including your session ID and Google account
-    identifier, expiry, and Drive file identifiers. Your email is read from the verified identity token
+    Cloudflare D1 stores session metadata, including a hash of the session ID, your Google account
+    identifier, expiry, and Drive file identifiers. Older sessions can retain their original ID
+    until they expire or are removed. Your email is read from the verified identity token
     for display and is not stored in session records. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
     Reloading or closing the page discards those tokens, and expiry requires authorization again.
-    Session records expire 30 days after creation or renewal; sign-out invalidates the session.
+    New session records expire 30 days after creation or renewal; older sessions are not extended
+    and may require sign-in again. Sign-out invalidates the session.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.
-    Sign-in also uses a five-minute OAuth state record and a temporary
-    <code>linger_oauth_state</code> cookie to bind the callback to your browser.
-    On HTTPS that cookie is <code>HttpOnly</code>, <code>Secure</code>, and
-    <code>SameSite=Lax</code>. The state record does not contain Google access,
-    refresh, or identity tokens.
+    Sign-in also uses a five-minute OAuth state record and temporary
+    <code>linger_oauth_state</code> and <code>linger_oauth_pkce</code> cookies to bind the callback
+    to your browser. On HTTPS these cookies are <code>HttpOnly</code>, <code>Secure</code>, and
+    <code>SameSite=Lax</code>. New state records contain neither the PKCE verifier nor Google
+    access, refresh, or identity tokens. State records created by older deployments may temporarily
+    contain a verifier until they are consumed or removed by scheduled cleanup.
   </p>
   <p>
     Cloudflare's coordination services store operational metadata such as Drive file IDs, entry

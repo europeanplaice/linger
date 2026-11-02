@@ -1,5 +1,5 @@
 import type { Env } from '../_shared/session'
-import { jsonResponse, makeOAuthStateCookie } from '../_shared/session'
+import { jsonResponse, makeOAuthStateCookie, makeOAuthPkceCookie } from '../_shared/session'
 import { saveOAuthState } from '../_shared/authStore'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
@@ -23,7 +23,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier))
   )
 
-  await saveOAuthState(state, JSON.stringify({ codeVerifier, nonce, popup: true }), env)
+  // Keep the PKCE secret in a short lived, HttpOnly browser cookie. The server
+  // store only needs nonce and response mode after atomically consuming state.
+  await saveOAuthState(state, JSON.stringify({ nonce, popup: true }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -44,12 +46,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
     params.set('prompt', 'select_account')
   }
 
+  const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })
+  headers.append('Set-Cookie', makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')))
+  headers.append('Set-Cookie', makeOAuthPkceCookie(codeVerifier, !env.SESSION_DOMAIN.startsWith('http://')))
   return new Response(null, {
     status: 302,
-    headers: {
-      Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
-      'Set-Cookie': makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')),
-    },
+    headers,
   })
 }
 

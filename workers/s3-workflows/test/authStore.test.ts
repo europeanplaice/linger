@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanupAuth, consumeOAuthState, saveOAuthState } from '../../../functions/_shared/authStore'
-import { createSession, deleteAllSessionsForSub, getSession, invalidateSession, isSessionRevoked, saveSession, SessionRevokedError } from '../../../functions/_shared/session'
+import { durableSessionHandle, sessionStorageId } from '../../../functions/_shared/authStore'
+import { createSession, deleteAllSessionsForSub, getSession, getSessionByStorageId, invalidateSession, isSessionRevoked, saveSession, SessionRevokedError } from '../../../functions/_shared/session'
 import type { Env, SessionData } from '../../../functions/_shared/session'
 import { onRequest as middleware } from '../../../functions/api/_middleware'
 import { onRequestGet as login } from '../../../functions/auth/login'
@@ -56,17 +57,29 @@ describe('D1 authentication and metadata-only persistence', () => {
     const started = await login({ request: new Request('https://example.com/auth/login'), env: onlyD1 } as never)
     const redirect = new URL(started.headers.get('Location')!)
     const state = redirect.searchParams.get('state')!
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    const pkceCookie = started.headers.get('Set-Cookie')!.match(/linger_oauth_pkce=([^;]+)/)![1]
+    const verifier = decodeURIComponent(pkceCookie)
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
+    const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    expect(challenge).toBe(redirect.searchParams.get('code_challenge'))
+    const tokenFetch = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(new URLSearchParams(init.body as string).get('code_verifier')).toBe(verifier)
+      return new Response(JSON.stringify({
       access_token: secrets.access_token,
       refresh_token: secrets.refresh_token,
       id_token: secrets.id_token,
       expires_in: 3600,
-    }))))
+      }))
+    })
+    vi.stubGlobal('fetch', tokenFetch)
 
     const completed = await callback({ env: onlyD1, request: new Request(`https://example.com/auth/callback?code=code&state=${state}`, {
-      headers: { Cookie: `linger_oauth_state=${state}` },
+      headers: { Cookie: `linger_oauth_state=${state}; linger_oauth_pkce=${pkceCookie}` },
     }) } as never)
     expect(completed.status).toBe(200)
+    expect(tokenFetch).toHaveBeenCalledOnce()
+    const storedOAuth = await bindings.AUTH_DB.prepare('SELECT data, consumed FROM auth_oauth_states WHERE id = ?').bind(state).first()
+    expect(storedOAuth).toBeNull()
     expect(await completed.text()).toContain('linger-oauth-complete')
     expect(verifyGoogleIdToken).toHaveBeenCalledWith(secrets.id_token, 'client', redirect.searchParams.get('nonce'))
     const id = completed.headers.get('Set-Cookie')!.match(/linger_session=([^;]+)/)![1]
@@ -80,7 +93,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     })
     expect(await (await checkSession({ env: onlyD1, request } as never)).json())
       .toMatchObject({ signedIn: true, googleSub: '12345' })
-    const row = await bindings.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(id).first<{ data: string }>()
+    const row = await bindings.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first<{ data: string }>()
     for (const value of Object.values(secrets)) expect(row!.data).not.toContain(value)
 
     const ended = await logout({ env: onlyD1, request: new Request('https://example.com/auth/logout', {
@@ -106,12 +119,12 @@ describe('D1 authentication and metadata-only persistence', () => {
       next: vi.fn(async () => new Response('ok')),
     }
     await bindings.AUTH_DB.prepare("UPDATE auth_sessions SET data = json_set(data, '$.renewed_at', ?) WHERE id = ?")
-      .bind(Date.now() - 86_400_001, id).run()
+      .bind(Date.now() - 86_400_001, await sessionStorageId(id)).run()
 
     expect((await middleware(context as never)).status).toBe(200)
     expect(context.next).toHaveBeenCalledOnce()
     expect((await getSession(id, bindings))!.renewed_at).toBeGreaterThan(Date.now() - 60_000)
-    const row = await bindings.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(id).first<{ data: string }>()
+    const row = await bindings.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first<{ data: string }>()
     for (const value of Object.values(secrets)) expect(row!.data).not.toContain(value)
   })
 
@@ -126,7 +139,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     await saveSession(id, data, bindings)
 
     const row = await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?')
-      .bind(id).first<{ data: string; email: string; google_sub: string; client_id: string }>()
+      .bind(await sessionStorageId(id)).first<{ data: string; email: string; google_sub: string; client_id: string }>()
     for (const value of Object.values(secrets)) expect(JSON.stringify(row)).not.toContain(value)
     const persisted = JSON.parse(row!.data)
     expect(persisted).toMatchObject({ folder_id: 'updated-folder', google_sub: '12345' })
@@ -136,6 +149,46 @@ describe('D1 authentication and metadata-only persistence', () => {
       expect(persisted).not.toHaveProperty(key)
     }
     expect(await getSession(id, bindings)).not.toHaveProperty('access_token')
+  })
+
+  it('stores only a session ID digest and keeps digest lookup out of the cookie path', async () => {
+    const bindings = authEnv()
+    const { id } = await account()
+    const digest = await sessionStorageId(id)
+    expect(digest).not.toBe(id)
+    expect(await bindings.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(id).first()).toBeNull()
+    expect(await bindings.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(digest).first()).not.toBeNull()
+    expect(await getSession(digest, bindings)).toBeNull()
+    expect(await getSessionByStorageId(digest, bindings)).toMatchObject({ google_sub: '12345' })
+  })
+
+  it('reads and revokes a legacy raw-ID D1 row during the hash rollout', async () => {
+    const bindings = authEnv()
+    const id = crypto.randomUUID()
+    await bindings.AUTH_DB.prepare('INSERT INTO auth_sessions (id, data, google_sub, expires_at) VALUES (?, ?, ?, ?)')
+      .bind(id, JSON.stringify({ google_sub: 'legacy-sub', folder_id: 'legacy-folder' }), 'legacy-sub', Date.now() + 60_000).run()
+
+    expect(await getSession(id, bindings)).toMatchObject({ google_sub: 'legacy-sub', folder_id: 'legacy-folder' })
+    await invalidateSession(id, undefined, bindings, 'legacy-sub')
+    expect(await getSession(id, bindings)).toBeNull()
+    expect(await bindings.AUTH_DB.prepare('SELECT revoked, data FROM auth_sessions WHERE id = ?').bind(id).first())
+      .toMatchObject({ revoked: 1, data: null })
+    expect(await bindings.AUTH_DB.prepare('SELECT revoked FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first())
+      .toMatchObject({ revoked: 1 })
+  })
+
+  it('keeps durable retry handles compatible with legacy D1 keys and caps their renewal', async () => {
+    const bindings = authEnv()
+    const id = crypto.randomUUID()
+    const expiry = Date.now() + 60_000
+    await bindings.AUTH_DB.prepare('INSERT INTO auth_sessions (id, data, google_sub, expires_at) VALUES (?, ?, ?, ?)')
+      .bind(id, JSON.stringify({ google_sub: 'legacy-sub' }), 'legacy-sub', expiry).run()
+    expect(await durableSessionHandle(id, bindings)).toBe(id)
+
+    const session = (await getSession(id, bindings))!
+    await saveSession(id, session, bindings)
+    const row = await bindings.AUTH_DB.prepare('SELECT expires_at FROM auth_sessions WHERE id = ?').bind(id).first<{ expires_at: number }>()
+    expect(row!.expires_at).toBe(expiry)
   })
 
   it('uses the D1 trigger to reject unknown, nested, and wrongly typed session metadata', async () => {
@@ -176,7 +229,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     expect(await getSession(id, bindings)).toBeNull()
     expect(await isSessionRevoked(id, bindings)).toBe(true)
     const row = await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id, revoked, refresh_owner FROM auth_sessions WHERE id = ?')
-      .bind(id).first()
+      .bind(await sessionStorageId(id)).first()
     expect(row).toMatchObject({ data: null, email: null, google_sub: null, client_id: null, revoked: 1, refresh_owner: null })
     await expect(saveSession(id, data, bindings)).rejects.toBeInstanceOf(SessionRevokedError)
   })
@@ -192,7 +245,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     for (const id of ids) {
       expect(await getSession(id, bindings)).toBeNull()
       expect(await isSessionRevoked(id, bindings)).toBe(true)
-      expect(await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?').bind(id).first())
+      expect(await bindings.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first())
         .toMatchObject({ data: null, email: null, google_sub: null, client_id: null })
     }
   })
@@ -211,6 +264,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     await saveOAuthState(state, 'verifier', bindings)
     const results = await Promise.all([consumeOAuthState(state, bindings), consumeOAuthState(state, bindings)])
     expect(results.filter(Boolean)).toEqual(['verifier'])
+    expect(await bindings.AUTH_DB.prepare('SELECT id FROM auth_oauth_states WHERE id = ?').bind(state).first()).toBeNull()
 
     const legacyState = crypto.randomUUID()
     await bindings.SESSIONS.put(`oauth_state:${legacyState}`, 'legacy-verifier', { expirationTtl: 120 })
@@ -222,7 +276,7 @@ describe('D1 authentication and metadata-only persistence', () => {
     const state = crypto.randomUUID()
     await saveOAuthState(state, 'verifier', bindings)
     await bindings.AUTH_DB.batch([
-      bindings.AUTH_DB.prepare('UPDATE auth_sessions SET expires_at = 0 WHERE id = ?').bind(id),
+      bindings.AUTH_DB.prepare('UPDATE auth_sessions SET expires_at = 0 WHERE id = ?').bind(await sessionStorageId(id)),
       bindings.AUTH_DB.prepare('UPDATE auth_oauth_states SET expires_at = 0 WHERE id = ?').bind(state),
     ])
     expect(await getSession(id, bindings)).toBeNull()

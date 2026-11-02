@@ -1,4 +1,5 @@
 import { createSession } from '../../../functions/_shared/session'
+import { sessionStorageId } from '../../../functions/_shared/authStore'
 import { createExecutionContext, env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as drive from '../../../functions/_shared/drive'
@@ -67,22 +68,28 @@ describe('metadata-only reconciliation boundaries', () => {
     expect(s3.deleteObject).not.toHaveBeenCalled()
     expect(await index.getEntry(date)).toBeNull()
 
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(auth.sessionId).first<{ data: string }>()
+    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(auth.sessionId)).first<{ data: string }>()
     expect(row!.data).not.toMatch(/privacy-(access|refresh|id)-sentinel/)
   })
 
   it('keeps queued deletion metadata through object eviction when no request token exists', async () => {
     const { auth, index } = await seed()
     await index.queueDeletion({ ...auth, date }, 'delete-1')
+    await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
+      expect(state.storage.sql.exec<{ session_id: string }>('SELECT session_id FROM pending_deletions').one().session_id)
+        .toBe(await sessionStorageId(auth.sessionId))
+      // Simulate a retry row written by the previous Worker version.
+      state.storage.sql.exec('UPDATE pending_deletions SET session_id = ?', auth.sessionId)
+    })
     await index.deferDeletion(date, 'delete-1', Date.now() - 1)
     await evictDurableObject(index)
 
     expect(await runDurableObjectAlarm(index)).toBe(true)
     expect(s3.deleteObject).not.toHaveBeenCalled()
     await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
-      expect(state.storage.sql.exec<{ request_id: string; attempts: number }>(
-        'SELECT request_id, attempts FROM pending_deletions',
-      ).one()).toMatchObject({ request_id: 'delete-1', attempts: 1 })
+      expect(state.storage.sql.exec<{ request_id: string; attempts: number; session_id: string }>(
+        'SELECT request_id, attempts, session_id FROM pending_deletions',
+      ).one()).toMatchObject({ request_id: 'delete-1', attempts: 1, session_id: await sessionStorageId(auth.sessionId) })
       expect(await state.storage.getAlarm()).toBeGreaterThan(Date.now())
     })
   })

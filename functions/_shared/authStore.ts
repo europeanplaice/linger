@@ -4,6 +4,49 @@ import { OAUTH_STATE_TTL, SESSION_TTL, SessionRevokedError } from './session'
 type AuthEnv = Env & { AUTH_DB: D1Database }
 interface SessionRow { data: string | null; revoked: number; expires_at: number }
 
+const SESSION_ID_HASH_PREFIX = 'sha256:'
+
+// Session IDs are bearer credentials. Persist only a deterministic digest so
+// server-side lookups remain possible without retaining the cookie value.
+// Cookie lookups and durable retry handles use separate paths so a digest alone
+// never authenticates a session.
+export async function sessionStorageId(id: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id)))
+  return SESSION_ID_HASH_PREFIX + Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// Used only for trusted durable retry payloads that have already crossed a
+// request authentication boundary. Cookie values must always use sessionStorageId.
+export async function durableSessionHandle(id: string, env: Env): Promise<string> {
+  if (id.startsWith(SESSION_ID_HASH_PREFIX)) return id
+  if (!env.AUTH_DB) return id
+  const hashed = await sessionStorageId(id)
+  const hashedRow = await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(hashed).first()
+  if (hashedRow) return hashed
+  const legacyRow = await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(id).first()
+  // A legacy raw primary key cannot be replaced while older Pages versions may
+  // still read it. Retain that handle until the row expires; new sessions use
+  // the hash immediately.
+  return legacyRow ? id : hashed
+}
+
+async function findSessionRow(id: string, env: AuthEnv): Promise<{ storageId: string; row: SessionRow | null }> {
+  const storageId = await sessionStorageId(id)
+  let row = await env.AUTH_DB.prepare('SELECT data, revoked, expires_at FROM auth_sessions WHERE id = ?').bind(storageId).first<SessionRow>()
+  if (row || id.startsWith(SESSION_ID_HASH_PREFIX)) return { storageId, row }
+  // Read legacy rows written before hashed identifiers shipped. We deliberately
+  // leave them in place until natural expiry so old workflow payloads and logout
+  // requests remain valid through the rollout.
+  row = await env.AUTH_DB.prepare('SELECT data, revoked, expires_at FROM auth_sessions WHERE id = ?').bind(id).first<SessionRow>()
+  return { storageId: id, row }
+}
+
+export async function readD1SessionByStorageId(storageId: string, env: AuthEnv): Promise<SessionData | null> {
+  if (!/^sha256:[0-9a-f]{64}$/.test(storageId)) return null
+  const row = await env.AUTH_DB.prepare('SELECT data, revoked, expires_at FROM auth_sessions WHERE id = ?').bind(storageId).first<SessionRow>()
+  return decode(row)
+}
+
 // No Sessions API/read replicas here: logout and RISC must see primary state.
 export function legacyAuthEnabled(env: Env): boolean {
   // Credential-bearing KV sessions are no longer supported. Existing D1 sessions
@@ -53,7 +96,7 @@ function adopt(session: SessionData, fresh: SessionData): void {
 }
 
 export async function readD1Session(id: string, env: AuthEnv): Promise<SessionData | null> {
-  let row = await env.AUTH_DB.prepare('SELECT data, revoked, expires_at FROM auth_sessions WHERE id = ?').bind(id).first<SessionRow>()
+  let { row } = await findSessionRow(id, env)
   if (row) {
     const session = decode(row)
     return session && await revokedDuringCutover(id, env) ? null : session
@@ -76,14 +119,14 @@ export async function readD1Session(id: string, env: AuthEnv): Promise<SessionDa
   try { session = JSON.parse(raw) as SessionData } catch { return null }
   await insertSession(id, session, expiry * 1000, env, true)
   if (await env.SESSIONS.get(`revoked-session:${id}`) === '1') await revokeD1Session(id, env)
-  row = await env.AUTH_DB.prepare('SELECT data, revoked, expires_at FROM auth_sessions WHERE id = ?').bind(id).first<SessionRow>()
-  return decode(row)
+  return decode((await findSessionRow(id, env)).row)
 }
 
 async function insertSession(id: string, session: SessionData, expiry: number, env: AuthEnv, importing = false): Promise<void> {
+  const storageId = await sessionStorageId(id)
   await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, email, google_sub, client_id, expires_at)
     VALUES (?, ?, ?, ?, ?, ?) ${importing ? 'ON CONFLICT(id) DO NOTHING' : ''}`)
-    .bind(id, JSON.stringify(sanitizeSession(session)), null,
+    .bind(storageId, JSON.stringify(sanitizeSession(session)), null,
       session.google_sub ?? null, session.client_id ?? null, expiry).run()
 }
 
@@ -104,27 +147,47 @@ export async function saveD1Session(id: string, session: SessionData, env: AuthE
   // (notably folder-scoped Drive file IDs after account-folder reconciliation).
   const patch = Object.fromEntries([...MUTABLE_SESSION_METADATA_FIELDS].map(key => [key, (safe as Record<string, unknown>)[key] ?? null]))
   const now = Date.now()
+  const { storageId, row: existing } = await findSessionRow(id, env)
+  // A digest presented as a cookie is deliberately not a storage handle. Do not
+  // issue an UPDATE unless the caller's raw ID resolved through the hash or the
+  // legacy raw-key lookup above.
+  if (!existing) throw new SessionRevokedError('Session revoked or expired')
+  const expiryUpdate = storageId === id ? 'expires_at = expires_at' : 'expires_at = MAX(expires_at, ?)'
   const row = await env.AUTH_DB.prepare(`UPDATE auth_sessions SET
     data = json_set(json_patch(data, ?), '$.renewed_at', MAX(COALESCE(json_extract(data, '$.renewed_at'), 0), ?)),
-    expires_at = MAX(expires_at, ?)
+    ${expiryUpdate}
     WHERE id = ? AND revoked = 0 AND expires_at > ? RETURNING data`)
-    .bind(JSON.stringify(patch), session.renewed_at ?? 0, now + SESSION_TTL * 1000, id, now).first<{ data: string }>()
+    .bind(...(storageId === id
+      ? [JSON.stringify(patch), session.renewed_at ?? 0, storageId, now]
+      : [JSON.stringify(patch), session.renewed_at ?? 0, now + SESSION_TTL * 1000, storageId, now])).first<{ data: string }>()
   if (!row) throw new SessionRevokedError('Session revoked or expired')
   adopt(session, JSON.parse(row.data) as SessionData)
 }
 
 export async function isD1SessionRevoked(id: string, env: AuthEnv): Promise<boolean> {
-  const row = await env.AUTH_DB.prepare('SELECT revoked, expires_at FROM auth_sessions WHERE id = ?').bind(id).first<{ revoked: number; expires_at: number }>()
+  const { row } = await findSessionRow(id, env)
   return !row || row.revoked !== 0 || row.expires_at <= Date.now() || await revokedDuringCutover(id, env)
 }
 
 export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
+  // Hashed storage IDs are internal lookup handles, never valid caller session
+  // IDs. Refuse them here so this API cannot revoke a row by its stored key.
+  if (id.startsWith(SESSION_ID_HASH_PREFIX)) throw new SessionRevokedError('Invalid session identifier')
   // Keep a credential-free tombstone through the legacy import window. Updates
   // are update-only, so delayed refreshes cannot recreate even a cleaned-up row.
   const until = Math.max(Date.now() + SESSION_TTL * 1000, Date.parse(env.AUTH_KV_FALLBACK_UNTIL ?? '') || 0)
-  await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, expires_at, revoked) VALUES (?, NULL, ?, 1)
+  const storageId = await sessionStorageId(id)
+  const statements = [env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, data, expires_at, revoked) VALUES (?, NULL, ?, 1)
     ON CONFLICT(id) DO UPDATE SET data = NULL, email = NULL, google_sub = NULL, client_id = NULL, revoked = 1, expires_at = MAX(expires_at, excluded.expires_at), refresh_owner = NULL, refresh_until = 0`)
-    .bind(id, until).run()
+    .bind(storageId, until)]
+  if (storageId !== id) {
+    // Revoke a pre-hash row too. This dual write is important during rollout:
+    // an old worker may still be updating the legacy primary key. Run both
+    // changes in one D1 batch so neither key remains active if one write fails.
+    statements.push(env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, email = NULL, google_sub = NULL, client_id = NULL, revoked = 1, expires_at = MAX(expires_at, ?), refresh_owner = NULL, refresh_until = 0 WHERE id = ?`)
+      .bind(until, id))
+  }
+  await env.AUTH_DB.batch(statements)
 }
 
 export async function revokeD1Account(field: "email" | "google_sub", value: string, env: AuthEnv): Promise<void> {
@@ -156,8 +219,10 @@ export async function consumeOAuthState(state: string, env: Env): Promise<string
         .bind(state, raw, Date.now() + OAUTH_STATE_TTL * 1000).run()
     }
   }
-  // Keep consumed records until expiry so a legacy KV value cannot be replayed.
-  const row = await env.AUTH_DB.prepare('UPDATE auth_oauth_states SET consumed = 1 WHERE id = ? AND consumed = 0 AND expires_at > ? RETURNING data')
+  // DELETE ... RETURNING is the atomic one-time claim and immediately removes
+  // the verifier/nonce payload. The legacy KV import path is disabled after the
+  // D1 cutover, so there is no need to retain a consumed marker.
+  const row = await env.AUTH_DB.prepare('DELETE FROM auth_oauth_states WHERE id = ? AND consumed = 0 AND expires_at > ? RETURNING data')
     .bind(state, Date.now()).first<{ data: string }>()
   return row?.data ?? null
 }

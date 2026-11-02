@@ -38,6 +38,20 @@ The Pages and Worker bindings must share one D1 database within each environment
 Production, staging, and preview must use different databases. KV remains needed
 for noncredential application caching and progress metadata.
 
+New sessions store a SHA-256 digest of the session cookie instead of the cookie
+value. Deploy the Workflows Worker before Pages: an older Worker cannot read
+sessions created by the new Pages code. Do not roll the Worker back while the
+new Pages version is active. Existing raw-ID sessions remain readable for the
+rollout but are no longer extended; they expire at their existing deadline and
+may require the user to sign in again. Revoked legacy rows and old pending
+deletion or Workflow records can retain raw IDs until their own cleanup. D1
+history, backups, logs, and prior Workflow state are not erased by this change.
+
+New OAuth attempts keep their PKCE verifier in a short-lived HttpOnly cookie,
+not D1. The one-time state row is deleted atomically on consumption. Expired
+unconsumed rows are removed by scheduled cleanup, and historical records remain
+subject to the existing backup and retention review.
+
 ## Environment bindings
 
 | Environment | Database ID | Worker config |

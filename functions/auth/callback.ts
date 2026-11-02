@@ -1,5 +1,5 @@
 import type { Env, SessionData } from '../_shared/session'
-import { createSession, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, parseOAuthStateCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import { createSession, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, clearOAuthPkceCookie, parseOAuthStateCookie, parseOAuthPkceCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
 import { consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
 
@@ -36,6 +36,14 @@ function popupCredentialResponse(payload: { accessToken: string; idToken: string
   })
 }
 
+function consumedStateError(body: unknown, status: number, secure: boolean): Response {
+  const response = jsonResponse(body, status)
+  const headers = new Headers(response.headers)
+  headers.append('Set-Cookie', clearOAuthStateCookie(secure))
+  headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
+  return new Response(response.body, { status, headers })
+}
+
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
@@ -49,51 +57,70 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const stateRecordRaw = await consumeOAuthState(state, env)
-  if (!stateRecordRaw) {
-    return jsonResponse({ error: 'Invalid or expired state' }, 400)
-  }
+  if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
 
-  let stateRecord: { codeVerifier: string; nonce: string; popup: boolean }
+  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
-    stateRecord = parsed.codeVerifier
-      ? { codeVerifier: parsed.codeVerifier, nonce: parsed.nonce ?? '', popup: parsed.popup === true }
-      : { codeVerifier: stateRecordRaw, nonce: '', popup: false }
+    stateRecord = { codeVerifier: parsed.codeVerifier, nonce: parsed.nonce ?? '', popup: parsed.popup === true }
   } catch {
     stateRecord = { codeVerifier: stateRecordRaw, nonce: '', popup: false }
   }
 
-  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: `${env.SESSION_DOMAIN}/auth/callback`,
-      grant_type: 'authorization_code',
-      code_verifier: stateRecord.codeVerifier,
-    }).toString(),
-  })
+  // Support attempts created before PKCE moved to the short lived browser cookie.
+  const codeVerifier = stateRecord.codeVerifier ?? parseOAuthPkceCookie(request)
+  if (!codeVerifier) return consumedStateError({ error: 'Invalid or expired state' }, 400, secure)
+
+  let tokenResp: Response
+  try {
+    tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: env.GOOGLE_CLIENT_ID,
+        client_secret: env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${env.SESSION_DOMAIN}/auth/callback`,
+        grant_type: 'authorization_code',
+        code_verifier: codeVerifier,
+      }).toString(),
+    })
+  } catch {
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+  }
 
   if (!tokenResp.ok) {
     // Not 502/503/504 — Cloudflare's edge silently replaces those status codes with
     // its own branded error page, discarding this JSON body entirely.
-    return jsonResponse({ error: 'Authentication failed. Please try again.' }, 500)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
   }
 
-  const tokens = await tokenResp.json() as {
-    access_token: string
-    expires_in: number
-    id_token?: string
+  let tokenPayload: unknown
+  try {
+    tokenPayload = await tokenResp.json()
+  } catch {
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
   }
 
-  if (!tokens.id_token) return jsonResponse({ error: 'Authentication failed. Please try again.' }, 500)
+  if (!tokenPayload || typeof tokenPayload !== 'object' || Array.isArray(tokenPayload)) {
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+  }
+  const responseFields = tokenPayload as Record<string, unknown>
+  if (typeof responseFields.access_token !== 'string' || !responseFields.access_token ||
+    typeof responseFields.id_token !== 'string' || !responseFields.id_token ||
+    typeof responseFields.expires_in !== 'number' || !Number.isFinite(responseFields.expires_in) || responseFields.expires_in <= 0) {
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+  }
+  const tokens = {
+    access_token: responseFields.access_token,
+    id_token: responseFields.id_token,
+    expires_in: responseFields.expires_in,
+  }
   let claims
   try {
     claims = await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID, stateRecord.nonce || undefined)
   } catch {
-    return jsonResponse({ error: 'Authentication failed. Please try again.' }, 500)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
   }
   const googleSub = claims.sub
 
@@ -111,8 +138,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // getSession already treats a missing session record
   // as absent. The other order risks the opposite and worse case: a live
   // session with no index entry, invisible to /auth/risc's revocation.
-  await addSubSessionIndex(googleSub, sessionId, env)
-  await createSession(sessionId, session, env)
+  try {
+    await addSubSessionIndex(googleSub, sessionId, env)
+    await createSession(sessionId, session, env)
+  } catch {
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+  }
 
   const credential = {
     accessToken: tokens.access_token,
@@ -123,7 +154,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, secure)
     const headers = new Headers(response.headers)
     headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
+    headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
     return new Response(response.body, { status: response.status, headers })
   }
-  return jsonResponse({ error: 'Popup sign-in required' }, 400, { 'Set-Cookie': clearOAuthStateCookie(secure) })
+  return consumedStateError({ error: 'Popup sign-in required' }, 400, secure)
 }

@@ -1,10 +1,11 @@
 import type { S3WorkflowService } from './s3Workflow'
-import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, revokeD1Account, revokeD1Session, saveD1Session, sanitizeSession } from './authStore'
+import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session, sanitizeSession } from './authStore'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
 const COOKIE_NAME = 'linger_session'
 const OAUTH_STATE_COOKIE_NAME = 'linger_oauth_state'
+const OAUTH_PKCE_COOKIE_NAME = 'linger_oauth_pkce'
 export const OAUTH_STATE_TTL = 300
 
 export interface Env {
@@ -94,6 +95,14 @@ export async function getSession(sessionId: string, env: Env): Promise<SessionDa
   }
 }
 
+// Durable retry payloads contain the stored digest rather than the cookie's
+// bearer ID. Keep this path separate so a digest presented as a cookie cannot
+// be used to retrieve the associated session.
+export async function getSessionByStorageId(storageId: string, env: Env): Promise<SessionData | null> {
+  if (!env.AUTH_DB) return null
+  return readD1SessionByStorageId(storageId, { ...env, AUTH_DB: env.AUTH_DB })
+}
+
 export async function saveSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
   if (env.AUTH_DB) return saveD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
   if (await isSessionRevoked(sessionId, env)) throw new SessionRevokedError('Session revoked')
@@ -156,6 +165,27 @@ export function makeOAuthStateCookie(state: string, secure = true): string {
 export function clearOAuthStateCookie(secure = true): string {
   const secureFlag = secure ? '; Secure' : ''
   return `${OAUTH_STATE_COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=0`
+}
+
+export function makeOAuthPkceCookie(verifier: string, secure = true): string {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${OAUTH_PKCE_COOKIE_NAME}=${encodeURIComponent(verifier)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=${OAUTH_STATE_TTL}`
+}
+
+export function clearOAuthPkceCookie(secure = true): string {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${OAUTH_PKCE_COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=0`
+}
+
+export function parseOAuthPkceCookie(request: Request): string | null {
+  const header = request.headers.get('Cookie') ?? ''
+  for (const part of header.split(';')) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq === -1 || trimmed.slice(0, eq) !== OAUTH_PKCE_COOKIE_NAME) continue
+    try { return decodeURIComponent(trimmed.slice(eq + 1)) || null } catch { return null }
+  }
+  return null
 }
 
 export function parseOAuthStateCookie(request: Request): string | null {

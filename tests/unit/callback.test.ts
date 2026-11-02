@@ -87,6 +87,8 @@ describe('OAuth callback popup flow', () => {
     expect(response.headers.get('Cache-Control')).toContain('no-store')
     expect(response.headers.get('Content-Security-Policy')).toContain('nonce-')
     expect(response.headers.get('Set-Cookie')).toContain('linger_session=')
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('Path=/auth/callback')
     expect(response.headers.get('Set-Cookie')).toContain('HttpOnly')
     const html = await response.text()
     expect(html).toContain('window.opener.postMessage')
@@ -135,5 +137,39 @@ describe('OAuth callback popup flow', () => {
     const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv() } as any)
     expect(response.status).toBe(500)
     expect(await response.text()).not.toContain('secret internal error')
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
+  })
+
+  it('clears the PKCE cookie after a token endpoint network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('private network details')))
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv() } as any)
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Authentication failed. Please try again.' })
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
+  })
+
+  it('clears the PKCE cookie when the token response is malformed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{', { status: 200 })))
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv() } as any)
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Authentication failed. Please try again.' })
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
+  })
+
+  it.each([
+    ['JSON null', 'null'],
+    ['a JSON array', '[]'],
+    ['a missing access token', JSON.stringify({ id_token: 'id', expires_in: 3600 })],
+    ['an invalid expiration', JSON.stringify({ access_token: 'access', id_token: 'id', expires_in: '3600' })],
+  ])('fails closed for token response shape: %s', async (_label, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv() } as any)
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Authentication failed. Please try again.' })
+    expect(response.headers.get('Set-Cookie')).toContain('linger_oauth_pkce=')
+    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
   })
 })

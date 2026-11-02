@@ -1,4 +1,5 @@
 import { createSession } from '../../../functions/_shared/session'
+import { sessionStorageId } from '../../../functions/_shared/authStore'
 import { env, introspectWorkflowInstance, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import type { S3SyncIndex } from '../src/syncIndex'
@@ -33,7 +34,7 @@ describe('retired S3MirrorWorkflow', () => {
 
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     expect(await runInDurableObject(index, (state: S3SyncIndex) => state.getEntry('2026-04-02'))).toBeNull()
-    const stored = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(sessionId).first<{ data: string }>()
+    const stored = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(sessionId)).first<{ data: string }>()
     expect(stored!.data).not.toMatch(/access_token|refresh_token|id_token/)
   })
 })

@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
+import { durableSessionHandle } from '../../../functions/_shared/authStore'
 import { authorizedSession, ensureAccountDiaryFolder, mirrorEntryCore, type MirrorEntryCoreInput, type S3Config } from './runtime'
 import { findJsonFile, readJsonFile, writeJsonFile } from '../../../functions/_shared/drive'
 import { getValidAccessToken } from '../../../functions/_shared/session'
@@ -132,12 +133,13 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
 
   async queueDeletion(input: S3WorkflowAuth & { date: string }, requestId: string): Promise<void> {
     await authorizedSession(this.env, input)
+    const durableSessionId = await durableSessionHandle(input.sessionId, this.env)
     await this.ctx.storage.transaction(async () => {
       this.ctx.storage.sql.exec(
         `INSERT INTO pending_deletions (date, request_id, session_id, account_key, next_attempt, attempts)
          VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(date) DO UPDATE SET request_id = excluded.request_id,
          session_id = excluded.session_id, account_key = excluded.account_key, next_attempt = excluded.next_attempt, attempts = 0`,
-        input.date, requestId, input.sessionId, input.accountKey, Date.now() + 5 * 60_000,
+        input.date, requestId, durableSessionId, input.accountKey, Date.now() + 5 * 60_000,
       )
       await this.scheduleDeletionAlarm()
     })
@@ -170,6 +172,15 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     const row = this.ctx.storage.sql.exec<{ date: string; request_id: string; session_id: string; account_key: string; attempts: number }>(
       'SELECT date, request_id, session_id, account_key, attempts FROM pending_deletions WHERE next_attempt <= ? ORDER BY next_attempt LIMIT 1', Date.now(),
     ).toArray()[0]
+    if (row && !row.session_id.startsWith('sha256:')) {
+      const storedId = await durableSessionHandle(row.session_id, this.env)
+      if (storedId !== row.session_id) {
+        this.ctx.storage.sql.exec(
+          'UPDATE pending_deletions SET session_id = ? WHERE date = ? AND request_id = ? AND session_id = ?',
+          storedId, row.date, row.request_id, row.session_id,
+        )
+      }
+    }
     try {
       if (row) {
         await this.reconcileEntry({ sessionId: row.session_id, accountKey: row.account_key, date: row.date })
