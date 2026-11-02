@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { pathToFileURL } from 'node:url'
 
 const CONTROL_FILES = new Set(['.assetsignore', '_headers', '_redirects', '_routes.json', '_worker.js'])
 const POLL_INTERVAL_MS = 3000
 const POLL_TIMEOUT_MS = 90_000
 const REQUEST_TIMEOUT_MS = 15_000
+const MAX_ASSET_REDIRECTS = 5
 
 function requiredEnv(name) {
   const value = process.env[name]?.trim()
@@ -140,16 +142,12 @@ function deploymentOrigin(deploymentUrl, projectName) {
   return url
 }
 
-async function verifyAsset(deploymentUrl, asset) {
+export async function verifyAsset(deploymentUrl, asset) {
   const encodedPath = asset.relativePath.split('/').map(encodeURIComponent).join('/')
   const url = new URL(encodedPath, deploymentUrl)
   const [expectedBytes, response] = await Promise.all([
     readFile(asset.absolutePath),
-    fetch(url, {
-      cache: 'no-store',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    }),
+    fetchAsset(url, deploymentUrl, asset.relativePath),
   ])
 
   if (!response.ok) {
@@ -165,6 +163,54 @@ async function verifyAsset(deploymentUrl, asset) {
   if (expectedHash !== deployedHash) {
     throw new Error(`${asset.relativePath}: SHA-256 mismatch (build=${expectedHash}, deployed=${deployedHash})`)
   }
+}
+
+async function fetchAsset(url, deploymentUrl, relativePath) {
+  const visited = new Set()
+  let currentUrl = url
+
+  for (let redirectCount = 0; redirectCount <= MAX_ASSET_REDIRECTS; redirectCount += 1) {
+    if (currentUrl.origin !== deploymentUrl.origin) {
+      throw new Error(`${relativePath}: deployment redirected outside its Pages origin`)
+    }
+    if (visited.has(currentUrl.href)) {
+      throw new Error(`${relativePath}: deployment returned a redirect loop at ${currentUrl.pathname}`)
+    }
+    visited.add(currentUrl.href)
+
+    const response = await fetch(currentUrl, {
+      cache: 'no-store',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+    if (response.status < 300 || response.status >= 400) return response
+
+    const location = response.headers.get('location')
+    if (!location) {
+      await response.body?.cancel()
+      throw new Error(`${relativePath}: deployment returned HTTP ${response.status} without a redirect location`)
+    }
+
+    const redirectUrl = new URL(location, currentUrl)
+    if (
+      redirectUrl.protocol !== 'https:' ||
+      redirectUrl.origin !== deploymentUrl.origin ||
+      redirectUrl.username ||
+      redirectUrl.password
+    ) {
+      await response.body?.cancel()
+      throw new Error(`${relativePath}: deployment redirected outside its Pages origin`)
+    }
+    if (redirectCount === MAX_ASSET_REDIRECTS) {
+      await response.body?.cancel()
+      throw new Error(`${relativePath}: deployment exceeded ${MAX_ASSET_REDIRECTS} redirects`)
+    }
+
+    await response.body?.cancel()
+    currentUrl = redirectUrl
+  }
+
+  throw new Error(`${relativePath}: deployment exceeded ${MAX_ASSET_REDIRECTS} redirects`)
 }
 
 async function verifyAssets(deployment, projectName, distDirectory) {
@@ -217,7 +263,9 @@ async function main() {
   )
 }
 
-main().catch((error) => {
-  console.error(describeError(error))
-  process.exitCode = 1
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(describeError(error))
+    process.exitCode = 1
+  })
+}

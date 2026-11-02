@@ -57,7 +57,7 @@ jobs:
 
       - run: npm run test:unit
 
-      - run: node scripts/check-deployment.test.mjs
+      - run: npm run test:deployment
 
   privacy-test:
     runs-on: ubuntu-latest
