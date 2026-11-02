@@ -133,11 +133,31 @@ async function waitForExpectedDeployment({ accountId, projectName, apiToken, exp
   )
 }
 
-function deploymentOrigin(deploymentUrl, projectName) {
-  const url = new URL(deploymentUrl)
-  const permittedHost = url.hostname === `${projectName}.pages.dev` || url.hostname.endsWith(`.${projectName}.pages.dev`)
-  if (url.protocol !== 'https:' || !permittedHost || url.username || url.password) {
-    throw new Error(`Cloudflare returned an unexpected Pages deployment URL: ${deploymentUrl}`)
+function parsePagesDeploymentUrl(value, label) {
+  const url = new URL(value)
+  const permittedHost = url.hostname.endsWith('.pages.dev')
+  if (
+    url.protocol !== 'https:' ||
+    !permittedHost ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(`${label} is not a valid Cloudflare Pages deployment URL: ${value}`)
+  }
+  return url
+}
+
+export function deploymentOrigin(deploymentUrl, expectedDeploymentUrl) {
+  const url = parsePagesDeploymentUrl(deploymentUrl, 'Cloudflare API deployment URL')
+  const expectedUrl = parsePagesDeploymentUrl(expectedDeploymentUrl, 'Wrangler deployment URL')
+  if (url.origin !== expectedUrl.origin) {
+    throw new Error(
+      `Cloudflare API deployment URL ${url.origin} does not match Wrangler deployment URL ${expectedUrl.origin}`,
+    )
   }
   return url
 }
@@ -213,8 +233,7 @@ async function fetchAsset(url, deploymentUrl, relativePath) {
   throw new Error(`${relativePath}: deployment exceeded ${MAX_ASSET_REDIRECTS} redirects`)
 }
 
-async function verifyAssets(deployment, projectName, distDirectory) {
-  const origin = deploymentOrigin(deployment.url, projectName)
+async function verifyAssets(deployment, origin, distDirectory) {
   const files = await listStaticFiles(distDirectory)
   if (files.length === 0) throw new Error(`No static files found in ${distDirectory}`)
 
@@ -230,6 +249,7 @@ async function main() {
   const accountId = requiredEnv('CLOUDFLARE_ACCOUNT_ID')
   const apiToken = requiredEnv('CLOUDFLARE_API_TOKEN')
   const projectName = requiredEnv('PAGES_PROJECT')
+  const expectedDeploymentUrl = requiredEnv('EXPECTED_DEPLOYMENT_URL')
   const expectedSha = requiredEnv('EXPECTED_COMMIT_SHA')
   const expectedBranch = requiredEnv('EXPECTED_BRANCH')
   const deployStartedAtValue = process.env.DEPLOY_STARTED_AT?.trim()
@@ -255,7 +275,8 @@ async function main() {
     expectedDirty: expectedDirtyValue === undefined ? undefined : expectedDirtyValue === 'true',
     deployStartedAt,
   })
-  const assetCount = await verifyAssets(deployment, projectName, distDirectory)
+  const origin = deploymentOrigin(deployment.url, expectedDeploymentUrl)
+  const assetCount = await verifyAssets(deployment, origin, distDirectory)
 
   console.log(
     `Verified Cloudflare Pages production deployment ${deployment.id}: ` +

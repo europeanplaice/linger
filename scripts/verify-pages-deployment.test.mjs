@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { verifyAsset } from './verify-pages-deployment.mjs'
+import { deploymentOrigin, verifyAsset } from './verify-pages-deployment.mjs'
 
 async function withAsset(content, callback) {
   const directory = await mkdtemp(join(tmpdir(), 'linger-pages-verify-'))
@@ -16,6 +16,29 @@ async function withAsset(content, callback) {
     await rm(directory, { recursive: true, force: true })
   }
 }
+
+test('accepts the Pages deployment URL returned by Wrangler for the configured project', () => {
+  const url = 'https://f7cd342e.grass-puffer.pages.dev'
+
+  assert.equal(deploymentOrigin(url, url).origin, url)
+})
+
+test('rejects a Pages API URL that differs from the URL returned by Wrangler', () => {
+  assert.throws(
+    () => deploymentOrigin(
+      'https://f7cd342e.grass-puffer.pages.dev',
+      'https://another-id.grass-puffer.pages.dev',
+    ),
+    /does not match Wrangler deployment URL/,
+  )
+})
+
+test('rejects deployment URLs outside the Cloudflare Pages domain', () => {
+  assert.throws(
+    () => deploymentOrigin('https://example.com', 'https://example.com'),
+    /not a valid Cloudflare Pages deployment URL/,
+  )
+})
 
 test('verifies asset bytes after a same-origin Pages clean-URL redirect', async () => {
   const originalFetch = globalThis.fetch

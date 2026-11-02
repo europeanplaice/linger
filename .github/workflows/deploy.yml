@@ -184,6 +184,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PAGES_PROJECT: linger
+          EXPECTED_DEPLOYMENT_URL: ${{ steps.production-pages-deploy.outputs.deployment-url }}
           EXPECTED_COMMIT_SHA: ${{ github.sha }}
           EXPECTED_BRANCH: main
           EXPECTED_COMMIT_DIRTY: 'false'
@@ -254,6 +255,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PAGES_PROJECT: linger-staging
+          EXPECTED_DEPLOYMENT_URL: ${{ steps.staging-pages-deploy.outputs.deployment-url }}
           EXPECTED_COMMIT_SHA: ${{ github.sha }}
           EXPECTED_BRANCH: staging
           DEPLOY_STARTED_AT: ${{ steps.staging-pages-deploy-start.outputs.timestamp }}
