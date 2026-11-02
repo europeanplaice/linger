@@ -18,6 +18,23 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function describeError(error, seen = new Set(), depth = 0) {
+  if (depth >= 4) return 'cause chain truncated'
+  if (!(error instanceof Error)) return typeof error === 'string' ? error : String(error)
+  if (seen.has(error)) return 'circular cause'
+  seen.add(error)
+
+  const code = typeof error.code === 'string' ? ` [${error.code}]` : ''
+  const cause = error.cause === undefined
+    ? ''
+    : `; cause=${describeError(error.cause, seen, depth + 1)}`
+  const nestedErrors = Array.isArray(error.errors)
+    ? `; errors=[${error.errors.slice(0, 4).map((nested) => describeError(nested, seen, depth + 1)).join(' | ')}]`
+    : ''
+
+  return `${error.name}${code}: ${error.message}${cause}${nestedErrors}`
+}
+
 async function listStaticFiles(directory, currentDirectory = directory) {
   const entries = await readdir(currentDirectory, { withFileTypes: true })
   const paths = []
@@ -195,6 +212,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : 'Deployment integrity verification failed')
+  console.error(describeError(error))
   process.exitCode = 1
 })
