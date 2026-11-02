@@ -2,6 +2,8 @@
 
 declare const __DEPLOY_VERSION__: string
 declare const __DEPLOY_BRANCH__: string
+declare const __DEPLOY_COMMIT_URL__: string
+declare const __DEPLOY_AUDIT_HISTORY_URL__: string
 
 declare namespace React {
   namespace JSX {

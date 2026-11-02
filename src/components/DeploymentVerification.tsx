@@ -5,10 +5,13 @@ import { useI18n } from '../i18n'
 const AUDIT_WORKFLOW_URL = 'https://api.github.com/repos/europeanplaice/linger/actions/workflows/deployment-integrity.yml/runs?branch=main&event=schedule&per_page=1'
 const GITHUB_REPO_URL = 'https://github.com/europeanplaice/linger'
 const GITHUB_API_REPO_URL = 'https://api.github.com/repos/europeanplaice/linger'
+const AUDIT_HISTORY_PAGE_URL = `${GITHUB_REPO_URL}/actions/workflows/deployment-integrity.yml?query=branch%3Amain`
 const MAX_AUDIT_AGE_MS = 90 * 60 * 1000
 const FULL_SHA_PATTERN = /^[\da-f]{40}$/i
 const BUILD_SHA = __DEPLOY_VERSION__
 const BUILD_BRANCH = __DEPLOY_BRANCH__
+const BUILD_COMMIT_URL = __DEPLOY_COMMIT_URL__
+const BUILD_AUDIT_HISTORY_URL = __DEPLOY_AUDIT_HISTORY_URL__
 
 type VerificationState =
   | { kind: 'idle' | 'loading' | 'pending' | 'verified' | 'failed' | 'not-verified' | 'stale' | 'unavailable' | 'dev-build' | 'non-production'; runId?: number; checkedAt?: string; auditedSha?: string }
@@ -67,8 +70,17 @@ export function DeploymentVerification() {
   }))
   const buildSha = BUILD_SHA
   const hasBuildSha = FULL_SHA_PATTERN.test(buildSha)
+  const buildCommitUrl = hasBuildSha && BUILD_COMMIT_URL === `${GITHUB_REPO_URL}/commit/${buildSha}`
+    ? BUILD_COMMIT_URL
+    : null
+  const auditHistoryUrl = state.runId
+    ? `${GITHUB_REPO_URL}/actions/runs/${state.runId}`
+    : BUILD_AUDIT_HISTORY_URL === AUDIT_HISTORY_PAGE_URL
+      ? BUILD_AUDIT_HISTORY_URL
+      : null
   const isProductionBuild = hasBuildSha && BUILD_BRANCH === 'main'
   const shortBuildSha = hasBuildSha ? buildSha.slice(0, 7) : buildSha
+  const buildLabel = <>{t.settings.deploymentBuild}: <code>{shortBuildSha}</code></>
 
   async function checkDeployment() {
     if (!hasBuildSha) {
@@ -184,9 +196,6 @@ export function DeploymentVerification() {
     }
   })()
 
-  const runUrl = state.runId
-    ? `${GITHUB_REPO_URL}/actions/runs/${state.runId}`
-    : `${GITHUB_REPO_URL}/actions/workflows/deployment-integrity.yml?query=branch%3Amain`
   const verificationIcon = state.kind === 'verified'
     ? <ShieldCheck aria-hidden="true" />
     : state.kind === 'failed'
@@ -200,23 +209,29 @@ export function DeploymentVerification() {
       <div className="deployment-verification-mark" aria-hidden="true">{verificationIcon}</div>
       <div className="deployment-verification-content">
         <p className="deployment-verification-title">{t.settings.deploymentChecks}</p>
-        <a
-          className="deployment-verification-build"
-          href={hasBuildSha ? `${GITHUB_REPO_URL}/commit/${buildSha}` : GITHUB_REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {t.settings.deploymentBuild}: <code>{shortBuildSha}</code>
-          <ExternalLink size={12} aria-hidden="true" />
-        </a>
+        {buildCommitUrl ? (
+          <a
+            className="deployment-verification-build"
+            href={buildCommitUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {buildLabel}
+            <ExternalLink size={12} aria-hidden="true" />
+          </a>
+        ) : (
+          <span className="deployment-verification-build">{buildLabel}</span>
+        )}
         <p className="deployment-verification-status" role="status" aria-live="polite" aria-atomic="true">
           {statusMessage}
         </p>
         <p className="deployment-verification-scope">{t.settings.deploymentScope}</p>
-        <a className="deployment-verification-run" href={runUrl} target="_blank" rel="noopener noreferrer">
-          {state.runId ? t.settings.deploymentViewRun : t.settings.deploymentViewHistory}
-          <ExternalLink size={12} aria-hidden="true" />
-        </a>
+        {auditHistoryUrl && (
+          <a className="deployment-verification-run" href={auditHistoryUrl} target="_blank" rel="noopener noreferrer">
+            {state.runId ? t.settings.deploymentViewRun : t.settings.deploymentViewHistory}
+            <ExternalLink size={12} aria-hidden="true" />
+          </a>
+        )}
       </div>
       <button
         className="deployment-verification-button"

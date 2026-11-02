@@ -68,6 +68,8 @@ jobs:
         env:
           DEPLOY_VERSION: ${{ needs.resolve-production-target.outputs.sha }}
           DEPLOY_BRANCH: main
+          DEPLOY_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ needs.resolve-production-target.outputs.sha }}
+          DEPLOY_AUDIT_HISTORY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/deployment-integrity.yml?query=branch%3Amain
         run: npm run build
 
       - name: Compare Cloudflare production deployment with GitHub Actions

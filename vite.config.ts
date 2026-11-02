@@ -48,6 +48,8 @@ export default defineConfig({
   define: {
     __DEPLOY_VERSION__: JSON.stringify(process.env.DEPLOY_VERSION ?? 'dev'),
     __DEPLOY_BRANCH__: JSON.stringify(process.env.DEPLOY_BRANCH ?? 'local'),
+    __DEPLOY_COMMIT_URL__: JSON.stringify(process.env.DEPLOY_COMMIT_URL ?? ''),
+    __DEPLOY_AUDIT_HISTORY_URL__: JSON.stringify(process.env.DEPLOY_AUDIT_HISTORY_URL ?? ''),
   },
   server: {
     proxy: {
@@ -153,6 +155,8 @@ export default defineConfig({
             'process.env.NODE_ENV': '"production"',
             __DEPLOY_VERSION__: JSON.stringify(process.env.DEPLOY_VERSION ?? 'dev'),
             __DEPLOY_BRANCH__: JSON.stringify(process.env.DEPLOY_BRANCH ?? 'local'),
+            __DEPLOY_COMMIT_URL__: JSON.stringify(process.env.DEPLOY_COMMIT_URL ?? ''),
+            __DEPLOY_AUDIT_HISTORY_URL__: JSON.stringify(process.env.DEPLOY_AUDIT_HISTORY_URL ?? ''),
           },
           logLevel: 'silent',
         })

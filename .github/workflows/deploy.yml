@@ -152,6 +152,8 @@ jobs:
         env:
           DEPLOY_VERSION: ${{ github.sha }}
           DEPLOY_BRANCH: main
+          DEPLOY_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          DEPLOY_AUDIT_HISTORY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/deployment-integrity.yml?query=branch%3Amain
 
       - name: Apply authentication database migrations
         uses: cloudflare/wrangler-action@v3
@@ -213,6 +215,7 @@ jobs:
         env:
           DEPLOY_VERSION: ${{ github.sha }}
           DEPLOY_BRANCH: staging
+          DEPLOY_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
 
       # `wrangler pages deploy` rejects `--config <path>` ("Pages does not
       # support custom paths for the Wrangler configuration file"), so the
