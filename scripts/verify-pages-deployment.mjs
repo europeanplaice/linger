@@ -54,10 +54,25 @@ async function getProductionDeployments(accountId, projectName, apiToken) {
     cache: 'no-store',
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
-  if (!response.ok) throw new Error(`Cloudflare Pages API returned HTTP ${response.status}`)
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    const errors = Array.isArray(payload?.errors)
+      ? payload.errors.map((error) => [error.code, error.message].filter(Boolean).join(': ')).join('; ')
+      : ''
+    const rayId = response.headers.get('cf-ray')
+    const mitigation = response.headers.get('cf-mitigated')
+    const contentType = response.headers.get('content-type')
+    const details = [
+      errors || payload === null && `non-JSON response (${contentType ?? 'unknown content type'})`,
+      rayId && `cf-ray=${rayId}`,
+      mitigation && `cf-mitigated=${mitigation}`,
+    ].filter(Boolean).join('; ')
+    throw new Error(
+      `Cloudflare Pages API returned HTTP ${response.status}${details ? `: ${details}` : ''}`,
+    )
+  }
 
-  const payload = await response.json()
-  if (!payload.success || !Array.isArray(payload.result)) {
+  if (!payload?.success || !Array.isArray(payload.result)) {
     throw new Error('Cloudflare Pages API returned an invalid deployment list')
   }
 
