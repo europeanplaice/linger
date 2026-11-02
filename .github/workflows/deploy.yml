@@ -165,15 +165,34 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.jsonc
 
-      - uses: cloudflare/wrangler-action@v3
+      - id: production-pages-deploy-start
+        run: echo "timestamp=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - id: production-pages-deploy
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=linger --commit-hash=${{ github.sha }}
+          command: pages deploy dist --project-name=linger --branch=main --commit-hash=${{ github.sha }} --commit-dirty=false
+
+      - name: Verify production deployment and served assets
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: linger
+          EXPECTED_COMMIT_SHA: ${{ github.sha }}
+          EXPECTED_BRANCH: main
+          EXPECTED_COMMIT_DIRTY: 'false'
+          DEPLOY_STARTED_AT: ${{ steps.production-pages-deploy-start.outputs.timestamp }}
+          DIST_DIRECTORY: dist
+        run: node scripts/verify-pages-deployment.mjs
 
       - name: Verify production deployment
         timeout-minutes: 3
-        run: node scripts/check-deployment.mjs https://linger.europeanplaice.com
+        env:
+          DEPLOYMENT_URL: ${{ steps.production-pages-deploy.outputs.deployment-url }}
+        run: node scripts/check-deployment.mjs "$DEPLOYMENT_URL"
 
   deploy-staging:
     needs: [build, lint, unit-test, privacy-test, workers-test, e2e-test, npm-audit]
@@ -214,12 +233,30 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy workers/s3-workflows/src/index.ts --config workers/s3-workflows/wrangler.staging.jsonc
 
-      - uses: cloudflare/wrangler-action@v3
+      - id: staging-pages-deploy-start
+        run: echo "timestamp=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - id: staging-pages-deploy
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name=linger-staging --commit-hash=${{ github.sha }} --branch=staging
 
+      - name: Verify staging deployment and served assets
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: linger-staging
+          EXPECTED_COMMIT_SHA: ${{ github.sha }}
+          EXPECTED_BRANCH: staging
+          DEPLOY_STARTED_AT: ${{ steps.staging-pages-deploy-start.outputs.timestamp }}
+          DIST_DIRECTORY: dist
+        run: node scripts/verify-pages-deployment.mjs
+
       - name: Verify staging deployment
         timeout-minutes: 3
-        run: node scripts/check-deployment.mjs https://staging.linger.europeanplaice.com
+        env:
+          DEPLOYMENT_URL: ${{ steps.staging-pages-deploy.outputs.deployment-url }}
+        run: node scripts/check-deployment.mjs "$DEPLOYMENT_URL"

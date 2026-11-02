@@ -1,0 +1,65 @@
+name: Deployment Integrity Audit
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: deployment-integrity-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the audit scripts
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Find latest successful production deployment run
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/latest-successful-production-run.mjs
+
+      - name: Checkout the deployed source revision
+        if: steps.latest.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.latest.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: steps.latest.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        if: steps.latest.outputs.skip == 'false'
+        run: npm ci
+
+      - name: Rebuild the expected production assets
+        if: steps.latest.outputs.skip == 'false'
+        env:
+          DEPLOY_VERSION: ${{ steps.latest.outputs.sha }}
+        run: npm run build
+
+      - name: Compare Cloudflare production deployment with GitHub Actions
+        if: steps.latest.outputs.skip == 'false'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_READ_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: linger
+          EXPECTED_COMMIT_SHA: ${{ steps.latest.outputs.sha }}
+          EXPECTED_BRANCH: main
+          EXPECTED_COMMIT_DIRTY: 'false'
+          DIST_DIRECTORY: dist
+        run: node scripts/verify-pages-deployment.mjs

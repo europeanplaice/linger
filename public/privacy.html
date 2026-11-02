@@ -145,9 +145,12 @@
     <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">GitHub</a>
     so users can inspect how the current implementation handles data. The production GitHub Actions
     workflow deploys from <code>main</code> after its validation jobs and associates the deployment
-    with the triggering commit hash. This makes the normal deployment traceable to public source;
-    it does not remove the host administrator's technical access described below or prevent an
-    administrator with Cloudflare deployment access from changing the running code.
+    with the triggering commit hash. After deployment, the workflow checks that Cloudflare's latest
+    production deployment records that commit and that the deployment URL's static files match the
+    build output. A scheduled audit repeats the comparison against the latest successful production
+    run. This makes the normal deployment traceable to public source; it does not remove the host
+    administrator's technical access described below or prevent an administrator with Cloudflare
+    deployment access from changing the running code.
   </p>
   <h3>Information the host administrator may access, or cause Linger to access</h3>
   <ul>
