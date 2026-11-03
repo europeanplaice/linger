@@ -1,6 +1,7 @@
 name: Deployment Integrity Audit
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '17 * * * *'
 
@@ -77,6 +78,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_READ_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PAGES_PROJECT: linger
+          VERIFICATION_MODE: scheduled
           EXPECTED_COMMIT_SHA: ${{ needs.resolve-production-target.outputs.sha }}
           EXPECTED_BRANCH: main
           EXPECTED_COMMIT_DIRTY: 'false'

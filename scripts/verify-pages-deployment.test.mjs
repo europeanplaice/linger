@@ -23,6 +23,12 @@ test('accepts the Pages deployment URL returned by Wrangler for the configured p
   assert.equal(deploymentOrigin(url, url).origin, url)
 })
 
+test('scheduled audits validate and use the Pages API deployment URL', () => {
+  const url = 'https://f7cd342e.grass-puffer.pages.dev'
+  assert.equal(deploymentOrigin(url).origin, url)
+  assert.throws(() => deploymentOrigin('https://example.com'), /not a valid Cloudflare Pages deployment URL/)
+})
+
 test('rejects a Pages API URL that differs from the URL returned by Wrangler', () => {
   assert.throws(
     () => deploymentOrigin(

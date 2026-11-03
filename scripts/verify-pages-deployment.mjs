@@ -153,6 +153,7 @@ function parsePagesDeploymentUrl(value, label) {
 
 export function deploymentOrigin(deploymentUrl, expectedDeploymentUrl) {
   const url = parsePagesDeploymentUrl(deploymentUrl, 'Cloudflare API deployment URL')
+  if (expectedDeploymentUrl === undefined) return url
   const expectedUrl = parsePagesDeploymentUrl(expectedDeploymentUrl, 'Wrangler deployment URL')
   if (url.origin !== expectedUrl.origin) {
     throw new Error(
@@ -249,7 +250,9 @@ async function main() {
   const accountId = requiredEnv('CLOUDFLARE_ACCOUNT_ID')
   const apiToken = requiredEnv('CLOUDFLARE_API_TOKEN')
   const projectName = requiredEnv('PAGES_PROJECT')
-  const expectedDeploymentUrl = requiredEnv('EXPECTED_DEPLOYMENT_URL')
+  const expectedDeploymentUrl = process.env.VERIFICATION_MODE === 'scheduled'
+    ? undefined
+    : requiredEnv('EXPECTED_DEPLOYMENT_URL')
   const expectedSha = requiredEnv('EXPECTED_COMMIT_SHA')
   const expectedBranch = requiredEnv('EXPECTED_BRANCH')
   const deployStartedAtValue = process.env.DEPLOY_STARTED_AT?.trim()
