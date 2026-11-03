@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
 
+async function expectLoginPopupUrl(page: import('@playwright/test').Page, selectAccount = false) {
+  const url = new URL(await page.evaluate(() => (window as Window & { lastPopupUrl?: string }).lastPopupUrl ?? ''), baseUrl)
+  expect(url.pathname).toBe('/auth/login')
+  expect(url.searchParams.get('channel_id')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  expect(url.searchParams.get('select_account')).toBe(selectAccount ? '1' : null)
+}
+
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/loginScreenHarness.html`)
 }
@@ -40,9 +47,9 @@ test.describe('LoginScreen — language toggle', () => {
     await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Use another account' })).toBeVisible()
     await page.getByRole('button', { name: 'Sign in with Google' }).click()
-    await expect.poll(() => page.evaluate(() => (window as Window & { lastPopupUrl?: string }).lastPopupUrl)).toBe('/auth/login')
+    await expectLoginPopupUrl(page)
     await page.getByRole('button', { name: 'Use another account' }).click()
-    await expect.poll(() => page.evaluate(() => (window as Window & { lastPopupUrl?: string }).lastPopupUrl)).toBe('/auth/login?select_account=1')
+    await expectLoginPopupUrl(page, true)
   })
 
   test('clicking EN switches UI to English', async ({ page }) => {

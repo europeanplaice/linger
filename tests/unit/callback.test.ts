@@ -37,6 +37,7 @@ describe('OAuth callback popup flow', () => {
     const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env: makeEnv({ SESSION_DOMAIN: window.location.origin }) } as any)
     const html = await response.text()
     const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)![1]
+    const callbackDocument = new DOMParser().parseFromString(html, 'text/html')
 
     const popup = { closed: false, close: vi.fn(function (this: { closed: boolean }) { this.closed = true }) }
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
@@ -45,7 +46,7 @@ describe('OAuth callback popup flow', () => {
     const opener = { closed: false, postMessage: (data: unknown, origin: string) => {
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data, origin, source: popup as never })), 300)
     } }
-    new Function('window', 'document', script)({ opener, close: popup.close.bind(popup) }, document)
+    new Function('window', 'document', script)({ opener, close: popup.close.bind(popup) }, callbackDocument)
 
     await vi.advanceTimersByTimeAsync(250)
     expect(popup.closed).toBe(false)

@@ -13,7 +13,7 @@ async function setUpExpiredSave(
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
 
   let popupCount = 0
-  await page.context().route('**/auth/login', async route => {
+  await page.context().route('**/auth/login**', async route => {
     popupCount++
     const isReauth = popupCount > 1
     const sub = isReauth ? reauthSub : 'google-a'

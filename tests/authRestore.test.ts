@@ -166,7 +166,7 @@ test('popup sign-in accepts exact-origin credentials in memory and a reload requ
     sessionHeaders.push(headers)
     await route.fulfill({ json: { signedIn: Boolean(headers.authorization && headers['x-linger-google-id-token']), email: 'popup@example.com', googleSub: 'popup-sub' } })
   })
-  await page.context().route('**/auth/login', route => route.fulfill({
+  await page.context().route('**/auth/login**', route => route.fulfill({
     status: 200,
     contentType: 'text/html',
     body: `<!doctype html><script>
