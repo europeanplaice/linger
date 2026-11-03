@@ -9,6 +9,7 @@ const POLL_INTERVAL_MS = 3000
 const POLL_TIMEOUT_MS = 90_000
 const REQUEST_TIMEOUT_MS = 15_000
 const MAX_ASSET_REDIRECTS = 5
+const ASSET_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000]
 
 function requiredEnv(name) {
   const value = process.env[name]?.trim()
@@ -168,7 +169,7 @@ export async function verifyAsset(deploymentUrl, asset) {
   const url = new URL(encodedPath, deploymentUrl)
   const [expectedBytes, response] = await Promise.all([
     readFile(asset.absolutePath),
-    fetchAsset(url, deploymentUrl, asset.relativePath),
+    fetchAssetWithRetry(url, deploymentUrl, asset.relativePath),
   ])
 
   if (!response.ok) {
@@ -184,6 +185,16 @@ export async function verifyAsset(deploymentUrl, asset) {
   if (expectedHash !== deployedHash) {
     throw new Error(`${asset.relativePath}: SHA-256 mismatch (build=${expectedHash}, deployed=${deployedHash})`)
   }
+}
+
+async function fetchAssetWithRetry(url, deploymentUrl, relativePath) {
+  for (const delay of ASSET_RETRY_DELAYS_MS) {
+    const response = await fetchAsset(url, deploymentUrl, relativePath)
+    if (response.status !== 404 && response.status < 500) return response
+    await response.body?.cancel()
+    await sleep(delay)
+  }
+  return fetchAsset(url, deploymentUrl, relativePath)
 }
 
 async function fetchAsset(url, deploymentUrl, relativePath) {

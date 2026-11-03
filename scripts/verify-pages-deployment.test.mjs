@@ -69,6 +69,21 @@ test('verifies asset bytes after a same-origin Pages clean-URL redirect', async 
   }
 })
 
+test('retries a temporarily unavailable asset and verifies its bytes', async () => {
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async () => ++requests === 1
+    ? new Response(null, { status: 404 })
+    : new Response('expected bytes')
+
+  try {
+    await withAsset('expected bytes', (asset) => verifyAsset(new URL('https://preview.example.pages.dev'), asset))
+    assert.equal(requests, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('rejects an asset redirect outside the Pages deployment origin', async () => {
   const originalFetch = globalThis.fetch
   const deploymentUrl = new URL('https://preview.linger-staging.pages.dev')
