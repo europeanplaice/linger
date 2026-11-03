@@ -10,9 +10,17 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
   cancelPendingSignIn = null
   clearOAuthCredentials()
   return new Promise((resolve, reject) => {
-    const loginUrl = options.selectAccount ? '/auth/login?select_account=1' : '/auth/login'
+    const channelId = crypto.randomUUID()
+    let channel: BroadcastChannel | null = null
+    if ('BroadcastChannel' in window) {
+      try { channel = new BroadcastChannel(`linger-oauth-${channelId}`) } catch { /* postMessage remains the fallback. */ }
+    }
+    const params = new URLSearchParams({ channel_id: channelId })
+    if (options.selectAccount) params.set('select_account', '1')
+    const loginUrl = `/auth/login?${params.toString()}`
     const popup = window.open(loginUrl, 'linger-google-signin', 'popup,width=520,height=680')
     if (!popup) {
+      channel?.close()
       reject(new Error('Google sign-in popup was blocked. Allow popups and try again.'))
       return
     }
@@ -23,6 +31,7 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
       if (finished) return
       finished = true
       window.removeEventListener('message', onMessage)
+      channel?.close()
       window.clearInterval(closeCheck)
       window.clearTimeout(timeout)
       if (!popup.closed) popup.close()
@@ -36,10 +45,11 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
     }
     const cancel = (error: Error) => finish(error)
 
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== popup) return
-      const message = event.data as { type?: unknown; credential?: unknown }
+    const handleMessage = (data: unknown, requireChannelId = false) => {
+      const message = data as { type?: unknown; credential?: unknown; channelId?: unknown }
       if (message?.type !== 'linger-oauth-complete' || !message.credential || typeof message.credential !== 'object') return
+      if (requireChannelId && message.channelId !== channelId) return
+      if (message.channelId !== undefined && message.channelId !== channelId) return
       const credential = message.credential as { accessToken?: unknown; idToken?: unknown; expiresAt?: unknown }
       if (typeof credential.accessToken !== 'string' || typeof credential.idToken !== 'string' || typeof credential.expiresAt !== 'number') {
         finish(new Error('Google sign-in returned an invalid response'))
@@ -51,13 +61,23 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
       catch (error) { finish(error instanceof Error ? error : new Error('Google sign-in failed')); return }
       checkSession().then(info => {
         if (!info.signedIn) throw new Error('Google sign-in could not be verified')
+        try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Sign-in can finish without the acknowledgement. */ }
         finish(undefined, info)
       }).catch(error => finish(error instanceof Error ? error : new Error('Google sign-in failed')))
     }
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== popup) return
+      handleMessage(event.data)
+    }
+    const onChannelMessage = (event: MessageEvent) => handleMessage(event.data, true)
 
     window.addEventListener('message', onMessage)
+    if (channel) channel.addEventListener('message', onChannelMessage)
     const closeCheck = window.setInterval(() => {
-      if (!receivedCredential && popup.closed) finish(new Error('Google sign-in was cancelled'))
+      // Browsers may report a COOP-isolated OAuth popup as closed even while it
+      // is still navigating through Google. BroadcastChannel can still deliver
+      // the callback, so only use this cancellation check without that fallback.
+      if (!channel && !receivedCredential && popup.closed) finish(new Error('Google sign-in was cancelled'))
     }, 250)
     const timeout = window.setTimeout(() => finish(new Error('Google sign-in timed out')), 5 * 60_000)
     cancelPendingSignIn = cancel

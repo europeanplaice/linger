@@ -16,6 +16,11 @@ function randomVerifier(): string {
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
+  const url = new URL(request.url)
+  const requestedChannelId = url.searchParams.get('channel_id')
+  const channelId = requestedChannelId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedChannelId)
+    ? requestedChannelId
+    : undefined
   const state = crypto.randomUUID()
   const codeVerifier = randomVerifier()
   const nonce = crypto.randomUUID()
@@ -25,7 +30,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
 
   // Keep the PKCE secret in a short lived, HttpOnly browser cookie. The server
   // store only needs nonce and response mode after atomically consuming state.
-  await saveOAuthState(state, JSON.stringify({ nonce, popup: true }), env)
+  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -42,7 +47,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   })
   // Let Google use its normal account/session selection for the primary
   // sign-in action. The explicit secondary action asks Google to show accounts.
-  if (new URL(request.url).searchParams.get('select_account') === '1') {
+  if (url.searchParams.get('select_account') === '1') {
     params.set('prompt', 'select_account')
   }
 

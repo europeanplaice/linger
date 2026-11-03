@@ -9,18 +9,47 @@ function base64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number }, origin: string, secure: boolean): Response {
+function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number }, origin: string, channelId: string | undefined, secure: boolean): Response {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(18)))
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)))
+  const encodedChannelId = JSON.stringify(channelId ?? '')
   const html = `<!doctype html><meta charset="utf-8"><title>Google sign-in</title><p>Returning to Linger…</p><script nonce="${nonce}">
     const encoded = '${encoded}'.replace(/-/g, '+').replace(/_/g, '/');
     const bytes = Uint8Array.from(atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)), c => c.charCodeAt(0));
     const credential = JSON.parse(new TextDecoder().decode(bytes));
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage({ type: 'linger-oauth-complete', credential }, '${origin}');
-    } else {
-      document.querySelector('p').textContent = 'Sign-in finished. Return to the Linger tab.';
+    const channelId = ${encodedChannelId};
+    const message = { type: 'linger-oauth-complete', credential, ...(channelId ? { channelId } : {}) };
+    const status = document.querySelector('p');
+    let acknowledged = false;
+    let channel = null;
+    if (channelId && 'BroadcastChannel' in window) {
+      try {
+        channel = new BroadcastChannel('linger-oauth-' + channelId);
+        channel.onmessage = event => {
+          if (event.data?.type !== 'linger-oauth-ack' || event.data.channelId !== channelId) return;
+          acknowledged = true;
+          clearTimeout(recoveryTimer);
+          status.textContent = 'Sign-in complete. Return to Linger.';
+          channel.close();
+        };
+      } catch { channel = null; }
     }
+    let delivered = false;
+    if (window.opener && !window.opener.closed) {
+      try {
+        window.opener.postMessage(message, '${origin}');
+        delivered = true;
+      } catch { /* A cross-origin opener cannot receive credentials. */ }
+    }
+    if (channel) {
+      try { channel.postMessage(message); delivered = true; }
+      catch { channel.close(); channel = null; }
+    }
+    status.textContent = delivered ? 'Finishing sign-in in Linger…' : 'Sign-in finished, but Linger could not be reached. Return to the Linger tab and try again.';
+    const recoveryTimer = setTimeout(() => {
+      if (!acknowledged) status.textContent = 'Linger has not confirmed sign-in. Return to the Linger tab and try again.';
+      channel?.close();
+    }, 10000);
   </script>`
   return new Response(html, {
     status: 200,
@@ -59,10 +88,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
 
-  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean }
+  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; channelId?: string }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
-    stateRecord = { codeVerifier: parsed.codeVerifier, nonce: parsed.nonce ?? '', popup: parsed.popup === true }
+    stateRecord = {
+      codeVerifier: parsed.codeVerifier,
+      nonce: parsed.nonce ?? '',
+      popup: parsed.popup === true,
+      channelId: typeof parsed.channelId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.channelId)
+        ? parsed.channelId
+        : undefined,
+    }
   } catch {
     stateRecord = { codeVerifier: stateRecordRaw, nonce: '', popup: false }
   }
@@ -151,7 +187,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     idToken: tokens.id_token,
   }
   if (stateRecord.popup) {
-    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, secure)
+    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure)
     const headers = new Headers(response.headers)
     headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
     headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
