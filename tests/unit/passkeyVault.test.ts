@@ -12,7 +12,6 @@ import {
   unlockWrappedMasterKey,
   wrapExistingMasterKey,
 } from '../../src/lib/passkeyVault'
-import { exportVaultRecovery, parseVaultRecoveryFile } from '../../src/lib/vaultRecovery'
 
 const prf = new Uint8Array(32).fill(0x31)
 
@@ -92,16 +91,4 @@ describe('passkey vault crypto', () => {
     expect(getVaultKey('user-a')).toHaveLength(32)
   })
 
-  it('exports a user-controlled recovery file without persisting it and validates imports', async () => {
-    const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
-    await createWrappedMasterKey(prf, userId, 'credential-a')
-    localStorage.clear()
-    const file = exportVaultRecovery()
-    expect(localStorage.length).toBe(0)
-    const recovery = parseVaultRecoveryFile(file)
-    expect(recovery.userId).toBe(userId)
-    expect(recovery.masterKey).toHaveLength(32)
-    recovery.masterKey.fill(0)
-    await expect(Promise.resolve().then(() => parseVaultRecoveryFile('{"version":1,"userId":"user","masterKey":"bad"}'))).rejects.toThrow(/format/)
-  })
 })

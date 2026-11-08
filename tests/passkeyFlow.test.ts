@@ -3,13 +3,13 @@ import { createPasskeyTestEnv } from './helpers/passkeyAuth'
 import type { Env } from '../functions/_shared/session'
 import {
   addOptions, addVerify, loginOptions, loginVerify,
-  recoverSession, registrationOptions, registrationVerify,
+  deleteCredential, listCredentials, registrationOptions, registrationVerify,
 } from '../functions/_shared/passkeys'
 
 // Native Chrome WebAuthn + real server verification + migrated SQL. Only the
 // HTTP transport is intercepted, so mocked signature verification cannot hide
 // a mismatch between browser options, PRF bytes, wrappers, and backend handlers.
-test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures', async ({ page, context, browserName }) => {
+test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn signatures', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'The virtual authenticator requires CDP')
   const origin = 'http://localhost:5173'
   const { env, db } = await createPasskeyTestEnv({}, { domain: origin })
@@ -17,9 +17,10 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
     '/register/options': registrationOptions, '/register/verify': registrationVerify,
     '/login/options': loginOptions, '/login/verify': loginVerify,
     '/add/options': addOptions, '/add/verify': addVerify,
-    '/recover': recoverSession,
+    '/credentials/list': listCredentials, '/credentials/delete': deleteCredential,
   }
   const forbiddenNetworkValues: string[] = []
+  const loginVerifyStatuses: number[] = []
   let registrationRequests = 0
   await page.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
@@ -34,16 +35,18 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
       ...(body ? { body } : {}),
     })
     const response = await handler(request, env)
+    if (path === '/login/verify') loginVerifyStatuses.push(response.status)
     for (const cookie of response.headers.getSetCookie()) {
       const fields = cookie.split(';').map(part => part.trim())
       const equals = fields[0].indexOf('=')
-      const path = fields.find(part => part.startsWith('Path='))?.slice(5) ?? '/'
+      const cookiePath = fields.find(part => part.startsWith('Path='))?.slice(5) ?? '/'
       const maxAge = Number(fields.find(part => part.startsWith('Max-Age='))?.slice(8) ?? 300)
-      await context.addCookies([{
+      const cookieData = {
         name: fields[0].slice(0, equals), value: decodeURIComponent(fields[0].slice(equals + 1)),
-        domain: 'localhost', path, httpOnly: fields.includes('HttpOnly'), sameSite: 'Strict',
+        domain: 'localhost', path: cookiePath, httpOnly: fields.includes('HttpOnly'), sameSite: 'Strict',
         expires: maxAge === 0 ? 1 : Math.floor(Date.now() / 1000) + maxAge,
-      }])
+      } as const
+      await context.addCookies([cookieData])
     }
     const headers = Object.fromEntries(response.headers)
     delete headers['set-cookie']
@@ -71,11 +74,7 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
 
-    const recovery = await page.evaluate(async () => {
-      const path = '/src/api/passkeys.ts'
-      return (await import(/* @vite-ignore */ path)).exportVaultRecovery() as string
-    })
-    const userId = (JSON.parse(recovery) as { userId: string }).userId
+    const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
     expect(forbiddenNetworkValues).toEqual([])
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
@@ -88,14 +87,22 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
+    const firstPasskeyKey = await page.evaluate(async internalId => {
+      const path = '/src/lib/passkeyVault.ts'
+      const key = (await import(/* @vite-ignore */ path)).getVaultKey(internalId) as Uint8Array
+      try { return Array.from(key) } finally { key.fill(0) }
+    }, userId)
+    expect(firstPasskeyKey).toHaveLength(32)
+    const originalSessionCookie = (await context.cookies(origin)).find(cookie => cookie.name === 'linger_session')
+    expect(originalSessionCookie).toBeTruthy()
+    const firstSession = await page.evaluate(async internalId => {
+      const path = '/src/api/passkeys.ts'
+      return (await import(/* @vite-ignore */ path)).listPasskeys(internalId)
+    }, userId)
+    const originalCredentialId = firstSession.currentCredentialId
+    expect(originalCredentialId).toBeTruthy()
     expect(registrationRequests).toBe(1)
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 1 })
-    const recoveredAgain = await page.evaluate(async () => {
-      const path = '/src/api/passkeys.ts'
-      return (await import(/* @vite-ignore */ path)).exportVaultRecovery() as string
-    })
-    expect(recoveredAgain).toBe(recovery)
-
     // A second provider has a different PRF secret. It must wrap the existing
     // master key, rather than silently creating an unreadable new account key.
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId })
@@ -110,32 +117,55 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
       await (await import(/* @vite-ignore */ path)).addPasskey(internalId)
     }, userId)
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 2 })
-    await page.evaluate(async () => {
-      const vaultPath = '/src/lib/passkeyVault.ts'
-      const apiPath = '/src/api/passkeys.ts'
-      ;(await import(/* @vite-ignore */ vaultPath)).clearVaultKey()
-      await (await import(/* @vite-ignore */ apiPath)).loginWithPasskey()
-    })
-    expect(await page.evaluate(async () => {
-      const path = '/src/api/passkeys.ts'
-      return (await import(/* @vite-ignore */ path)).exportVaultRecovery() as string
-    })).toBe(recovery)
 
-    await page.evaluate(async text => {
+    // Sign in using only the second authenticator. The returned vault key must
+    // match the first passkey's in-memory key, proving both wrappers unlock it.
+    const secondPasskeyKey = await page.evaluate(async internalId => {
       const vaultPath = '/src/lib/passkeyVault.ts'
       const apiPath = '/src/api/passkeys.ts'
-      ;(await import(/* @vite-ignore */ vaultPath)).clearVaultKey()
-      await (await import(/* @vite-ignore */ apiPath)).recoverVault(text)
-    }, recovery)
-    const afterRecovery = await page.evaluate(async () => {
+      const vault = await import(/* @vite-ignore */ vaultPath)
+      vault.clearVaultKey()
+      await (await import(/* @vite-ignore */ apiPath)).loginWithPasskey()
+      const key = vault.getVaultKey(internalId) as Uint8Array
+      try { return Array.from(key) } finally { key.fill(0) }
+    }, userId)
+    expect(secondPasskeyKey).toEqual(firstPasskeyKey)
+    const listed = await page.evaluate(async internalId => {
       const path = '/src/api/passkeys.ts'
-      return (await import(/* @vite-ignore */ path)).exportVaultRecovery() as string
-    })
-    expect(afterRecovery).toBe(recovery)
+      return (await import(/* @vite-ignore */ path)).listPasskeys(internalId)
+    }, userId) as { credentials: Array<{ credentialId: string; createdAt: number }>; currentCredentialId: string | null }
+    expect(listed.credentials).toHaveLength(2)
+    const removedCredentialId = listed.currentCredentialId
+    if (!removedCredentialId) throw new Error('Second passkey sign-in did not identify its credential')
+    expect(removedCredentialId).not.toBe(originalCredentialId)
+    // Return to the first credential's session while the second authenticator
+    // remains installed. Removing the second credential must invalidate that
+    // credential's sessions and prevent its next real signed assertion.
+    await context.addCookies([originalSessionCookie!])
+    await page.evaluate(async ({ internalId, credentialId }) => {
+      const path = '/src/api/passkeys.ts'
+      await (await import(/* @vite-ignore */ path)).deletePasskey(internalId, credentialId)
+    }, { internalId: userId, credentialId: removedCredentialId })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
+    const afterDelete = await page.evaluate(async internalId => {
+      const path = '/src/api/passkeys.ts'
+      return (await import(/* @vite-ignore */ path)).listPasskeys(internalId)
+    }, userId) as { credentials: Array<{ credentialId: string; createdAt: number }>; currentCredentialId: string | null }
+    expect(afterDelete.credentials.map((entry: { credentialId: string }) => entry.credentialId)).not.toContain(removedCredentialId)
+
+    // Its authenticator still signs a native assertion, but the server no
+    // longer accepts that credential after deletion.
+    await expect(page.evaluate(async () => {
+      const path = '/src/api/passkeys.ts'
+      await (await import(/* @vite-ignore */ path)).loginWithPasskey()
+    })).rejects.toThrow()
+    expect(loginVerifyStatuses.at(-1)).toBe(401)
     const dump = JSON.stringify(db.prepare('SELECT * FROM passkey_users WHERE id = ?').get(userId))
-    expect(dump).not.toContain((JSON.parse(recovery) as { masterKey: string }).masterKey)
+    const keyEncoding = Buffer.from(firstPasskeyKey).toString('base64')
+    expect(dump).not.toContain(keyEncoding)
     const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))
-    expect(JSON.stringify(storage)).not.toContain((JSON.parse(recovery) as { masterKey: string }).masterKey)
+    expect(JSON.stringify(storage)).not.toContain(keyEncoding)
+
   } finally {
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId })
     db.close()

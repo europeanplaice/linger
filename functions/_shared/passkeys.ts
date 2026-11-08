@@ -9,7 +9,7 @@ import {
 } from '@simplewebauthn/server'
 import type { Env } from './session'
 import { makeSessionCookie, parseSessionId, SESSION_TTL, jsonResponse } from './session'
-import { createPasskeySession, getPasskeySessionUserId } from './authStore'
+import { createPasskeySession, getPasskeySessionInfo, getPasskeySessionUserId, sessionStorageId } from './authStore'
 import { openVaultValue, sealVaultValue, validVaultKey } from './vaultCrypto'
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000
@@ -285,7 +285,7 @@ export async function registrationVerify(request: Request, env: Env): Promise<Re
     const credentialIdValue = credential.id
     const credentialPublicKey = publicKeyBytes(credential.publicKey)
     const assertion = body.assertion as AuthenticationResponseJSON
-    if (assertion.id !== credentialIdValue || assertion.response.userHandle !== base64url(new TextEncoder().encode(challenge.user_id))) throw new Error('New credential assertion mismatch')
+    if (assertion.id !== credentialIdValue || (assertion.response.userHandle != null && assertion.response.userHandle !== base64url(new TextEncoder().encode(challenge.user_id)))) throw new Error('New credential assertion mismatch')
     const assertionVerification = await verifyAuthenticationResponse({
       response: assertion, expectedChallenge: challenge.wrap_challenge,
       expectedOrigin: origin, expectedRPID: rpID,
@@ -304,7 +304,7 @@ export async function registrationVerify(request: Request, env: Env): Promise<Re
         .bind(credentialIdValue, challenge.user_id, credentialPublicKey, count, transports, challenge.prf_salt, body.wrappedMasterKey, now),
     ])
     const sessionId = randomToken(32)
-    await createPasskeySession(sessionId, challenge.user_id, env)
+    await createPasskeySession(sessionId, challenge.user_id, env, credentialIdValue)
     return withClearedChallengeCookie(jsonResponse({ userId: challenge.user_id, wrappedMasterKey: body.wrappedMasterKey, prfSalt: challenge.prf_salt }), env,
       makeSessionCookie(sessionId, SESSION_TTL, secureCookie(env)))
   } catch {
@@ -356,7 +356,7 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
       .bind(nextCounter, row.credential_id, row.counter).run()
     if (!update.success || update.meta.changes !== 1) throw new Error('Credential changed concurrently')
     const sessionId = randomToken(32)
-    await createPasskeySession(sessionId, row.user_id, env)
+    await createPasskeySession(sessionId, row.user_id, env, row.credential_id)
     return withClearedChallengeCookie(jsonResponse({
       userId: row.user_id,
       credentialId: row.credential_id,
@@ -396,7 +396,9 @@ export async function addVerify(request: Request, env: Env): Promise<Response> {
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
-  const userId = await authenticatedUser(request, env)
+  const browserSessionId = parseSessionId(request)
+  const browserSession = browserSessionId ? await getPasskeySessionInfo(browserSessionId, env) : null
+  const userId = browserSession?.userId
   if (!userId) return withClearedChallengeCookie(jsonResponse({ error: 'Unauthorized' }, 401), env)
   if (!await validateUnlockedProfile(request, env, userId)) return withClearedChallengeCookie(jsonResponse({ error: 'Vault unlock required' }, 401), env)
   const body = await readJson(request)
@@ -414,7 +416,7 @@ export async function addVerify(request: Request, env: Env): Promise<Response> {
     if (!result.verified || !result.registrationInfo) throw new Error('Not verified')
     const credential = result.registrationInfo.credential
     const assertion = body.assertion as AuthenticationResponseJSON
-    if (assertion.id !== credential.id || assertion.response.userHandle !== base64url(new TextEncoder().encode(userId))) throw new Error('New credential assertion mismatch')
+    if (assertion.id !== credential.id || (assertion.response.userHandle != null && assertion.response.userHandle !== base64url(new TextEncoder().encode(userId)))) throw new Error('New credential assertion mismatch')
     const assertionVerification = await verifyAuthenticationResponse({
       response: assertion, expectedChallenge: challenge.wrap_challenge,
       expectedOrigin: origin, expectedRPID: rpID,
@@ -423,31 +425,79 @@ export async function addVerify(request: Request, env: Env): Promise<Response> {
       requireUserVerification: true,
     })
     if (!assertionVerification.verified) throw new Error('PRF assertion failed')
-    await env.AUTH_DB.prepare('INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    const inserted = await env.AUTH_DB.prepare(`INSERT INTO passkey_credentials
+      (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+        SELECT 1 FROM auth_sessions s WHERE s.id = ? AND s.user_id = ? AND s.revoked = 0 AND s.expires_at > ?
+          AND (s.credential_id IS NULL OR EXISTS (
+            SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
+          ))
+      )`)
       .bind(credential.id, userId, publicKeyBytes(credential.publicKey), assertionVerification.authenticationInfo.newCounter,
-        transportList((body.response as RegistrationResponseJSON).response.transports), challenge.prf_salt, body.wrappedMasterKey, Date.now()).run()
+        transportList((body.response as RegistrationResponseJSON).response.transports), challenge.prf_salt, body.wrappedMasterKey, Date.now(),
+        await sessionStorageId(browserSessionId!), userId, Date.now()).run()
+    if (!inserted.success || inserted.meta.changes !== 1) throw new Error('Passkey session ended')
     return withClearedChallengeCookie(jsonResponse({ ok: true, userId }), env)
   } catch { return withClearedChallengeCookie(jsonResponse({ error: 'Passkey setup failed' }, 400), env) }
 }
 
-export async function recoverSession(request: Request, env: Env): Promise<Response> {
+export async function listCredentials(request: Request, env: Env): Promise<Response> {
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
-  if (!hasAuthDb(env)) return jsonResponse({ error: 'Recovery unavailable' }, 503)
-  const userId = request.headers.get('X-Linger-Vault-User') ?? ''
-  const key = request.headers.get('X-Linger-Vault-Key')
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId) || !validVaultKey(key)) {
-    return jsonResponse({ error: 'Recovery failed' }, 401)
+  if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
+  const sessionId = parseSessionId(request)
+  const session = sessionId ? await getPasskeySessionInfo(sessionId, env) : null
+  if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
+  if (request.headers.get('X-Linger-Vault-User') !== session.userId || !await validateUnlockedProfile(request, env, session.userId)) {
+    return jsonResponse({ error: 'Vault unlock required' }, 401)
   }
-  try {
-    const row = await env.AUTH_DB.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?').bind(userId).first<{ account_envelope: string | null }>()
-    if (!row?.account_envelope) throw new Error('Unknown account')
-    await openVaultValue<unknown>(key, userId, 'account-metadata', row.account_envelope)
-    const sessionId = randomToken(32)
-    await createPasskeySession(sessionId, userId, env)
-    return withClearedChallengeCookie(jsonResponse({ userId }), env,
-      makeSessionCookie(sessionId, SESSION_TTL, secureCookie(env)))
-  } catch { return jsonResponse({ error: 'Recovery failed' }, 401) }
+  const result = await env.AUTH_DB.prepare('SELECT credential_id, created_at FROM passkey_credentials WHERE user_id = ? ORDER BY created_at, credential_id')
+    .bind(session.userId).all<{ credential_id: string; created_at: number }>()
+  return jsonResponse({
+    credentials: (result.results ?? []).map(row => ({ credentialId: row.credential_id, createdAt: row.created_at })),
+    currentCredentialId: session.credentialId,
+  })
+}
+
+export async function deleteCredential(request: Request, env: Env): Promise<Response> {
+  const rejected = sameOrigin(request, env)
+  if (rejected) return rejected
+  if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
+  const sessionId = parseSessionId(request)
+  const session = sessionId ? await getPasskeySessionInfo(sessionId, env) : null
+  if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
+  if (request.headers.get('X-Linger-Vault-User') !== session.userId || !await validateUnlockedProfile(request, env, session.userId)) {
+    return jsonResponse({ error: 'Vault unlock required' }, 401)
+  }
+  const body = await readJson(request)
+  if (!body || typeof body.credentialId !== 'string' || !body.credentialId || body.credentialId.length > 1024) {
+    return jsonResponse({ error: 'Invalid credential' }, 400)
+  }
+  if (body.credentialId === session.credentialId) return jsonResponse({ error: 'Current credential cannot be deleted' }, 409)
+  // D1 batch executes these statements as one transaction. The guarded DELETE
+  // makes the final-credential check atomic with removal, including concurrent deletes.
+  const deletion = env.AUTH_DB.prepare(`DELETE FROM passkey_credentials
+    WHERE credential_id = ? AND user_id = ? AND (SELECT COUNT(*) FROM passkey_credentials WHERE user_id = ?) > 1
+      AND EXISTS (
+        SELECT 1 FROM auth_sessions s WHERE s.id = ? AND s.user_id = ? AND s.revoked = 0 AND s.expires_at > ?
+          AND (s.credential_id IS NULL OR EXISTS (
+            SELECT 1 FROM passkey_credentials current_c WHERE current_c.credential_id = s.credential_id AND current_c.user_id = s.user_id
+          ))
+      ) RETURNING credential_id`).bind(body.credentialId, session.userId, session.userId,
+        await sessionStorageId(sessionId!), session.userId, Date.now())
+  const revocation = env.AUTH_DB.prepare(`UPDATE auth_sessions SET user_id = NULL, credential_id = NULL, revoked = 1, data = NULL
+    WHERE credential_id = ? AND user_id = ? AND NOT EXISTS (
+      SELECT 1 FROM passkey_credentials c WHERE c.credential_id = ? AND c.user_id = ?
+    )`)
+    .bind(body.credentialId, session.userId, body.credentialId, session.userId)
+  const [deleted] = await env.AUTH_DB.batch([deletion, revocation]) as [{ results?: Array<{ credential_id: string }> }, unknown]
+  if (!deleted?.results?.length) {
+    if (!await getPasskeySessionInfo(sessionId!, env)) return jsonResponse({ error: 'Unauthorized' }, 401)
+    const existing = await env.AUTH_DB.prepare('SELECT credential_id FROM passkey_credentials WHERE credential_id = ? AND user_id = ?')
+      .bind(body.credentialId, session.userId).first<{ credential_id: string }>()
+    return existing ? jsonResponse({ error: 'Last credential cannot be deleted' }, 409) : jsonResponse({ error: 'Credential not found' }, 404)
+  }
+  return jsonResponse({ ok: true })
 }
 
 function fromBase64url(input: string): Uint8Array {

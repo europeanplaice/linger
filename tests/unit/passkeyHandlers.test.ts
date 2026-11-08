@@ -10,7 +10,8 @@ const webauthn = vi.hoisted(() => ({
 
 vi.mock('@simplewebauthn/server', () => webauthn)
 
-import { addOptions, addVerify, loginOptions, loginVerify, recoverSession, registrationOptions, registrationVerify } from '../../functions/_shared/passkeys'
+import { addOptions, addVerify, deleteCredential, listCredentials, loginOptions, loginVerify, registrationOptions, registrationVerify } from '../../functions/_shared/passkeys'
+import { createPasskeySession, sessionStorageId } from '../../functions/_shared/authStore'
 
 const origin = 'https://example.com'
 const challenge = 'test-challenge-value'
@@ -124,7 +125,7 @@ describe('passkey handlers', () => {
       response: { ...registrationResponse, clientExtensionResults: { prf: { enabled: true } } },
       assertion: {
         ...assertionResponse,
-        response: { ...assertionResponse.response, userHandle: base64url(data.userId) },
+        response: { ...assertionResponse.response, userHandle: null },
         clientExtensionResults: { prf: { enabled: true, results: { first: 'PRF_OUTPUT_MUST_NOT_PERSIST' } } },
       },
       wrappedMasterKey, prfSalt: data.prfSalt,
@@ -202,21 +203,118 @@ describe('passkey handlers', () => {
     db.close()
   })
 
-  it('recovers a session only with the key that decrypts that user profile', async () => {
-    const { env, db, key, userId } = await createPasskeyTestEnv()
-    const wrong = btoa(String.fromCharCode(...new Uint8Array(32).fill(7))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-    const rejected = await recoverSession(request('/auth/passkey/recover', {}, {
-      'X-Linger-Vault-Key': wrong, 'X-Linger-Vault-User': userId,
-    }), env)
-    expect(rejected.status).toBe(401)
-    expect(await rejected.json()).toEqual({ error: 'Recovery failed' })
+  it('allows an omitted userHandle for the known credential used to add a passkey', async () => {
+    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
+    const data = await options.json() as { prfSalt: string }
+    const result = await addVerify(request('/auth/passkey/add/verify', {
+      response: registrationResponse,
+      assertion: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: null } },
+      wrappedMasterKey, prfSalt: data.prfSalt,
+    }, { ...headers, Cookie: `${headers.Cookie}; ${challengeCookie(options)}` }), env)
+    expect(result.status).toBe(200)
+    expect(db.prepare('SELECT user_id FROM passkey_credentials WHERE credential_id = ?').get(credentialId)).toEqual({ user_id: userId })
+    db.close()
+  })
 
-    const recovered = await recoverSession(request('/auth/passkey/recover', {}, {
-      'X-Linger-Vault-Key': key, 'X-Linger-Vault-User': userId,
+  it('rejects a present mismatched userHandle when adding a passkey', async () => {
+    const { env, db, headers } = await createPasskeyTestEnv()
+    const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
+    const data = await options.json() as { prfSalt: string }
+    const result = await addVerify(request('/auth/passkey/add/verify', {
+      response: registrationResponse,
+      assertion: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url('wrong-user') } },
+      wrappedMasterKey, prfSalt: data.prfSalt,
+    }, { ...headers, Cookie: `${headers.Cookie}; ${challengeCookie(options)}` }), env)
+    expect(result.status).toBe(400)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 0 })
+    db.close()
+  })
+
+  it('does not add a credential if its session is revoked during WebAuthn verification', async () => {
+    const { env, db, headers, userId, sessionId } = await createPasskeyTestEnv()
+    const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
+    const data = await options.json() as { prfSalt: string }
+    webauthn.verifyAuthenticationResponse.mockImplementationOnce(async () => {
+      db.prepare('UPDATE auth_sessions SET user_id = NULL, revoked = 1 WHERE id = ?').run(await sessionStorageId(sessionId))
+      return { verified: true, authenticationInfo: { newCounter: 2 } }
+    })
+    const result = await addVerify(request('/auth/passkey/add/verify', {
+      response: registrationResponse,
+      assertion: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+      wrappedMasterKey, prfSalt: data.prfSalt,
+    }, { ...headers, Cookie: `${headers.Cookie}; ${challengeCookie(options)}` }), env)
+    expect(result.status).toBe(400)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 0 })
+    db.close()
+  })
+
+  it('lists credentials and deletes another credential while protecting current and final credentials', async () => {
+    const { env, db, headers, userId, sessionId, key } = await createPasskeyTestEnv()
+    const otherCredentialId = 'other-credential-id'
+    const now = Date.now()
+    db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      VALUES (?, ?, ?, 1, '[]', ?, ?, ?)`).run(credentialId, userId, new Uint8Array([1]), prfSalt, wrappedMasterKey, now)
+    db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      VALUES (?, ?, ?, 1, '[]', ?, ?, ?)`).run(otherCredentialId, userId, new Uint8Array([2]), prfSalt, wrappedMasterKey, now + 1)
+    db.prepare('UPDATE auth_sessions SET credential_id = ? WHERE id = ?').run(credentialId, await sessionStorageId(sessionId))
+
+    const listed = await listCredentials(request('/auth/passkey/credentials/list', {}, headers), env)
+    expect(listed.status).toBe(200)
+    expect(await listed.json()).toEqual({
+      credentials: [{ credentialId, createdAt: now }, { credentialId: otherCredentialId, createdAt: now + 1 }],
+      currentCredentialId: credentialId,
+    })
+    const currentDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId }, headers), env)
+    expect(currentDelete.status).toBe(409)
+    const lastDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId: otherCredentialId }, headers), env)
+    expect(lastDelete.status).toBe(200)
+    expect(await lastDelete.json()).toEqual({ ok: true })
+    expect(db.prepare('SELECT user_id, credential_id, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: userId, credential_id: credentialId, revoked: 0 })
+    expect(db.prepare('SELECT credential_id FROM passkey_credentials WHERE user_id = ?').all(userId)).toEqual([{ credential_id: credentialId }])
+
+    const unboundSessionId = 'second-session'
+    await createPasskeySession(unboundSessionId, userId, env)
+    const lastCredentialDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId }, {
+      ...headers, Cookie: `linger_session=${unboundSessionId}`,
     }), env)
-    expect(recovered.status).toBe(200)
-    expect(await recovered.json()).toEqual({ userId })
-    expect(recovered.headers.get('set-cookie')).toContain('linger_session=')
+    expect(lastCredentialDelete.status).toBe(409)
+    expect(key).toBeTruthy()
+    db.close()
+  })
+
+  it('requires same origin, matching unlocked user, and a vault key for credential management', async () => {
+    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    const addCredential = () => db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      VALUES (?, ?, ?, 1, '[]', ?, ?, ?)`).run('listed-credential', userId, new Uint8Array([1]), prfSalt, wrappedMasterKey, Date.now())
+    addCredential()
+    expect((await listCredentials(request('/auth/passkey/credentials/list', {}, { ...headers, Origin: 'https://attacker.example' }), env)).status).toBe(403)
+    expect((await listCredentials(request('/auth/passkey/credentials/list', {}, { ...headers, 'X-Linger-Vault-User': 'other-user' }), env)).status).toBe(401)
+    expect((await listCredentials(request('/auth/passkey/credentials/list', {}, { Cookie: headers.Cookie, 'X-Linger-Vault-User': userId }), env)).status).toBe(401)
+    db.close()
+  })
+
+  it('requires discoverable login userHandle to match and rejects deleted credential sessions', async () => {
+    const { env, db, userId, key } = await createPasskeyTestEnv()
+    db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      VALUES (?, ?, ?, 1, '[]', ?, ?, ?)`).run(credentialId, userId, new Uint8Array([1]), prfSalt, wrappedMasterKey, Date.now())
+    const options = await loginOptions(request('/auth/passkey/login/options', {}), env)
+    const mismatch = await loginVerify(request('/auth/passkey/login/verify', {
+      response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url('wrong-user') } },
+    }, { Cookie: challengeCookie(options) }), env)
+    expect(mismatch.status).toBe(401)
+
+    const options2 = await loginOptions(request('/auth/passkey/login/options', {}), env)
+    const valid = await loginVerify(request('/auth/passkey/login/verify', {
+      response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+    }, { Cookie: challengeCookie(options2) }), env)
+    expect(valid.status).toBe(200)
+    const sessionCookie = valid.headers.get('set-cookie')?.match(/linger_session=([^;]+)/)?.[1]
+    expect(sessionCookie).toBeTruthy()
+    db.prepare('DELETE FROM passkey_credentials WHERE credential_id = ?').run(credentialId)
+    const { readD1Session } = await import('../../functions/_shared/authStore')
+    expect(await readD1Session(decodeURIComponent(sessionCookie!), { ...env, AUTH_DB: env.AUTH_DB! }, key)).toBeNull()
     db.close()
   })
 })

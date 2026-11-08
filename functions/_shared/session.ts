@@ -23,6 +23,7 @@ export interface Env {
   DIARY_WRITER?: {
     getByName(name: string): {
       ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
+      selectFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string; folderId: string }): Promise<string>
     }
   }
 }

@@ -3,7 +3,7 @@ import { startSignIn, checkSession, revokeSession } from '../api/auth'
 import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
 import { clearOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
-import { addPasskey as addPasskeyCredential, loginWithPasskey, recoverVault as recoverPasskeyVault, registerPasskey } from '../api/passkeys'
+import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
@@ -35,7 +35,6 @@ export interface AuthState {
   setupPasskey: () => Promise<void>
   unlockPasskey: () => Promise<void>
   addPasskey: () => Promise<void>
-  recoverVault: (recoveryText: string) => Promise<void>
   lockVault: () => void
   clearVaultError: () => void
 }
@@ -217,7 +216,7 @@ export function useAuth(): AuthState {
     })
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add' | 'recover', recoveryText?: string) => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add') => {
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()
@@ -238,11 +237,6 @@ export function useAuth(): AuthState {
         if (!userId) throw new Error('Unlock the vault before adding another passkey')
         await addPasskeyCredential(userId, controller.signal)
         if (revision !== vaultRevision.current) return
-      } else {
-        if (!recoveryText) throw new Error('Choose your recovery file first')
-        const result = await recoverPasskeyVault(recoveryText, controller.signal)
-        if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
-        setVaultUserId(result.userId)
       }
       setVaultStatus('unlocked')
     } catch (error) {
@@ -265,7 +259,6 @@ export function useAuth(): AuthState {
   const setupPasskey = useCallback(() => runVaultAction('setup'), [runVaultAction])
   const unlockPasskey = useCallback(() => runVaultAction('unlock'), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
-  const recoverVault = useCallback((recoveryText: string) => runVaultAction('recover', recoveryText), [runVaultAction])
   const lockVault = useCallback(() => {
     vaultRevision.current++
     vaultOperation.current?.abort()
@@ -309,5 +302,5 @@ export function useAuth(): AuthState {
     signIn({ selectAccount, expectedGoogleSub: googleSub })
   }, [googleSub, signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, unlockPasskey, addPasskey, recoverVault, lockVault, clearVaultError }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, unlockPasskey, addPasskey, lockVault, clearVaultError }
 }

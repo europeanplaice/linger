@@ -531,6 +531,35 @@ html.session-restoring .landing {
 .passkey-recovery-help summary { cursor: pointer; }
 .passkey-recovery-help input { width: 100%; }
 .passkey-settings .passkey-gate-actions { justify-content: start; }
+.passkey-credential-list {
+  list-style: none;
+  display: grid;
+  gap: 0.75rem;
+  margin-block: 0.75rem;
+}
+.passkey-credential-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding-block: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.passkey-credential-list li > span { overflow-wrap: anywhere; }
+dialog.passkey-delete-dialog {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  width: min(420px, 90vw);
+  max-height: 85dvh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px var(--shadow-heavy);
+  margin: auto;
+}
+dialog.passkey-delete-dialog[open] { display: grid; gap: 1rem; }
+dialog.passkey-delete-dialog p { font-size: 0.9rem; line-height: 1.6; }
+dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .landing-content section {
   margin-top: 2.5rem;
 }

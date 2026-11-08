@@ -25,6 +25,12 @@ export interface DriveRevisionMeta {
   size?: string
 }
 
+export interface DriveFolderCandidate {
+  id: string
+  name: string
+  modifiedTime?: string
+}
+
 export class DriveError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message)
@@ -182,6 +188,27 @@ export async function ensureFolder(
   await saveSession(sessionId, updated, env)
   session.folder_id = folderId
   return folderId
+}
+
+/** List folders this app can currently see for the authenticated Google account. */
+export async function listDriveFolders(token: string): Promise<DriveFolderCandidate[]> {
+  const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false")
+  const folders: DriveFolderCandidate[] = []
+  let pageToken: string | undefined
+  do {
+    const pageUrl = `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,modifiedTime,trashed)&pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    const page = await driveWithRetry(
+      () => fetch(pageUrl, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+      r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
+    )
+    for (const file of page.files) {
+      if (file.id && typeof file.name === 'string' && file.mimeType === 'application/vnd.google-apps.folder' && !file.trashed) {
+        folders.push({ id: file.id, name: file.name, ...(file.modifiedTime ? { modifiedTime: file.modifiedTime } : {}) })
+      }
+    }
+    pageToken = page.nextPageToken
+  } while (pageToken)
+  return folders.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 
 async function withFolderFallback<T>(

@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
-import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, saveEntry } from '../../../functions/_shared/drive'
+import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
 import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -10,8 +10,8 @@ import { authorizedSession } from './runtime'
 import type { WorkflowEnv } from './types'
 import { openVaultValue, sealVaultValue } from '../../../functions/_shared/vaultCrypto'
 
-// One object per Google subject and deployment environment. All sessions/devices
-// use this queue, including folder discovery and restores. Do not hold a storage
+// One object per internal Linger account and deployment environment. All
+// sessions/devices use this queue, including folder discovery and restores. Do not hold a storage
 // transaction or blockConcurrencyWhile across remote Drive requests.
 export class DiaryWriter extends DurableObject<WorkflowEnv> {
   private tail: Promise<unknown> = Promise.resolve()
@@ -83,6 +83,49 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
 
   async ensureFolder(auth: DiaryWriterAuth): Promise<string> {
     return this.serialize(async () => this.folder(auth, await this.session(auth)))
+  }
+
+  async selectFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string> {
+    // A rebind must not race a write already executing or waiting in this
+    // account queue. Later writes queue behind the completed rebind and use its
+    // new pointer.
+    if (this.queued !== 0) throw new DriveError(409, 'Diary activity is in progress; try selecting the folder again')
+    return this.serialize(async () => {
+      const session = await this.session(input)
+      const candidates = await listDriveFolders(input.accessToken)
+      if (!candidates.some(folder => folder.id === input.folderId)) {
+        throw new DriveError(400, 'Selected folder is not available to this Google account')
+      }
+      const meta = await getEntryMeta(input.accessToken, input.folderId)
+      if (meta.id !== input.folderId || meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) {
+        throw new DriveError(400, 'Selected item is not an available Drive folder')
+      }
+
+      const currentFolder = await this.readMetadata<string>('folder', input)
+      if (currentFolder === input.folderId) return currentFolder
+
+      // Clear old-folder S3 status only after the request has passed all
+      // checks and the writer queue is clear. resetAllData refuses to proceed
+      // while a live backfill is running, leaving both folder pointers intact.
+      await this.env.S3_SYNC_INDEX.getByName(input.accountKey).resetAllData()
+
+      // Clear per-date Drive IDs and pending create reservations before the new
+      // pointer is visible. A failure here leaves the old folder selected with
+      // empty, safely reconstructible caches.
+      const [files, creates] = await Promise.all([
+        this.ctx.storage.list({ prefix: 'file:' }),
+        this.ctx.storage.list({ prefix: 'create:' }),
+      ])
+      const cacheKeys = [...files.keys(), ...creates.keys()]
+      if (cacheKeys.length) await this.ctx.storage.delete(cacheKeys)
+
+      session.folder_id = input.folderId
+      session.changes_start_page_token = undefined
+      invalidateFolderScopedS3Cache(session)
+      await this.writeMetadata('folder', input, input.folderId)
+      await saveSession(input.sessionId, session, this.env)
+      return input.folderId
+    })
   }
 
   async mutate(input: DiaryMutationInput): Promise<Response> {

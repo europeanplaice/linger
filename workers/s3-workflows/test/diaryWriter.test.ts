@@ -5,14 +5,15 @@ import type { DriveFileMeta } from '../../../functions/_shared/drive'
 import * as drive from '../../../functions/_shared/drive'
 import type { DiaryMutationInput } from '../../../functions/_shared/diaryWriter'
 import type { DiaryWriter } from '../src/diaryWriter'
+import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
-import { openVaultValue } from '../../../functions/_shared/vaultCrypto'
+import { openVaultValue, sealVaultValue } from '../../../functions/_shared/vaultCrypto'
 import { createTestSession, testSession, vaultKey } from './auth'
 
 vi.mock('../../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(), findEntryMeta: vi.fn(), getDiaryFileMeta: vi.fn(),
-  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
+  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
 }))
 vi.mock('../../../functions/_shared/s3Settings', async original => ({
   ...await original<typeof import('../../../functions/_shared/s3Settings')>(),
@@ -39,6 +40,7 @@ beforeEach(() => {
   // must protect a second first-save even before Drive's listing catches up.
   vi.mocked(drive.findEntryMeta).mockResolvedValue(null)
   vi.mocked(drive.getEntryMeta).mockImplementation(async (_token, id) => ({ id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder' }))
+  vi.mocked(drive.listDriveFolders).mockResolvedValue([])
   vi.mocked(drive.getDiaryFileMeta).mockImplementation(async (_token, _id, session, _env, id) => {
     const record = files.get(id)
     if (!record || record.meta.trashed || record.meta.parents?.[0] !== session.folder_id) throw new drive.DriveError(404, 'not_found')
@@ -80,6 +82,72 @@ async function account() {
 }
 
 describe('account-scoped diary mutations', () => {
+  it('rebinds to a renamed visible folder, clears folder caches and keeps that folder on later discovery', async () => {
+    const { auth, service, writer } = await account()
+    const renamed = { id: 'renamed-folder', name: 'My old journal' }
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([renamed, { id: 'empty-canonical', name: 'linger_diary' }])
+    const session = (await getSession(auth.sessionId, env, auth.vaultKey))!
+    session.folder_id = 'old-folder'
+    session.changes_start_page_token = 'old-folder-change-token'
+    session.s3_settings_file_id = 'old-settings'
+    session.s3_status_file_id = 'old-status'
+    session.s3_settings_negative_cache_at = Date.now()
+    session.s3_status_negative_cache_at = Date.now()
+    await saveSession(auth.sessionId, session, env)
+
+    const fileCache = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:file:${date}`, 'old-file-id')
+    const createCache = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, { id: 'old-create-id', folderId: 'old-folder' })
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put({ [`file:${date}`]: fileCache, [`create:${date}`]: createCache }))
+    const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex) => instance.markPending(date, '7', new Date().toISOString(), 'old-file-id'))
+
+    expect(await service.selectDiaryFolder({ ...auth, folderId: renamed.id })).toBe(renamed.id)
+    const stored = (await runInDurableObject(writer, async (_instance: DiaryWriter, state) => ({
+      folder: await state.storage.get<string>('folder'),
+      file: await state.storage.get<string>(`file:${date}`),
+      create: await state.storage.get<string>(`create:${date}`),
+    })))
+    expect(await openVaultValue<string>(auth.vaultKey, auth.accountKey, 'diary-writer:folder', stored.folder!)).toBe(renamed.id)
+    expect(stored.file).toBeUndefined()
+    expect(stored.create).toBeUndefined()
+    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry(date))).toBeNull()
+    const reconciled = (await getSession(auth.sessionId, env, auth.vaultKey))!
+    expect(reconciled.folder_id).toBe(renamed.id)
+    expect(reconciled.changes_start_page_token).toBeUndefined()
+    expect(reconciled.s3_settings_file_id).toBeUndefined()
+    expect(reconciled.s3_status_file_id).toBeUndefined()
+    expect(reconciled.s3_settings_negative_cache_at).toBeUndefined()
+    expect(reconciled.s3_status_negative_cache_at).toBeUndefined()
+
+    expect(await service.ensureDiaryFolder(auth)).toBe(renamed.id)
+    expect(drive.ensureFolder).toHaveBeenLastCalledWith('test-access-token', auth.sessionId, expect.objectContaining({ folder_id: renamed.id }), expect.anything(), {
+      withinCoordinator: true,
+      discoverByName: false,
+    })
+  })
+
+  it('rejects a folder id that is not visible to the authenticated Google account', async () => {
+    const { auth, service } = await account()
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'visible-folder', name: 'Diary' }])
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'another-account-folder' })).rejects.toThrow('not available')
+  })
+
+  it('rejects visible IDs that resolve to a file or a trashed folder', async () => {
+    const { auth, service } = await account()
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'bad-folder', name: 'Diary' }])
+    vi.mocked(drive.getEntryMeta)
+      .mockResolvedValueOnce({ id: 'bad-folder', name: 'diary.txt', mimeType: 'text/plain' })
+      .mockResolvedValueOnce({ id: 'bad-folder', name: 'Diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'bad-folder' })).rejects.toThrow('available Drive folder')
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'bad-folder' })).rejects.toThrow('available Drive folder')
+  })
+
+  it('rejects a folder selection with credentials for a different account', async () => {
+    const { auth, service } = await account()
+    await expect(service.selectDiaryFolder({ ...auth, accountKey: 'other-account', folderId: 'visible-folder' })).rejects.toThrow()
+    expect(drive.listDriveFolders).not.toHaveBeenCalled()
+  })
+
   it('clears folder-scoped S3 caches when a session adopts the account folder', async () => {
     const { auth, service } = await account()
     const accountFolder = await service.ensureDiaryFolder(auth)

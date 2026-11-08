@@ -36,6 +36,11 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
   }
 
+  async selectDiaryFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string> {
+    await authorizedSession(this.env, input)
+    return this.env.DIARY_WRITER.getByName(input.accountKey).selectFolder(input)
+  }
+
   async mutateDiaryEntry(input: DiaryMutationInput): Promise<Response> {
     await authorizedSession(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).mutate(input)

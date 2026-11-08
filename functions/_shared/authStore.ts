@@ -9,10 +9,14 @@ interface SessionRow {
   expires_at: number
   account_envelope: string | null
   revision: number
+  credential_exists: number
 }
 const SESSION_ID_HASH_PREFIX = 'sha256:'
 const PROFILE_PURPOSE = 'account-metadata'
-const SESSION_SELECT = `SELECT s.user_id, s.revoked, s.expires_at, u.account_envelope, u.revision
+const SESSION_SELECT = `SELECT s.user_id, s.revoked, s.expires_at, u.account_envelope, u.revision,
+    CASE WHEN s.credential_id IS NULL OR EXISTS (
+      SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
+    ) THEN 1 ELSE 0 END AS credential_exists
   FROM auth_sessions s LEFT JOIN passkey_users u ON u.id = s.user_id WHERE s.id = ?`
 
 export async function sessionStorageId(id: string): Promise<string> {
@@ -34,15 +38,28 @@ export function legacyAuthEnabled(env: Env): boolean {
 // Google identifier. A storage digest is never accepted as a caller cookie.
 export async function getPasskeySessionUserId(id: string, env: Env): Promise<string | null> {
   if (!env.AUTH_DB || id.startsWith(SESSION_ID_HASH_PREFIX)) return null
-  const row = await env.AUTH_DB.prepare('SELECT user_id FROM auth_sessions WHERE id = ? AND revoked = 0 AND expires_at > ?')
+  const row = await env.AUTH_DB.prepare(`SELECT s.user_id FROM auth_sessions s
+    WHERE s.id = ? AND s.revoked = 0 AND s.expires_at > ? AND (
+      s.credential_id IS NULL OR EXISTS (SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id)
+    )`)
     .bind(await sessionStorageId(id), Date.now()).first<{ user_id: string | null }>()
   return row?.user_id ?? null
 }
 
-export async function createPasskeySession(id: string, userId: string, env: Env): Promise<void> {
+export async function getPasskeySessionInfo(id: string, env: Env): Promise<{ userId: string; credentialId: string | null } | null> {
+  if (!env.AUTH_DB || id.startsWith(SESSION_ID_HASH_PREFIX)) return null
+  const row = await env.AUTH_DB.prepare(`SELECT s.user_id, s.credential_id FROM auth_sessions s
+    WHERE s.id = ? AND s.revoked = 0 AND s.expires_at > ? AND (
+      s.credential_id IS NULL OR EXISTS (SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id)
+    )`)
+    .bind(await sessionStorageId(id), Date.now()).first<{ user_id: string | null; credential_id: string | null }>()
+  return row?.user_id ? { userId: row.user_id, credentialId: row.credential_id } : null
+}
+
+export async function createPasskeySession(id: string, userId: string, env: Env, credentialId: string | null = null): Promise<void> {
   if (!env.AUTH_DB || !userId || id.startsWith(SESSION_ID_HASH_PREFIX)) throw new SessionRevokedError('Passkey authentication required')
-  await env.AUTH_DB.prepare('INSERT INTO auth_sessions (id, user_id, data, expires_at) VALUES (?, ?, NULL, ?)')
-    .bind(await sessionStorageId(id), userId, Date.now() + SESSION_TTL * 1000).run()
+  await env.AUTH_DB.prepare('INSERT INTO auth_sessions (id, user_id, credential_id, data, expires_at) VALUES (?, ?, ?, NULL, ?)')
+    .bind(await sessionStorageId(id), userId, credentialId, Date.now() + SESSION_TTL * 1000).run()
 }
 
 export function sanitizeSession(session: SessionData): SessionData {
@@ -60,7 +77,7 @@ export function sanitizeSession(session: SessionData): SessionData {
 }
 
 async function decode(row: SessionRow | null, key?: string): Promise<SessionData | null> {
-  if (!row?.user_id || row.revoked || row.expires_at <= Date.now() || !validVaultKey(key)) return null
+  if (!row?.user_id || row.revoked || row.expires_at <= Date.now() || !row.credential_exists || !validVaultKey(key)) return null
   try {
     const profile = row.account_envelope
       ? await openVaultValue<SessionData>(key, row.user_id, PROFILE_PURPOSE, row.account_envelope)
@@ -119,7 +136,10 @@ export async function saveD1Session(id: string, session: SessionData, env: AuthE
     const envelope = await sealVaultValue(key, session.user_id, PROFILE_PURPOSE, merged)
     const updated = await env.AUTH_DB.prepare(`UPDATE passkey_users SET account_envelope = ?, revision = revision + 1
       WHERE id = ? AND revision = ? AND EXISTS (
-        SELECT 1 FROM auth_sessions WHERE id = ? AND user_id = passkey_users.id AND revoked = 0 AND expires_at > ?
+        SELECT 1 FROM auth_sessions s WHERE s.id = ? AND s.user_id = passkey_users.id AND s.revoked = 0 AND s.expires_at > ?
+          AND (s.credential_id IS NULL OR EXISTS (
+            SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
+          ))
       ) RETURNING revision`)
       .bind(envelope, session.user_id, row.revision, storageId, Date.now()).first<{ revision: number }>()
     if (!updated) continue

@@ -1,8 +1,15 @@
-import { copyPrfOutput, createWrappedMasterKey, getVaultKey, parseWrappedMasterKey, serializeWrappedMasterKey, setVaultHeadersForKey, setVaultKeyHeader, unlockVaultWithKey, unlockWrappedMasterKey, wrapExistingMasterKey } from '../lib/passkeyVault'
+import { copyPrfOutput, createWrappedMasterKey, getVaultKey, parseWrappedMasterKey, serializeWrappedMasterKey, setVaultKeyHeader, unlockWrappedMasterKey, wrapExistingMasterKey } from '../lib/passkeyVault'
 import type { WrappedMasterKeyPayload } from '../lib/passkeyVault'
-import { exportVaultRecovery as makeVaultRecoveryFile, parseVaultRecoveryFile } from '../lib/vaultRecovery'
 
-export const exportVaultRecovery = makeVaultRecoveryFile
+export interface PasskeyCredentialSummary {
+  credentialId: string
+  createdAt: number
+}
+
+export interface PasskeyCredentialList {
+  credentials: PasskeyCredentialSummary[]
+  currentCredentialId: string | null
+}
 
 type JsonObject = Record<string, unknown>
 interface OptionsEnvelope { options: JsonObject; wrapOptions?: JsonObject; prfInput: string; prfSalt?: string; userId?: string }
@@ -219,23 +226,10 @@ export async function addPasskey(userId: string, signal?: AbortSignal): Promise<
   }
 }
 
-export async function recoverVault(recoveryText: string, signal?: AbortSignal): Promise<{ userId: string }> {
-  const { userId, masterKey } = parseVaultRecoveryFile(recoveryText)
-  const headers = new Headers()
-  setVaultHeadersForKey(headers, userId, masterKey)
-  try {
-    const response = await fetch('/auth/passkey/recover', {
-      method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', headers,
-      signal,
-    })
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({})) as { error?: unknown }
-      throw new Error(typeof data.error === 'string' ? data.error : `Vault recovery failed (${response.status})`)
-    }
-    const data = await response.json().catch(() => ({})) as { userId?: unknown }
-    throwIfAborted(signal)
-    if (data.userId !== userId) throw new Error('Recovery key did not match the saved vault')
-    unlockVaultWithKey(userId, masterKey)
-    return { userId }
-  } finally { masterKey.fill(0) }
+export async function listPasskeys(userId: string, signal?: AbortSignal): Promise<PasskeyCredentialList> {
+  return post<PasskeyCredentialList>('credentials/list', {}, userId, signal)
+}
+
+export async function deletePasskey(userId: string, credentialId: string, signal?: AbortSignal): Promise<void> {
+  await post<{ ok: true }>('credentials/delete', { credentialId }, userId, signal)
 }

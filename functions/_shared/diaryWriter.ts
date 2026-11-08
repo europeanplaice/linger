@@ -20,6 +20,7 @@ export interface DiaryMutationInput extends DiaryWriterAuth {
 
 export interface DiaryWriterService {
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
+  selectDiaryFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string>
   mutateDiaryEntry(input: DiaryMutationInput): Promise<Response>
 }
 

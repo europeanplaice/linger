@@ -5,6 +5,7 @@ import { ExportButton } from './ExportButton'
 import { ImportButton } from './ImportButton'
 import { SettingsSelect } from './SettingsSelect'
 import { DeploymentVerification } from './DeploymentVerification'
+import { DiaryFolderSettings } from './DiaryFolderSettings'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
 import { folderNameForHostname } from '../utils/folderName'
@@ -141,6 +142,9 @@ interface SettingsModalProps {
   onClose: () => void
   onSignOut: () => void
   passkeyControls?: ReactNode
+  folderRecoveryDisabled?: boolean
+  beforeDiaryFolderSelect?: () => Promise<boolean>
+  onDiaryFolderSelected?: () => void | Promise<void>
   email?: string
   googleSub?: string
   googleClientId?: string
@@ -162,7 +166,7 @@ interface SettingsModalProps {
   onEntryRestored?: () => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, passkeyControls, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, passkeyControls, folderRecoveryDisabled = false, beforeDiaryFolderSelect, onDiaryFolderSelected, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const reducedMotion = useReducedMotion()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
@@ -198,6 +202,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     if (appliedFlashTimer.current !== undefined) window.clearTimeout(appliedFlashTimer.current)
     appliedFlashTimer.current = window.setTimeout(() => setAppliedFlash(null), 1200)
   }, [])
+  const [dataTransfers, setDataTransfers] = useState(0)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
   const [s3Enabled, setS3Enabled] = useState(false)
@@ -1036,7 +1041,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <span className="settings-item-label">{t.settings.exportAllEntries}</span>
               <InfoTip text={t.settings.exportHelp} />
             </span>
-            <ExportButton dates={dates} onExport={onExport} />
+            <ExportButton dates={dates} onExport={async progress => {
+              setDataTransfers(count => count + 1)
+              try { return await onExport(progress) } finally { setDataTransfers(count => count - 1) }
+            }} />
           </div>
           <div className="settings-item">
             <span className="settings-item-label-group">
@@ -1045,12 +1053,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </span>
             <ImportButton
               existingDates={dates}
-              onImport={onImport}
+              onImport={async (entries, progress) => {
+                setDataTransfers(count => count + 1)
+                try { return await onImport(entries, progress) } finally { setDataTransfers(count => count - 1) }
+              }}
               existingMilestones={milestones}
               onImportMilestones={onMilestoneAdd ? handleImportMilestones : undefined}
             />
           </div>
         </div>
+
+        {onDiaryFolderSelected && <DiaryFolderSettings
+          disabled={folderRecoveryDisabled || dataTransfers > 0 || s3SyncBusy || s3RestoringDate !== null}
+          beforeSelect={beforeDiaryFolderSelect}
+          onSelected={onDiaryFolderSelected}
+        />}
 
         {/* Google Drive */}
         <div className="settings-section" id="settings-storage">

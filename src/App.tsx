@@ -2,7 +2,10 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Sus
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
-import { getAllDrafts } from './lib/diaryCache'
+import { clearCache, getAllDrafts } from './lib/diaryCache'
+import { announceAccount } from './lib/accountSession'
+import { LocalStorageAdapter } from './lib/storageAdapter'
+import { SyncQueueManager } from './lib/syncQueue'
 import { useTheme } from './hooks/useTheme'
 import { useAccentColor } from './hooks/useAccentColor'
 import { useFont } from './hooks/useFont'
@@ -155,7 +158,7 @@ export default function App() {
     signOut,
     handleExpired,
     retryAfterExpired,
-    vaultStatus, vaultBusy, vaultError, setupPasskey, unlockPasskey, addPasskey, recoverVault, lockVault, clearVaultError,
+    vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, unlockPasskey, addPasskey, lockVault, clearVaultError,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { accent: accentColor, setAccent } = useAccentColor()
@@ -500,6 +503,24 @@ export default function App() {
     signOut()
   }, [signOut])
 
+  const beforeDiaryFolderSelect = useCallback(async () => {
+    if (editorDirtyRef.current || tokenExpired) return false
+    if (localStorage.getItem('linger_milestones_pending') === 'true') return false
+    const [drafts, pending] = await Promise.all([
+      getAllDrafts(email ?? undefined),
+      new SyncQueueManager(email ?? undefined).getPending(),
+    ])
+    return !editorDirtyRef.current && drafts.length === 0 && pending.length === 0
+  }, [email, tokenExpired])
+
+  const handleDiaryFolderSelected = useCallback(async () => {
+    // Stop this tab and notify other tabs before rebuilding folder-scoped caches.
+    announceAccount(null)
+    setSettingsOpen(false)
+    handleSignOut()
+    await Promise.all([clearCache(), new LocalStorageAdapter().clearAll()])
+  }, [handleSignOut])
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.repeat) {
@@ -658,7 +679,7 @@ export default function App() {
   const passkeyGate = vaultStatus !== 'unlocked' ? (
     <PasskeyGate busy={vaultBusy} error={vaultError}
       onSetup={() => { void setupPasskey() }} onUnlock={() => { void unlockPasskey() }}
-      onRecover={recoverVault} onClearError={clearVaultError} />
+      onClearError={clearVaultError} />
   ) : undefined
 
   if (status === 'initializing') {
@@ -787,7 +808,10 @@ export default function App() {
               onImport={diary.importAll}
               onClose={() => setSettingsOpen(false)}
               onSignOut={handleSignOut}
-              passkeyControls={<PasskeySettings busy={vaultBusy} error={vaultError} onAdd={() => { void addPasskey() }} />}
+              folderRecoveryDisabled={editorDirty || tokenExpired || vaultBusy || diary.loading}
+              beforeDiaryFolderSelect={beforeDiaryFolderSelect}
+              onDiaryFolderSelected={handleDiaryFolderSelected}
+              passkeyControls={<PasskeySettings userId={vaultUserId} busy={vaultBusy} error={vaultError} onAdd={addPasskey} />}
               email={email ?? undefined}
               googleSub={googleSub ?? undefined}
               googleClientId={googleClientId ?? undefined}

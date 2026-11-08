@@ -49,18 +49,28 @@ processes plaintext diary requests and Google identity during authorized operati
 
 ## Recovery
 
-Settings offers another-passkey registration and a user-owned recovery JSON file.
-The recovery file contains the internal account ID and master key: anyone holding
-it can unlock this account. It is downloaded only on explicit user action and
-must be kept private. Import verifies possession by decrypting the account
-envelope before creating a session; it does not require a server recovery secret.
+Settings offers additional passkeys and a list of registered credentials. Users
+can remove a lost credential after signing in with another passkey for the same
+internal account. The current credential and the final credential are protected
+against deletion. Removing a credential also invalidates sessions authenticated
+with it. A synced copy of the same credential shares its registration; adding a
+separate passkey creates a separately removable registration.
 
-If every passkey and recovery file is lost, the old encrypted metadata cannot be
-decrypted. The user can instead register a new internal account/passkey and
-authorize the same Google account to rediscover existing Drive diary files.
-Google ID can be reacquired from verified Google tokens; it is not permanently
-lost. This requires continued access to that Google account and its diary files.
-Creating a new account does not recover or invalidate the old account's passkeys.
+Recovery JSON files are no longer exported or accepted. Possession of a master
+key alone cannot create a new authenticated session. Removing a passkey does not
+erase previously obtained keys or data, and does not rotate the master key.
+
+If every passkey is lost, register a new internal account/passkey and authorize
+the same Google account. Diary files, milestones, and S3 settings stored in Drive
+can be loaded again; Cloudflare identity/cache metadata is rebuilt. Local-only
+preferences and unsaved drafts are not guaranteed by this process. Keep the
+existing OAuth client/project and Drive file grants. If the diary folder was
+renamed or automatic discovery cannot identify it, select the existing accessible
+Drive folder in settings. This requires continued access to that Google account
+and its files, and must be rehearsed with a real Google account before rollout.
+Creating a new account does not invalidate the old account's passkeys. Without
+another passkey for that old internal account, it cannot be managed from the new
+one; a lost Google session/device must also be secured through Google.
 
 ## Google security notifications
 
@@ -75,11 +85,14 @@ Migration `0005_passkey_vault.sql` revokes existing sessions, erases their ident
 metadata, removes Google/email lookup columns, and adds passkey tables. It rejects
 subsequent plaintext session payloads. D1 is required; there is no KV-only
 authentication fallback. This is a breaking authentication rollout, not a silent
-in-place conversion of existing active sessions.
+in-place conversion of existing active sessions. The follow-up credential-session
+migration associates new sessions with the authenticating credential and revokes
+older sessions that cannot be attributed to a credential.
 
 Before production, rehearse on staging with real Google and PRF-capable passkeys:
 registration, reload/unlock, account mismatch, two tabs, another passkey,
-recovery-file import, new-account recovery from Drive, diary writes, and S3 restore.
+credential removal and session revocation, new-account recovery from Drive
+(including renamed folders), diary writes, and S3 restore.
 Keep the OAuth client/project and existing Drive grants unless a separate
 migration verifies that older diary files remain accessible.
 
