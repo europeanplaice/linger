@@ -10,14 +10,11 @@ deployments and must not be mistaken for operations already performed.
 The privacy requirement is that persisted application data must not give the host
 operator credentials to Google Drive. OAuth access, refresh, and identity tokens
 must not be written to D1, KV, Durable Object storage, Workflow parameters or
-results, or application logs. Only when the user opts in, short-lived access and
-identity tokens may be saved in tab sessionStorage for reloads. Refresh tokens are
-never stored there. AWS temporary credentials must not
+results, application logs, or browser storage. AWS temporary credentials must not
 be persisted either: a Google identity token can authorize access to the user's
 optional S3 backup.
 
-Short-lived Google credentials are kept in browser memory, or optionally tab
-sessionStorage as described above. A request may pass them
+Short-lived Google credentials are kept in browser memory. A request may pass them
 to the backend for an operation the user authorizes. The backend may use them in
 request memory and synchronous service calls, but may persist only session and
 sync metadata. A session cookie or a database dump alone must not authorize a
@@ -30,8 +27,8 @@ subject index is retained; email-only events receive a retryable error. Migratio
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 
-By default, reloading or closing the page discards its credentials. An optional
-tab session stores short-lived tokens for reloads; see PASSKEY-PRIVACY.md. Expired tokens require
+Reloading or closing the page discards its Google credentials. An optional
+tab session can retain the unlocked passkey key; see PASSKEY-PRIVACY.md. Reloading or expired tokens require
 another Google authorization. S3 work advances while the app is open and the
 user's authorization remains valid; progress metadata can survive a pause, but
 credentials cannot be placed in a durable job to keep it running unattended.

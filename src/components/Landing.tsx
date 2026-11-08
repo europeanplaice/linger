@@ -113,7 +113,7 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
             Diary entries reside entirely in your own Google Drive folder (
             <code>linger_diary/</code>). No diary content is stored on Linger's servers. OAuth
             tokens are sent to Linger's API only while requests run; they are not stored in D1 or KV.
-            You can choose to keep your sign-in in this tab across reloads for up to eight hours. S3
+            You can choose to keep your passkey unlocked in this tab across reloads for up to eight hours. Google sign-in is required again after a reload. S3
             backfill runs from the open browser tab and pauses if you close or reload it.
           </p>
           <p>

@@ -73,7 +73,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
-    await page.getByRole('checkbox', { name: 'Stay signed in when this tab reloads' }).check()
+    await page.getByRole('checkbox', { name: 'Keep the passkey unlocked when this tab reloads' }).check()
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
 

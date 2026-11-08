@@ -1,4 +1,3 @@
-import { getOAuthCredentials, setOAuthCredentials } from './oauthCredentials'
 import { getVaultKey, getVaultUserId, unlockVaultWithKey } from './passkeyVault'
 
 const STORAGE_KEY = 'linger_tab_session_v1'
@@ -28,7 +27,7 @@ export function saveTabSession(): void {
   if (!userId || !key) return
   try {
     const encoded = btoa(String.fromCharCode(...key))
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ userId, key: encoded, expiresAt, oauth: getOAuthCredentials() }))
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ userId, key: encoded, expiresAt }))
   } catch { clearTabSession() } finally { key.fill(0) }
 }
 
@@ -36,8 +35,10 @@ export async function restoreTabSession(isCurrent: () => boolean = () => true): 
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return false
-    const value = JSON.parse(raw) as { userId: string; key: string; expiresAt: number; oauth?: { accessToken: string; idToken: string; expiresAt: number } | null }
+    const value = JSON.parse(raw) as { userId: string; key: string; expiresAt: number }
     if (typeof value.userId !== 'string' || !value.userId || typeof value.key !== 'string' || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now() || value.expiresAt > Date.now() + LIFETIME) throw new Error('Invalid saved session')
+    // Rewrite older sessions before the network request to discard stored OAuth tokens.
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: value.userId, key: value.key, expiresAt: value.expiresAt }))
     const key = Uint8Array.from(atob(value.key), c => c.charCodeAt(0))
     if (key.length !== 32) throw new Error('Invalid saved key')
     try {
@@ -46,7 +47,6 @@ export async function restoreTabSession(isCurrent: () => boolean = () => true): 
       if (!response.ok || !isCurrent()) throw new Error('Saved session unavailable')
       unlockVaultWithKey(value.userId, key)
       scheduleExpiry(value.expiresAt)
-      if (value.oauth && typeof value.oauth.accessToken === 'string' && typeof value.oauth.idToken === 'string' && typeof value.oauth.expiresAt === 'number' && value.oauth.expiresAt > Date.now() + 5000) setOAuthCredentials(value.oauth)
       saveTabSession()
       return true
     } finally { key.fill(0) }

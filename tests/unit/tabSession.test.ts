@@ -21,12 +21,28 @@ describe('optional tab session', () => {
     expect(sessionStorage.length).toBe(0)
     enableTabSession()
     saveTabSession()
+    expect(sessionStorage.getItem('linger_tab_session_v1')).not.toContain('access')
+    expect(sessionStorage.getItem('linger_tab_session_v1')).not.toContain('identity')
     clearVaultKey()
     clearOAuthCredentials()
     expect(await restoreTabSession()).toBe(true)
     expect(getVaultUserId()).toBe('user')
-    expect(getAccessToken()).toBe('access')
+    expect(getAccessToken()).toBeNull()
     expect(fetch).toHaveBeenCalledWith('/auth/passkey/session', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
+  })
+
+  it('removes legacy Google credentials before validating the session', async () => {
+    sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
+      userId: 'user', key: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), expiresAt: Date.now() + 60_000,
+      oauth: { accessToken: 'legacy-access', idToken: 'legacy-identity', expiresAt: Date.now() + 60_000 },
+    }))
+    vi.mocked(fetch).mockImplementation(async () => {
+      expect(sessionStorage.getItem('linger_tab_session_v1')).not.toContain('legacy-')
+      return new Response(null, { status: 200 })
+    })
+    expect(await restoreTabSession()).toBe(true)
+    expect(getVaultUserId()).toBe('user')
+    expect(getAccessToken()).toBeNull()
   })
 
   it('rejects revoked sessions and removes their stored credentials', async () => {
@@ -40,7 +56,7 @@ describe('optional tab session', () => {
     expect(sessionStorage.length).toBe(0)
   })
 
-  it('restores the vault without expired Google tokens and expires the saved session', async () => {
+  it('expires the saved session', async () => {
     unlockVaultWithKey('user', new Uint8Array(32).fill(7))
     setOAuthCredentials({ accessToken: 'access', idToken: 'identity', expiresAt: Date.now() + 60_000 })
     enableTabSession()

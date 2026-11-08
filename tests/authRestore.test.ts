@@ -26,29 +26,22 @@ test('valid session skips login screen and shows diary directly', async ({ page 
   await expect(page.locator('.login-screen')).toHaveCount(0)
 })
 
-test('an opted-in tab restores its vault and Google authorization on reload', async ({ page }) => {
+test('an opted-in tab restores its vault but requires Google authorization on reload', async ({ page }) => {
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
   let vaultChecks = 0
   await page.route('/auth/passkey/session', route => {
     vaultChecks++
     return route.fulfill({ json: { valid: true } })
   })
-  await page.route('/auth/session', async route => {
-    const headers = await route.request().allHeaders()
-    expect(headers.authorization).toBe('Bearer restored-access')
-    expect(headers['x-linger-google-id-token']).toBe('restored-id')
-    return route.fulfill({ json: { signedIn: true, email: 'reader@example.com', googleSub: 'reader', userId: 'user' } })
-  })
-  await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
-  await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404, body: '' }))
   await page.goto(baseUrl)
   await page.evaluate(() => sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
     userId: 'user', key: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), expiresAt: Date.now() + 3600_000,
     oauth: { accessToken: 'restored-access', idToken: 'restored-id', expiresAt: Date.now() + 1800_000 },
   })))
   await page.reload()
-  await expect(page.locator('.editor-textarea')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
   expect(vaultChecks).toBeGreaterThan(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).not.toContain('restored-')
 })
 
 test('reload requires fresh auth while preserving the cached draft', async ({ page }) => {

@@ -24,8 +24,8 @@ Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
 persisted on the server, placed in workflow input/output, or retained in server global state.
 By default browser keys and OAuth credentials are memory-only. Users can opt in
-to saving the unlocked key and short-lived Google tokens in the tab's sessionStorage
-for reloads, for at most eight hours. This exposes them to scripts running in the
+to saving the unlocked key in the tab's sessionStorage
+for reloads, for at most eight hours. Google authorization is required again after a reload. This exposes the key to scripts running in the
 origin and anyone with access to that browser profile. Sign-out, account changes,
 expiry and failed session validation clear the saved state. Browser restore behavior
 can retain tab state, so users of shared devices should explicitly sign out.
