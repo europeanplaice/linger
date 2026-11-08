@@ -148,6 +148,7 @@ test('keeps editor header typography stable between skeleton and loaded states',
 })
 
 test('no session shows login screen with sign-in button', async ({ page }) => {
+  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
   await page.route('/auth/session', async route => {
     await route.fulfill({ json: { signedIn: false } })
   })
@@ -160,6 +161,7 @@ test('no session shows login screen with sign-in button', async ({ page }) => {
 })
 
 test('popup sign-in accepts exact-origin credentials in memory and a reload requires sign-in again', async ({ page }) => {
+  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
   const sessionHeaders: Record<string, string>[] = []
   await page.route('/auth/session', async route => {
     const headers = await route.request().allHeaders()

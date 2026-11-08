@@ -46,8 +46,8 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
       existing.config.region !== config.region
     )
     let workflowJobActive = false
-    if (context.env.S3_WORKFLOW_SERVICE && session.google_sub) {
-      const job = await context.env.S3_WORKFLOW_SERVICE.getJob({ sessionId, accountKey: session.google_sub })
+    if (context.env.S3_WORKFLOW_SERVICE && session.user_id) {
+      const job = await context.env.S3_WORKFLOW_SERVICE.getJob({ sessionId, accountKey: session.user_id, vaultKey: session.vault_key, accessToken, expiresAt: session.expires_at, idToken: context.data.idToken })
       workflowJobActive = job?.state === 'queued' || job?.state === 'running'
     }
     if (targetChanged && (isBackfillRunActive(existing?.status.backfillProgress) || workflowJobActive)) {

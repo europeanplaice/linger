@@ -1,4 +1,4 @@
-import { createSession } from '../../../functions/_shared/session'
+import { createTestSession, testSession } from './auth'
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -40,21 +40,32 @@ function sessionIdFor(accountKey: string): string {
   return `session-${accountKey}`
 }
 
+const authKeys = new Map<string, string>()
 async function seedSession(accountKey: string) {
-  const session: SessionData = {
-    refresh_token: 'refresh',
-    access_token: 'access',
-    expires_at: Date.now() + 3600_000,
-    id_token: 'id-token',
-    id_token_verified: true,
-    google_sub: accountKey,
-  }
-  await createSession(sessionIdFor(accountKey), session, env)
+  const session: SessionData = testSession(accountKey, { access_token: 'access', id_token: 'id-token' })
+  await createTestSession(sessionIdFor(accountKey), session, env)
+  authKeys.set(sessionIdFor(accountKey), session.vault_key!)
 }
 
 function service() {
   const workflowEnv = env as unknown as WorkflowEnv
-  return new S3WorkflowsService(createExecutionContext(), workflowEnv)
+  return authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
+}
+
+function authenticatedService(instance: S3WorkflowsService): S3WorkflowsService {
+  return new Proxy(instance, {
+    get(target, property, receiver) {
+      const member = Reflect.get(target, property, receiver)
+      if (typeof member !== 'function') return member
+      return (input: unknown) => {
+        if (input && typeof input === 'object' && 'sessionId' in input && typeof input.sessionId === 'string') {
+          const vaultKey = authKeys.get(input.sessionId)
+          if (vaultKey) input = { ...input, vaultKey }
+        }
+        return member.call(target, input)
+      }
+    },
+  })
 }
 
 describe('retired durable Workflow entry points', () => {
@@ -68,7 +79,7 @@ describe('retired durable Workflow entry points', () => {
       S3_BACKFILL_WORKFLOW: { create: vi.fn(), get: vi.fn() },
       S3_MIRROR_WORKFLOW: { create: vi.fn(), get: vi.fn() },
     } as unknown as WorkflowEnv
-    return { workflowEnv, service: new S3WorkflowsService(createExecutionContext(), workflowEnv) }
+    return { workflowEnv, service: authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv)) }
   }
 
   it('fails closed on backfill start without creating a Workflow or reserving a job', async () => {
@@ -184,7 +195,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
         get: vi.fn().mockRejectedValue(new Error('not found')),
       },
     } as unknown as WorkflowEnv
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
 
     await expect(svc.mirrorEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-03', driveVersion: '9' }))
       .rejects.toThrow(/durable S3 mirroring is disabled/i)
@@ -205,7 +216,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
         get: vi.fn().mockRejectedValue(new Error('not found')),
       },
     } as unknown as WorkflowEnv
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
 
     const result = await svc.deleteEntry({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-07-04' })
     expect(result.ok).toBe(false)
@@ -235,7 +246,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     const accountKey = 'lazy-open-1'
     await seedSession(accountKey)
     const workflowEnv = lazyEnv()
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
     await svc.setBackupEnabled({ sessionId: sessionIdFor(accountKey), accountKey, enabled: true })
 
     const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-05', requestedVersion: '7' })
@@ -252,7 +263,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     const accountKey = 'lazy-open-2'
     await seedSession(accountKey)
     const workflowEnv = lazyEnv()
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
     await svc.setBackupEnabled({ sessionId: sessionIdFor(accountKey), accountKey, enabled: true })
 
     const status = await svc.getEntryStatus({
@@ -276,7 +287,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
       instance.markPending('2026-01-07', '3', new Date(Date.now() - 10 * 60 * 1000).toISOString())
     })
     const workflowEnv = lazyEnv()
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
 
     const status = await svc.getEntryStatus({ sessionId: sessionIdFor(accountKey), accountKey, date: '2026-01-07', requestedVersion: '3' })
     expect(status.status).toBe('failed')
@@ -320,7 +331,7 @@ describe('retired scheduling with exhausted workflow budget', () => {
         get: vi.fn().mockRejectedValue(new Error('not found')),
       },
     } as unknown as WorkflowEnv
-    const svc = new S3WorkflowsService(createExecutionContext(), workflowEnv)
+    const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
 
     const status = await svc.getEntryStatus({
       sessionId: sessionIdFor(accountKey),

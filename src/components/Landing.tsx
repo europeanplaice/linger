@@ -1,9 +1,12 @@
+import type { ReactNode } from 'react'
 import { LoginScreen } from './LoginScreen'
 import { DeploymentVerification } from './DeploymentVerification'
 import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
+  passkeyGate?: ReactNode
   onSignIn: () => void
+  onLockVault?: () => void
   onUseAnotherAccount?: () => void
   onRetry?: () => void
   tokenExpired?: boolean
@@ -16,18 +19,19 @@ interface Props {
 // long-form marketing content below makes `/` the canonical, crawlable landing
 // page (it is rendered into the initial HTML by the build-time prerender). The
 // copy here is intentionally English — it is the canonical content for `/`.
-export function Landing({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
+export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
   return (
     <div className="landing">
-      <LoginScreen
+      {passkeyGate ?? <LoginScreen
         onSignIn={onSignIn}
+        onLockVault={onLockVault}
         onUseAnotherAccount={onUseAnotherAccount}
         onRetry={onRetry}
         tokenExpired={tokenExpired}
         authResolved={authResolved}
         authError={authError}
         onDismissAuthError={onDismissAuthError}
-      />
+      />}
 
       <div className="landing-content">
         <section className="landing-shots" aria-label="Screenshots">

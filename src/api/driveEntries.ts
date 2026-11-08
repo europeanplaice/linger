@@ -1,3 +1,4 @@
+import { setVaultKeyHeader } from '../lib/passkeyVault'
 import type { ChangesResult, DiaryEntry, DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { accountRequest, invalidateAccount } from '../lib/accountSession'
 import { getAccessToken, getIdToken } from '../lib/oauthCredentials'
@@ -90,6 +91,7 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
   const idToken = getIdToken()
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
+  setVaultKeyHeader(headers)
   const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()
@@ -132,6 +134,7 @@ async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void>
   const idToken = getIdToken()
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
+  setVaultKeyHeader(headers)
   const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()

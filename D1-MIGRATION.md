@@ -1,5 +1,23 @@
 # Authentication metadata in D1
 
+## Passkey metadata protection (migration 0005)
+
+Read [PASSKEY-PRIVACY.md](PASSKEY-PRIVACY.md) before this breaking rollout.
+Migration 0005 revokes all old sessions, removes plaintext Google/email/client
+columns, enforces NULL session payloads, and adds passkey users, credentials, and
+one-use challenges. Google ID and Drive identifiers move to user-key-encrypted
+account envelopes; the app requires passkey unlock and Google authorization.
+KV-only authentication and legacy raw-session reads are no longer supported.
+
+Rehearse registration, PRF unlock, recovery, existing Drive access, and S3 on
+staging before production. Old Google-keyed Durable Objects, KV indexes, logs,
+workflow history, and database backups require separate cleanup/retention review.
+No production migration or historical cleanup has been performed by adding the
+source files. The earlier rollout notes below describe historical versions;
+their legacy read/fallback behavior does not apply after migration 0005.
+
+## Earlier credential-removal rollout
+
 OAuth credentials must no longer be persisted. The earlier KV-to-D1 cutover
 stored credentials with session metadata. Do not re-enable legacy imports or roll
 back to that credential-bearing design.

@@ -9,6 +9,8 @@ import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials 
 import { apiFetch, searchEntries } from '../../src/api/driveEntries'
 import { jsonResponse } from '../../functions/_shared/session'
 import { describeError, S3Error } from '../../functions/_shared/s3'
+import { unlockVaultWithKey, clearVaultKey } from '../../src/lib/passkeyVault'
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { revokeSession, startSignIn } from '../../src/api/auth'
 
 const accessToken = 'sentinel-google-access-token'
@@ -69,23 +71,24 @@ describe('OAuth persistence boundary', () => {
     })
   })
 
-  it('writes only metadata to KV even when callers pass credentials', async () => {
+  it('refuses KV-only sessions even when callers pass credentials', async () => {
     const stored = new Map<string, string>()
     const env = {
       SESSIONS: {
         put: vi.fn(async (key: string, value: string) => { stored.set(key, value) }),
         get: vi.fn(async (key: string) => stored.get(key) ?? null),
       },
-    } as never
+    }
 
-    await createSession('session-1', {
+    await expect(createSession('session-1', {
       access_token: accessToken,
       refresh_token: refreshToken,
       id_token: idToken,
       expires_at: Date.now() + 60_000,
       s3_assumed_credentials: { secretAccessKey: awsSecret },
       email: 'user@example.com',
-    } as never, env)
+    } as never, env as never)).rejects.toThrow('Passkey storage unavailable')
+    expect(env.SESSIONS.put).not.toHaveBeenCalled()
 
     const serialized = stored.get('session:session-1') ?? ''
     expect(serialized).not.toContain('user@example.com')
@@ -93,6 +96,17 @@ describe('OAuth persistence boundary', () => {
     expect(serialized).not.toContain(refreshToken)
     expect(serialized).not.toContain(idToken)
     expect(serialized).not.toContain(awsSecret)
+  })
+
+  it('encrypts Google identity and Drive metadata without storing user keys or tokens', async () => {
+    const { db, key } = await createPasskeyTestEnv({
+      google_sub: 'sentinel-google-sub', folder_id: 'sentinel-drive-folder',
+      access_token: accessToken, id_token: idToken, email: 'sentinel@example.com',
+    })
+    try {
+      const dump = JSON.stringify({ sessions: db.prepare('SELECT * FROM auth_sessions').all(), users: db.prepare('SELECT * FROM passkey_users').all() })
+      for (const value of ['sentinel-google-sub', 'sentinel-drive-folder', 'sentinel@example.com', key, accessToken, idToken]) expect(dump).not.toContain(value)
+    } finally { db.close() }
   })
 
   it('never imports legacy KV sessions after the cutover', async () => {
@@ -180,11 +194,14 @@ describe('D1 privacy migration', () => {
 describe('browser credential lifetime', () => {
   beforeEach(() => {
     clearOAuthCredentials()
+    clearVaultKey()
+    unlockVaultWithKey('11111111-1111-4111-8111-111111111111', crypto.getRandomValues(new Uint8Array(32)))
     localStorage.clear()
     sessionStorage.clear()
   })
   afterEach(() => {
     clearOAuthCredentials()
+    clearVaultKey()
     vi.restoreAllMocks()
   })
 

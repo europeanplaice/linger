@@ -2,6 +2,7 @@ import type { Data, Env } from './session'
 import { jsonResponse } from './session'
 
 export interface DiaryWriterAuth {
+  vaultKey?: string // request-scoped; never persisted
   sessionId: string
   accountKey: string
   accessToken: string
@@ -26,7 +27,7 @@ export interface DiaryWriterService {
 export const forwardDiaryMutation: PagesFunction<Env, 'date', Data> = async context => {
   const date = context.params.date as string
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonResponse({ error: 'Invalid date' }, 400)
-  const accountKey = context.data.session?.google_sub
+  const accountKey = context.data.session?.user_id
   if (!accountKey) return jsonResponse({ error: 'Please sign in again' }, 401)
   const writer = context.env.S3_WORKFLOW_SERVICE
   if (!writer) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
@@ -56,6 +57,7 @@ export const forwardDiaryMutation: PagesFunction<Env, 'date', Data> = async cont
   try {
     return await writer.mutateDiaryEntry({
       sessionId: context.data.sessionId, accountKey,
+      vaultKey: context.data.session.vault_key,
       accessToken: context.data.accessToken,
       expiresAt: context.data.session.expires_at ?? 0,
       idToken: context.data.idToken,

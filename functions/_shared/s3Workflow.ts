@@ -30,6 +30,10 @@ export interface BackfillJob {
 }
 
 export interface S3WorkflowAuth {
+  accessToken?: string // validated request credentials, RPC only
+  expiresAt?: number
+  idToken?: string
+  vaultKey?: string // service RPC only; never durable workflow input
   sessionId: string
   accountKey: string
 }

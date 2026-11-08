@@ -80,12 +80,13 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     if (existing) return jsonResponse({ ok: false, error: 'This entry already exists in Drive' }, 409)
 
     const writer = context.env.S3_WORKFLOW_SERVICE
-    if (!writer || !session.google_sub) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
+    if (!writer || !session.user_id) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
     // Recheck existence inside the same queue used by interactive saves. The
     // listing above alone cannot prevent a concurrent save from creating a file.
     const response = await writer.mutateDiaryEntry({
       sessionId,
-      accountKey: session.google_sub,
+      accountKey: session.user_id,
+      vaultKey: session.vault_key,
       accessToken,
       expiresAt: session.expires_at ?? 0,
       idToken,

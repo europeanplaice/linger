@@ -15,6 +15,7 @@ playwright-report/
 memo.txt
 staging-plan.md
 staging-rollout-summary.md
+privacy-passkey-plan.md
 test-results/
 *.tsbuildinfo
 

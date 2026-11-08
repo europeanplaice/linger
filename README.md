@@ -53,4 +53,4 @@ To deploy your own fork, configure a Google Cloud OAuth web client with the Driv
 
 ## Stack
 
-React, TypeScript, and Vite on Cloudflare Pages and Workers. Google Drive stores diary files; D1 stores session metadata. Durable Objects coordinate diary writes. Optional S3 backup uses authorized requests while the app is open.
+React, TypeScript, and Vite on Cloudflare Pages and Workers. Google Drive stores diary files; D1 stores passkey credentials and encrypted account metadata. Durable Objects coordinate diary writes. Optional S3 backup uses authorized requests while the app is open. Passkey unlock protects Cloudflare metadata; diary files in Drive and S3 stay plaintext. See [passkey privacy and rollout](PASSKEY-PRIVACY.md) for key handling, recovery, and migration requirements.

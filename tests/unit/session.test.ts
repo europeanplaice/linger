@@ -4,6 +4,8 @@ import {
   makeSessionCookie, clearSessionCookie, jsonResponse,
   removeEmailSessionIndex, invalidateSession,
 } from '../../functions/_shared/session'
+import { sessionStorageId } from '../../functions/_shared/authStore'
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 
 describe('jsonResponse', () => {
   it('marks JSON responses as non-cacheable with security headers', () => {
@@ -25,31 +27,39 @@ describe('parseSessionId', () => {
   it('decodes URI-encoded session IDs', () => expect(parseSessionId(request('linger_session=hello%20world'))).toBe('hello world'))
 })
 
-describe('session storage', () => {
-  it('reads valid session metadata and rejects invalid or absent records', async () => {
-    const valid = { email: 'user@example.com', google_sub: 'sub-1', folder_id: 'folder-1' }
-    const env = { SESSIONS: { get: vi.fn(async (key: string) => key === 'session:valid' ? JSON.stringify(valid) : key === 'session:bad' ? 'not-json' : null) } }
-    expect(await getSession('valid', env as any)).toEqual({ google_sub: 'sub-1', folder_id: 'folder-1' })
-    expect(await getSession('bad', env as any)).toBeNull()
-    expect(await getSession('missing', env as any)).toBeNull()
+describe('encrypted passkey session storage', () => {
+  it('requires a passkey session and the user key to read encrypted account metadata', async () => {
+    const { env, db, sessionId, userId, key } = await createPasskeyTestEnv({ google_sub: 'sub-1', folder_id: 'folder-1' })
+    expect(await getSession(sessionId, env)).toBeNull()
+    expect(await getSession('missing', env, key)).toBeNull()
+    expect(await getSession(sessionId, env, 'invalid-key')).toBeNull()
+    expect(await getSession(sessionId, env, key)).toMatchObject({ user_id: userId, google_sub: 'sub-1', folder_id: 'folder-1' })
+    db.close()
   })
 
-  it('persists only the metadata allowlist, even when given request credentials', async () => {
-    const put = vi.fn()
-    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put } }
-    await saveSession('sid', {
-      email: 'user@example.com', google_sub: 'sub-1', folder_id: 'folder-1',
-      access_token: 'sensitive-access', id_token: 'sensitive-id', refresh_token: 'legacy-refresh',
-      expires_at: Date.now() + 60_000,
-    } as any, env as any)
-    expect(put).toHaveBeenCalledOnce()
-    const stored = JSON.parse(put.mock.calls[0][1])
-    expect(stored).toMatchObject({ google_sub: 'sub-1', folder_id: 'folder-1' })
-    expect(stored).not.toHaveProperty('email')
-    expect(stored).not.toHaveProperty('access_token')
-    expect(stored).not.toHaveProperty('id_token')
-    expect(stored).not.toHaveProperty('refresh_token')
-    expect(stored).not.toHaveProperty('expires_at')
+  it('encrypts metadata updates and never persists request credentials or raw session JSON', async () => {
+    const { env, db, sessionId, userId, key } = await createPasskeyTestEnv({ google_sub: 'sub-1', folder_id: 'folder-1' })
+    const session = await getSession(sessionId, env, key)
+    expect(session).not.toBeNull()
+    Object.assign(session!, {
+      folder_id: 'folder-next', access_token: 'sensitive-access', id_token: 'sensitive-id',
+      refresh_token: 'legacy-refresh', expires_at: Date.now() + 60_000,
+    })
+    await saveSession(sessionId, session!, env)
+    const row = db.prepare('SELECT data FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)) as { data: null }
+    expect(row.data).toBeNull()
+    const profile = db.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?').get(userId) as { account_envelope: string }
+    expect(profile.account_envelope).toMatch(/^v1\./)
+    expect(profile.account_envelope).not.toContain('sensitive-access')
+    expect(profile.account_envelope).not.toContain('sensitive-id')
+    expect(profile.account_envelope).not.toContain('legacy-refresh')
+    db.close()
+  })
+
+  it('never restores legacy KV session payloads', async () => {
+    const get = vi.fn().mockResolvedValue(JSON.stringify({ access_token: 'old-token', google_sub: 'sub' }))
+    expect(await getSession('legacy', { SESSIONS: { get } } as never)).toBeNull()
+    expect(get).not.toHaveBeenCalled()
   })
 })
 
@@ -57,7 +67,7 @@ describe('request-scoped Google credentials', () => {
   it('returns a still-valid access token supplied on this request without writing it to KV', async () => {
     const put = vi.fn()
     const session = { access_token: 'request-access', expires_at: Date.now() + 120_000 }
-    expect(await getValidAccessToken('sid', session, { SESSIONS: { get: vi.fn(), put } } as any)).toBe('request-access')
+    expect(await getValidAccessToken('sid', session, { SESSIONS: { get: vi.fn(), put } } as never)).toBe('request-access')
     expect(put).not.toHaveBeenCalled()
   })
 
@@ -65,21 +75,21 @@ describe('request-scoped Google credentials', () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
     const env = { SESSIONS: { get: vi.fn(), put: vi.fn() } }
-    await expect(getValidAccessToken('sid', { access_token: 'expired', expires_at: Date.now() - 1 } as any, env as any)).rejects.toThrow(/request-scoped/)
-    await expect(getValidAccessToken('sid', {} as any, env as any)).rejects.toThrow(/request-scoped/)
+    await expect(getValidAccessToken('sid', { access_token: 'expired', expires_at: Date.now() - 1 }, env as never)).rejects.toThrow(/request-scoped/)
+    await expect(getValidAccessToken('sid', {}, env as never)).rejects.toThrow(/request-scoped/)
     expect(fetch).not.toHaveBeenCalled()
   })
 
   it('returns only a verified ID token present on this request', async () => {
     const env = { SESSIONS: { get: vi.fn(), put: vi.fn() } }
     const valid = { access_token: 'at', expires_at: Date.now() + 120_000, id_token: 'id', id_token_verified: true }
-    expect(await getValidIdToken('sid', valid as any, env as any)).toBe('id')
-    expect(await getValidIdToken('sid', { ...valid, id_token_verified: false } as any, env as any)).toBeNull()
+    expect(await getValidIdToken('sid', valid, env as never)).toBe('id')
+    expect(await getValidIdToken('sid', { ...valid, id_token_verified: false }, env as never)).toBeNull()
   })
 
   it('does not return an ID token when the request access token is expired', async () => {
     const env = { SESSIONS: { get: vi.fn(), put: vi.fn() } }
-    await expect(getValidIdToken('sid', { access_token: 'at', expires_at: Date.now() - 1, id_token: 'id', id_token_verified: true } as any, env as any)).rejects.toThrow(/request-scoped/)
+    await expect(getValidIdToken('sid', { access_token: 'at', expires_at: Date.now() - 1, id_token: 'id', id_token_verified: true }, env as never)).rejects.toThrow(/request-scoped/)
   })
 })
 
@@ -102,21 +112,20 @@ describe('session cookies', () => {
 })
 
 describe('session indexes and revocation', () => {
-  it('removes the email index entry for one session', async () => {
+  it('does not create or remove Google identifier indexes', async () => {
     const del = vi.fn()
-    await removeEmailSessionIndex('user@example.com', 'sid', { SESSIONS: { delete: del } } as any)
-    expect(del).toHaveBeenCalledWith('esidx:user@example.com:sid')
+    const env = { SESSIONS: { delete: del }, AUTH_DB: {} }
+    await removeEmailSessionIndex('user@example.com', 'sid', env as never)
+    expect(del).not.toHaveBeenCalled()
   })
-  it('marks the session revoked before deleting its record and identity index', async () => {
-    const calls: string[] = []
-    const env = { SESSIONS: {
-      put: vi.fn(async (key: string) => { calls.push(`put:${key}`) }),
-      delete: vi.fn(async (key: string) => { calls.push(`delete:${key}`) }),
-    } }
-    await invalidateSession('sid', 'user@example.com', env as any, 'sub-1')
-    expect(calls).toEqual([
-      'put:revoked-session:sid', 'delete:session:sid',
-      'delete:esidx:user@example.com:sid', 'delete:ssidx:sub-1:sid',
-    ])
+
+  it('revokes by opaque session digest without touching KV identity indexes', async () => {
+    const { env, db, sessionId, userId, kv } = await createPasskeyTestEnv()
+    await invalidateSession(sessionId, undefined, env)
+    expect(db.prepare('SELECT user_id, data, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: null, data: null, revoked: 1 })
+    expect(db.prepare('SELECT id FROM passkey_users WHERE id = ?').get(userId)).toEqual({ id: userId })
+    expect(kv.size()).toBe(0)
+    db.close()
   })
 })

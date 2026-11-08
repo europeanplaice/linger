@@ -1,9 +1,18 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
+import { encodeVaultBytes } from '../../functions/_shared/vaultCrypto'
 import {
   ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
 } from '../../functions/_shared/drive'
+
+vi.mock('../../functions/_shared/session', async importOriginal => ({
+  ...await importOriginal<typeof import('../../functions/_shared/session')>(),
+  saveSession: vi.fn(async () => {}),
+}))
+
+const testUserId = `drive-test-user-${crypto.randomUUID()}`
+const testVaultKey = encodeVaultBytes(crypto.getRandomValues(new Uint8Array(32)))
 
 function mockFetch(response: unknown): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
@@ -90,7 +99,7 @@ describe('ensureFolder', () => {
     }
     const session: any = {
       refresh_token: 'rt', access_token: 'at', expires_at: 1000,
-      google_sub: 'google-user', folder_id: 'stale-device-folder',
+      user_id: testUserId, vault_key: testVaultKey, google_sub: 'google-user', folder_id: 'stale-device-folder',
       s3_settings_file_id: 'old-settings', s3_status_file_id: 'old-status',
       s3_settings_negative_cache_at: Date.now(), s3_status_negative_cache_at: Date.now(),
     }
@@ -98,7 +107,7 @@ describe('ensureFolder', () => {
     const result = await ensureFolder('token', 'sid', session, env as any)
 
     expect(service.ensureDiaryFolder).toHaveBeenCalledWith({
-      sessionId: 'sid', accountKey: 'google-user', accessToken: 'token', expiresAt: 1000, idToken: undefined,
+      sessionId: 'sid', accountKey: testUserId, vaultKey: testVaultKey, accessToken: 'token', expiresAt: 1000, idToken: undefined,
     })
     expect(result).toBe('account-folder')
     expect(session.folder_id).toBe('account-folder')
@@ -114,7 +123,7 @@ describe('ensureFolder', () => {
   it('fails closed when the account coordinator is unavailable', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'google-user' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'google-user' }
     const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() }, SESSION_DOMAIN: 'https://linger.europeanplaice.com' }
 
     await expect(ensureFolder('token', 'sid', session, env as any)).rejects.toMatchObject({ status: 503 })
@@ -126,7 +135,7 @@ describe('ensureFolder', () => {
     const getByName = vi.fn().mockReturnValue({ ensureFolder: ensureDiaryFolder })
     const session: any = {
       refresh_token: 'rt', access_token: 'at', expires_at: 1000,
-      google_sub: 'google-user', folder_id: 'stale-device-folder',
+      user_id: testUserId, vault_key: testVaultKey, google_sub: 'google-user', folder_id: 'stale-device-folder',
     }
     const env = {
       SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() },
@@ -135,9 +144,9 @@ describe('ensureFolder', () => {
 
     const result = await ensureFolder('token', 'sid', session, env as any)
 
-    expect(getByName).toHaveBeenCalledWith('google-user')
+    expect(getByName).toHaveBeenCalledWith(testUserId)
     expect(ensureDiaryFolder).toHaveBeenCalledWith({
-      sessionId: 'sid', accountKey: 'google-user', accessToken: 'token', expiresAt: 1000, idToken: undefined,
+      sessionId: 'sid', accountKey: testUserId, vaultKey: testVaultKey, accessToken: 'token', expiresAt: 1000, idToken: undefined,
     })
     expect(result).toBe('worker-account-folder')
     expect(session.folder_id).toBe('worker-account-folder')
@@ -210,7 +219,7 @@ describe('ensureFolder', () => {
 
     expect(result).toBe('existing-folder')
     expect(session.folder_id).toBe('existing-folder')
-    expect(put).toHaveBeenCalledOnce()
+    expect(put).not.toHaveBeenCalled()
   })
 
   it('creates folder when none exists on Drive', async () => {
@@ -365,7 +374,7 @@ describe('getDiaryFileMeta', () => {
       version: '2',
     }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' }
 
     const result = await getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01')
 
@@ -380,7 +389,7 @@ describe('getDiaryFileMeta', () => {
       parents: ['other-folder'],
       trashed: false,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' }
 
     await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
@@ -396,7 +405,7 @@ describe('getDiaryFileMeta', () => {
       version: '2',
     }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' }
 
     const result = await getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01')
 
@@ -411,7 +420,7 @@ describe('getDiaryFileMeta', () => {
       parents: ['folder-1'],
       trashed: false,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' }
 
     await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
@@ -425,7 +434,7 @@ describe('getDiaryFileMeta', () => {
       parents: ['folder-1'],
       trashed: true,
     })))
-    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, google_sub: 'test-user', folder_id: 'folder-1' }
+    const session = { refresh_token: 'rt', access_token: 'at', expires_at: 1000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' }
 
     await expect(getDiaryFileMeta('token', 'sid', session, envStub, 'file-1', '2026-05-01'))
       .rejects.toMatchObject({ status: 404, message: 'not_found' })
@@ -575,7 +584,7 @@ describe('getRevisionContent', () => {
   })
 })
 
-const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, google_sub: 'test-user', folder_id: 'folder-1' })
+const sessionWithFolder = () => ({ refresh_token: 'rt', access_token: 'at', expires_at: Date.now() + 3_600_000, user_id: testUserId, vault_key: testVaultKey, google_sub: 'test-user', folder_id: 'folder-1' })
 const envStub = {
   SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() },
   S3_WORKFLOW_SERVICE: { ensureDiaryFolder: vi.fn().mockResolvedValue('folder-1') },

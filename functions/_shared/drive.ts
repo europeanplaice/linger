@@ -102,7 +102,7 @@ export async function ensureFolder(
   options: EnsureFolderOptions = {},
 ): Promise<string> {
   if (!options.withinCoordinator) {
-    if (!session.google_sub) throw new DriveError(401, 'Google account identity missing; sign in again')
+    if (!session.user_id) throw new DriveError(401, 'Google account identity missing; sign in again')
 
     // Route even a cached session through the account-level pointer. A cached
     // ID is a hint from this login session, not the account-wide source of truth.
@@ -110,15 +110,17 @@ export async function ensureFolder(
     if (env.S3_WORKFLOW_SERVICE) {
       folderId = await env.S3_WORKFLOW_SERVICE.ensureDiaryFolder({
         sessionId,
-        accountKey: session.google_sub,
+        accountKey: session.user_id,
+        vaultKey: session.vault_key,
         accessToken: token,
         expiresAt: session.expires_at ?? 0,
         idToken: session.id_token,
       })
     } else if (env.DIARY_WRITER) {
-      folderId = await env.DIARY_WRITER.getByName(session.google_sub).ensureFolder({
+      folderId = await env.DIARY_WRITER.getByName(session.user_id).ensureFolder({
         sessionId,
-        accountKey: session.google_sub,
+        accountKey: session.user_id,
+        vaultKey: session.vault_key,
         accessToken: token,
         expiresAt: session.expires_at ?? 0,
         idToken: session.id_token,

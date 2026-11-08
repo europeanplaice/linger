@@ -69,7 +69,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     return setBackupEnabledForAuth(this.env, input)
   }
 
-  async resetAllData(input: { sessionId: string; accountKey: string }): Promise<void> {
+  async resetAllData(input: S3WorkflowAuth): Promise<void> {
     await authorizedSession(this.env, input)
     const index = indexFor(this.env, input.accountKey)
     await index.resetAllData()

@@ -19,6 +19,7 @@ import {
 } from '../src/runtime'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
+import { createTestSession, testSession } from './auth'
 
 function httpError(status: number): Error {
   return Object.assign(new Error(`HTTP ${status}`), { status })
@@ -40,13 +41,10 @@ describe('account diary folder coordination', () => {
   it('routes workflow folder lookups through the account DiaryWriter', async () => {
     const accountKey = `folder-account-${crypto.randomUUID()}`
     const sessionId = `folder-session-${crypto.randomUUID()}`
-    const original = {
-      refresh_token: 'refresh', access_token: 'access', expires_at: Date.now() + 3_600_000,
-      google_sub: accountKey, folder_id: 'old-session-folder',
-    }
-    await createSession(sessionId, original, env)
+    const original = testSession(accountKey, { access_token: 'access', folder_id: 'old-session-folder' })
+    await createTestSession(sessionId, original, env)
     const ensureFolder = vi.fn(async () => {
-      const persisted = (await getSession(sessionId, env))!
+      const persisted = (await getSession(sessionId, env, original.vault_key))!
       persisted.folder_id = 'canonical-folder'
       await saveSession(sessionId, persisted, env)
       return 'canonical-folder'
@@ -54,13 +52,13 @@ describe('account diary folder coordination', () => {
     const getByName = vi.fn().mockReturnValue({ ensureFolder })
     const workflowEnv = { DIARY_WRITER: { getByName } } as unknown as WorkflowEnv
 
-    const resolved = await ensureAccountDiaryFolder(workflowEnv, sessionId, original)
+    const resolved = await ensureAccountDiaryFolder(workflowEnv, sessionId, original, original.vault_key)
 
     expect(getByName).toHaveBeenCalledWith(accountKey)
-    expect(ensureFolder).toHaveBeenCalledWith({ sessionId, accountKey, accessToken: 'access', expiresAt: original.expires_at })
+    expect(ensureFolder).toHaveBeenCalledWith({ sessionId, accountKey, accessToken: 'access', expiresAt: original.expires_at, idToken: original.id_token, vaultKey: original.vault_key })
     expect(resolved).toBe('canonical-folder')
     expect(original.folder_id).toBe('canonical-folder')
-    expect((await getSession(sessionId, env))?.folder_id).toBe('canonical-folder')
+    expect((await getSession(sessionId, env, original.vault_key))?.folder_id).toBe('canonical-folder')
   })
 })
 
@@ -144,29 +142,24 @@ describe('entryStatusForAuth stale-pending aging', () => {
   const workflowEnv = env as unknown as WorkflowEnv
 
   async function seedPending(accountKey: string, updatedAt: string) {
-    const session: SessionData = {
-      refresh_token: 'r',
-      access_token: 'a',
-      expires_at: Date.now() + 3600_000,
-      id_token: 'i',
-      google_sub: accountKey,
-    }
-    await createSession(accountKey, session, env)
+    const session: SessionData = testSession(accountKey, { access_token: 'a', id_token: 'i' })
+    await createTestSession(accountKey, session, env)
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     await runInDurableObject(index, (instance: S3SyncIndex) => {
       instance.setBackupEnabled(true)
       instance.markPending('2026-01-01', '5', updatedAt)
     })
+    return session.vault_key
   }
 
   it('reports a fresh pending record as pending', async () => {
-    await seedPending('stale-fresh-1', new Date().toISOString())
-    const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-fresh-1', accountKey: 'stale-fresh-1', date: '2026-01-01', requestedVersion: '5' })
+    const key = await seedPending('stale-fresh-1', new Date().toISOString())
+    const status = await entryStatusForAuth(workflowEnv, { sessionId: 'stale-fresh-1', accountKey: 'stale-fresh-1', vaultKey: key, date: '2026-01-01', requestedVersion: '5' })
     expect(status?.status).toBe('pending')
   })
 
   it('fails closed when a stale record would need a durable mirror re-arm', async () => {
-    await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    const key = await seedPending('stale-old-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
     const create = vi.fn().mockResolvedValue(undefined)
     const workflowEnvWithMock = {
       ...workflowEnv,
@@ -175,6 +168,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
     const status = await entryStatusForAuth(workflowEnvWithMock, {
       sessionId: 'stale-old-1',
       accountKey: 'stale-old-1',
+      vaultKey: key,
       date: '2026-01-01',
       requestedVersion: '5',
       since: new Date(Date.now() - 60 * 1000).toISOString(),
@@ -185,10 +179,11 @@ describe('entryStatusForAuth stale-pending aging', () => {
   })
 
   it('still reports pending within the save-grace window even if the record itself is old', async () => {
-    await seedPending('stale-grace-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+    const key = await seedPending('stale-grace-1', new Date(Date.now() - 10 * 60 * 1000).toISOString())
     const status = await entryStatusForAuth(workflowEnv, {
       sessionId: 'stale-grace-1',
       accountKey: 'stale-grace-1',
+      vaultKey: key,
       date: '2026-01-01',
       requestedVersion: '5',
       since: new Date().toISOString(),
@@ -198,15 +193,9 @@ describe('entryStatusForAuth stale-pending aging', () => {
 
   it('reports disabled when backup has never been enabled', async () => {
     const accountKey = 'stale-disabled-1'
-    const session: SessionData = {
-      refresh_token: 'r',
-      access_token: 'a',
-      expires_at: Date.now() + 3600_000,
-      id_token: 'i',
-      google_sub: accountKey,
-    }
-    await createSession(accountKey, session, env)
-    const status = await entryStatusForAuth(workflowEnv, { sessionId: accountKey, accountKey, date: '2026-01-01', requestedVersion: '5' })
+    const session: SessionData = testSession(accountKey, { access_token: 'a', id_token: 'i' })
+    await createTestSession(accountKey, session, env)
+    const status = await entryStatusForAuth(workflowEnv, { sessionId: accountKey, accountKey, vaultKey: session.vault_key, date: '2026-01-01', requestedVersion: '5' })
     expect(status.status).toBe('disabled')
   })
 })

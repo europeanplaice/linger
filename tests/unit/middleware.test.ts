@@ -1,3 +1,5 @@
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { getSession } from '../../functions/_shared/session'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest } from '../../functions/api/_middleware'
 
@@ -22,15 +24,17 @@ afterEach(() => {
 })
 
 describe('API auth middleware', () => {
-  function makeContext(overrides: Record<string, any> = {}) {
+  async function makeContext(overrides: Record<string, any> = {}) {
     const session = overrides.session ?? makeSession()
+    const seeded = await createPasskeyTestEnv(session, { clientId: 'id' })
     const baseEnv = {
+      ...seeded.env,
       SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put: vi.fn(), delete: vi.fn() },
       GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret', SESSION_DOMAIN: 'https://example.com',
     }
     const { env: envOverride, ...rest } = overrides
     const headers = new Headers({
-      Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at',
+      ...seeded.headers, Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at',
     })
     return {
       request: new Request('https://example.com/api/drive/entries', { headers }),
@@ -41,13 +45,13 @@ describe('API auth middleware', () => {
   }
 
   it('returns 401 when no session cookie', async () => {
-    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entries', { headers: { Authorization: 'Bearer at' } }) })
+    const ctx = await makeContext({ request: new Request('https://example.com/api/drive/entries', { headers: { Authorization: 'Bearer at' } }) })
     expect((await onRequest(ctx as any)).status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
   })
 
   it('rejects cross-site mutation requests before resolving the session', async () => {
-    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entry/2026-05-01', {
+    const ctx = await makeContext({ request: new Request('https://example.com/api/drive/entry/2026-05-01', {
       method: 'POST', headers: {
         Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at',
         Origin: 'https://attacker.example', 'Sec-Fetch-Site': 'cross-site',
@@ -59,13 +63,13 @@ describe('API auth middleware', () => {
   })
 
   it('returns 401 when session metadata is absent', async () => {
-    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(null) } } })
+    const ctx = await makeContext({ env: { AUTH_DB: undefined } })
     expect((await onRequest(ctx as any)).status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
   })
 
   it('requires a request-scoped bearer token and does not call the handler without one', async () => {
-    const ctx = makeContext({ request: new Request('https://example.com/api/drive/entries', {
+    const ctx = await makeContext({ request: new Request('https://example.com/api/drive/entries', {
       headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a' },
     }) })
     const response = await onRequest(ctx as any)
@@ -81,7 +85,7 @@ describe('API auth middleware', () => {
     ['expired', { ...accessTokenInfo, expires_in: 0 }],
   ])('rejects an access token with %s', async (_reason, info) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(info), { status: 200 })))
-    const ctx = makeContext()
+    const ctx = await makeContext()
     const response = await onRequest(ctx as any)
     expect(response.status).toBe(401)
     expect(ctx.next).not.toHaveBeenCalled()
@@ -90,7 +94,7 @@ describe('API auth middleware', () => {
   it('returns 503 when Google tokeninfo is temporarily unavailable without revoking the session', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })))
     const del = vi.fn()
-    const ctx = makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(makeSession())), put: vi.fn(), delete: del } } })
+    const ctx = await makeContext({ env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(makeSession())), put: vi.fn(), delete: del } } })
     const response = await onRequest(ctx as any)
     expect(response.status).toBe(503)
     expect(response.headers.get('Retry-After')).toBe('1')
@@ -101,7 +105,7 @@ describe('API auth middleware', () => {
   it('passes the validated request token to the handler without persisting credentials', async () => {
     const put = vi.fn()
     const session = makeSession({ renewed_at: Date.now() })
-    const ctx = makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
+    const ctx = await makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
     const response = await onRequest(ctx as any)
     expect(response.status).toBe(200)
     expect(response.headers.get('Cache-Control')).toBe('no-store')
@@ -116,10 +120,10 @@ describe('API auth middleware', () => {
   it('saves renewal metadata without request credentials when the sliding TTL renews', async () => {
     const put = vi.fn()
     const session = makeSession({ renewed_at: Date.now() - 25 * 60 * 60 * 1000 })
-    const ctx = makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
+    const ctx = await makeContext({ session, env: { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify(session)), put } } })
     await onRequest(ctx as any)
-    expect(put).toHaveBeenCalledOnce()
-    const saved = JSON.parse(put.mock.calls[0][1])
+    expect(put).not.toHaveBeenCalled()
+    const saved = await getSession('sid123', ctx.env, ctx.request.headers.get('X-Linger-Vault-Key') ?? undefined)
     expect(saved).toMatchObject({ google_sub: 'account-a', folder_id: 'folder-a' })
     expect(saved).not.toHaveProperty('email')
     expect(saved).not.toHaveProperty('access_token')
@@ -127,7 +131,7 @@ describe('API auth middleware', () => {
   })
 
   it('sets deploy version when configured', async () => {
-    const ctx = makeContext({ env: { CF_PAGES_COMMIT_SHA: 'abc1234' } })
+    const ctx = await makeContext({ env: { CF_PAGES_COMMIT_SHA: 'abc1234' } })
     expect((await onRequest(ctx as any)).headers.get('X-Deploy-Version')).toBe('abc1234')
   })
 })

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { onRequestPost as onLogout } from '../../functions/auth/logout'
 import { onRequestGet as onSessionCheck } from '../../functions/auth/session'
+import { sessionStorageId } from '../../functions/_shared/authStore'
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 
 const { mockVerifyAccess, mockVerifyId } = vi.hoisted(() => ({
   mockVerifyAccess: vi.fn().mockResolvedValue(3600),
@@ -10,6 +12,7 @@ vi.mock('../../functions/_shared/google', () => ({
   verifyGoogleAccessToken: mockVerifyAccess,
   verifyGoogleIdToken: mockVerifyId,
   GoogleAccessTokenValidationError: class GoogleAccessTokenValidationError extends Error { constructor(message: string, readonly transient: boolean) { super(message) } },
+  GoogleIdTokenValidationError: class GoogleIdTokenValidationError extends Error { constructor(message: string, readonly transient: boolean) { super(message) } },
 }))
 
 afterEach(() => {
@@ -19,144 +22,93 @@ afterEach(() => {
 })
 
 describe('logout handler', () => {
-  it('deletes session and clears cookie', async () => {
-    const del = vi.fn()
-    const get = vi.fn().mockResolvedValue(JSON.stringify({ google_sub: 'google-sub-123' }))
-    const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:google-sub-123' },
+  it('revokes only the passkey session and clears the cookie', async () => {
+    const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv({ google_sub: 'google-sub-123' })
+    const request = new Request('https://example.com/auth/logout', {
+      method: 'POST', headers: { ...headers, 'X-Linger-Account': 'sub:google-sub-123' },
     })
-    const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
-
-    const response = await onLogout({ request, env } as any)
-
+    const response = await onLogout({ request, env } as never)
     expect(response.status).toBe(200)
-    expect(del).toHaveBeenCalledWith('session:sid123')
-    const cookie = response.headers.get('Set-Cookie')
-    expect(cookie).toContain('Max-Age=0')
+    expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
+    expect(db.prepare('SELECT user_id, data, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: null, data: null, revoked: 1 })
+    expect(db.prepare('SELECT id FROM passkey_users WHERE id = ?').get(userId)).toEqual({ id: userId })
+    db.close()
   })
 
-  it('removes subject index entry on logout', async () => {
-    const session = { google_sub: 'google-sub-123' }
-    const get = vi.fn().mockImplementation((key: string) => {
-      if (key === 'session:sid123') return Promise.resolve(JSON.stringify(session))
-      return Promise.resolve(null)
+  it('does not revoke a session if the browser vault user changed', async () => {
+    const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv()
+    const request = new Request('https://example.com/auth/logout', {
+      method: 'POST', headers: { ...headers, 'X-Linger-Vault-User': 'another-user' },
     })
-    const del = vi.fn()
-    const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:google-sub-123' },
-    })
-    const env = { SESSIONS: { get, put: vi.fn(), delete: del }, SESSION_DOMAIN: 'https://example.com' }
-
-    await onLogout({ request, env } as any)
-
-    expect(del).toHaveBeenNthCalledWith(1, 'session:sid123')
-    expect(del).toHaveBeenNthCalledWith(2, 'ssidx:google-sub-123:sid123')
+    expect((await onLogout({ request, env } as never)).status).toBe(401)
+    expect(db.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: userId, revoked: 0 })
+    db.close()
   })
 
-  it('works without a session cookie', async () => {
-    const del = vi.fn()
-    const request = new Request('http://localhost/auth/logout')
-    const env = { SESSIONS: { delete: del }, SESSION_DOMAIN: 'https://example.com' }
-
-    const response = await onLogout({ request, env } as any)
-
-    expect(response.status).toBe(200)
-    expect(del).not.toHaveBeenCalled()
-  })
-
-  it('rejects cross-site logout requests', async () => {
-    const del = vi.fn()
-    const request = new Request('http://localhost/auth/logout', {
-      method: 'POST',
-      headers: {
-        Cookie: 'linger_session=sid123', 'X-Linger-Account': 'email:user%40example.com',
-        Origin: 'https://attacker.example',
-        'Sec-Fetch-Site': 'cross-site',
-      },
+  it('rejects cross-site logout requests before revocation', async () => {
+    const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv()
+    const request = new Request('https://example.com/auth/logout', {
+      method: 'POST', headers: { ...headers, Origin: 'https://attacker.example', 'Sec-Fetch-Site': 'cross-site' },
     })
-    const env = { SESSIONS: { delete: del }, SESSION_DOMAIN: 'https://example.com' }
-
-    const response = await onLogout({ request, env } as any)
-
-    expect(response.status).toBe(403)
-    expect(del).not.toHaveBeenCalled()
+    expect((await onLogout({ request, env } as never)).status).toBe(403)
+    expect(db.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: userId, revoked: 0 })
+    db.close()
   })
 
   it('omits Secure flag on HTTP domains', async () => {
-    const get = vi.fn().mockResolvedValue(JSON.stringify({ google_sub: 'google-sub-123' }))
-    const request = new Request('http://localhost/auth/logout', {
-      headers: { Cookie: 'linger_session=sid', 'X-Linger-Account': 'sub:google-sub-123' },
-    })
-    const env = { SESSIONS: { get, put: vi.fn(), delete: vi.fn() }, SESSION_DOMAIN: 'http://localhost:8788' }
-
-    const response = await onLogout({ request, env } as any)
-
-    const cookie = response.headers.get('Set-Cookie')
-    expect(cookie).not.toContain('Secure')
+    const { env, db, headers } = await createPasskeyTestEnv({}, { domain: 'http://localhost:8788' })
+    const response = await onLogout({ request: new Request('http://localhost:8788/auth/logout', { method: 'POST', headers }), env } as never)
+    expect(response.headers.get('Set-Cookie')).not.toContain('Secure')
+    db.close()
   })
 })
 
 describe('session check handler', () => {
-  it('returns signedIn: true when session exists', async () => {
-    const put = vi.fn()
-    const request = new Request('http://localhost/auth/session', {
-      headers: { Cookie: 'linger_session=sid123', Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'request-id-token' },
+  it('verifies request-scoped Google credentials and seals account metadata', async () => {
+    const { env, db, headers, sessionId, userId, key } = await createPasskeyTestEnv()
+    const request = new Request('https://example.com/auth/session', {
+      headers: { ...headers, Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'request-id-token' },
     })
-    const env = {
-      SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify({ email: 'user@example.com', google_sub: 'google-sub-123' })), put },
-      GOOGLE_CLIENT_ID: 'client-id',
-      SESSION_DOMAIN: 'https://example.com',
-    }
-
-    const response = await onSessionCheck({ request, env } as any)
+    const response = await onSessionCheck({ request, env } as never)
     const data = await response.json()
-
-    expect(data).toMatchObject({ signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123' })
-    expect(put).not.toHaveBeenCalled()
+    expect(data).toMatchObject({ signedIn: true, userId, email: 'user@example.com', googleSub: 'google-sub-123' })
     expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
     expect(mockVerifyAccess).toHaveBeenCalledWith('request-access', 'client-id', 'google-sub-123')
     expect(mockVerifyId).toHaveBeenCalledWith('request-id-token', 'client-id')
+    const storedSession = db.prepare('SELECT data FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)) as { data: null }
+    expect(storedSession.data).toBeNull()
+    const envelope = db.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?').get(userId) as { account_envelope: string }
+    expect(envelope.account_envelope).toMatch(/^v1\./)
+    expect(envelope.account_envelope).not.toContain(key)
+    expect(envelope.account_envelope).not.toContain('google-sub-123')
+    expect(envelope.account_envelope).not.toContain('request-access')
+    expect(envelope.account_envelope).not.toContain('request-id-token')
+    db.close()
   })
 
-  it('returns signedIn: false when no cookie', async () => {
-    const request = new Request('http://localhost/auth/session')
-    const env = { SESSIONS: { get: vi.fn() } }
-
-    const response = await onSessionCheck({ request, env } as any)
-    const data = await response.json()
-
-    expect(data).toEqual({ signedIn: false })
-  })
-
-  it('returns signedIn: false when session not in KV', async () => {
-    const request = new Request('http://localhost/auth/session', {
-      headers: { Cookie: 'linger_session=sid123', Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'request-id-token' },
-    })
-    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(null) }, GOOGLE_CLIENT_ID: 'client-id' }
-
-    const response = await onSessionCheck({ request, env } as any)
-    const data = await response.json()
-
-    expect(data).toEqual({ signedIn: false })
-  })
-
-  it('requires both request-scoped access and ID tokens before restoring a session', async () => {
-    const session = JSON.stringify({ email: 'user@example.com', google_sub: 'google-sub-123' })
-    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(session) }, GOOGLE_CLIENT_ID: 'client-id', SESSION_DOMAIN: 'https://example.com' }
-    const missingAccess = new Request('http://localhost/auth/session', { headers: { Cookie: 'linger_session=sid123', 'X-Linger-Google-ID-Token': 'id' } })
-    const missingId = new Request('http://localhost/auth/session', { headers: { Cookie: 'linger_session=sid123', Authorization: 'Bearer access' } })
-    expect(await (await onSessionCheck({ request: missingAccess, env } as any)).json()).toEqual({ signedIn: false })
-    expect(await (await onSessionCheck({ request: missingId, env } as any)).json()).toEqual({ signedIn: false })
+  it('returns signed out without both request-scoped Google tokens', async () => {
+    const { env, db, headers } = await createPasskeyTestEnv()
+    const missingAccess = new Request('https://example.com/auth/session', { headers: { ...headers, 'X-Linger-Google-ID-Token': 'id' } })
+    const missingId = new Request('https://example.com/auth/session', { headers: { ...headers, Authorization: 'Bearer access' } })
+    expect(await (await onSessionCheck({ request: missingAccess, env } as never)).json()).toEqual({ signedIn: false })
+    expect(await (await onSessionCheck({ request: missingId, env } as never)).json()).toEqual({ signedIn: false })
     expect(mockVerifyAccess).not.toHaveBeenCalled()
     expect(mockVerifyId).not.toHaveBeenCalled()
+    db.close()
   })
 
-  it('does not restore a session for an ID token from another Google account', async () => {
+  it('rejects a Google identity from another linked account and unauthenticated cookies', async () => {
+    const { env, db, headers } = await createPasskeyTestEnv({ google_sub: 'google-sub-123' })
     mockVerifyId.mockResolvedValueOnce({ sub: 'different-account' })
-    const request = new Request('http://localhost/auth/session', { headers: {
-      Cookie: 'linger_session=sid123', Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'other-id-token',
-    } })
-    const env = { SESSIONS: { get: vi.fn().mockResolvedValue(JSON.stringify({ google_sub: 'google-sub-123' })) }, GOOGLE_CLIENT_ID: 'client-id' }
-    expect(await (await onSessionCheck({ request, env } as any)).json()).toEqual({ signedIn: false })
+    const request = new Request('https://example.com/auth/session', {
+      headers: { ...headers, Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'other-id-token' },
+    })
+    expect(await (await onSessionCheck({ request, env } as never)).json()).toEqual({ signedIn: false })
+    const noCookie = new Request('https://example.com/auth/session', { headers: { Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'id' } })
+    expect(await (await onSessionCheck({ request: noCookie, env } as never)).json()).toEqual({ signedIn: false })
+    db.close()
   })
 })

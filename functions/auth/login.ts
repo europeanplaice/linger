@@ -1,6 +1,6 @@
 import type { Env } from '../_shared/session'
-import { jsonResponse, makeOAuthStateCookie, makeOAuthPkceCookie } from '../_shared/session'
-import { saveOAuthState } from '../_shared/authStore'
+import { jsonResponse, makeOAuthStateCookie, makeOAuthPkceCookie, parseSessionId } from '../_shared/session'
+import { saveOAuthState, getPasskeySessionUserId, sessionStorageId } from '../_shared/authStore'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
 
@@ -16,6 +16,9 @@ function randomVerifier(): string {
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
+  const sessionId = parseSessionId(request)
+  const userId = sessionId ? await getPasskeySessionUserId(sessionId, env) : null
+  if (!sessionId || !userId) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
   const url = new URL(request.url)
   const requestedChannelId = url.searchParams.get('channel_id')
   const channelId = requestedChannelId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedChannelId)
@@ -30,7 +33,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
 
   // Keep the PKCE secret in a short lived, HttpOnly browser cookie. The server
   // store only needs nonce and response mode after atomically consuming state.
-  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId }), env)
+  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId, userId, sessionHandle: await sessionStorageId(sessionId) }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,

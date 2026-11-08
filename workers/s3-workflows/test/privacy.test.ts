@@ -1,148 +1,107 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
-import { createSession, getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
+import { getSession } from '../../../functions/_shared/session'
 import { sessionStorageId } from '../../../functions/_shared/authStore'
-import type { SessionData } from '../../../functions/_shared/session'
 import type { DiaryWriter } from '../src/diaryWriter'
+import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
+import { authorizedSession } from '../src/runtime'
+import { openVaultValue } from '../../../functions/_shared/vaultCrypto'
+import { createTestSession, testSession, vaultKey } from './auth'
 
 vi.mock('../../../functions/_shared/drive', async importOriginal => ({
   ...await importOriginal<typeof import('../../../functions/_shared/drive')>(),
-  ensureFolder: vi.fn(async (_token: string, _id: string, session: SessionData) => {
-    session.folder_id = 'privacy-folder'
-    return 'privacy-folder'
+  ensureFolder: vi.fn(async (_token: string, _id: string, session: { folder_id?: string }) => {
+    session.folder_id = 'drive-folder-sensitive-sentinel'
+    return 'drive-folder-sensitive-sentinel'
   }),
   getEntryMeta: vi.fn(async (_token: string, id: string) => ({
     id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder',
   })),
 }))
 
-const sentinel = {
+const credentials = {
   access_token: 'privacy-access-sentinel',
   refresh_token: 'privacy-refresh-sentinel',
   id_token: 'privacy-id-sentinel',
   secretAccessKey: 'privacy-aws-secret-sentinel',
 }
 
-function authSession(extra: Partial<SessionData> = {}): SessionData {
-  return {
-    ...sentinel,
-    expires_at: Date.now() + 3_600_000,
-    id_token_verified: true,
-    email: 'privacy@example.com',
-    google_sub: `privacy-${crypto.randomUUID()}`,
-    folder_id: 'folder-metadata',
-    ...extra,
-  }
-}
-
-function rawD1(row: unknown): string {
-  return JSON.stringify(row)
-}
-
-describe('OAuth credential storage privacy', () => {
-  it('persists only the typed metadata allowlist in D1 and returns no credentials', async () => {
-    const id = `privacy-${crypto.randomUUID()}`
-    const session = authSession()
-    await createSession(id, session, env)
-
-    const row = await env.AUTH_DB.prepare('SELECT data, email, google_sub, client_id FROM auth_sessions WHERE id = ?')
-      .bind(await sessionStorageId(id)).first<Record<string, unknown>>()
-    expect(row).not.toBeNull()
-    expect(await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(id).first()).toBeNull()
-    const persisted = rawD1(row)
-    for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
-    expect(persisted).not.toContain('expires_at')
-    expect(JSON.parse(String(row!.data))).toMatchObject({
-      folder_id: 'folder-metadata',
-      google_sub: session.google_sub,
+describe('Workers metadata privacy', () => {
+  it('keeps Google identifiers and folder metadata encrypted in D1 and requires the vault key', async () => {
+    const userId = `privacy-user-${crypto.randomUUID()}`
+    const sessionId = `privacy-session-${crypto.randomUUID()}`
+    const googleSub = `google-sub-sensitive-${crypto.randomUUID()}`
+    const key = vaultKey()
+    const session = testSession(userId, {
+      ...credentials,
+      email: 'privacy@example.com',
+      google_sub: googleSub,
+      folder_id: 'drive-folder-sensitive-sentinel',
+      vault_key: key,
     })
+    await createTestSession(sessionId, session, env)
 
-    const loaded = await getSession(id, env)
-    expect(loaded).toMatchObject({ folder_id: 'folder-metadata', google_sub: session.google_sub })
-    for (const key of ['access_token', 'refresh_token', 'id_token', 'expires_at', 'id_token_verified']) {
-      expect(loaded).not.toHaveProperty(key)
+    const auth = await env.AUTH_DB.prepare('SELECT id, user_id, data FROM auth_sessions WHERE id = ?')
+      .bind(await sessionStorageId(sessionId)).first<{ id: string; user_id: string; data: string | null }>()
+    const profile = await env.AUTH_DB.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?')
+      .bind(userId).first<{ account_envelope: string }>()
+    expect(auth).toMatchObject({ user_id: userId, data: null })
+    expect(auth!.id).not.toBe(sessionId)
+    expect(profile!.account_envelope).toMatch(/^v1\./)
+    const persisted = JSON.stringify({ auth, profile })
+    for (const sensitive of [googleSub, session.email, session.folder_id, ...Object.values(credentials), key]) {
+      expect(persisted).not.toContain(sensitive)
     }
+
+    expect(await getSession(sessionId, env)).toBeNull()
+    expect(await getSession(sessionId, env, key)).toMatchObject({ user_id: userId, google_sub: googleSub, folder_id: session.folder_id })
   })
 
-  it('keeps tokens out of D1 after a stale metadata writer saves', async () => {
-    const id = `privacy-save-${crypto.randomUUID()}`
-    const session = authSession()
-    await createSession(id, session, env)
-    session.folder_id = 'updated-folder'
-    await saveSession(id, session, env)
-
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first<{ data: string }>()
-    const persisted = rawD1(row)
-    for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
-    expect(JSON.parse(row!.data)).toMatchObject({ folder_id: 'updated-folder' })
-    expect(await getSession(id, env)).not.toHaveProperty('access_token')
-  })
-
-  it('rejects a hashed identifier at the cookie-facing session save boundary', async () => {
-    const id = `privacy-hash-cookie-${crypto.randomUUID()}`
-    const session = authSession()
-    await createSession(id, session, env)
-    const digest = await sessionStorageId(id)
-    await expect(saveSession(digest, { ...session, folder_id: 'forged-update' }, env)).rejects.toThrow()
-    expect(await getSession(id, env)).toMatchObject({ folder_id: 'folder-metadata' })
-  })
-
-  it('rejects hashed identifiers at the caller-facing revoke boundary', async () => {
-    const id = `privacy-hash-revoke-${crypto.randomUUID()}`
-    await createSession(id, authSession(), env)
-    const digest = await sessionStorageId(id)
-    await expect(invalidateSession(digest, undefined, env)).rejects.toThrow()
-    expect(await getSession(id, env)).not.toBeNull()
-  })
-
-  it('rejects unknown, nested, and wrong-type fields at the D1 boundary', async () => {
-    const id = `privacy-trigger-${crypto.randomUUID()}`
-    const now = Date.now()
-    const allowed = JSON.stringify({ google_sub: 'trigger-test' })
-    const insert = (data: string) => env.AUTH_DB.prepare(
-      'INSERT INTO auth_sessions (id, data, expires_at) VALUES (?, ?, ?)',
-    ).bind(id, data, now + 60_000).run()
-
-    await expect(insert(JSON.stringify({ google_sub: 'trigger-test', unexpected: 'secret' }))).rejects.toThrow()
-    await expect(insert(JSON.stringify({ google_sub: 'trigger-test', nested: { token: 'secret' } }))).rejects.toThrow()
-    await expect(insert(JSON.stringify({ google_sub: ['not', 'text'] }))).rejects.toThrow()
-
-    await insert(allowed)
-    await expect(env.AUTH_DB.prepare('UPDATE auth_sessions SET data = ? WHERE id = ?')
-      .bind(JSON.stringify({ google_sub: 'trigger-test', future_secret: 'secret' }), id).run()).rejects.toThrow()
-  })
-
-  it('does not import credential-bearing legacy KV sessions into D1', async () => {
-    const id = `privacy-legacy-${crypto.randomUUID()}`
-    await env.SESSIONS.put(`session:${id}`, JSON.stringify(authSession()), { expirationTtl: 300 })
-
-    expect(await getSession(id, env)).toBeNull()
-    expect(await env.AUTH_DB.prepare('SELECT id FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(id)).first()).toBeNull()
-  })
-
-  it('passes OAuth credentials transiently to DiaryWriter without persisting them in Durable Object storage', async () => {
-    const accountKey = `privacy-do-${crypto.randomUUID()}`
+  it('encrypts Drive IDs in DiaryWriter storage and fails closed without a vault key', async () => {
+    const userId = `privacy-do-user-${crypto.randomUUID()}`
     const sessionId = `privacy-do-session-${crypto.randomUUID()}`
-    await createSession(sessionId, authSession({ google_sub: accountKey }), env)
+    const googleSub = `google-sub-sensitive-${crypto.randomUUID()}`
+    const key = vaultKey()
+    const session = testSession(userId, { google_sub: googleSub, vault_key: key })
+    await createTestSession(sessionId, session, env)
     const workflowEnv = env as unknown as WorkflowEnv
-    const writer = workflowEnv.DIARY_WRITER.getByName(accountKey)
-
-    expect(await writer.ensureFolder({
+    const writer = workflowEnv.DIARY_WRITER.getByName(userId)
+    const auth = {
       sessionId,
-      accountKey,
-      accessToken: sentinel.access_token,
+      accountKey: userId,
+      vaultKey: key,
+      accessToken: credentials.access_token,
       expiresAt: Date.now() + 3_600_000,
-      idToken: sentinel.id_token,
-    })).toBe('privacy-folder')
+      idToken: credentials.id_token,
+    }
+
+    await expect(authorizedSession(workflowEnv, { sessionId, accountKey: userId })).rejects.toThrow(/unauthorized/i)
+    expect(await writer.ensureFolder(auth)).toBe('drive-folder-sensitive-sentinel')
 
     const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) =>
       Object.fromEntries(await state.storage.list()),
-    )
-    const persisted = rawD1(stored)
-    for (const secret of Object.values(sentinel)) expect(persisted).not.toContain(secret)
-    expect(stored).toEqual({ folder: 'privacy-folder' })
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(sessionId)).first<{ data: string }>()
-    for (const secret of Object.values(sentinel)) expect(row!.data).not.toContain(secret)
+    ) as Record<string, string>
+    expect(stored.folder).toMatch(/^v1\./)
+    expect(await openVaultValue<string>(key, userId, 'diary-writer:folder', stored.folder)).toBe('drive-folder-sensitive-sentinel')
+    const persisted = JSON.stringify(stored)
+    for (const sensitive of [googleSub, 'drive-folder-sensitive-sentinel', credentials.access_token, credentials.id_token, key]) {
+      expect(persisted).not.toContain(sensitive)
+    }
+  })
+
+  it('does not persist Drive file IDs in the S3 sync index', async () => {
+    const userId = `privacy-index-user-${crypto.randomUUID()}`
+    const workflowEnv = env as unknown as WorkflowEnv
+    const index = workflowEnv.S3_SYNC_INDEX.getByName(userId)
+    const fileId = `drive-file-sensitive-${crypto.randomUUID()}`
+    await runInDurableObject(index, (instance: S3SyncIndex, state) => {
+      instance.markSynced('2026-01-01', '3', new Date().toISOString(), fileId)
+      const row = state.storage.sql.exec<{ file_id: string | null }>(
+        "SELECT file_id FROM entries WHERE date = '2026-01-01'",
+      ).one()
+      expect(row.file_id).toBeNull()
+      expect(JSON.stringify(state.storage.sql.exec('SELECT * FROM entries').toArray())).not.toContain(fileId)
+    })
   })
 })

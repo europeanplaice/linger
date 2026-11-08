@@ -1,4 +1,4 @@
-import { createSession } from '../../../functions/_shared/session'
+import { createTestSession, testSession } from './auth'
 import { sessionStorageId } from '../../../functions/_shared/authStore'
 import { createExecutionContext, env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -36,16 +36,14 @@ vi.mock('../../../functions/_shared/s3', async importOriginal => ({
 
 async function seed() {
   const accountKey = crypto.randomUUID()
-  const auth = { accountKey, sessionId: accountKey }
-  const session: SessionData = {
-    google_sub: accountKey,
+  const session: SessionData = testSession(accountKey, {
     access_token: 'privacy-access-sentinel',
     refresh_token: 'privacy-refresh-sentinel',
-    expires_at: Date.now() + 3_600_000,
     id_token: 'privacy-id-sentinel',
     id_token_verified: true,
-  }
-  await createSession(accountKey, session, env)
+  })
+  const auth = { accountKey, sessionId: accountKey, vaultKey: session.vault_key }
+  await createTestSession(accountKey, session, env)
   const index = env.S3_SYNC_INDEX.getByName(accountKey)
   await index.setBackupEnabled(true)
   return { auth, index, service: new Service(createExecutionContext(), env) }
@@ -68,11 +66,11 @@ describe('metadata-only reconciliation boundaries', () => {
     expect(s3.deleteObject).not.toHaveBeenCalled()
     expect(await index.getEntry(date)).toBeNull()
 
-    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(auth.sessionId)).first<{ data: string }>()
-    expect(row!.data).not.toMatch(/privacy-(access|refresh|id)-sentinel/)
+    const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(auth.sessionId)).first<{ data: string | null }>()
+    expect(row!.data).toBeNull()
   })
 
-  it('keeps queued deletion metadata through object eviction when no request token exists', async () => {
+  it('drops legacy durable deletion retries after eviction because retries require a request unlock', async () => {
     const { auth, index } = await seed()
     await index.queueDeletion({ ...auth, date }, 'delete-1')
     await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
@@ -84,13 +82,11 @@ describe('metadata-only reconciliation boundaries', () => {
     await index.deferDeletion(date, 'delete-1', Date.now() - 1)
     await evictDurableObject(index)
 
-    expect(await runDurableObjectAlarm(index)).toBe(true)
+    expect(await runDurableObjectAlarm(index)).toBe(false)
     expect(s3.deleteObject).not.toHaveBeenCalled()
     await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
-      expect(state.storage.sql.exec<{ request_id: string; attempts: number; session_id: string }>(
-        'SELECT request_id, attempts, session_id FROM pending_deletions',
-      ).one()).toMatchObject({ request_id: 'delete-1', attempts: 1, session_id: await sessionStorageId(auth.sessionId) })
-      expect(await state.storage.getAlarm()).toBeGreaterThan(Date.now())
+      expect(state.storage.sql.exec('SELECT * FROM pending_deletions').toArray()).toEqual([])
+      expect(await state.storage.getAlarm()).toBeNull()
     })
   })
 

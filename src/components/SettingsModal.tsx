@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BookOpen, CalendarDays, Check, CloudUpload, FolderOpen, HardDrive, Info, Palette, PartyPopper, UserRound, X, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { ExportButton } from './ExportButton'
@@ -140,6 +140,7 @@ interface SettingsModalProps {
   onImport: (entries: { date: string; content: string }[], onProgress: (done: number, total: number) => void) => Promise<ImportResult>
   onClose: () => void
   onSignOut: () => void
+  passkeyControls?: ReactNode
   email?: string
   googleSub?: string
   googleClientId?: string
@@ -161,7 +162,7 @@ interface SettingsModalProps {
   onEntryRestored?: () => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, passkeyControls, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const reducedMotion = useReducedMotion()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
@@ -664,6 +665,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             </button>
           </div>
         </div>
+
+        {passkeyControls}
 
         {/* Appearance */}
         <div className="settings-section" id="settings-appearance">

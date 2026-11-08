@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { startSignIn, checkSession, revokeSession } from '../api/auth'
 import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
 import { clearOAuthCredentials } from '../lib/oauthCredentials'
+import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
+import { addPasskey as addPasskeyCredential, loginWithPasskey, recoverVault as recoverPasskeyVault, registerPasskey } from '../api/passkeys'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
@@ -26,6 +28,16 @@ export interface AuthState {
   signOut: () => void
   handleExpired: () => void
   retryAfterExpired: (selectAccount?: boolean) => void
+  vaultStatus: 'locked' | 'unlocked' | 'unsupported'
+  vaultBusy: boolean
+  vaultError: string | null
+  vaultUserId: string | null
+  setupPasskey: () => Promise<void>
+  unlockPasskey: () => Promise<void>
+  addPasskey: () => Promise<void>
+  recoverVault: (recoveryText: string) => Promise<void>
+  lockVault: () => void
+  clearVaultError: () => void
 }
 
 const KNOWN_AUTH_ERROR_CODES: readonly AuthErrorCode[] = ['sign_in_failed', 'account_mismatch']
@@ -45,6 +57,12 @@ export function useAuth(): AuthState {
   )
   const [authError, setAuthError] = useState<AuthErrorCode | null>(null)
   const [signingIn, setSigningIn] = useState(false)
+  const [vaultStatus, setVaultStatus] = useState<'locked' | 'unlocked' | 'unsupported'>('locked')
+  const [vaultBusy, setVaultBusy] = useState(false)
+  const [vaultError, setVaultError] = useState<string | null>(null)
+  const [vaultUserId, setVaultUserId] = useState<string | null>(null)
+  const vaultRevision = useRef(0)
+  const vaultOperation = useRef<AbortController | null>(null)
   const authRevision = useRef(0)
   const restoring = useRef(true)
 
@@ -58,12 +76,39 @@ export function useAuth(): AuthState {
       authRevision.current++
       restoring.current = false
       rememberSession(false)
+      vaultRevision.current++
+      vaultOperation.current?.abort()
+      vaultOperation.current = null
+      clearVaultKey()
+      setVaultUserId(null)
+      setVaultStatus('locked')
+      setVaultBusy(false)
       setStatus('signedOut')
       setTokenExpired(false)
       setAuthError(null)
       setSigningIn(false)
     })
     return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const clearOnPageExit = () => {
+      vaultOperation.current?.abort()
+      vaultOperation.current = null
+      clearVaultKey()
+      clearOAuthCredentials()
+    }
+    const resetAfterHistoryRestore = (event: PageTransitionEvent) => {
+      // A bfcache restore keeps React state, although pagehide discarded keys.
+      // Re-enter the unlock flow instead of leaving an unusable signed-in view.
+      if (event.persisted) invalidateAccount()
+    }
+    window.addEventListener('pagehide', clearOnPageExit)
+    window.addEventListener('pageshow', resetAfterHistoryRestore)
+    return () => {
+      window.removeEventListener('pagehide', clearOnPageExit)
+      window.removeEventListener('pageshow', resetAfterHistoryRestore)
+    }
   }, [])
 
   // Pick up an OAuth failure once and remove it from copied/reloaded URLs.
@@ -100,6 +145,14 @@ export function useAuth(): AuthState {
     restoring.current = true
     checkSession().then(info => {
       if (cancelled || revision !== authRevision.current) return
+      const activeVaultUser = getVaultUserId()
+      if (activeVaultUser) {
+        setVaultUserId(activeVaultUser)
+        setVaultStatus('unlocked')
+      } else {
+        setVaultUserId(null)
+        setVaultStatus('locked')
+      }
       const account = info.signedIn ? accountIdentity(info) : null
       const latest = readAuthEvent()
       if (latest && latest.id !== startedEvent && latest.account !== account) {
@@ -125,8 +178,18 @@ export function useAuth(): AuthState {
     setSigningIn(true)
     startSignIn({ selectAccount: Boolean(options.selectAccount) }).then(info => {
       if (revision !== authRevision.current) return
+      const unlockedUserId = getVaultUserId()
+      if (info.userId && unlockedUserId && info.userId !== unlockedUserId) {
+        clearVaultKey()
+        setVaultUserId(null)
+        setVaultStatus('locked')
+        throw new Error('vault_account_mismatch')
+      }
       if (options.expectedGoogleSub !== undefined && info.googleSub !== options.expectedGoogleSub) {
         clearOAuthCredentials()
+        clearVaultKey()
+        setVaultUserId(null)
+        setVaultStatus('locked')
         throw new Error('account_mismatch')
       }
       const account = accountIdentity(info)
@@ -142,11 +205,78 @@ export function useAuth(): AuthState {
       setSigningIn(false)
     }).catch(error => {
       if (revision !== authRevision.current) return
+      // Cancelling Google consent does not lose the already-unlocked passkey.
+      // Account invalidation and actual vault mismatches clear it separately.
+      if (!getVaultUserId()) {
+        setVaultUserId(null)
+        setVaultStatus('locked')
+      }
       setSigningIn(false)
       setAuthError(error instanceof Error && error.message === 'account_mismatch' ? 'account_mismatch' : 'sign_in_failed')
       console.error('Google sign-in failed:', error)
     })
   }, [])
+
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add' | 'recover', recoveryText?: string) => {
+    const revision = ++vaultRevision.current
+    vaultOperation.current?.abort()
+    const controller = new AbortController()
+    vaultOperation.current = controller
+    setVaultBusy(true)
+    setVaultError(null)
+    try {
+      if (action === 'setup') {
+        const result = await registerPasskey(controller.signal)
+        if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
+        setVaultUserId(result.userId)
+      } else if (action === 'unlock') {
+        const result = await loginWithPasskey(controller.signal)
+        if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
+        setVaultUserId(result.userId)
+      } else if (action === 'add') {
+        const userId = getVaultUserId()
+        if (!userId) throw new Error('Unlock the vault before adding another passkey')
+        await addPasskeyCredential(userId, controller.signal)
+        if (revision !== vaultRevision.current) return
+      } else {
+        if (!recoveryText) throw new Error('Choose your recovery file first')
+        const result = await recoverPasskeyVault(recoveryText, controller.signal)
+        if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
+        setVaultUserId(result.userId)
+      }
+      setVaultStatus('unlocked')
+    } catch (error) {
+      if (revision === vaultRevision.current) {
+        if (action !== 'add') {
+          clearVaultKey()
+          setVaultUserId(null)
+          setVaultStatus('locked')
+        }
+        const message = error instanceof Error ? error.message : 'Passkey setup could not be completed'
+        setVaultError(message)
+        if (action !== 'add' && /support|secure connection/i.test(message)) setVaultStatus('unsupported')
+      }
+    } finally {
+      if (vaultOperation.current === controller) vaultOperation.current = null
+      if (revision === vaultRevision.current) setVaultBusy(false)
+    }
+  }, [])
+
+  const setupPasskey = useCallback(() => runVaultAction('setup'), [runVaultAction])
+  const unlockPasskey = useCallback(() => runVaultAction('unlock'), [runVaultAction])
+  const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
+  const recoverVault = useCallback((recoveryText: string) => runVaultAction('recover', recoveryText), [runVaultAction])
+  const lockVault = useCallback(() => {
+    vaultRevision.current++
+    vaultOperation.current?.abort()
+    vaultOperation.current = null
+    clearVaultKey()
+    clearOAuthCredentials()
+    setVaultUserId(null)
+    setVaultStatus('locked')
+    setVaultBusy(false)
+  }, [])
+  const clearVaultError = useCallback(() => setVaultError(null), [])
 
   const signOut = useCallback(() => {
     const account = getAccountSnapshot().account
@@ -154,6 +284,13 @@ export function useAuth(): AuthState {
       // A delayed logout completion must not clear a newly signed-in account.
       if (getAccountSnapshot().account === null && (!readAuthEvent() || readAuthEvent()?.account === account)) announceAccount(null)
     }).catch(() => {})
+    vaultRevision.current++
+    vaultOperation.current?.abort()
+    vaultOperation.current = null
+    clearVaultKey()
+    setVaultUserId(null)
+    setVaultStatus('locked')
+    setVaultBusy(false)
     authRevision.current++
     restoring.current = false
     setActiveAccount(null, true)
@@ -172,5 +309,5 @@ export function useAuth(): AuthState {
     signIn({ selectAccount, expectedGoogleSub: googleSub })
   }, [googleSub, signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, unlockPasskey, addPasskey, recoverVault, lockVault, clearVaultError }
 }

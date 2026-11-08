@@ -1,5 +1,5 @@
-import type { Env, SessionData } from '../_shared/session'
-import { createSession, addSubSessionIndex, makeSessionCookie, clearOAuthStateCookie, clearOAuthPkceCookie, parseOAuthStateCookie, parseOAuthPkceCookie, SESSION_TTL, jsonResponse } from '../_shared/session'
+import type { Env } from '../_shared/session'
+import { clearOAuthStateCookie, clearOAuthPkceCookie, parseOAuthStateCookie, parseOAuthPkceCookie, jsonResponse } from '../_shared/session'
 import { consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
 
@@ -88,11 +88,13 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
 
-  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; channelId?: string }
+  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; channelId?: string; userId?: string; sessionHandle?: string }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
     stateRecord = {
       codeVerifier: parsed.codeVerifier,
+      userId: parsed.userId,
+      sessionHandle: parsed.sessionHandle,
       nonce: parsed.nonce ?? '',
       popup: parsed.popup === true,
       channelId: typeof parsed.channelId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.channelId)
@@ -102,6 +104,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   } catch {
     stateRecord = { codeVerifier: stateRecordRaw, nonce: '', popup: false }
   }
+
+  // The Strict session cookie is not sent on Google's cross-site callback.
+  // Bind the one-use OAuth state to the passkey session captured before redirect.
+  if (!env.AUTH_DB || !stateRecord.userId || !/^sha256:[0-9a-f]{64}$/.test(stateRecord.sessionHandle ?? '')) {
+    return consumedStateError({ error: 'Passkey session required' }, 401, secure)
+  }
+  const active = await env.AUTH_DB.prepare('SELECT user_id FROM auth_sessions WHERE id = ? AND user_id = ? AND revoked = 0 AND expires_at > ?')
+    .bind(stateRecord.sessionHandle, stateRecord.userId, Date.now()).first()
+  if (!active) return consumedStateError({ error: 'Passkey session expired' }, 401, secure)
 
   // Support attempts created before PKCE moved to the short lived browser cookie.
   const codeVerifier = stateRecord.codeVerifier ?? parseOAuthPkceCookie(request)
@@ -158,28 +169,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   } catch {
     return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
   }
-  const googleSub = claims.sub
-
-  const sessionId = crypto.randomUUID()
-  const session: SessionData = {
-    client_id: env.GOOGLE_CLIENT_ID,
-    ...(googleSub ? { google_sub: googleSub } : {}),
-  }
-  // D1 creates the session and identity indexes atomically. These helpers are
-  // no-ops there; retain the ordering below for KV-only deployments.
-  // Written before createSession: if the index write fails, no session was ever
-  // created (fails the login, visibly and retryably); if saveSession instead
-  // failed *after* a successful index write, the only trace left is a dangling
-  // index entry pointing at a session that doesn't exist — harmless, since
-  // getSession already treats a missing session record
-  // as absent. The other order risks the opposite and worse case: a live
-  // session with no index entry, invisible to /auth/risc's revocation.
-  try {
-    await addSubSessionIndex(googleSub, sessionId, env)
-    await createSession(sessionId, session, env)
-  } catch {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
-  }
+  // Google identity and credentials remain in this response's memory only.
+  // /auth/session verifies them again and seals account metadata with the user's
+  // request-scoped key; the OAuth callback has no key and writes no profile.
+  void claims
 
   const credential = {
     accessToken: tokens.access_token,
@@ -189,7 +182,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   if (stateRecord.popup) {
     const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure)
     const headers = new Headers(response.headers)
-    headers.append('Set-Cookie', makeSessionCookie(sessionId, SESSION_TTL, secure))
     headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
     return new Response(response.body, { status: response.status, headers })
   }

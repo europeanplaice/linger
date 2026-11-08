@@ -16,6 +16,8 @@ import { useS3Backfill } from './hooks/useS3Backfill'
 import { useS3StaleEntryAutoResync } from './hooks/useS3StaleEntryAutoResync'
 import { Keyboard } from 'lucide-react'
 import { Landing } from './components/Landing'
+import { PasskeyGate } from './components/PasskeyGate'
+import { PasskeySettings } from './components/PasskeySettings'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
 import { EntryEditor } from './components/EntryEditor'
@@ -153,6 +155,7 @@ export default function App() {
     signOut,
     handleExpired,
     retryAfterExpired,
+    vaultStatus, vaultBusy, vaultError, setupPasskey, unlockPasskey, addPasskey, recoverVault, lockVault, clearVaultError,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { accent: accentColor, setAccent } = useAccentColor()
@@ -652,18 +655,26 @@ export default function App() {
     }
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
 
+  const passkeyGate = vaultStatus !== 'unlocked' ? (
+    <PasskeyGate busy={vaultBusy} error={vaultError} returning={hadSession}
+      onSetup={() => { void setupPasskey() }} onUnlock={() => { void unlockPasskey() }}
+      onRecover={recoverVault} onClearError={clearVaultError} />
+  ) : undefined
+
   if (status === 'initializing') {
     // A returning session restores into the app shell; everyone else (including
     // crawlers and first-time visitors) sees the landing, which matches the
     // build-time prerendered HTML so there is no flash before React mounts.
     return hadSession
       ? <RestoringScreen selectedDate={selectedDate} />
-      : <Landing onSignIn={() => signIn()} onUseAnotherAccount={() => signIn({ selectAccount: true })} onRetry={() => retryAfterExpired()} authError={authError} onDismissAuthError={clearAuthError} />
+      : <Landing passkeyGate={passkeyGate} onLockVault={vaultStatus === 'unlocked' ? lockVault : undefined} onSignIn={() => signIn()} onUseAnotherAccount={() => signIn({ selectAccount: true })} onRetry={() => retryAfterExpired()} authError={authError} onDismissAuthError={clearAuthError} />
   }
 
   if (status === 'signedOut' && !tokenExpired) {
     return (
       <Landing
+        passkeyGate={passkeyGate}
+        onLockVault={vaultStatus === 'unlocked' ? lockVault : undefined}
         onSignIn={() => signIn()}
         onUseAnotherAccount={() => signIn({ selectAccount: true })}
         onRetry={() => retryAfterExpired()}
@@ -776,6 +787,7 @@ export default function App() {
               onImport={diary.importAll}
               onClose={() => setSettingsOpen(false)}
               onSignOut={handleSignOut}
+              passkeyControls={<PasskeySettings busy={vaultBusy} error={vaultError} onAdd={() => { void addPasskey() }} />}
               email={email ?? undefined}
               googleSub={googleSub ?? undefined}
               googleClientId={googleClientId ?? undefined}

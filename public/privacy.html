@@ -93,15 +93,17 @@
     stored to complete sign-in, while the PKCE verifier is kept in a short-lived browser cookie.
   </p>
   <p>
-    Cloudflare D1 stores session metadata, including a hash of the session ID, your Google account
-    identifier, expiry, and Drive file identifiers. Older sessions can retain their original ID
-    until they expire or are removed. Your email is read from the verified identity token
+    Cloudflare D1 stores a random Linger account identifier, public passkey credentials, encrypted
+    master keys, session ID hashes, and expiry. Your Google account identifier and cached Drive
+    identifiers are stored in an encrypted account envelope protected by your passkey-derived key.
+    Historical records remain subject to separate retention and cleanup. Your email is read from the verified identity token
     for display and is not stored in session records. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
-    Reloading or closing the page discards those tokens, and expiry requires authorization again.
-    New session records expire 30 days after creation or renewal; older sessions are not extended
-    and may require sign-in again. Sign-out invalidates the session.
+    Reloading or closing the page discards those tokens and the unlocked metadata key; using Linger
+    again requires passkey unlock and Google authorization. New session records expire 30 days after
+    creation or renewal. Sign-out invalidates the session. Metadata keys are used only in request
+    memory, including on the backend when needed, and are not saved in plaintext.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.
@@ -113,8 +115,9 @@
     contain a verifier until they are consumed or removed by scheduled cleanup.
   </p>
   <p>
-    Cloudflare's coordination services store operational metadata such as Drive file IDs, entry
-    dates and versions, S3 sync status, and backfill progress so writes and backups can be coordinated
+    Cloudflare's coordination services store operational metadata such as entry dates and versions,
+    S3 sync status, and backfill progress. New cached Drive identifiers and create reservations are
+    encrypted with the user metadata key so writes and backups can be coordinated
     and retried. This metadata does not include diary entry text. Cloudflare may also process request
     logs, error diagnostics, and workflow state under the retention rules for the services and account
     plan in use. The application avoids deliberately logging sensitive values, but provider-side
@@ -256,6 +259,15 @@
     <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.
     Revoking access does not delete files already stored in Drive or S3. For questions about personal
     information held by Linger's services, contact us below.
+  </p>
+
+  <p>
+    You can save a recovery file from Settings or add another compatible passkey. The recovery file
+    contains the metadata master key and must be kept private. If every passkey and recovery file is
+    lost, old encrypted account metadata cannot be decrypted. Your plaintext diary files remain in
+    Google Drive: create a new Linger passkey and authorize the same Google account to reconnect.
+    A verified Google security event can invalidate all Linger sessions because the service does not
+    retain a readable Google-account lookup index.
   </p>
 
   <h2>10. Security</h2>

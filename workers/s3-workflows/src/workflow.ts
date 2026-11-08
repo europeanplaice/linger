@@ -47,7 +47,13 @@ async function createChainedInstance(env: WorkflowEnv, id: string, params: S3Bac
       id,
       // Workflow payloads are durable storage. Keep the session handle opaque
       // while preserving getSession() compatibility with both hashed and old IDs.
-      params: { ...params, sessionId: await durableSessionHandle(params.sessionId, env) },
+      params: {
+        sessionId: await durableSessionHandle(params.sessionId, env),
+        accountKey: params.accountKey,
+        jobId: params.jobId,
+        ...(params.scope ? { scope: params.scope.map(({ date, version }) => ({ date, version })) } : {}),
+        ...(params.chunkIndex !== undefined ? { chunkIndex: params.chunkIndex } : {}),
+      },
       retention: { successRetention: '1 hour', errorRetention: '1 day' },
     })
   } catch (error) {
@@ -75,7 +81,7 @@ async function processBatch(
     async () => {
       const session = await authorizedSession(env, params)
       const accessToken = await getValidAccessToken(params.sessionId, session, env)
-      const config = params.config ?? await loadS3Config(accessToken, params.sessionId, session, env)
+      const config = await loadS3Config(accessToken, params.sessionId, session, env)
       if (!config || !config.enabled) throw new NonRetryableError('S3 backup is not enabled')
       const index = indexFor(env, params.accountKey)
       // params.config is frozen at backfill start and carried through every chained
@@ -92,7 +98,7 @@ async function processBatch(
       for (const target of targets) {
         try {
           const known = await index.getEntry(target.date)
-          if (target.fileId && known?.fileId === target.fileId && target.version && known.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
+          if (target.version && known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version)) continue
           await index.reconcileEntry({ sessionId: params.sessionId, accountKey: params.accountKey, date: target.date, expectedBucket: config.bucket, jobId: params.jobId })
         } catch (error) {
           if (error instanceof Error && error.name === 'SupersededBackfillError') throw new NonRetryableError('Backfill was superseded')
@@ -172,7 +178,7 @@ export class S3BackfillWorkflow extends WorkflowEntrypoint<WorkflowEnv, S3Backfi
             const entries = await listEntryPage(accessToken, params.sessionId, session, this.env, pageToken)
             return {
               entries: entries.files
-                .map(file => ({ date: file.name.match(/^diary-(\d{4}-\d{2}-\d{2})\.(?:txt|md)$/)?.[1] ?? '', fileId: file.id, version: file.version }))
+                .map(file => ({ date: file.name.match(/^diary-(\d{4}-\d{2}-\d{2})\.(?:txt|md)$/)?.[1] ?? '', version: file.version }))
                 .filter(target => target.date),
               ...(entries.nextPageToken ? { nextPageToken: entries.nextPageToken } : {}),
             } satisfies EntryPage

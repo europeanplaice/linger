@@ -4,6 +4,7 @@ import type { AuthErrorCode } from '../hooks/useAuth'
 
 interface Props {
   onSignIn: () => void
+  onLockVault?: () => void
   onUseAnotherAccount?: () => void
   onRetry?: () => void
   tokenExpired?: boolean
@@ -12,7 +13,7 @@ interface Props {
   onDismissAuthError?: () => void
 }
 
-export function LoginScreen({ onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError }: Props) {
+export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
@@ -49,6 +50,7 @@ export function LoginScreen({ onSignIn, onUseAnotherAccount, onRetry, tokenExpir
             {t.login.useAnotherAccount}
           </button>
         )}
+        {onLockVault && <button className="btn-use-another-account" type="button" onClick={onLockVault}>{t.login.passkeyChange}</button>}
         <p className="login-footer">
           <a href="/home" target="_blank" rel="noopener noreferrer">
             {t.login.aboutLinger}

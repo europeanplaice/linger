@@ -1,5 +1,6 @@
 import { accountRequest } from '../lib/accountSession'
 import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials } from '../lib/oauthCredentials'
+import { clearVaultKey, getVaultUserId, setVaultKeyHeader } from '../lib/passkeyVault'
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
@@ -89,26 +90,41 @@ export interface SessionInfo {
   email: string | null
   googleSub: string | null
   googleClientId: string | null
+  userId: string | null
 }
 
 export async function checkSession(): Promise<SessionInfo> {
   const accessToken = getAccessToken()
-  if (!accessToken) return { signedIn: false, email: null, googleSub: null, googleClientId: null }
+  if (!accessToken) return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+  const requestVaultUserId = getVaultUserId()
   try {
     const headers = new Headers({ Authorization: `Bearer ${accessToken}` })
+    setVaultKeyHeader(headers)
     const idToken = getIdToken()
     if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
     const resp = await fetch('/auth/session', { credentials: 'include', headers, cache: 'no-store', redirect: 'error' })
-    if (resp.status === 401) return { signedIn: false, email: null, googleSub: null, googleClientId: null }
-    const data = await resp.json() as { signedIn: boolean; email?: string | null; googleSub?: string | null; googleClientId?: string | null }
+    if (resp.status === 401) return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+    const data = await resp.json() as { signedIn: boolean; email?: string | null; googleSub?: string | null; googleClientId?: string | null; userId?: string | null }
+    const unlockedUserId = getVaultUserId()
+    if (requestVaultUserId && unlockedUserId !== requestVaultUserId) {
+      return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+    }
+    if (unlockedUserId && data.userId && unlockedUserId !== data.userId) {
+      if (requestVaultUserId === unlockedUserId) {
+        clearVaultKey()
+        clearOAuthCredentials()
+      }
+      return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+    }
     return {
       signedIn: Boolean(data.signedIn),
       email: data.email ?? null,
       googleSub: data.googleSub ?? null,
       googleClientId: data.googleClientId ?? null,
+      userId: data.userId ?? null,
     }
   } catch {
-    return { signedIn: false, email: null, googleSub: null, googleClientId: null }
+    return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
   }
 }
 
@@ -118,6 +134,9 @@ export async function revokeSession(): Promise<void> {
   cancelPendingSignIn = null
   clearOAuthCredentials()
   const { init } = accountRequest({ method: 'POST' })
-  const response = await fetch('/auth/logout', { ...init, credentials: 'include' })
+  const headers = new Headers(init.headers)
+  setVaultKeyHeader(headers)
+  clearVaultKey()
+  const response = await fetch('/auth/logout', { ...init, headers, credentials: 'include', redirect: 'error' })
   if (!response.ok) throw new Error('Logout failed')
 }

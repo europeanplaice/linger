@@ -1,5 +1,5 @@
 import type { S3WorkflowService } from './s3Workflow'
-import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session, sanitizeSession } from './authStore'
+import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
@@ -22,12 +22,15 @@ export interface Env {
   // both bindings route folder discovery to the same account-scoped object.
   DIARY_WRITER?: {
     getByName(name: string): {
-      ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string }): Promise<string>
+      ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
     }
   }
 }
 
 export interface SessionData {
+  user_id?: string // random passkey principal, never a Google identifier
+  vault_key?: string // request memory only; never serialize
+  vault_snapshot?: SessionData // request-local baseline for merging encrypted metadata
   access_token?: string
   expires_at?: number // ms since epoch; only in the current request
   folder_id?: string
@@ -83,44 +86,25 @@ export function parseSessionId(request: Request): string | null {
   return null
 }
 
-export async function getSession(sessionId: string, env: Env): Promise<SessionData | null> {
-  if (env.AUTH_DB) return readD1Session(sessionId, { ...env, AUTH_DB: env.AUTH_DB })
-  const raw = await env.SESSIONS.get(`session:${sessionId}`)
-  if (!raw) return null
-  if (await isSessionRevoked(sessionId, env)) return null
-  try {
-    return sanitizeSession(JSON.parse(raw) as SessionData)
-  } catch {
-    return null
-  }
+export async function getSession(sessionId: string, env: Env, vaultKey?: string): Promise<SessionData | null> {
+  if (!env.AUTH_DB) return null
+  return readD1Session(sessionId, { ...env, AUTH_DB: env.AUTH_DB }, vaultKey)
 }
 
-// Durable retry payloads contain the stored digest rather than the cookie's
-// bearer ID. Keep this path separate so a digest presented as a cookie cannot
-// be used to retrieve the associated session.
-export async function getSessionByStorageId(storageId: string, env: Env): Promise<SessionData | null> {
+// Only trusted service RPC may supply an internal storage handle.
+export async function getSessionByStorageId(storageId: string, env: Env, vaultKey?: string): Promise<SessionData | null> {
   if (!env.AUTH_DB) return null
-  return readD1SessionByStorageId(storageId, { ...env, AUTH_DB: env.AUTH_DB })
+  return readD1SessionByStorageId(storageId, { ...env, AUTH_DB: env.AUTH_DB }, vaultKey)
 }
 
 export async function saveSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
-  if (env.AUTH_DB) return saveD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
-  if (await isSessionRevoked(sessionId, env)) throw new SessionRevokedError('Session revoked')
-  await env.SESSIONS.put(`session:${sessionId}`, JSON.stringify(sanitizeSession(session)), { expirationTtl: SESSION_TTL })
-  // Revocation can finish while put() is in flight. Its separate marker remains
-  // authoritative even if another location still reads this late session write.
-  if (await isSessionRevoked(sessionId, env)) {
-    await env.SESSIONS.delete(`session:${sessionId}`)
-    throw new SessionRevokedError('Session revoked')
-  }
+  if (!env.AUTH_DB) throw new SessionRevokedError('Passkey storage unavailable')
+  return saveD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
 }
 
 export async function createSession(sessionId: string, session: SessionData, env: Env): Promise<void> {
-  if (env.AUTH_DB) {
-    session.renewed_at = Date.now()
-    return createD1Session(sessionId, sanitizeSession(session), { ...env, AUTH_DB: env.AUTH_DB })
-  }
-  return saveSession(sessionId, sanitizeSession(session), env)
+  if (!env.AUTH_DB) throw new SessionRevokedError('Passkey storage unavailable')
+  return createD1Session(sessionId, session, { ...env, AUTH_DB: env.AUTH_DB })
 }
 
 export async function isSessionRevoked(sessionId: string, env: Env): Promise<boolean> {
@@ -226,8 +210,10 @@ export async function removeEmailSessionIndex(email: string, sessionId: string, 
 }
 
 export async function addSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {
-  if (env.AUTH_DB) return
-  await env.SESSIONS.put(subSessionIndexKey(sub, sessionId), '', { expirationTtl: SESSION_TTL })
+  // Google identifiers must never be used as persistent index keys.
+  void sub
+  void sessionId
+  void env
 }
 
 export async function removeSubSessionIndex(sub: string, sessionId: string, env: Env): Promise<void> {

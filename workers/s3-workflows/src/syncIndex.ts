@@ -90,22 +90,19 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return this.serialize(async () => {
       const session = await authorizedSession(this.env, input)
       const accessToken = await getValidAccessToken(input.sessionId, session, this.env)
-      const folder = await ensureAccountDiaryFolder(this.env, input.sessionId, session)
+      const folder = await ensureAccountDiaryFolder(this.env, input.sessionId, session, input.vaultKey)
       const file = await findJsonFile(accessToken, folder, 's3_settings.json')
       const old = file ? await readJsonFile<S3Config>(accessToken, file) : null
       // Retain the old target before remote I/O so a lost Drive response cannot
       // make a retried bucket change look like a plain re-save.
-      const target = this.configValue('bucket') ?? old?.bucket ?? ''
-      const bucketChanged = target !== input.config.bucket
+      const bucketChanged = old?.bucket !== input.config.bucket
       const needsBackfill = input.config.enabled && (bucketChanged || !old?.enabled || this.configValue('backfill_required') === '1')
       if (bucketChanged || needsBackfill) this.assertNoActiveJob()
-      this.setConfigValue('bucket', target)
       if (needsBackfill) this.setConfigValue('backfill_required', '1')
       this.settingsUpdating = true
       try {
         const meta = await writeJsonFile(accessToken, folder, 's3_settings.json', input.config, file ?? undefined)
         if (bucketChanged) this.resetAllData()
-        this.setConfigValue('bucket', input.config.bucket)
         this.setBackupEnabled(input.config.enabled)
         return { meta, needsBackfill }
       } finally {
@@ -122,8 +119,8 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     this.ctx.storage.sql.exec('INSERT INTO account_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value)
   }
 
-  markBackfillStarted(bucket: string): void {
-    if (this.configValue('bucket') === bucket) this.setConfigValue('backfill_required', '0')
+  markBackfillStarted(): void {
+    this.setConfigValue('backfill_required', '0')
   }
 
   private assertNoActiveJob(): void {
@@ -247,6 +244,17 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
       // ALTER failure surfaces instead of leaving a schema the code can't use.
       const entryColumns = this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(entries)').toArray()
       if (!entryColumns.some(column => column.name === 'file_id')) this.ctx.storage.sql.exec('ALTER TABLE entries ADD COLUMN file_id TEXT')
+      // Older versions stored raw Drive file IDs here. The column remains for
+      // schema compatibility, but values are no longer needed as a cache and
+      // are cleared on every startup. Historical backups may still contain the
+      // old values and are handled in the privacy migration plan.
+      this.ctx.storage.sql.exec('UPDATE entries SET file_id = NULL WHERE file_id IS NOT NULL')
+      this.ctx.storage.sql.exec("DELETE FROM account_config WHERE key = 'bucket'")
+      // Pending alarm retries predate request-scoped vault unlock and cannot be
+      // resumed without persisting the key. Future retries happen on an
+      // authenticated request that supplies it.
+      this.ctx.storage.sql.exec('DELETE FROM pending_deletions')
+      await this.ctx.storage.deleteAlarm()
       const jobColumns = this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(jobs)').toArray()
       if (!jobColumns.some(column => column.name === 'updated_at')) {
         this.ctx.storage.sql.exec('ALTER TABLE jobs ADD COLUMN updated_at TEXT')
@@ -295,8 +303,11 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   startJob(requestId: string, jobId: string, workflowId: string, enabled: boolean, startedAt: string, expectedBucket?: string): JobReservation {
+    // Bucket names now remain in Drive and request memory only.
+    void expectedBucket
     if (this.settingsUpdating) throw new Error('A settings update is already running')
-    if (expectedBucket && this.configValue('bucket') && this.configValue('bucket') !== expectedBucket) throw new Error('S3 backup target changed')
+    // The current bucket is read from Drive during reconciliation; never retain
+    // the bucket name as plaintext DO configuration.
     const existingRequest = this.ctx.storage.sql.exec<JobRow>(
       'SELECT job_id, state, total, completed, failed, failed_dates, started_at, updated_at, finished_at, workflow_id, error FROM jobs WHERE request_id = ?',
       requestId,
@@ -469,13 +480,12 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
 
   getEntry(date: string): EntrySyncStatus | null {
     const row = this.ctx.storage.sql.exec<EntryRow>(
-      'SELECT date, file_id, drive_version, synced_version, state, updated_at, last_error FROM entries WHERE date = ?',
+      'SELECT date, drive_version, synced_version, state, updated_at, last_error FROM entries WHERE date = ?',
       date,
     ).toArray()[0]
     if (!row) return null
     return {
       date: row.date,
-      ...(row.file_id ? { fileId: row.file_id } : {}),
       ...(row.drive_version ? { driveVersion: row.drive_version } : {}),
       ...(row.synced_version ? { syncedVersion: row.synced_version } : {}),
       state: row.state as S3SyncState,
@@ -484,9 +494,7 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     }
   }
 
-  markPending(date: string, driveVersion: string | undefined, updatedAt: string, fileId?: string): EntrySyncStatus | null {
-    const known = this.getEntry(date)
-    if (fileId && known && known.fileId !== fileId) this.markDeleted(date)
+  markPending(date: string, driveVersion: string | undefined, updatedAt: string, _fileId?: string): EntrySyncStatus | null {
     const current = this.getEntry(date)
     if (current?.driveVersion && driveVersion && isAtLeast(current.driveVersion, driveVersion) && current.driveVersion !== driveVersion) {
       return current
@@ -501,11 +509,10 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
       current?.syncedVersion ?? null,
       updatedAt,
     )
-    if (fileId) this.ctx.storage.sql.exec('UPDATE entries SET file_id = ? WHERE date = ?', fileId, date)
     return this.getEntry(date)
   }
 
-  markSynced(date: string, driveVersion: string | undefined, updatedAt: string, fileId?: string): EntrySyncStatus | null {
+  markSynced(date: string, driveVersion: string | undefined, updatedAt: string, _fileId?: string): EntrySyncStatus | null {
     const current = this.getEntry(date)
     if (current?.driveVersion && driveVersion && current.driveVersion !== driveVersion && isAtLeast(current.driveVersion, driveVersion)) return current
     const syncedVersion = current?.syncedVersion && driveVersion && isAtLeast(current.syncedVersion, driveVersion)
@@ -520,7 +527,6 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
       syncedVersion ?? null,
       updatedAt,
     )
-    if (fileId) this.ctx.storage.sql.exec('UPDATE entries SET file_id = ? WHERE date = ?', fileId, date)
     return this.getEntry(date)
   }
 

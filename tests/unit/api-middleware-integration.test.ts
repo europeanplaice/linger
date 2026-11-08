@@ -1,3 +1,6 @@
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { getSession } from '../../functions/_shared/session'
+import { getPasskeySessionUserId } from '../../functions/_shared/authStore'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { onRequest as apiMiddleware } from '../../functions/api/_middleware'
 import { onRequestGet as onGetEntry, onRequestPost as onPostEntry } from '../../functions/api/drive/entry/[date]'
@@ -12,7 +15,7 @@ import { createFakeKV, type FakeKV } from '../helpers/fakeKV'
 // started reading a differently-named field, every isolated test above would
 // keep passing while the real request chain broke. These tests instead compose
 // the real middleware with a real route handler, sharing one context object and
-// a real (in-memory) KV, exactly as Cloudflare Pages wires `_middleware.ts` to
+// a migrated in-memory SQL database with encrypted metadata, exactly as Cloudflare Pages wires `_middleware.ts` to
 // the leaf handler via `context.next()`.
 
 vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
@@ -28,20 +31,19 @@ function makeSession(overrides?: Record<string, unknown>) {
   }
 }
 
-function makeEnv(kv: FakeKV) {
-  const base = {
-    SESSIONS: kv,
-    GOOGLE_CLIENT_ID: 'client-id',
-    GOOGLE_CLIENT_SECRET: 'client-secret',
-    SESSION_DOMAIN: 'https://example.com',
-  }
-  return { ...base, S3_WORKFLOW_SERVICE: {
-    mutateDiaryEntry: async (input: { sessionId: string; date: string; body: string }) => {
-      const session = JSON.parse((await kv.get(`session:${input.sessionId}`))!)
+async function makeEnv(kv: FakeKV) {
+  const seeded = await createPasskeyTestEnv(JSON.parse(await kv.get('session:sid123') ?? '{"google_sub":"account-a"}'))
+  const base = seeded.env
+  return { ...base, testHeaders: seeded.headers, S3_WORKFLOW_SERVICE: {
+    mutateDiaryEntry: async (input: { sessionId: string; date: string; body: string; vaultKey?: string; accessToken: string; expiresAt: number }) => {
+      const session = await getSession(input.sessionId, base, input.vaultKey)
+      if (!session) return new Response('{}', { status: 401 })
+      session.access_token = input.accessToken
+      session.expires_at = input.expiresAt
       return saveDiaryEntry({
         request: new Request('https://example.com/', { method: 'POST', body: input.body }),
         params: { date: input.date }, env: base as never,
-        data: { session, sessionId: input.sessionId, accessToken: session.access_token }, waitUntil: vi.fn(),
+        data: { session, sessionId: input.sessionId, accessToken: input.accessToken }, waitUntil: vi.fn(),
       })
     },
   } }
@@ -49,7 +51,7 @@ function makeEnv(kv: FakeKV) {
 
 // Chains api/_middleware.ts to the GET entry/[date] handler via a single shared
 // context, the same object both layers read/write in production.
-function makeChainedContext(request: Request, env: ReturnType<typeof makeEnv>, params: Record<string, string>) {
+function makeChainedContext(request: Request, env: Awaited<ReturnType<typeof makeEnv>>, params: Record<string, string>) {
   const context: Record<string, unknown> = {
     request,
     env,
@@ -83,7 +85,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     { baseVersion: '7' },
   ])('blocks updates outside the diary folder through real file authorization with options %j', async (options) => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession({ folder_id: 'diary-folder' })) })
-    const env = makeEnv(kv)
+    const env = await makeEnv(kv)
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       if (String(input).includes('/tokeninfo')) return Promise.resolve(new Response(JSON.stringify({
         aud: 'client-id', sub: 'account-a', expires_in: 3600,
@@ -97,7 +99,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     vi.stubGlobal('fetch', fetchMock)
     const request = new Request('https://example.com/api/drive/entry/2026-05-01', {
       method: 'POST',
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123', Origin: 'https://example.com' },
+      headers: { ...env.testHeaders, Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123', Origin: 'https://example.com' },
       body: JSON.stringify({ content: 'overwrite', fileId: 'externalFile12345678', ...options }),
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
@@ -117,9 +119,9 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
 
   it('threads sessionId/accessToken from middleware into the handler and returns the entry', async () => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
-    const env = makeEnv(kv)
+    const env = await makeEnv(kv)
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123' },
+      headers: { ...env.testHeaders, Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer at-123' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -127,7 +129,7 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
 
     expect(response.status).toBe(200)
     expect(context.next).toHaveBeenCalledOnce()
-    // The handler actually ran with the accessToken the middleware resolved from KV,
+    // The handler actually ran with the accessToken the middleware validated from the request,
     // not a hardcoded test double — proves the data handoff, not just that *a*
     // response came back.
     expect(vi.mocked(drive.findEntryMeta)).toHaveBeenCalledWith(
@@ -139,12 +141,12 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     // the handler produced — the two layers' effects compose, not one replacing
     // the other.
     expect(response.headers.get('Set-Cookie')).toContain('linger_session=sid123')
-    expect(kv.has('session:sid123')).toBe(true)
+    expect(await getPasskeySessionUserId('sid123', env as never)).toBeTruthy()
   })
 
   it('blocks the handler entirely when there is no session cookie', async () => {
     const kv = createFakeKV()
-    const env = makeEnv(kv)
+    const env = await makeEnv(kv)
     const request = new Request('http://localhost/api/drive/entry/2026-05-01')
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -157,13 +159,13 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
 
   it('blocks the handler when request credentials are expired and preserves the metadata session', async () => {
     const kv = createFakeKV({ 'session:sid123': JSON.stringify(makeSession()) })
-    const env = makeEnv(kv)
+    const env = await makeEnv(kv)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       aud: 'client-id', sub: 'account-a', expires_in: 0,
       scope: 'openid email https://www.googleapis.com/auth/drive.file',
     }), { status: 200 })))
     const request = new Request('http://localhost/api/drive/entry/2026-05-01', {
-      headers: { Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer expired' },
+      headers: { ...env.testHeaders, Cookie: 'linger_session=sid123', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer expired' },
     })
     const context = makeChainedContext(request, env, { date: '2026-05-01' })
 
@@ -172,6 +174,6 @@ describe('api/_middleware.ts + drive/entry/[date].ts — real wiring', () => {
     expect(response.status).toBe(401)
     expect(context.next).not.toHaveBeenCalled()
     expect(vi.mocked(drive.findEntryMeta)).not.toHaveBeenCalled()
-    expect(kv.has('session:sid123')).toBe(true)
+    expect(await getPasskeySessionUserId('sid123', env as never)).toBeTruthy()
   })
 })

@@ -1,5 +1,12 @@
 # OAuth privacy boundary
 
+The current passkey design is described in [PASSKEY-PRIVACY.md](PASSKEY-PRIVACY.md).
+Google identifiers and Drive metadata are sealed with a user key instead of
+stored as plaintext session fields. Google authorization still uses the backend
+authorization-code flow and request-memory tokens. Diary files remain plaintext.
+The legacy credential cleanup requirements below are retained for historical
+deployments and must not be mistaken for operations already performed.
+
 The privacy requirement is that persisted application data must not give the host
 operator credentials to Google Drive. OAuth access, refresh, and identity tokens
 must not be written to D1, KV, Durable Object storage, Workflow parameters or
@@ -15,8 +22,8 @@ Drive operation. Server-side refresh tokens are no longer part of this design.
 
 Session storage does not retain Google email addresses. The session endpoint reads
 the email for display from the verified request-scoped identity token. RISC events
-with a Google subject revoke matching sessions; email-only events cannot be mapped
-without retaining an email index and receive a retryable error. Migration 0004
+with a Google subject conservatively revoke all sessions because no readable
+subject index is retained; email-only events receive a retryable error. Migration 0004
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 

@@ -1,4 +1,4 @@
-import { createSession, getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
+import { getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
 import { env, createExecutionContext, runInDurableObject } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
@@ -6,6 +6,8 @@ import * as drive from '../../../functions/_shared/drive'
 import type { DiaryMutationInput } from '../../../functions/_shared/diaryWriter'
 import type { DiaryWriter } from '../src/diaryWriter'
 import type { WorkflowEnv } from '../src/types'
+import { openVaultValue } from '../../../functions/_shared/vaultCrypto'
+import { createTestSession, testSession, vaultKey } from './auth'
 
 vi.mock('../../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../../functions/_shared/drive')>(),
@@ -65,11 +67,12 @@ async function account() {
   const auth = {
     accountKey,
     sessionId: `session-${accountKey}`,
+    vaultKey: vaultKey(),
     accessToken: 'test-access-token',
     expiresAt: Date.now() + 3_600_000,
     idToken: 'test-id-token',
   }
-  await createSession(auth.sessionId, { google_sub: accountKey, access_token: 'test', refresh_token: 'test', expires_at: Date.now() + 3_600_000 }, workflowEnv)
+  await createTestSession(auth.sessionId, testSession(accountKey, { vault_key: auth.vaultKey, access_token: 'test' }), workflowEnv)
   await workflowEnv.S3_SYNC_INDEX.getByName(accountKey).setBackupEnabled(false)
   const service = new Service(createExecutionContext(), workflowEnv)
   const input = (content: string, options: object = {}): DiaryMutationInput => ({ ...auth, date, method: 'POST', body: JSON.stringify({ content, baseVersion: null, ...options }) })
@@ -80,7 +83,7 @@ describe('account-scoped diary mutations', () => {
   it('clears folder-scoped S3 caches when a session adopts the account folder', async () => {
     const { auth, service } = await account()
     const accountFolder = await service.ensureDiaryFolder(auth)
-    const session = (await getSession(auth.sessionId, env))!
+    const session = (await getSession(auth.sessionId, env, auth.vaultKey))!
     session.folder_id = 'old-device-folder'
     session.s3_settings_file_id = 'old-settings-file'
     session.s3_status_file_id = 'old-status-file'
@@ -89,7 +92,7 @@ describe('account-scoped diary mutations', () => {
     await saveSession(auth.sessionId, session, env)
 
     expect(await service.ensureDiaryFolder(auth)).toBe(accountFolder)
-    const reconciled = (await getSession(auth.sessionId, env))!
+    const reconciled = (await getSession(auth.sessionId, env, auth.vaultKey))!
     expect(reconciled.folder_id).toBe(accountFolder)
     expect(reconciled.s3_settings_file_id).toBeUndefined()
     expect(reconciled.s3_status_file_id).toBeUndefined()
@@ -99,28 +102,62 @@ describe('account-scoped diary mutations', () => {
 
   it('reconciles a second device session to the account folder pointer', async () => {
     const { auth, service, writer } = await account()
-    const firstSession = (await getSession(auth.sessionId, env))!
+    const firstSession = (await getSession(auth.sessionId, env, auth.vaultKey))!
     firstSession.folder_id = 'legacy-folder-a'
     await saveSession(auth.sessionId, firstSession, env)
-    const secondSessionId = `other-${auth.sessionId}`
-    await createSession(secondSessionId, { ...firstSession, folder_id: 'legacy-folder-b' }, env)
-
     const firstFolder = await service.ensureDiaryFolder(auth)
+    const secondSessionId = `other-${auth.sessionId}`
+    await createTestSession(secondSessionId, { ...firstSession, folder_id: 'legacy-folder-b' }, env)
+
     const secondFolder = await service.ensureDiaryFolder({ ...auth, sessionId: secondSessionId })
 
     expect(firstFolder).toBe('legacy-folder-a')
     expect(secondFolder).toBe(firstFolder)
-    expect((await getSession(secondSessionId, env))?.folder_id).toBe(firstFolder)
-    expect(await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get('folder'))).toBe(firstFolder)
+    expect((await getSession(secondSessionId, env, auth.vaultKey))?.folder_id).toBe(firstFolder)
+    const folderEnvelope = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get<string>('folder'))
+    expect(folderEnvelope).toMatch(/^v1\./)
+    expect(await openVaultValue<string>(auth.vaultKey, auth.accountKey, 'diary-writer:folder', folderEnvelope!)).toBe(firstFolder)
+  })
+
+  it('drops a legacy object-shaped create reservation and creates an encrypted replacement', async () => {
+    const { auth, service, input, writer } = await account()
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) =>
+      state.storage.put(`create:${date}`, { id: 'legacy-drive-file-id', folderId: 'legacy-folder-id' }),
+    )
+
+    expect((await service.mutateDiaryEntry(input('new entry'))).status).toBe(200)
+    const reservation = await runInDurableObject(writer, async (_instance: DiaryWriter, state) =>
+      state.storage.get<string>(`file:${date}`),
+    )
+    expect(reservation).toMatch(/^v1\./)
+    expect(reservation).not.toContain('legacy-drive-file-id')
+    expect(reservation).not.toContain(auth.vaultKey)
+  })
+
+  it('rejects a tampered versioned cache instead of treating it as a Drive ID', async () => {
+    const { auth, service, writer } = await account()
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put('folder', 'v1.invalid.invalid'))
+
+    await expect(service.ensureDiaryFolder(auth)).rejects.toThrow()
+    expect(drive.ensureFolder).not.toHaveBeenCalled()
   })
 
   it('allows one of two concurrent first saves and retains one Drive file despite listing lag', async () => {
-    const { service, input } = await account()
+    const { auth, service, input, writer } = await account()
     const responses = await Promise.all(['device A', 'device B'].map(content => service.mutateDiaryEntry(input(content))))
     expect(responses.map(r => r.status).sort()).toEqual([200, 409])
     expect(files.size).toBe(1)
     expect(drive.saveEntry).toHaveBeenCalledOnce()
     expect([...files.values()][0].content).toBe(responses[0].status === 200 ? 'device A' : 'device B')
+    const saved = await responses.find(response => response.status === 200)!.json() as DriveFileMeta
+    const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) =>
+      Object.fromEntries(await state.storage.list()),
+    )
+    const serialized = JSON.stringify(stored)
+    expect(serialized).not.toContain(auth.vaultKey)
+    expect(serialized).not.toContain(saved.id)
+    expect(serialized).not.toContain('folder-' + auth.accountKey)
+    expect(Object.values(stored).every(value => typeof value === 'string' && value.startsWith('v1.'))).toBe(true)
   })
 
   it('serializes updates from separate login sessions and returns the winning content as a conflict', async () => {
@@ -128,7 +165,7 @@ describe('account-scoped diary mutations', () => {
     const first = await service.mutateDiaryEntry(input('original'))
     const meta = await first.json() as DriveFileMeta
     const otherSession = `other-${auth.sessionId}`
-    await createSession(otherSession, (await getSession(auth.sessionId, env))!, env)
+    await createTestSession(otherSession, (await getSession(auth.sessionId, env, auth.vaultKey))!, env)
     const base = { fileId: meta.id, baseVersion: meta.version, baseContent: 'original' }
     const responses = await Promise.all([
       service.mutateDiaryEntry(input('device A', base)),
@@ -209,19 +246,20 @@ describe('account-scoped diary mutations', () => {
   })
 
   it('reuses a persisted creation ID after a write commits but its response is lost', async () => {
-    const { service, input, writer } = await account()
+    const { auth, service, input, writer } = await account()
     const save = vi.mocked(drive.saveEntry).getMockImplementation()!
     vi.mocked(drive.saveEntry).mockImplementationOnce(async (...args) => {
       await save(...args)
       throw new TypeError('response lost')
     })
     expect((await service.mutateDiaryEntry(input('retained'))).status).toBe(500)
-    const reserved = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get<{ id: string; folderId: string }>(`create:${date}`))
-    expect(reserved).toBeTruthy()
+    const reserved = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get<string>(`create:${date}`))
+    expect(reserved).toMatch(/^v1\./)
+    const reservation = await openVaultValue<{ id: string; folderId: string }>(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, reserved!)
     expect((await service.mutateDiaryEntry(input('retained'))).status).toBe(200)
     expect(files.size).toBe(1)
     expect(drive.generateFileId).toHaveBeenCalledOnce()
-    expect([...files.keys()]).toEqual([reserved!.id])
+    expect([...files.keys()]).toEqual([reservation.id])
   })
 
   it('rejects an account mismatch before accessing Drive', async () => {
@@ -231,7 +269,7 @@ describe('account-scoped diary mutations', () => {
   })
 
   it('recovers when the folder persisted by an earlier write was trashed in Drive', async () => {
-    const { service, input, writer } = await account()
+    const { auth, service, input, writer } = await account()
     await service.mutateDiaryEntry(input('old entry'))
     vi.mocked(drive.getEntryMeta)
       .mockResolvedValueOnce({ id: 'old-folder', name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
@@ -243,7 +281,9 @@ describe('account-scoped diary mutations', () => {
     })
     const response = await service.mutateDiaryEntry({ ...input('new entry'), date: '2026-11-01' })
     expect(response.status).toBe(200)
-    expect(await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get('folder'))).toBe('replacement-folder')
+    const folderEnvelope = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get<string>('folder'))
+    expect(folderEnvelope).toMatch(/^v1\./)
+    expect(await openVaultValue<string>(auth.vaultKey, auth.accountKey, 'diary-writer:folder', folderEnvelope!)).toBe('replacement-folder')
     const meta = await response.json() as DriveFileMeta
     expect(files.get(meta.id)?.meta.parents).toEqual(['replacement-folder'])
   })
@@ -251,7 +291,7 @@ describe('account-scoped diary mutations', () => {
   it('rechecks a revoked session after waiting behind another device write', async () => {
     const { auth, service, input } = await account()
     const otherSession = `other-${auth.sessionId}`
-    await createSession(otherSession, (await getSession(auth.sessionId, env))!, env)
+    await createTestSession(otherSession, (await getSession(auth.sessionId, env, auth.vaultKey))!, env)
     let enter!: () => void
     let release!: () => void
     const entered = new Promise<void>(resolve => { enter = resolve })

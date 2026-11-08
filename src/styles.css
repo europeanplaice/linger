@@ -516,6 +516,17 @@ html.session-restoring .landing {
   padding: 1rem 1.5rem 5rem;
   line-height: 1.75;
 }
+.passkey-gate-card {
+  width: min(100%, 32rem);
+  padding: clamp(1.5rem, 5vw, 3rem);
+  box-sizing: border-box;
+}
+.passkey-gate-card p { line-height: 1.6; }
+.passkey-gate-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
+.passkey-recovery-help { margin-top: 1.5rem; text-align: start; }
+.passkey-recovery-help summary { cursor: pointer; }
+.passkey-recovery-help input { width: 100%; }
+.passkey-settings .passkey-gate-actions { justify-content: start; }
 .landing-content section {
   margin-top: 2.5rem;
 }

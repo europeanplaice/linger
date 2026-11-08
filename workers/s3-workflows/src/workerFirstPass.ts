@@ -43,7 +43,6 @@ export async function runWorkerFirstPass(
     const allDiscovered: DiaryTarget[] = page.files
       .map(file => ({
         date: file.name.match(/^diary-(\d{4}-\d{2}-\d{2})\.(?:txt|md)$/)?.[1] ?? '',
-        fileId: file.id,
         version: file.version,
       }))
       .filter(target => Boolean(target.date))
@@ -68,8 +67,8 @@ export async function runWorkerFirstPass(
     for (const target of targetsToProcess) {
       try {
         const known = await index.getEntry(target.date)
-        if (!(target.fileId && known?.fileId === target.fileId && target.version && known.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version))) {
-          await index.reconcileEntry({ sessionId, accountKey, date: target.date, expectedBucket: config.bucket, jobId })
+        if (!(target.version && known?.state === 'synced' && known.syncedVersion && isAtLeast(known.syncedVersion, target.version))) {
+          await index.reconcileEntry({ sessionId, accountKey, date: target.date, vaultKey: session.vault_key, expectedBucket: config.bucket, jobId })
         }
         processed++
       } catch (e) {

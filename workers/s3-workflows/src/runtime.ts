@@ -12,10 +12,9 @@ import {
 import { deleteObject, isAtLeast, putObjectIfNewer, safeProviderCode, S3Error, type AssumedCredentials } from '../../../functions/_shared/s3'
 import { getAssumedCredentials } from '../../../functions/_shared/s3Settings'
 import type { GetEntryStatusInput, GetJobInput, MirrorResult, S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
-import type { MirrorWorkflowParams, WorkflowEnv } from './types'
+import type { WorkflowEnv } from './types'
 import type { S3SyncIndex } from './syncIndex'
 import type { DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
-import { durableSessionHandle } from '../../../functions/_shared/authStore'
 
 export interface S3Config {
   enabled: boolean
@@ -29,13 +28,8 @@ const S3_BUCKET_RE = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
 const S3_REGION_RE = /^[a-z]{2}-[a-z]+-\d$/
 const DIARY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const PENDING_GRACE_MS = 20_000
-// How long a `pending` record is still trusted to mean "a mirror workflow is
-// genuinely working toward this and will update it on its own" before it's
-// treated as stale and reported as 'unconfirmed' (nothing is driving it and a
-// manual retry is the only way forward). Sized against the mirror workflow's
-// worst-case step: STEP_TIMEOUT (2 min) x (EXTERNAL_STEP_RETRIES.limit + 1)
-// attempts plus the exponential backoff between them, so a step that's
-// legitimately still retrying is never misreported as abandoned.
+// Request-scoped mirror operations write pending before external I/O. A later
+// authenticated status request retries pending work that outlives the request.
 const MIRROR_STALE_PENDING_MS = 5 * 60 * 1000
 
 export function entryKey(date: string): string {
@@ -51,9 +45,17 @@ export async function authorizedSession(env: WorkflowEnv, auth: S3WorkflowAuth):
   // A digest can only arrive here through a trusted workflow/DO payload. Pages
   // requests authenticate their raw cookie sessionId before making this RPC.
   const session = auth.sessionId.startsWith('sha256:')
-    ? await getSessionByStorageId(auth.sessionId, env)
-    : await getSession(auth.sessionId, env)
-  if (!session || session.google_sub !== auth.accountKey) throw new Error('Unauthorized')
+    ? await getSessionByStorageId(auth.sessionId, env, auth.vaultKey)
+    : await getSession(auth.sessionId, env, auth.vaultKey)
+  if (!session || session.user_id !== auth.accountKey) throw new Error('Unauthorized')
+  // These credentials arrive only on the trusted request-scoped service RPC.
+  // They are attached to this in-memory session object and never saved.
+  if (auth.accessToken) session.access_token = auth.accessToken
+  if (auth.expiresAt !== undefined) session.expires_at = auth.expiresAt
+  if (auth.idToken) {
+    session.id_token = auth.idToken
+    session.id_token_verified = true
+  }
   return session
 }
 
@@ -61,9 +63,10 @@ export async function ensureAccountDiaryFolder(
   env: WorkflowEnv,
   sessionId: string,
   session: SessionData,
+  vaultKey?: string,
 ): Promise<string> {
-  const accountKey = session.google_sub
-  if (!accountKey) throw new Error('Google account identity missing; sign in again')
+  const accountKey = session.user_id
+  if (!accountKey) throw new Error('Linger account identity missing; sign in again')
   if (!session.access_token || !session.expires_at) throw new Error('Request-scoped Google credentials are required')
   const auth: DiaryWriterAuth = {
     sessionId,
@@ -71,6 +74,7 @@ export async function ensureAccountDiaryFolder(
     accessToken: session.access_token,
     expiresAt: session.expires_at,
     ...(session.id_token ? { idToken: session.id_token } : {}),
+    ...(vaultKey ? { vaultKey } : {}),
   }
   const folderId = await env.DIARY_WRITER.getByName(accountKey).ensureFolder(auth)
   if (session.folder_id !== folderId) invalidateFolderScopedS3Cache(session)
@@ -82,10 +86,8 @@ export function indexFor(env: WorkflowEnv, accountKey: string): DurableObjectStu
   return env.S3_SYNC_INDEX.getByName(accountKey)
 }
 
-// Google `sub` values (used as accountKey) are always numeric strings, so this
-// name can never collide with a real account and can safely reuse the
-// S3SyncIndex class as a singleton, account-wide counter — see
-// recordWorkflowStep's comment in syncIndex.ts for why that's safe.
+// Namespaces are per user_id. This reserved name is separate from random
+// user principals and reuses S3SyncIndex as an account-wide usage counter.
 const USAGE_TRACKER_KEY = '__workflow_usage__'
 
 // Cloudflare's Free plan includes 3,000 Workflow steps/day per account
@@ -186,8 +188,9 @@ export async function loadS3Config(
   sessionId: string,
   session: SessionData,
   env: WorkflowEnv,
+  vaultKey?: string,
 ): Promise<S3Config | null> {
-  const folderId = await ensureAccountDiaryFolder(env, sessionId, session)
+  const folderId = await ensureAccountDiaryFolder(env, sessionId, session, vaultKey)
   const fileId = await findJsonFile(accessToken, folderId, 's3_settings.json')
   if (!fileId) return null
   return parseS3Config(await readJsonFile<unknown>(accessToken, fileId))
@@ -268,29 +271,18 @@ export async function getJobForAuth(env: WorkflowEnv, input: GetJobInput) {
   return indexFor(env, input.accountKey).getJob(input.jobId)
 }
 
-// Lazy mirror-on-read: any check (plain open or since-scoped save poll) of a date
-// that nothing is actively working toward — no index record at all, or only a
-// stale 'pending' record plus a lapsed workflow retry budget — fires a
-// fire-and-forget S3MirrorWorkflow (mirrorEntryForAuth) so the entry self-heals
-// instead of leaving a 'not backed up' / 'unconfirmed' badge that needs a manual
-// retry. Concurrency-safe: markPending lands synchronously before the workflow is
-// created, so follow-up polls in the same run see a fresh pending record and never
-// re-fire; a rare racing pair of checks schedules two idempotent mirrors
-// (putObjectIfNewer's conditional write plus the DO's monotonic markSynced make
-// the duplicate harmless). When the arm is refused the refusal is *reported*, not
-// swallowed: a used-up daily step budget is the one permanent-on-the-day check
-// (transient, resetting at UTC midnight), and a since-scoped check must surface
-// it as a concrete 'failed' with the reason rather than a vague 'unconfirmed'.
-// It deliberately writes no 'failed' row for that — a daily-windowed stickiness
-// would let the refusal outlive its own (brief) cause, so a later open re-arms
-// as normal once the budget resets.
+// A plain open or since-scoped status check reconciles missing or stale records in
+// this authenticated request. It writes pending before Drive/S3 I/O and records a
+// failure safely; a later authenticated request can retry the operation.
 async function armLazyMirrorOrReport(
   env: WorkflowEnv,
   input: GetEntryStatusInput,
-): Promise<{ status: 'pending' } | { status: 'failed'; error: string }> {
-  const outcome = await mirrorEntryForAuth(env, { sessionId: input.sessionId, accountKey: input.accountKey, date: input.date })
-  if (outcome.ok) return { status: 'pending' }
-  return { status: 'failed', error: outcome.error ?? 'Mirror could not be scheduled' }
+): Promise<{ status: 'synced' } | { status: 'failed'; error: string }> {
+  // User keys cannot be placed in durable Workflow state. Reconcile inside this
+  // authenticated request so protected metadata stays request-scoped.
+  const outcome = await mirrorEntryForAuthNow(env, input)
+  if (outcome.ok) return { status: 'synced' }
+  return { status: 'failed', error: outcome.error ?? 'Mirror failed' }
 }
 
 export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatusInput) {
@@ -330,17 +322,14 @@ export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatus
 
 export async function setBackupEnabledForAuth(
   env: WorkflowEnv,
-  input: { sessionId: string; accountKey: string; enabled: boolean; resetEntries?: boolean },
+  input: S3WorkflowAuth & { enabled: boolean; resetEntries?: boolean },
 ): Promise<void> {
   await authorizedSession(env, input)
   await indexFor(env, input.accountKey).setBackupEnabled(input.enabled, input.resetEntries ?? false)
 }
 
-export interface MirrorEntryCoreInput {
-  sessionId: string
-  accountKey: string
+export interface MirrorEntryCoreInput extends S3WorkflowAuth {
   date: string
-  fileId?: string
   driveVersion?: string
   expectedBucket?: string
   jobId?: string
@@ -360,7 +349,7 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
     if (!job || !['queued', 'running'].includes(job.state)) throw new SupersededBackfillError('Backfill is no longer active')
   }
   const { accessToken, idToken } = await freshGoogleTokens(input.sessionId, session, env)
-  const config = await loadS3Config(accessToken, input.sessionId, session, env)
+  const config = await loadS3Config(accessToken, input.sessionId, session, env, input.vaultKey)
   if (input.expectedBucket && config?.bucket !== input.expectedBucket) throw new SupersededBackfillError('S3 backup target changed')
   await index.setBackupEnabled(!!config?.enabled)
   if (!config?.enabled) {
@@ -380,7 +369,7 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
       return
     }
     const version = meta.version
-    await index.markPending(input.date, version, new Date().toISOString(), meta.id)
+    await index.markPending(input.date, version, new Date().toISOString())
     let content: string
     try {
       content = (await getEntryContent(accessToken, meta.id, input.date)).content
@@ -396,7 +385,7 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
       if (isMissingEntryError(error)) continue
       throw error
     }
-    const synced = await index.markSynced(input.date, version, new Date().toISOString(), meta.id)
+    const synced = await index.markSynced(input.date, version, new Date().toISOString())
     if (synced?.driveVersion && version && synced.driveVersion !== version) continue
     return
   }
@@ -427,31 +416,8 @@ export async function mirrorEntryForAuthNow(env: WorkflowEnv, input: MirrorEntry
 // kept short: mirror instances carry only one date's params (trivial), but a
 // failed instance lingering at the default 3-day Free retention just wastes
 // storage for no debugging value beyond a day.
-async function createMirrorWorkflow(env: WorkflowEnv, id: string, params: MirrorWorkflowParams): Promise<void> {
-  try {
-    await env.S3_MIRROR_WORKFLOW.create({
-      id,
-      params,
-      retention: { successRetention: '1 hour', errorRetention: '1 day' },
-    })
-  } catch (error) {
-    try {
-      await env.S3_MIRROR_WORKFLOW.get(id)
-      return
-    } catch {
-      throw new Error(safeError(error))
-    }
-  }
-}
-
-// Fire-and-forget mirror: marks the entry pending and hands the actual Drive→S3
-// mirror off to a dedicated S3MirrorWorkflow instance (whose steps retry
-// transient failures — see mirrorWorkflow.ts), returning immediately so the
-// calling save endpoint's context.waitUntil doesn't race a long mirror against
-// its 30s budget. The Drive save itself has already succeeded by the time this
-// runs, so a failure to even schedule the workflow is swallowed (the entry stays
-// 'pending'; entryStatusForAuth's stale-pending aging surfaces it as
-// 'unconfirmed' with a retry affordance rather than an eternal spinner).
+// Reconcile within the authenticated service request. User vault keys and Google
+// credentials are request-scoped and cannot be carried by durable Workflows.
 export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
   const session = await authorizedSession(env, input)
   if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
@@ -481,69 +447,29 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   if (backupEnabled === false) {
     return { ok: true }
   }
-  // Same daily-step budget that gates new backfills: a save's mirror must not be
-  // able to silently consume the account's entire Workflow allowance past the cap
-  // the Settings UI reports as "remaining". The refusal leaves the entry without a
-  // pending record, so entryStatusForAuth surfaces it as unconfirmed once its
-  // save-grace window passes (daily reset self-heals the account). Only the
-  // budget-exceeded denial is honored; any other (unexpected) failure to read the
-  // tracker is a bookkeeping problem rather than a reason to block the save, so it
-  // fails open and schedules the mirror anyway.
+  await index.markPending(input.date, input.driveVersion, new Date().toISOString())
   try {
-    await assertWithinDailyStepBudget(env)
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
-      console.warn('s3Workflows: mirror refused — daily Workflow step budget reached')
-      return { ok: false, error: error.message }
-    }
-    console.warn('s3Workflows: could not determine daily step budget; mirroring anyway')
-  }
-  await index.markPending(input.date, input.driveVersion, new Date().toISOString(), input.fileId)
-  try {
-    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, sessionId: await durableSessionHandle(input.sessionId, env), kind: 'mirror' })
+    await index.reconcileEntry(input)
     return { ok: true }
   } catch (error) {
-    console.error('s3Workflows: failed to start mirror workflow')
-    return { ok: true }
+    const message = safeError(error)
+    await index.markFailed(input.date, input.driveVersion, message, new Date().toISOString())
+    return { ok: false, error: message }
   }
 }
 
-export async function deleteEntryForAuth(env: WorkflowEnv, input: { sessionId: string; accountKey: string; date: string }): Promise<MirrorResult> {
+export async function deleteEntryForAuth(env: WorkflowEnv, input: MirrorEntryCoreInput): Promise<MirrorResult> {
   const session = await authorizedSession(env, input)
   if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
-  // Same disabled-account short-circuit as mirrorEntryForAuth (see its comment):
-  // a backup-off account has nothing for a delete workflow to remove. Fail open on
-  // an unexpected flag error (unknown → schedule), exactly as the mirror path does.
   const index = indexFor(env, input.accountKey)
-  let backupEnabled: boolean | null
-  try {
-    backupEnabled = await index.getBackupEnabled()
-  } catch (error) {
-    console.warn('s3Workflows: could not read backup-enabled flag; deleting anyway')
-    backupEnabled = null
-  }
-  if (backupEnabled === false) {
-    return { ok: true }
-  }
-  const deletionId = crypto.randomUUID()
-  await index.queueDeletion(input, deletionId)
-  try {
-    await assertWithinDailyStepBudget(env)
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Daily Workflow step budget')) {
-      console.warn('s3Workflows: delete refused — daily Workflow step budget reached')
-      await index.deferDeletion(input.date, deletionId, Date.parse(`${todayUTC()}T00:00:00.000Z`) + 86_400_000)
-      return { ok: false, error: error.message }
-    }
-    console.warn('s3Workflows: could not determine daily step budget; deleting anyway')
-  }
   await index.markPending(input.date, undefined, new Date().toISOString())
   try {
-    await createMirrorWorkflow(env, crypto.randomUUID(), { ...input, sessionId: await durableSessionHandle(input.sessionId, env), kind: 'delete', deletionId })
+    await index.reconcileEntry(input)
     return { ok: true }
   } catch (error) {
-    console.error('s3Workflows: failed to start delete workflow')
-    return { ok: true }
+    const message = safeError(error)
+    await index.markFailed(input.date, undefined, message, new Date().toISOString())
+    return { ok: false, error: message }
   }
 }
 

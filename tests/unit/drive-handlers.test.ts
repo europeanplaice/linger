@@ -1,3 +1,4 @@
+import * as sessionStore from '../../functions/_shared/session'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost as onSearch } from '../../functions/api/drive/search'
 import { onRequestGet as onListEntries } from '../../functions/api/drive/entries'
@@ -9,6 +10,11 @@ import { onRequestGet as onGetMilestones, onRequestPut as onPutMilestones } from
 import { saveDiaryEntry as onPostEntry, removeDiaryEntry as onDeleteEntry } from '../../functions/_shared/entryMutation'
 import * as drive from '../../functions/_shared/drive'
 import * as s3Settings from '../../functions/_shared/s3Settings'
+
+vi.mock('../../functions/_shared/session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../functions/_shared/session')>()),
+  saveSession: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
@@ -82,7 +88,7 @@ describe('list entries handler', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as { files: unknown[] }
     expect(body.files).toHaveLength(1)
-    expect(put).toHaveBeenCalledOnce()
+    expect(sessionStore.saveSession).toHaveBeenCalledOnce()
   })
 
   it('still returns entries when getStartPageToken fails', async () => {
@@ -96,7 +102,7 @@ describe('list entries handler', () => {
     const body = await res.json() as { files: unknown[] }
     expect(body.files).toEqual([])
     // Session should not be updated when token fetch fails
-    expect(put).not.toHaveBeenCalled()
+    expect(sessionStore.saveSession).not.toHaveBeenCalled()
   })
 })
 
@@ -625,7 +631,7 @@ describe('changes handler', () => {
 
   it('initialises the start page token and returns empty changes when none is stored', async () => {
     const session: Record<string, unknown> = {}
-    const { ctx, put } = changesContext(session)
+    const { ctx } = changesContext(session)
 
     const res = await onChanges(ctx as any)
 
@@ -633,19 +639,19 @@ describe('changes handler', () => {
     expect(await res.json()).toEqual({ changes: [], newStartPageToken: 'tok-init' })
     expect(drive.getStartPageToken).toHaveBeenCalledOnce()
     expect(drive.getChanges).not.toHaveBeenCalled()
-    expect(put).toHaveBeenCalledOnce()
+    expect(sessionStore.saveSession).toHaveBeenCalledOnce()
   })
 
   it('returns changes and persists newStartPageToken when a token is stored', async () => {
     const session: Record<string, unknown> = { changes_start_page_token: 'tok-old' }
-    const { ctx, put } = changesContext(session)
+    const { ctx } = changesContext(session)
 
     const res = await onChanges(ctx as any)
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' })
     expect(drive.getChanges).toHaveBeenCalledWith('tok', 'tok-old')
-    expect(put).toHaveBeenCalledOnce()
+    expect(sessionStore.saveSession).toHaveBeenCalledOnce()
   })
 
   it('resets the token and returns empty changes when the stored token is stale (400)', async () => {

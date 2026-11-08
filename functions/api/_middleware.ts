@@ -28,8 +28,9 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
 
   const sessionId = parseSessionId(context.request)
   if (!sessionId) return jsonResponse({ error: 'Unauthorized' }, 401)
-  const session = await getSession(sessionId, context.env)
-  if (!session || !session.google_sub) return jsonResponse({ error: 'Session not found' }, 401)
+  const session = await getSession(sessionId, context.env, context.request.headers.get('X-Linger-Vault-Key') ?? undefined)
+  if (!session || !session.google_sub) return jsonResponse({ error: 'Vault unlock required' }, 401)
+  if (session.user_id !== context.request.headers.get('X-Linger-Vault-User')) return jsonResponse({ error: 'Account changed' }, 401, { 'X-Linger-Account-Changed': '1' })
   const accountError = validateRequestAccount(context.request, session)
   if (accountError) return accountError
 

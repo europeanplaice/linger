@@ -41,7 +41,7 @@ const mutateDiaryEntry = vi.fn()
 function makeContext(overrides: Record<string, unknown> = {}) {
   return {
     request: new Request('http://localhost/api/s3/restore', { method: 'POST' }),
-    data: { accessToken: 'tok', sessionId: 'sid', session: { google_sub: '123', expires_at: 3_600_000 } },
+    data: { accessToken: 'tok', sessionId: 'sid', session: { google_sub: '123', user_id: 'internal-user', vault_key: 'request-key', expires_at: 3_600_000 } },
     env: { S3_WORKFLOW_SERVICE: { mutateDiaryEntry } },
     waitUntil: vi.fn(),
     ...overrides,
@@ -97,7 +97,7 @@ describe('POST /api/s3/restore', () => {
 
     expect(body.ok).toBe(true)
     expect(mutateDiaryEntry).toHaveBeenCalledWith({
-      sessionId: 'sid', accountKey: '123', accessToken: 'tok', expiresAt: 3_600_000, idToken: 'fake-id-token',
+      sessionId: 'sid', accountKey: 'internal-user', vaultKey: 'request-key', accessToken: 'tok', expiresAt: 3_600_000, idToken: 'fake-id-token',
       date: '2024-01-02', method: 'POST', body: JSON.stringify({ content: 'recovered body', baseVersion: null }),
     })
     expect(drive.saveEntry).not.toHaveBeenCalled()

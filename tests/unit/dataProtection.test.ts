@@ -7,7 +7,8 @@ import { clearCache, deleteDraft, getAllCached, getAllDrafts } from '../../src/l
 import * as diaryCache from '../../src/lib/diaryCache'
 import { onRequest as middleware } from '../../functions/api/_middleware'
 import { onRequestPost as logout } from '../../functions/auth/logout'
-import { createFakeKV } from '../helpers/fakeKV'
+import { sessionStorageId } from '../../functions/_shared/authStore'
+import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { getSession, saveSession, getValidAccessToken, invalidateSession, SessionRevokedError } from '../../functions/_shared/session'
 import type { AuthStatus } from '../../src/hooks/useAuth'
 import type { LoadedDiaryEntry } from '../../src/types'
@@ -85,32 +86,32 @@ it('does not show account A data to account B when an older read finishes after 
 })
 
 it('keeps a logged-out session deleted when an earlier API request finishes', async () => {
-  const session = { google_sub: 'account-a', access_token: 'a', expires_at: Date.now() + 3_600_000 }
-  const kv = createFakeKV({ 'session:a': JSON.stringify(session) })
-  const env = { SESSIONS: kv, SESSION_DOMAIN: 'https://app.example.com', GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' }
+  const { env, db, headers, sessionId, kv } = await createPasskeyTestEnv({ google_sub: 'account-a' }, { sessionId: 'a', clientId: 'c' })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
     aud: 'c', sub: 'account-a', scope: 'https://www.googleapis.com/auth/drive.file', expires_in: '3600',
   }), { status: 200 })))
   const downstream = deferred<Response>()
   const entered = deferred<void>()
   const apiPending = middleware({
-    request: new Request('https://app.example.com/api/drive/entries', { headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a', Authorization: 'Bearer a' } }),
+    request: new Request('https://example.com/api/drive/entries', { headers: { ...headers, Authorization: 'Bearer a' } }),
     env, data: {},
     next: () => { entered.resolve(); return downstream.promise },
   } as never)
   await entered.promise
   const response = await logout({
-    request: new Request('https://app.example.com/auth/logout', {
-      method: 'POST', headers: { Cookie: 'linger_session=a', 'X-Linger-Account': 'sub:account-a', Origin: 'https://app.example.com' },
+    request: new Request('https://example.com/auth/logout', {
+      method: 'POST', headers: { ...headers, Origin: 'https://example.com' },
     }), env,
   } as never)
   expect(response.status).toBe(200)
   expect(kv.has('session:a')).toBe(false)
   downstream.resolve(new Response('{}'))
   const lateResponse = await apiPending
-  expect(kv.has('session:a')).toBe(false)
   expect(lateResponse.status).toBe(401)
   expect(lateResponse.headers.get('Set-Cookie')).toContain('Max-Age=0')
+  expect(await env.AUTH_DB!.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(sessionId)).first())
+    .toMatchObject({ user_id: null, revoked: 1 })
+  db.close()
 })
 
 it('discards an old read even when the same account logs back in', async () => {
@@ -256,47 +257,84 @@ it('does not replay account A drafts for account B while clearing the shared cac
 })
 
 it('rejects session data recreated by a stale writer', async () => {
-  const kv = createFakeKV()
-  const env = { SESSIONS: kv } as never
-  await invalidateSession('a', undefined, env)
-  await kv.put('session:a', JSON.stringify({ access_token: 'stale' }))
-  expect(await getSession('a', env)).toBeNull()
-  await expect(saveSession('a', { access_token: 'a', expires_at: 0 }, env)).rejects.toBeInstanceOf(SessionRevokedError)
-  // A new sign-in has a different random session ID and remains usable.
-  await saveSession('b', { access_token: 'b', expires_at: 0, google_sub: 'b-sub' }, env)
-  expect(await getSession('b', env)).toMatchObject({ google_sub: 'b-sub' })
-  expect((await getSession('b', env))?.access_token).toBeUndefined()
+  const stale = await createPasskeyTestEnv({ google_sub: 'a-sub', folder_id: 'before' }, { sessionId: 'a' })
+  const writerSession = (await getSession(stale.sessionId, stale.env, stale.key))!
+  writerSession.folder_id = 'late-write'
+  await invalidateSession(stale.sessionId, undefined, stale.env)
+  await expect(saveSession(stale.sessionId, writerSession, stale.env)).rejects.toBeInstanceOf(SessionRevokedError)
+  expect(await getSession(stale.sessionId, stale.env, stale.key)).toBeNull()
+  expect(await stale.env.AUTH_DB!.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?')
+    .bind(await sessionStorageId(stale.sessionId))
+    .first()).toMatchObject({ user_id: null, revoked: 1 })
+
+  const signedIn = await createPasskeyTestEnv({ google_sub: 'b-sub' }, { sessionId: 'b' })
+  expect(await getSession(signedIn.sessionId, signedIn.env, signedIn.key)).toMatchObject({ google_sub: 'b-sub', user_id: signedIn.userId })
+  stale.db.close()
+  signedIn.db.close()
 })
 
-it('keeps authorization revoked when the token-record deletion fails', async () => {
-  const kv = createFakeKV({ 'session:a': JSON.stringify({ access_token: 'a' }) })
-  const env = { SESSIONS: { ...kv, delete: async () => { throw new Error('KV delete unavailable') } } } as never
-  await expect(invalidateSession('a', undefined, env)).rejects.toThrow('KV delete unavailable')
-  expect(kv.has('session:a')).toBe(true)
-  expect(await getSession('a', env)).toBeNull()
+it('keeps D1 authorization revoked while the encrypted profile remains', async () => {
+  const fixture = await createPasskeyTestEnv({ google_sub: 'revoked-profile-sub' }, { sessionId: 'revoked-profile' })
+  const before = await fixture.env.AUTH_DB!.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?')
+    .bind(fixture.userId).first<{ account_envelope: string }>()
+  await invalidateSession(fixture.sessionId, undefined, fixture.env)
+  const row = await fixture.env.AUTH_DB!.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?')
+    .bind(await sessionStorageId(fixture.sessionId)).first()
+  const after = await fixture.env.AUTH_DB!.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?')
+    .bind(fixture.userId).first<{ account_envelope: string }>()
+  expect(row).toMatchObject({ user_id: null, revoked: 1 })
+  expect(after!.account_envelope).toBe(before!.account_envelope)
+  expect(await getSession(fixture.sessionId, fixture.env, fixture.key)).toBeNull()
+  fixture.db.close()
 })
 
 it('cannot refresh a credential after logout because sessions have no refresh token', async () => {
-  const session = { expires_at: 0 }
-  const env = { SESSIONS: createFakeKV(), GOOGLE_CLIENT_ID: 'c', GOOGLE_CLIENT_SECRET: 's' } as never
-  await expect(getValidAccessToken('a', session, env)).rejects.toThrow(/request-scoped/)
-  expect(await getSession('a', env)).toBeNull()
+  const fixture = await createPasskeyTestEnv({ google_sub: 'request-token-sub' }, { sessionId: 'request-token-session' })
+  const session = (await getSession(fixture.sessionId, fixture.env, fixture.key))!
+  await expect(getValidAccessToken(fixture.sessionId, session, fixture.env)).rejects.toThrow(/request-scoped/)
+  expect(await getSession(fixture.sessionId, fixture.env, fixture.key)).not.toHaveProperty('access_token')
+  fixture.db.close()
 })
 
-it('rejects revocation that races with an already-started KV write', async () => {
-  const kv = createFakeKV()
+it('rejects revocation that races with an already-started encrypted D1 profile update', async () => {
+  const fixture = await createPasskeyTestEnv({ google_sub: 'race-sub', folder_id: 'before' }, { sessionId: 'race-session' })
   const write = deferred<void>()
   const entered = deferred<void>()
-  const env = { SESSIONS: { ...kv, put: async (key: string, value: string) => {
-    if (key === 'session:a') { entered.resolve(); await write.promise }
-    await kv.put(key, value)
-  } } } as never
-  const pending = saveSession('a', { access_token: 'a', expires_at: 0, email: 'a@example.com' }, env)
+  const database = fixture.env.AUTH_DB!
+  const delayedDb = new Proxy(database, {
+    get(target, property) {
+      if (property === 'prepare') return (sql: string) => {
+        const statement = target.prepare(sql)
+        if (!sql.startsWith('UPDATE passkey_users SET account_envelope')) return statement
+        return {
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values as never[])
+            return {
+              first: async (column?: string) => {
+                entered.resolve()
+                await write.promise
+                return column === undefined ? bound.first() : bound.first(column)
+              },
+            }
+          },
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  }) as D1Database
+  const raceEnv = { ...fixture.env, AUTH_DB: delayedDb }
+  const staleSession = (await getSession(fixture.sessionId, fixture.env, fixture.key))!
+  staleSession.folder_id = 'late-write'
+  const pending = saveSession(fixture.sessionId, staleSession, raceEnv)
   const rejected = expect(pending).rejects.toBeInstanceOf(SessionRevokedError)
   await entered.promise
-  await invalidateSession('a', undefined, env)
+  await invalidateSession(fixture.sessionId, undefined, raceEnv)
   write.resolve()
   await rejected
-  expect(kv.has('session:a')).toBe(false)
-  expect(await getSession('a', env)).toBeNull()
+  expect(await getSession(fixture.sessionId, fixture.env, fixture.key)).toBeNull()
+  const profile = await fixture.env.AUTH_DB!.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?')
+    .bind(fixture.userId).first<{ account_envelope: string }>()
+  expect(profile!.account_envelope).not.toContain('late-write')
+  fixture.db.close()
 })
