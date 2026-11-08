@@ -32,6 +32,16 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('mobile pagehide flushes the latest edit and keeps it visible on pageshow', async ({ page }) => {
+  await page.goto(`${baseUrl}/tests/entryEditorHarness.html`)
+  await page.evaluate(() => window.editorHarness.render({ date: '2026-05-01', initialContent: '', autoSave: true }))
+  await page.locator('textarea.editor-textarea').fill('mobile draft 🌸')
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
+  await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls().map(call => call.content))).toContain('mobile draft 🌸')
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
+  await expect(page.locator('textarea.editor-textarea')).toHaveValue('mobile draft 🌸')
+})
+
 test('mobile back closes sidebar instead of leaving the app', async ({ page }) => {
   await page.goto(baseUrl)
   await expect(page.locator('.editor-textarea')).toBeVisible()

@@ -15,7 +15,7 @@ interface Window {
     toggle: () => void
   }
   exportButtonHarness: {
-    render: () => void
+    render: (entries?: { date: string; content: string }[]) => void
     exportCalls: () => number
     progressCalls: () => { done: number; total: number }[]
   }

@@ -140,6 +140,20 @@ test.describe('ImportButton', () => {
     await expect(page.locator('.import-confirm-desc')).toContainText('Could not read this file')
   })
 
+  for (const [name, files] of [
+    ['invalid date', { 'diary-2026-02-30.txt': 'invalid', 'diary-2026-05-01.txt': 'valid' }],
+    ['duplicate date', { 'one/diary-2026-05-01.txt': 'first', 'two/diary-2026-05-01.md': 'second' }],
+  ] as const) {
+    test(`rejects a ZIP with an ${name} before importing anything`, async ({ page }) => {
+      await loadHarness(page)
+      await render(page)
+      await uploadZip(page, files)
+      await expect(page.locator('.import-confirm-desc')).toContainText('invalid date or more than one diary file')
+      await expect(page.locator('.import-confirm-start')).not.toHaveText('Start import')
+      expect(await page.evaluate(() => window.importButtonHarness.importCalls())).toEqual([])
+    })
+  }
+
   test('cancel closes the dialog without importing', async ({ page }) => {
     await loadHarness(page)
     await render(page, { existingDates: [] })

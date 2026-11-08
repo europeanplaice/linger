@@ -4,6 +4,7 @@ import type JSZip from 'jszip'
 import { useI18n } from '../i18n'
 import type { ImportResult } from '../hooks/useDiary'
 import { normalizeMilestones, type Milestone } from '../types'
+import { parseYmd } from '../utils/date'
 
 interface ParsedEntry {
   date: string
@@ -34,6 +35,8 @@ const DIARY_FILENAME = /^diary-(\d{4}-\d{2}-\d{2})\.(?:txt|md)$/
 const MILESTONES_FILENAME = 'milestones.json'
 const LEGACY_MILESTONES_FILENAME = 'anniversaries.json'
 
+class InvalidDiaryArchiveError extends Error {}
+
 // Legacy .md entries carry a `---\ndate: …\n---` frontmatter block; the date
 // there is never authoritative (the filename is), so only the body is kept.
 function stripFrontmatter(text: string): string {
@@ -45,6 +48,7 @@ async function parseZip(file: File): Promise<ParsedZip> {
   const { default: JSZip } = await import('jszip')
   const zip = await JSZip.loadAsync(file)
   const entries: ParsedEntry[] = []
+  const dates = new Set<string>()
   let milestonesEntry: JSZip.JSZipObject | null = null
 
   for (const zipEntry of Object.values(zip.files)) {
@@ -53,8 +57,10 @@ async function parseZip(file: File): Promise<ParsedZip> {
 
     const diaryMatch = DIARY_FILENAME.exec(basename)
     if (diaryMatch) {
+      if (!parseYmd(diaryMatch[1]) || dates.has(diaryMatch[1])) throw new InvalidDiaryArchiveError()
+      dates.add(diaryMatch[1])
       const content = await zipEntry.async('string')
-      entries.push({ date: diaryMatch[1], content: stripFrontmatter(content) })
+      entries.push({ date: diaryMatch[1], content: basename.endsWith('.md') ? stripFrontmatter(content) : content })
       continue
     }
 
@@ -145,7 +151,7 @@ export function ImportButton({ existingDates, onImport, existingMilestones = [],
       setPhase('confirming')
     } catch (err) {
       console.error('Import parse failed:', err)
-      setErrorMsg(t.import.invalidFile)
+      setErrorMsg(err instanceof InvalidDiaryArchiveError ? t.import.invalidDiaryArchive : t.import.invalidFile)
       setPhase('error')
     }
   }, [t])

@@ -46,4 +46,26 @@ test.describe('ExportButton', () => {
     expect(await zip.file('diary-2026-05-01.txt')?.async('string')).toBe('first entry')
     expect(await zip.file('diary-2026-05-02.txt')?.async('string')).toBe('second entry')
   })
+
+  test('imports an exported zip without changing Unicode, newlines, or empty entries', async ({ page }) => {
+    const entries = [
+      { date: '2026-05-01', content: '日本語 🌸\nsecond line\r\nlast line' },
+      { date: '2026-05-02', content: '' },
+      { date: '2026-05-03', content: '---\ndate: personal note\n---\nThis is diary text.' },
+    ]
+    await page.goto(`${baseUrl}/tests/exportButtonHarness.html`)
+    await page.evaluate(value => window.exportButtonHarness.render(value), entries)
+    await page.locator('.btn-export-modern').click()
+    const downloadPromise = page.waitForEvent('download')
+    await page.locator('.export-confirm-start').click()
+    const buffer = await readDownload(await downloadPromise)
+
+    await page.goto(`${baseUrl}/tests/importButtonHarness.html`)
+    await page.evaluate(() => window.importButtonHarness.render({ existingDates: ['2026-05-01'] }))
+    await page.locator('input[type=file]').setInputFiles({ name: 'backup.zip', mimeType: 'application/zip', buffer })
+    await expect(page.locator('.import-confirm-desc')).toContainText('1 entries already exist')
+    await expect(page.locator('.import-confirm-desc')).toContainText('2 entries will be added')
+    await page.locator('.import-confirm-start').click()
+    await expect.poll(() => page.evaluate(() => window.importButtonHarness.importCalls())).toEqual([entries])
+  })
 })

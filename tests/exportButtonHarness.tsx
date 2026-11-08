@@ -3,7 +3,7 @@ import { ExportButton } from '../src/components/ExportButton'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
-const entries = [
+const defaultEntries = [
   {
     date: '2026-05-01',
     content: 'first entry',
@@ -13,6 +13,7 @@ const entries = [
     content: 'second entry',
   },
 ]
+let entries = defaultEntries
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
 let renderCount = 0
@@ -39,7 +40,8 @@ function App() {
 }
 
 window.exportButtonHarness = {
-  render: () => {
+  render: (input = defaultEntries) => {
+    entries = input
     exportCalls = 0
     progressCalls = []
     root.render(<App key={++renderCount} />)
