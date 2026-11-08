@@ -40,7 +40,7 @@ test('a blocked Google popup preserves the unlocked passkey for retry', async ({
 })
 
 test('history restoration requests unlock again after discarding memory keys', async ({ page }) => {
-  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
+  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 1 })
   await page.goto(baseUrl)
   await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
   await page.evaluate(() => {
