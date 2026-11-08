@@ -4,6 +4,7 @@ import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount
 import { clearOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
+import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../lib/tabSession'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
@@ -32,8 +33,8 @@ export interface AuthState {
   vaultBusy: boolean
   vaultError: string | null
   vaultUserId: string | null
-  setupPasskey: () => Promise<void>
-  unlockPasskey: () => Promise<void>
+  setupPasskey: (remember?: boolean) => Promise<void>
+  unlockPasskey: (remember?: boolean) => Promise<void>
   addPasskey: () => Promise<void>
   lockVault: () => void
   clearVaultError: () => void
@@ -79,6 +80,7 @@ export function useAuth(): AuthState {
       vaultOperation.current?.abort()
       vaultOperation.current = null
       clearVaultKey()
+      clearTabSession()
       setVaultUserId(null)
       setVaultStatus('locked')
       setVaultBusy(false)
@@ -100,7 +102,7 @@ export function useAuth(): AuthState {
     const resetAfterHistoryRestore = (event: PageTransitionEvent) => {
       // A bfcache restore keeps React state, although pagehide discarded keys.
       // Re-enter the unlock flow instead of leaving an unusable signed-in view.
-      if (event.persisted) invalidateAccount()
+      if (event.persisted) window.location.reload()
     }
     window.addEventListener('pagehide', clearOnPageExit)
     window.addEventListener('pageshow', resetAfterHistoryRestore)
@@ -142,7 +144,7 @@ export function useAuth(): AuthState {
     const revision = authRevision.current
     const startedEvent = readAuthEvent()?.id
     restoring.current = true
-    checkSession().then(info => {
+    restoreTabSession(() => !cancelled && revision === authRevision.current).then(() => checkSession()).then(info => {
       if (cancelled || revision !== authRevision.current) return
       const activeVaultUser = getVaultUserId()
       if (activeVaultUser) {
@@ -162,6 +164,11 @@ export function useAuth(): AuthState {
       setActiveAccount(account, !info.signedIn)
       if (account) announceAccount(account)
       rememberSession(info.signedIn)
+      if (!info.signedIn) {
+        clearOAuthCredentials()
+        if (getVaultUserId()) saveTabSession()
+        else clearTabSession()
+      }
       setStatus(info.signedIn ? 'signedIn' : 'signedOut')
       setEmail(info.email)
       setGoogleSub(info.googleSub)
@@ -175,11 +182,15 @@ export function useAuth(): AuthState {
     restoring.current = false
     setAuthError(null)
     setSigningIn(true)
-    startSignIn({ selectAccount: Boolean(options.selectAccount) }).then(info => {
+    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount) })
+    // Do not retain the previous Google credentials during account switching.
+    saveTabSession()
+    pendingSignIn.then(info => {
       if (revision !== authRevision.current) return
       const unlockedUserId = getVaultUserId()
       if (info.userId && unlockedUserId && info.userId !== unlockedUserId) {
         clearVaultKey()
+        clearTabSession()
         setVaultUserId(null)
         setVaultStatus('locked')
         throw new Error('vault_account_mismatch')
@@ -187,6 +198,7 @@ export function useAuth(): AuthState {
       if (options.expectedGoogleSub !== undefined && info.googleSub !== options.expectedGoogleSub) {
         clearOAuthCredentials()
         clearVaultKey()
+        clearTabSession()
         setVaultUserId(null)
         setVaultStatus('locked')
         throw new Error('account_mismatch')
@@ -196,6 +208,7 @@ export function useAuth(): AuthState {
       setActiveAccount(account, getAccountSnapshot().account !== account)
       announceAccount(account)
       rememberSession(true)
+      saveTabSession()
       setEmail(info.email)
       setGoogleSub(info.googleSub)
       setGoogleClientId(info.googleClientId)
@@ -216,7 +229,7 @@ export function useAuth(): AuthState {
     })
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add') => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember = false) => {
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()
@@ -238,6 +251,10 @@ export function useAuth(): AuthState {
         await addPasskeyCredential(userId, controller.signal)
         if (revision !== vaultRevision.current) return
       }
+      if (action !== 'add') {
+        clearTabSession()
+        if (remember) { enableTabSession(); saveTabSession() }
+      }
       setVaultStatus('unlocked')
     } catch (error) {
       if (revision === vaultRevision.current) {
@@ -256,14 +273,15 @@ export function useAuth(): AuthState {
     }
   }, [])
 
-  const setupPasskey = useCallback(() => runVaultAction('setup'), [runVaultAction])
-  const unlockPasskey = useCallback(() => runVaultAction('unlock'), [runVaultAction])
+  const setupPasskey = useCallback((remember = false) => runVaultAction('setup', remember), [runVaultAction])
+  const unlockPasskey = useCallback((remember = false) => runVaultAction('unlock', remember), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
     vaultRevision.current++
     vaultOperation.current?.abort()
     vaultOperation.current = null
     clearVaultKey()
+    clearTabSession()
     clearOAuthCredentials()
     setVaultUserId(null)
     setVaultStatus('locked')
@@ -281,6 +299,7 @@ export function useAuth(): AuthState {
     vaultOperation.current?.abort()
     vaultOperation.current = null
     clearVaultKey()
+    clearTabSession()
     setVaultUserId(null)
     setVaultStatus('locked')
     setVaultBusy(false)
@@ -295,6 +314,8 @@ export function useAuth(): AuthState {
   }, [])
 
   const handleExpired = useCallback(() => {
+    clearOAuthCredentials()
+    saveTabSession()
     setTokenExpired(true)
   }, [])
 

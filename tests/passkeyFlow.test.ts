@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createPasskeyTestEnv } from './helpers/passkeyAuth'
 import type { Env } from '../functions/_shared/session'
+import { onRequestGet as restoreSession } from '../functions/auth/passkey/session'
 import {
   addOptions, addVerify, loginOptions, loginVerify,
   deleteCredential, listCredentials, registrationOptions, registrationVerify,
@@ -18,6 +19,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     '/login/options': loginOptions, '/login/verify': loginVerify,
     '/add/options': addOptions, '/add/verify': addVerify,
     '/credentials/list': listCredentials, '/credentials/delete': deleteCredential,
+    '/session': async (request, env) => await restoreSession({ request, env } as Parameters<typeof restoreSession>[0]) as Response,
   }
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
@@ -71,6 +73,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await page.getByRole('checkbox', { name: 'Stay signed in when this tab reloads' }).check()
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
 
@@ -78,6 +81,13 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
     expect(forbiddenNetworkValues).toEqual([])
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
+
+    // An opted-in reload validates the existing server session and restores the
+    // vault, even before Google authorization has been completed.
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).not.toBeNull()
+    await page.evaluate(() => sessionStorage.removeItem('linger_tab_session_v1'))
 
     await page.evaluate(async () => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))

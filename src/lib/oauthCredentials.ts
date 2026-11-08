@@ -6,6 +6,10 @@ export interface OAuthCredentials {
 
 let current: OAuthCredentials | null = null
 
+export function getOAuthCredentials(): OAuthCredentials | null {
+  return getAccessToken() && current ? { ...current } : null
+}
+
 export function setOAuthCredentials(value: OAuthCredentials): void {
   if (!value.accessToken || !value.idToken || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now()) {
     clearOAuthCredentials()

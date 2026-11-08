@@ -522,6 +522,9 @@ html.session-restoring .landing {
   box-sizing: border-box;
 }
 .passkey-gate-card p { line-height: 1.6; }
+.passkey-remember { display: flex; align-items: center; gap: .6rem; text-align: left; padding: .5rem 0; }
+.passkey-remember input { flex: none; width: 1.1rem; height: 1.1rem; }
+.passkey-gate-card .passkey-remember-help { text-align: left; font-size: .85rem; margin-bottom: 1rem; }
 .passkey-gate-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
 .passkey-gate-navigation { flex-direction: column; align-items: stretch; }
 .passkey-primary { justify-content: center; height: auto; min-height: 44px; padding: 0.75rem 1rem; white-space: normal; font-family: inherit; }

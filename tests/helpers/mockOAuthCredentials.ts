@@ -18,6 +18,7 @@ export async function installMockOAuthCredentials(
       ? `
           let current = null;
           export function setOAuthCredentials(value) { current = { ...value }; }
+          export function getOAuthCredentials() { return getAccessToken() ? { ...current } : null; }
           export function getAccessToken() { return current && current.expiresAt > Date.now() + 5000 ? current.accessToken : null; }
           export function getIdToken() { return getAccessToken() ? current.idToken : null; }
           export function clearOAuthCredentials() { current = null; }
@@ -25,6 +26,7 @@ export async function installMockOAuthCredentials(
       : `
           let current = { accessToken: 'e2e-access-token', idToken: 'e2e-id-token', expiresAt: Date.now() + 3600000 };
           export function setOAuthCredentials(value) { current = { ...value }; }
+          export function getOAuthCredentials() { return getAccessToken() ? { ...current } : null; }
           export function getAccessToken() { return current && current.expiresAt > Date.now() + 5000 ? current.accessToken : null; }
           export function getIdToken() { return getAccessToken() ? current.idToken : null; }
           export function clearOAuthCredentials() { current = null; }

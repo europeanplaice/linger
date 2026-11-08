@@ -100,10 +100,13 @@
     for display and is not stored in session records. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
-    Reloading or closing the page discards those tokens and the unlocked metadata key; using Linger
-    again requires passkey unlock and Google authorization. New session records expire 30 days after
+    By default, reloading requires passkey unlock and Google authorization again. If you choose to
+    stay signed in on reload, the unlocked metadata key and short-lived Google tokens are also stored
+    in this tab's browser session storage for up to eight hours. Someone with access to this browser
+    or malicious scripts running on this site could access them. Browser restore may retain tab data;
+    sign out when using a shared device. New session records expire 30 days after
     creation or renewal. Sign-out invalidates the session. Metadata keys are used only in request
-    memory, including on the backend when needed, and are not saved in plaintext.
+    memory, including on the backend when needed; the optional tab session saves the key in browser storage.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.
@@ -274,7 +277,7 @@
   <h2>10. Security</h2>
   <p>
     The app uses HTTPS for communication between your browser, Cloudflare, Google, and AWS. OAuth
-    tokens are kept in browser memory and used transiently by the backend. No method of online storage or
+    tokens are kept in browser memory, optionally in tab session storage as described above, and used transiently by the backend. No method of online storage or
     transmission is completely secure, and the security of your Google account, device, browser, and
     optional AWS account is also important.
   </p>

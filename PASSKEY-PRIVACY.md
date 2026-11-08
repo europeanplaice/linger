@@ -22,9 +22,13 @@ providers fail closed instead of falling back to plaintext metadata.
 The user's master key and Google credentials may be used in request memory.
 Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
-persisted, placed in workflow input/output, or retained in server global state.
-Browser keys and OAuth credentials are memory-only and cleared on logout/account
-invalidation; reloading requires passkey unlock and Google authorization again.
+persisted on the server, placed in workflow input/output, or retained in server global state.
+By default browser keys and OAuth credentials are memory-only. Users can opt in
+to saving the unlocked key and short-lived Google tokens in the tab's sessionStorage
+for reloads, for at most eight hours. This exposes them to scripts running in the
+origin and anyone with access to that browser profile. Sign-out, account changes,
+expiry and failed session validation clear the saved state. Browser restore behavior
+can retain tab state, so users of shared devices should explicitly sign out.
 
 ## Stored data
 

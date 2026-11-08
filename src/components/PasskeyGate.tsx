@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 interface Props {
   busy: boolean
   error: string | null
-  onSetup: () => void
-  onUnlock: () => void
+  onSetup: (remember: boolean) => void
+  onUnlock: (remember: boolean) => void
   onClearError?: () => void
 }
 
@@ -14,6 +14,7 @@ export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Pr
   const { t, language, setLanguage } = useI18n()
   const title = useRef<HTMLHeadingElement>(null)
   const [view, setView] = useState<'login' | 'setup'>('login')
+  const [remember, setRemember] = useState(false)
   const previousView = useRef(view)
   useEffect(() => {
     if (previousView.current !== view) title.current?.focus()
@@ -34,10 +35,15 @@ export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Pr
         <p className="passkey-setup-note" id="passkey-setup-note">{t.login.passkeySetupNote}</p>
       </>}
       {error && <p className="session-expired-msg" role="alert">{error}</p>}
+      <label className="passkey-remember">
+        <input type="checkbox" checked={remember} disabled={busy} onChange={event => setRemember(event.target.checked)} />
+        <span>{t.login.passkeyRemember}</span>
+      </label>
+      <p className="passkey-remember-help">{t.login.passkeyRememberHelp}</p>
       <div className="passkey-gate-actions passkey-gate-navigation">
         <button className="btn-signin-google passkey-primary" type="button" disabled={busy}
           aria-describedby={setup ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
-          onClick={setup ? onSetup : onUnlock}>
+          onClick={() => (setup ? onSetup : onUnlock)(remember)}>
           {busy ? t.login.passkeyWorking : setup ? t.login.passkeySetup : t.login.passkeyUnlock}
         </button>
         <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'login' : 'setup')}>
