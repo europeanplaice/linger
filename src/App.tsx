@@ -656,7 +656,7 @@ export default function App() {
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
 
   const passkeyGate = vaultStatus !== 'unlocked' ? (
-    <PasskeyGate busy={vaultBusy} error={vaultError} returning={hadSession}
+    <PasskeyGate busy={vaultBusy} error={vaultError}
       onSetup={() => { void setupPasskey() }} onUnlock={() => { void unlockPasskey() }}
       onRecover={recoverVault} onClearError={clearVaultError} />
   ) : undefined

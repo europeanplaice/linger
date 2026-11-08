@@ -523,6 +523,10 @@ html.session-restoring .landing {
 }
 .passkey-gate-card p { line-height: 1.6; }
 .passkey-gate-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
+.passkey-gate-navigation { flex-direction: column; align-items: stretch; }
+.passkey-primary { justify-content: center; height: auto; min-height: 44px; padding: 0.75rem 1rem; white-space: normal; font-family: inherit; }
+.passkey-gate-navigation .btn-use-another-account { margin: 0; min-height: 44px; padding: 0.5rem; }
+.passkey-setup-note { text-align: start; border-inline-start: 3px solid var(--border); padding-inline-start: 1rem; }
 .passkey-recovery-help { margin-top: 1.5rem; text-align: start; }
 .passkey-recovery-help summary { cursor: pointer; }
 .passkey-recovery-help input { width: 100%; }

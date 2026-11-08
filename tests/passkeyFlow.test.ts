@@ -20,9 +20,11 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
     '/recover': recoverSession,
   }
   const forbiddenNetworkValues: string[] = []
+  let registrationRequests = 0
   await page.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
     const path = new URL(incoming.url()).pathname.replace('/auth/passkey', '')
+    if (path === '/register/options') registrationRequests++
     const handler = handlers[path]
     if (!handler) { await route.fulfill({ status: 404 }); return }
     const body = incoming.postData()
@@ -57,8 +59,16 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
   let authenticatorId = authenticator.authenticatorId
   try {
     await page.goto(origin)
-    await expect(page.getByRole('heading', { name: 'Protect your account with a passkey' })).toBeVisible()
-    await page.getByRole('button', { name: 'Set up a passkey', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Start using Linger' })).toBeFocused()
+    expect(registrationRequests).toBe(0)
+    await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
+    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
 
     const recovery = await page.evaluate(async () => {
@@ -71,14 +81,15 @@ test('registers, unlocks, and recovers a PRF vault with real WebAuthn signatures
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
 
     await page.evaluate(async () => {
-      const path = '/src/lib/passkeyVault.ts'
-      const vault = await import(/* @vite-ignore */ path)
-      vault.clearVaultKey()
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     })
-    await page.evaluate(async () => {
-      const path = '/src/api/passkeys.ts'
-      await (await import(/* @vite-ignore */ path)).loginWithPasskey()
-    })
+    await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
+    expect(registrationRequests).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 1 })
     const recoveredAgain = await page.evaluate(async () => {
       const path = '/src/api/passkeys.ts'
       return (await import(/* @vite-ignore */ path)).exportVaultRecovery() as string

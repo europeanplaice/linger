@@ -36,7 +36,7 @@ test('a blocked Google popup preserves the unlocked passkey for retry', async ({
   await google.click()
   await expect(page.getByRole('alert')).toContainText('Google sign-in could not be completed')
   await expect(google).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Protect your account with a passkey' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toHaveCount(0)
 })
 
 test('history restoration requests unlock again after discarding memory keys', async ({ page }) => {
@@ -47,5 +47,5 @@ test('history restoration requests unlock again after discarding memory keys', a
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
   })
-  await expect(page.getByRole('heading', { name: 'Protect your account with a passkey' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
 })
