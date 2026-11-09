@@ -102,12 +102,12 @@
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
     By default, reloading requires passkey unlock, after which the saved refresh token can restore
-    Google access. If you choose to stay signed in on reload, the unlocked metadata key is stored
-    in this tab's browser session storage for up to eight hours. Someone with access to this browser
-    or malicious scripts running on this site could access them. Browser restore may retain tab data;
-    sign out when using a shared device. New session records expire 30 days after
+    Google access. If you choose to skip passkey on this device, the unlocked metadata key is stored
+    in browser local storage for up to seven days, including across restarts. Someone with access to this browser
+    or malicious scripts running on this site could access it. Do not use this option on a shared device.
+    You can remove the saved key in settings or by signing out. New session records expire 30 days after
     creation or renewal. Sign-out invalidates the session. Metadata keys are used only in request
-    memory, including on the backend when needed; the optional tab session saves the key in browser storage.
+    memory, including on the backend when needed; the optional device session saves the key in browser storage.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.

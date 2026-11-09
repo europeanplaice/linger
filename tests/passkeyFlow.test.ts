@@ -24,6 +24,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
   let registrationRequests = 0
+  let removeCredentialBeforeAdd: { authenticatorId: string; credentialId: string } | null = null
   await page.addInitScript(() => {
     const create = navigator.credentials.create.bind(navigator.credentials)
     navigator.credentials.create = async options => {
@@ -34,7 +35,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   await context.route('**/auth/login?*', async route => {
     await route.fulfill({ contentType: 'text/html', body: `<script>window.opener.postMessage({type:'linger-oauth-complete',credential:{accessToken:'test-access',idToken:'test-id',expiresAt:Date.now()+3600000,email:'person@example.com'}}, location.origin)</script>` })
   })
-  await page.route('**/auth/passkey/**', async route => {
+  await context.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
     const path = new URL(incoming.url()).pathname.replace('/auth/passkey', '')
     if (path === '/register/options') registrationRequests++
@@ -47,6 +48,10 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       ...(body ? { body } : {}),
     })
     const response = await handler(request, env)
+    if (path === '/add/options' && removeCredentialBeforeAdd) {
+      await cdp.send('WebAuthn.removeCredential', removeCredentialBeforeAdd)
+      removeCredentialBeforeAdd = null
+    }
     if (path === '/login/verify') loginVerifyStatuses.push(response.status)
     for (const cookie of response.headers.getSetCookie()) {
       const fields = cookie.split(';').map(part => part.trim())
@@ -83,7 +88,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
-    await page.getByRole('checkbox', { name: 'Keep the passkey unlocked when this tab reloads' }).check()
+    await page.getByRole('checkbox', { name: 'Skip passkey on this device for 7 days' }).check()
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
     await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
@@ -99,8 +104,13 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     // vault, even before Google authorization has been completed.
     await page.reload()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
-    expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).not.toBeNull()
-    await page.evaluate(() => sessionStorage.removeItem('linger_tab_session_v1'))
+    expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).not.toBeNull()
+    const reopened = await context.newPage()
+    await reopened.goto(origin)
+    await expect(reopened.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
+    await expect(reopened.getByRole('heading', { name: 'Sign in to Linger' })).toHaveCount(0)
+    await reopened.close()
+    await page.evaluate(() => localStorage.removeItem('linger_device_session_v1'))
 
     await page.evaluate(async () => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
@@ -128,6 +138,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 1 })
     // A second provider has a different PRF secret. It must wrap the existing
     // master key, rather than silently creating an unreadable new account key.
+    const firstCredentials = await cdp.send('WebAuthn.getCredentials', { authenticatorId })
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId })
     const second = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
       protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
@@ -135,6 +146,8 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       hasPrf: true,
     } })
     authenticatorId = second.authenticatorId
+    await cdp.send('WebAuthn.addCredential', { authenticatorId, credential: firstCredentials.credentials[0] })
+    removeCredentialBeforeAdd = { authenticatorId, credentialId: firstCredentials.credentials[0].credentialId }
     await page.evaluate(async internalId => {
       const path = '/src/api/passkeys.ts'
       await (await import(/* @vite-ignore */ path)).addPasskey(internalId)

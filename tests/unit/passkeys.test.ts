@@ -65,6 +65,16 @@ it('sends only same-origin passkey routes and strips PRF bytes from assertion JS
 })
 
 it('lists and deletes other passkeys with the unlocked vault session headers', async () => {
+  class FakeCredential {}
+  vi.stubGlobal('PublicKeyCredential', FakeCredential)
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+  const credential = Object.assign(new FakeCredential(), {
+    id: 'AQ', rawId: new Uint8Array([1]).buffer,
+    getClientExtensionResults: () => ({ prf: { results: { first: new Uint8Array(32).buffer } } }),
+    toJSON: () => ({ id: 'AQ', rawId: 'AQ', type: 'public-key', response: {} }),
+  })
+  const credentialsDescriptor = Object.getOwnPropertyDescriptor(navigator, 'credentials')
+  Object.defineProperty(navigator, 'credentials', { configurable: true, value: { get: vi.fn().mockResolvedValue(credential) } })
   const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
   await createWrappedMasterKey(new Uint8Array(32).fill(7), userId, 'cred')
   const credentials = [{ credentialId: 'cred-1', createdAt: 1_800_000_000_000 }]
@@ -72,9 +82,14 @@ it('lists and deletes other passkeys with the unlocked vault session headers', a
     const path = String(input)
     expect(init?.redirect).toBe('error')
     expect(init?.method).toBe('POST')
+    if (path.endsWith('/login/options')) return new Response(JSON.stringify({ options: { challenge: 'AQ' }, prfInput: 'Ag' }), { status: 200 })
     const headers = new Headers(init?.headers)
     expect(headers.get('X-Linger-Vault-User')).toBe(userId)
     expect(headers.get('X-Linger-Vault-Key')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    if (path.endsWith('/login/verify')) {
+      expect(JSON.parse(String(init?.body)).managementAction).toBe('delete')
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }
     if (path.endsWith('/credentials/list')) {
       expect(JSON.parse(String(init?.body))).toEqual({})
       return new Response(JSON.stringify({ credentials, currentCredentialId: 'cred-current' }), { status: 200 })
@@ -84,9 +99,13 @@ it('lists and deletes other passkeys with the unlocked vault session headers', a
     return new Response(JSON.stringify({ ok: true }), { status: 200 })
   })
   vi.stubGlobal('fetch', fetchMock)
-  await expect(listPasskeys(userId)).resolves.toEqual({ credentials, currentCredentialId: 'cred-current' })
-  await expect(deletePasskey(userId, 'cred-1')).resolves.toBeUndefined()
-  expect(fetchMock).toHaveBeenCalledTimes(2)
+  try {
+    await expect(listPasskeys(userId)).resolves.toEqual({ credentials, currentCredentialId: 'cred-current' })
+    await expect(deletePasskey(userId, 'cred-1')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  } finally {
+    if (credentialsDescriptor) Object.defineProperty(navigator, 'credentials', credentialsDescriptor)
+  }
 })
 
 it('strips PRF outputs from both the attestation and verification assertion sent to the server', async () => {

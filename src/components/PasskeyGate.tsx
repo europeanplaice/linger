@@ -40,10 +40,10 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
       </>}
       {error && <p className="session-expired-msg" role="alert">{error}</p>}
       <label className="passkey-remember">
-        <input type="checkbox" checked={remember} disabled={busy} onChange={event => setRemember(event.target.checked)} />
+        <input type="checkbox" checked={remember} disabled={busy} aria-describedby="passkey-remember-help" onChange={event => setRemember(event.target.checked)} />
         <span>{t.login.passkeyRemember}</span>
       </label>
-      <p className="passkey-remember-help">{t.login.passkeyRememberHelp}</p>
+      <p className="passkey-remember-help" id="passkey-remember-help">{t.login.passkeyRememberHelp}</p>
       <div className="passkey-gate-actions passkey-gate-navigation">
         <button className="btn-signin-google passkey-primary" type="button" disabled={busy}
           aria-describedby={setup ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}

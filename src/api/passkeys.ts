@@ -207,8 +207,23 @@ export async function loginWithPasskey(signal?: AbortSignal): Promise<{ userId: 
   } finally { prfOutput.fill(0) }
 }
 
+async function verifyManagementAction(userId: string, action: 'add' | 'delete', signal?: AbortSignal): Promise<void> {
+  requireWebAuthn()
+  const envelope = await post<OptionsEnvelope>('login/options', undefined, undefined, signal)
+  const options = requestOptions(envelope)
+  // This assertion proves presence only; no PRF output is needed for the key.
+  delete options.extensions
+  const credential = await navigator.credentials.get({ publicKey: options, signal })
+  throwIfAborted(signal)
+  if (!(credential instanceof PublicKeyCredential)) throw new Error('Passkey verification was cancelled')
+  const results = credential.getClientExtensionResults() as JsonObject
+  const { prf: _prf, ...safeResults } = results
+  await post('login/verify', { response: serializeCredential(credential, safeResults), managementAction: action }, userId, signal)
+}
+
 export async function addPasskey(userId: string, signal?: AbortSignal, email?: string | null): Promise<void> {
   requireWebAuthn()
+  await verifyManagementAction(userId, 'add', signal)
   const existingKey = getVaultKey(userId)
   if (!existingKey) throw new Error('Unlock the passkey vault before adding another passkey')
   let prfOutput: Uint8Array | null = null
@@ -233,5 +248,6 @@ export async function listPasskeys(userId: string, signal?: AbortSignal): Promis
 }
 
 export async function deletePasskey(userId: string, credentialId: string, signal?: AbortSignal): Promise<void> {
+  await verifyManagementAction(userId, 'delete', signal)
   await post<{ ok: true }>('credentials/delete', { credentialId }, userId, signal)
 }

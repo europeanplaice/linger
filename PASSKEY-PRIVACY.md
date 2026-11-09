@@ -27,8 +27,12 @@ Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
 persisted on the server, placed in workflow input/output, or retained in server global state.
 Browser keys and plaintext OAuth credentials are memory-only by default. Users can opt in
-to saving the unlocked key in the tab's sessionStorage
-for reloads, for at most eight hours. A passkey-protected refresh token in D1
+to saving the unlocked key in the browser's localStorage for up to seven days,
+including across browser restarts. The fixed expiry is not extended by use.
+If the browser is closed at expiry, the expired record is removed on the next
+app launch; browser storage cannot be erased while the app is not running.
+Users can remove the saved key in passkey settings or by signing out. Existing
+tab-only sessions remain limited to their original expiry. A passkey-protected refresh token in D1
 can restore Google access after unlock. This exposes the key to scripts running in the
 origin and anyone with access to that browser profile. Sign-out, account changes,
 expiry and failed session validation clear the saved state. Browser restore behavior
@@ -59,7 +63,8 @@ processes plaintext diary requests and Google identity during authorized operati
 
 Settings offers additional passkeys and a list of registered credentials. Users
 can remove a lost credential after signing in with another passkey for the same
-internal account. The current credential and the final credential are protected
+internal account. Adding or removing a credential requires a fresh passkey
+assertion, verified by the server for each operation. The current credential and the final credential are protected
 against deletion. Removing a credential also invalidates sessions authenticated
 with it. A synced copy of the same credential shares its registration; adding a
 separate passkey creates a separately removable registration.

@@ -50,6 +50,11 @@ function challengeCookie(response: Response): string {
   return cookie.split(';', 1)[0]
 }
 
+async function grant(db: Awaited<ReturnType<typeof createPasskeyTestEnv>>['db'], sessionId: string, action: 'add' | 'delete') {
+  db.prepare('INSERT OR REPLACE INTO passkey_management_grants (session_id, action, expires_at) VALUES (?, ?, ?)')
+    .run(await sessionStorageId(sessionId), action, Date.now() + 60_000)
+}
+
 describe('passkey handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -181,13 +186,31 @@ describe('passkey handlers', () => {
     db.close()
   })
 
+  it('requires a fresh, single-use assertion for credential management', async () => {
+    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+      VALUES (?, ?, ?, 1, '[]', ?, ?, ?)`).run(credentialId, userId, new Uint8Array([1]), prfSalt, wrappedMasterKey, Date.now())
+    expect((await addOptions(request('/auth/passkey/add/options', {}, headers), env)).status).toBe(401)
+    const options = await loginOptions(request('/auth/passkey/login/options', {}), env)
+    const proof = await loginVerify(request('/auth/passkey/login/verify', {
+      response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+      managementAction: 'add',
+    }, { ...headers, Cookie: `${headers.Cookie}; ${challengeCookie(options)}` }), env)
+    expect(proof.status).toBe(200)
+    expect(proof.headers.get('set-cookie')).not.toContain('linger_session=')
+    expect((await addOptions(request('/auth/passkey/add/options', {}, headers), env)).status).toBe(200)
+    expect((await addOptions(request('/auth/passkey/add/options', {}, headers), env)).status).toBe(401)
+    db.close()
+  })
+
   it('requires the decrypted existing profile before adding another passkey', async () => {
-    const { env, db, headers, key, userId } = await createPasskeyTestEnv({ google_sub: 'google-identity' })
+    const { env, db, headers, key, userId, sessionId } = await createPasskeyTestEnv({ google_sub: 'google-identity' })
     const invalid = await addOptions(request('/auth/passkey/add/options', {}, {
       Cookie: headers.Cookie, 'X-Linger-Vault-Key': key, 'X-Linger-Vault-User': 'another-user',
     }), env)
     expect(invalid.status).toBe(401)
 
+    await grant(db, sessionId, 'add')
     const options = await addOptions(request('/auth/passkey/add/options', {}, {
       Cookie: headers.Cookie, 'X-Linger-Vault-Key': key, 'X-Linger-Vault-User': userId,
     }), env)
@@ -204,7 +227,8 @@ describe('passkey handlers', () => {
   })
 
   it('allows an omitted userHandle for the known credential used to add a passkey', async () => {
-    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    const { env, db, headers, userId, sessionId } = await createPasskeyTestEnv()
+    await grant(db, sessionId, 'add')
     const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
     const data = await options.json() as { prfSalt: string }
     const result = await addVerify(request('/auth/passkey/add/verify', {
@@ -218,7 +242,8 @@ describe('passkey handlers', () => {
   })
 
   it('rejects a present mismatched userHandle when adding a passkey', async () => {
-    const { env, db, headers } = await createPasskeyTestEnv()
+    const { env, db, headers, sessionId } = await createPasskeyTestEnv()
+    await grant(db, sessionId, 'add')
     const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
     const data = await options.json() as { prfSalt: string }
     const result = await addVerify(request('/auth/passkey/add/verify', {
@@ -233,6 +258,7 @@ describe('passkey handlers', () => {
 
   it('does not add a credential if its session is revoked during WebAuthn verification', async () => {
     const { env, db, headers, userId, sessionId } = await createPasskeyTestEnv()
+    await grant(db, sessionId, 'add')
     const options = await addOptions(request('/auth/passkey/add/options', {}, headers), env)
     const data = await options.json() as { prfSalt: string }
     webauthn.verifyAuthenticationResponse.mockImplementationOnce(async () => {
@@ -267,6 +293,7 @@ describe('passkey handlers', () => {
     })
     const currentDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId }, headers), env)
     expect(currentDelete.status).toBe(409)
+    await grant(db, sessionId, 'delete')
     const lastDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId: otherCredentialId }, headers), env)
     expect(lastDelete.status).toBe(200)
     expect(await lastDelete.json()).toEqual({ ok: true })
@@ -276,6 +303,7 @@ describe('passkey handlers', () => {
 
     const unboundSessionId = 'second-session'
     await createPasskeySession(unboundSessionId, userId, env)
+    await grant(db, unboundSessionId, 'delete')
     const lastCredentialDelete = await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId }, {
       ...headers, Cookie: `linger_session=${unboundSessionId}`,
     }), env)

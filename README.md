@@ -15,7 +15,7 @@ A private daily diary that saves plain-text entries to your Google Drive.
 
 ## Your data
 
-Diary entries are stored as one `.txt` file per day in the `linger_diary/` folder in Google Drive. A Google refresh token is encrypted using the passkey-protected key and saved in D1 so Google authorization can be restored after passkey unlock. Short-lived Google tokens accompany authorized requests and are used in memory. Users can opt to retain the unlocked key in tab session storage for up to eight hours. The browser keeps a local cache and unsaved drafts so the app can load quickly and recover edits. Google Drive remains the primary copy. See [OAuth privacy and migration](OAUTH-PRIVACY.md) for the security boundary and treatment of previously stored credentials.
+Diary entries are stored as one `.txt` file per day in the `linger_diary/` folder in Google Drive. A Google refresh token is encrypted using the passkey-protected key and saved in D1 so Google authorization can be restored after passkey unlock. Short-lived Google tokens accompany authorized requests and are used in memory. Users can opt to retain the unlocked key in browser storage for up to seven days across restarts; anyone using the browser or malicious scripts on the origin may access it. The browser keeps a local cache and unsaved drafts so the app can load quickly and recover edits. Google Drive remains the primary copy. See [OAuth privacy and migration](OAUTH-PRIVACY.md) for the security boundary and treatment of previously stored credentials.
 
 S3 backup is optional. It uses short-lived AWS credentials and writes to a bucket in your AWS account. Backup work advances while the app is open and authorized. See the [S3 setup guide](self-hosted/aws-s3/README.md).
 

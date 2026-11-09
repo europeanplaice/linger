@@ -160,11 +160,12 @@ function validHkdfSalt(value: unknown): value is string {
   try { return atob(value).length === 32 } catch { return false }
 }
 
-function validWebAuthnResponse(value: unknown): value is AuthenticationResponseJSON | RegistrationResponseJSON {
+function validWebAuthnResponse(value: unknown, requirePrf = true): value is AuthenticationResponseJSON | RegistrationResponseJSON {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
   if (typeof candidate.id !== 'string' || typeof candidate.rawId !== 'string' || candidate.type !== 'public-key' ||
     !candidate.response || typeof candidate.response !== 'object' || Array.isArray(candidate.response)) return false
+  if (!requirePrf) return true
   // The browser has already checked that PRF returned bytes. Those bytes never
   // cross the network; only the WebAuthn extension's non-secret enabled flag is
   // accepted here, and it is never persisted.
@@ -332,7 +333,8 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
   if (rejected) return rejected
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
   const body = await readJson(request)
-  if (!body || !validWebAuthnResponse(body.response)) return withClearedChallengeCookie(jsonResponse({ error: 'Invalid passkey response' }, 400), env)
+  const managementAction = body?.managementAction === 'add' || body?.managementAction === 'delete'
+  if (!body || !validWebAuthnResponse(body.response, !managementAction)) return withClearedChallengeCookie(jsonResponse({ error: 'Invalid passkey response' }, 400), env)
   const challenge = await consumeChallenge(request, env, 'login')
   if (!challenge) return withClearedChallengeCookie(jsonResponse({ error: 'Challenge expired' }, 400), env)
   const response = body.response as AuthenticationResponseJSON
@@ -355,6 +357,16 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
     const update = await env.AUTH_DB.prepare('UPDATE passkey_credentials SET counter = ? WHERE credential_id = ? AND counter = ?')
       .bind(nextCounter, row.credential_id, row.counter).run()
     if (!update.success || update.meta.changes !== 1) throw new Error('Credential changed concurrently')
+    if (body.managementAction === 'add' || body.managementAction === 'delete') {
+      const currentId = parseSessionId(request)
+      const current = currentId ? await getPasskeySessionInfo(currentId, env) : null
+      if (!current || current.userId !== row.user_id || request.headers.get('X-Linger-Vault-User') !== row.user_id ||
+          !await validateUnlockedProfile(request, env, row.user_id)) throw new Error('Account mismatch')
+      await env.AUTH_DB.prepare('DELETE FROM passkey_management_grants WHERE session_id IN (SELECT session_id FROM passkey_management_grants WHERE expires_at <= ? LIMIT 100)').bind(Date.now()).run()
+      await env.AUTH_DB.prepare('INSERT INTO passkey_management_grants (session_id, action, expires_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET action = excluded.action, expires_at = excluded.expires_at')
+        .bind(await sessionStorageId(currentId!), body.managementAction, Date.now() + 60_000).run()
+      return withClearedChallengeCookie(jsonResponse({ ok: true }), env)
+    }
     const sessionId = randomToken(32)
     await createPasskeySession(sessionId, row.user_id, env, row.credential_id)
     return withClearedChallengeCookie(jsonResponse({
@@ -371,6 +383,10 @@ export async function addOptions(request: Request, env: Env): Promise<Response> 
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
   const userId = await authenticatedUser(request, env)
   if (!userId) return jsonResponse({ error: 'Unauthorized' }, 401)
+  const sessionId = parseSessionId(request)
+  const grant = sessionId && await env.AUTH_DB.prepare("DELETE FROM passkey_management_grants WHERE session_id = ? AND action = 'add' AND expires_at > ? RETURNING session_id")
+    .bind(await sessionStorageId(sessionId), Date.now()).first()
+  if (!grant) return jsonResponse({ error: 'Passkey verification required' }, 401)
   try {
     if (!await validateUnlockedProfile(request, env, userId)) return jsonResponse({ error: 'Vault unlock required' }, 401)
     const { rpID } = relyingParty(request, env)
@@ -474,6 +490,9 @@ export async function deleteCredential(request: Request, env: Env): Promise<Resp
     return jsonResponse({ error: 'Invalid credential' }, 400)
   }
   if (body.credentialId === session.credentialId) return jsonResponse({ error: 'Current credential cannot be deleted' }, 409)
+  const grant = await env.AUTH_DB.prepare("DELETE FROM passkey_management_grants WHERE session_id = ? AND action = 'delete' AND expires_at > ? RETURNING session_id")
+    .bind(await sessionStorageId(sessionId!), Date.now()).first()
+  if (!grant) return jsonResponse({ error: 'Passkey verification required' }, 401)
   // D1 batch executes these statements as one transaction. The guarded DELETE
   // makes the final-credential check atomic with removal, including concurrent deletes.
   const deletion = env.AUTH_DB.prepare(`DELETE FROM passkey_credentials

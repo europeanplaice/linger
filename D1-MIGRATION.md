@@ -1,5 +1,12 @@
 # Authentication metadata in D1
 
+## Passkey management verification (migration 0008)
+
+Apply `0008_passkey_management_grants.sql` before deploying the matching Pages
+code. Adding or deleting a passkey requires a fresh assertion and a short-lived,
+single-use grant bound to the current session. Older Pages code does not enforce
+this check, so retire older deployments at rollout.
+
 ## Encrypted Google refresh credentials (migration 0007)
 
 Apply `0007_google_refresh_vault.sql` before deploying code that uses the Google

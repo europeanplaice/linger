@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { deletePasskey, listPasskeys } from '../api/passkeys'
 import type { PasskeyCredentialSummary } from '../api/passkeys'
 import { useI18n } from '../i18n'
+import { clearTabSession, hasDeviceSession } from '../lib/tabSession'
 
 export function PasskeySettings({ userId, busy, error, onAdd }: { userId: string | null; busy: boolean; error: string | null; onAdd: () => Promise<void> }) {
   const { t, language } = useI18n()
@@ -13,6 +14,7 @@ export function PasskeySettings({ userId, busy, error, onAdd }: { userId: string
   const [status, setStatus] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [rememberedDevice, setRememberedDevice] = useState(hasDeviceSession)
   const dialog = useRef<HTMLDialogElement>(null)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -78,6 +80,7 @@ export function PasskeySettings({ userId, busy, error, onAdd }: { userId: string
   return <section className="settings-section passkey-settings" aria-labelledby="passkey-settings-title">
     <h4 className="settings-section-title" id="passkey-settings-title">{t.login.passkeyTitle}</h4>
     <p className="settings-section-description">{t.login.passkeyProviderHelp}</p>
+    {rememberedDevice && <button className="settings-copy-btn" type="button" onClick={() => { clearTabSession(); setRememberedDevice(false); setStatus(t.login.passkeyForgotDevice) }}>{t.login.passkeyForgetDevice}</button>}
     <button className="settings-copy-btn" type="button" disabled={busy || !userId} onClick={() => { void add() }}>
       {busy ? t.login.passkeyWorking : t.login.passkeyAdd}
     </button>
