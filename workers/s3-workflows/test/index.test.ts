@@ -101,7 +101,7 @@ describe('retired durable Workflow entry points', () => {
       .rejects.toThrow(/durable s3 mirroring is disabled/i)
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-03'))).toBeNull()
+    expect(await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-07-03')).toBeNull()
   })
 })
 
@@ -163,7 +163,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     expect(result.error).toMatch(/request-scoped Google credentials/i)
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-01'))
+    const entry = await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-07-01')
     expect(entry).toBeNull()
     expect(drive.findEntryMeta).not.toHaveBeenCalled()
   })
@@ -180,7 +180,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     expect(result.error).toMatch(/request-scoped Google credentials/i)
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-02'))
+    const entry = await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-07-02')
     expect(entry).toBeNull()
     expect(drive.findEntryMeta).not.toHaveBeenCalled()
   })
@@ -202,7 +202,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-03'))
+    const entry = await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-07-03')
     expect(entry).toBeNull()
   })
 
@@ -223,7 +223,7 @@ describe('S3WorkflowsService single-entry mirror RPCs', () => {
     expect(result.error).toMatch(/request-scoped Google credentials/i)
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-07-04'))).toBeNull()
+    expect(await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-07-04')).toBeNull()
   })
 })
 
@@ -255,7 +255,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
 
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    const entry = await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-05'))
+    const entry = await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-01-05')
     expect(entry).toBeNull()
   })
 
@@ -282,10 +282,8 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     const accountKey = 'lazy-open-3'
     await seedSession(accountKey)
     const index = (env as unknown as WorkflowEnv).S3_SYNC_INDEX.getByName(accountKey)
-    await runInDurableObject(index, (instance: S3SyncIndex) => {
-      instance.setBackupEnabled(true)
-      instance.markPending('2026-01-07', '3', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-    })
+    await index.setBackupEnabled(true)
+    await index.updateProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-01-07', 'pending', '3', new Date(Date.now() - 10 * 60 * 1000).toISOString())
     const workflowEnv = lazyEnv()
     const svc = authenticatedService(new S3WorkflowsService(createExecutionContext(), workflowEnv))
 
@@ -293,7 +291,7 @@ describe('getEntryStatus lazy mirror-on-read', () => {
     expect(status.status).toBe('failed')
     expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-07')))
+    expect(await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-01-07'))
       .toMatchObject({ state: 'pending' })
   })
 })
@@ -345,6 +343,6 @@ describe('retired scheduling with exhausted workflow budget', () => {
     expect('error' in status ? status.error : '').toMatch(/request-scoped Google credentials/i)
     // Nothing was scheduled and no persistent failed record was written.
     expect(workflowEnv.S3_MIRROR_WORKFLOW.create).not.toHaveBeenCalled()
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry('2026-01-09'))).toBeNull()
+    expect(await index.getProtectedEntry({ sessionId: sessionIdFor(accountKey), accountKey, vaultKey: authKeys.get(sessionIdFor(accountKey)) }, '2026-01-09')).toBeNull()
   })
 })

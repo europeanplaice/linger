@@ -21,6 +21,16 @@ import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 
 export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex, DiaryWriter }
 
+async function migrateSyncMetadata(env: WorkflowEnv, input: DiaryWriterAuth): Promise<void> {
+  try {
+    await indexFor(env, input.accountKey).migrateLegacyMetadata({ sessionId: input.sessionId, accountKey: input.accountKey, vaultKey: input.vaultKey })
+  } catch {
+    // Sync metadata is reconstructible. A corrupt legacy job or temporary index
+    // outage must not prevent the user from accessing or saving the diary.
+    console.warn('Legacy sync metadata migration deferred')
+  }
+}
+
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
   async scheduled(): Promise<void> {
     await cleanupAuth(this.env)
@@ -33,16 +43,19 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
 
   async ensureDiaryFolder(input: DiaryWriterAuth): Promise<string> {
     await authorizedSession(this.env, input)
+    await migrateSyncMetadata(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
   }
 
   async selectDiaryFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string> {
     await authorizedSession(this.env, input)
+    await migrateSyncMetadata(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).selectFolder(input)
   }
 
   async mutateDiaryEntry(input: DiaryMutationInput): Promise<Response> {
     await authorizedSession(this.env, input)
+    await migrateSyncMetadata(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).mutate(input)
   }
 

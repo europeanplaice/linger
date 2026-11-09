@@ -7,7 +7,7 @@ import type { DiaryMutationInput } from '../../../functions/_shared/diaryWriter'
 import type { DiaryWriter } from '../src/diaryWriter'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
-import { openVaultValue, sealVaultValue } from '../../../functions/_shared/vaultCrypto'
+import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functions/_shared/vaultCrypto'
 import { createTestSession, testSession, vaultKey } from './auth'
 
 vi.mock('../../../functions/_shared/drive', async original => ({
@@ -99,7 +99,7 @@ describe('account-scoped diary mutations', () => {
     const createCache = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, { id: 'old-create-id', folderId: 'old-folder' })
     await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put({ [`file:${date}`]: fileCache, [`create:${date}`]: createCache }))
     const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
-    await runInDurableObject(index, (instance: S3SyncIndex) => instance.markPending(date, '7', new Date().toISOString(), 'old-file-id'))
+    await index.updateProtectedEntry(auth, date, 'pending', '7', new Date().toISOString())
 
     expect(await service.selectDiaryFolder({ ...auth, folderId: renamed.id })).toBe(renamed.id)
     const stored = (await runInDurableObject(writer, async (_instance: DiaryWriter, state) => ({
@@ -110,7 +110,7 @@ describe('account-scoped diary mutations', () => {
     expect(await openVaultValue<string>(auth.vaultKey, auth.accountKey, 'diary-writer:folder', stored.folder!)).toBe(renamed.id)
     expect(stored.file).toBeUndefined()
     expect(stored.create).toBeUndefined()
-    expect(await runInDurableObject(index, (instance: S3SyncIndex) => instance.getEntry(date))).toBeNull()
+    expect(await index.getProtectedEntry(auth, date)).toBeNull()
     const reconciled = (await getSession(auth.sessionId, env, auth.vaultKey))!
     expect(reconciled.folder_id).toBe(renamed.id)
     expect(reconciled.changes_start_page_token).toBeUndefined()
@@ -195,7 +195,7 @@ describe('account-scoped diary mutations', () => {
 
     expect((await service.mutateDiaryEntry(input('new entry'))).status).toBe(200)
     const reservation = await runInDurableObject(writer, async (_instance: DiaryWriter, state) =>
-      state.storage.get<string>(`file:${date}`),
+      [...(await state.storage.list<string>({ prefix: 'file:v2:' })).values()][0],
     )
     expect(reservation).toMatch(/^v1\./)
     expect(reservation).not.toContain('legacy-drive-file-id')
@@ -222,10 +222,115 @@ describe('account-scoped diary mutations', () => {
       Object.fromEntries(await state.storage.list()),
     )
     const serialized = JSON.stringify(stored)
+    expect(serialized).not.toContain(date)
     expect(serialized).not.toContain(auth.vaultKey)
     expect(serialized).not.toContain(saved.id)
     expect(serialized).not.toContain('folder-' + auth.accountKey)
     expect(Object.values(stored).every(value => typeof value === 'string' && value.startsWith('v1.'))).toBe(true)
+  })
+
+  it('moves an existing encrypted reservation to a private lookup key without losing its Drive ID', async () => {
+    const { auth, service, input, writer } = await account()
+    const folderId = await service.ensureDiaryFolder(auth)
+    const legacy = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, { id: 'reserved-id', folderId })
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put(`create:${date}`, legacy))
+
+    expect((await service.mutateDiaryEntry(input('entry'))).status).toBe(200)
+    expect(drive.generateFileId).not.toHaveBeenCalled()
+    expect(files.has('reserved-id')).toBe(true)
+    const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => Object.fromEntries(await state.storage.list()))
+    expect(JSON.stringify(stored)).not.toContain(date)
+  })
+
+  it('preserves an object-shaped legacy reservation when retrying a create', async () => {
+    const { auth, service, input, writer } = await account()
+    const folderId = await service.ensureDiaryFolder(auth)
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) =>
+      state.storage.put(`create:${date}`, { id: 'legacy-reserved-id', folderId }),
+    )
+    expect((await service.mutateDiaryEntry(input('entry'))).status).toBe(200)
+    expect(drive.generateFileId).not.toHaveBeenCalled()
+    expect(files.has('legacy-reserved-id')).toBe(true)
+    const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => Object.fromEntries(await state.storage.list()))
+    expect(JSON.stringify(stored)).not.toContain(date)
+    expect(JSON.stringify(stored)).not.toContain('legacy-reserved-id')
+  })
+
+  it('retains a legacy reservation if a partially migrated record is corrupted', async () => {
+    const { auth, service, writer } = await account()
+    const folderId = await service.ensureDiaryFolder(auth)
+    const old = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, { id: 'reserved-id', folderId })
+    const digest = await vaultLookupKey(auth.vaultKey, auth.accountKey, 'diary-writer-date', date)
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put({ [`create:${date}`]: old, [`create:v2:${digest}`]: 'v1.invalid.invalid' }))
+    await expect(service.ensureDiaryFolder(auth)).rejects.toThrow()
+    const remaining = await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.get(`create:${date}`))
+    expect(remaining).toBe(old)
+    expect(drive.generateFileId).not.toHaveBeenCalled()
+  })
+
+  it('migrates every legacy date key on an authenticated folder request', async () => {
+    const { auth, service, writer } = await account()
+    const otherDate = '2002-03-04'
+    const oldFile = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:file:${date}`, 'old-file')
+    const oldCreate = await sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:create:${otherDate}`, { id: 'reserved', folderId: 'old-folder' })
+    await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put({ [`file:${date}`]: oldFile, [`create:${otherDate}`]: oldCreate }))
+
+    await service.ensureDiaryFolder(auth)
+    const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => Object.fromEntries(await state.storage.list()))
+    const entries = Object.entries(stored)
+    expect(entries.some(([key]) => key.startsWith('file:v2:'))).toBe(true)
+    expect(entries.some(([key]) => key.startsWith('create:v2:'))).toBe(true)
+    expect(JSON.stringify(stored)).not.toContain(date)
+    expect(JSON.stringify(stored)).not.toContain(otherDate)
+    const [key, envelope] = entries.find(([name]) => name.startsWith('create:v2:'))!
+    expect(await openVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:${key}`, envelope as string)).toEqual({ id: 'reserved', folderId: 'old-folder' })
+  })
+
+  it('keeps diary saves available if an unrelated legacy sync job cannot migrate', async () => {
+    const { auth, service, input } = await account()
+    const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex, state) => {
+      instance.startJob('legacy-request', 'legacy-job', 'legacy-workflow', true, new Date().toISOString())
+      state.storage.sql.exec('UPDATE jobs SET failed_dates = ? WHERE job_id = ?', 'invalid-legacy-data', 'legacy-job')
+      instance.finishJob('legacy-job', new Date().toISOString())
+    })
+    expect((await service.mutateDiaryEntry(input('entry'))).status).toBe(200)
+    expect(files.size).toBe(1)
+    await runInDurableObject(index, (_instance: S3SyncIndex, state) => {
+      expect(state.storage.sql.exec<{ failed_dates: string }>('SELECT failed_dates FROM jobs WHERE job_id = ?', 'legacy-job').one().failed_dates).toBe('invalid-legacy-data')
+    })
+  })
+
+  it('migrates old sync dates when the user opens their diary', async () => {
+    const { auth, service } = await account()
+    const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
+    await runInDurableObject(index, (instance: S3SyncIndex, state) => {
+      state.storage.sql.exec("INSERT INTO entries (date, drive_version, synced_version, state, updated_at) VALUES (?, '1', '1', 'synced', ?)", date, new Date().toISOString())
+      instance.startJob('legacy-request', 'legacy-job', 'legacy-workflow', true, new Date().toISOString())
+      state.storage.sql.exec('UPDATE jobs SET failed_dates = ? WHERE job_id = ?', JSON.stringify([date]), 'legacy-job')
+      instance.finishJob('legacy-job', new Date().toISOString())
+    })
+    await service.ensureDiaryFolder(auth)
+    expect(await index.getProtectedEntry(auth, date)).toMatchObject({ date, syncedVersion: '1' })
+    expect(await index.getProtectedJob(auth, 'legacy-job')).toMatchObject({ failedDates: [date] })
+    await runInDurableObject(index, (_instance: S3SyncIndex, state) => {
+      const rows = { entries: state.storage.sql.exec('SELECT * FROM entries').toArray(), jobs: state.storage.sql.exec('SELECT * FROM jobs').toArray(), dates: state.storage.sql.exec('SELECT * FROM protected_job_dates').toArray() }
+      expect(rows.entries).toEqual([])
+      expect(JSON.stringify(rows)).not.toContain(date)
+    })
+  })
+
+  it('rejects an incorrect vault key before changing legacy sync records', async () => {
+    const { auth, service } = await account()
+    const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
+    await runInDurableObject(index, (_instance: S3SyncIndex, state) => {
+      state.storage.sql.exec("INSERT INTO entries (date, state, updated_at) VALUES (?, 'pending', ?)", date, new Date().toISOString())
+    })
+    await expect(service.ensureDiaryFolder({ ...auth, vaultKey: vaultKey() })).rejects.toThrow(/unauthorized/i)
+    await runInDurableObject(index, (_instance: S3SyncIndex, state) => {
+      expect(state.storage.sql.exec('SELECT date FROM entries').toArray()).toEqual([{ date }])
+      expect(state.storage.sql.exec('SELECT * FROM protected_entries').toArray()).toEqual([])
+    })
   })
 
   it('serializes updates from separate login sessions and returns the winning content as a conflict', async () => {
@@ -321,9 +426,9 @@ describe('account-scoped diary mutations', () => {
       throw new TypeError('response lost')
     })
     expect((await service.mutateDiaryEntry(input('retained'))).status).toBe(500)
-    const reserved = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => state.storage.get<string>(`create:${date}`))
+    const [reservedKey, reserved] = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => [...(await state.storage.list<string>({ prefix: 'create:v2:' })).entries()][0])
     expect(reserved).toMatch(/^v1\./)
-    const reservation = await openVaultValue<{ id: string; folderId: string }>(auth.vaultKey, auth.accountKey, `diary-writer:create:${date}`, reserved!)
+    const reservation = await openVaultValue<{ id: string; folderId: string }>(auth.vaultKey, auth.accountKey, `diary-writer:${reservedKey}`, reserved!)
     expect((await service.mutateDiaryEntry(input('retained'))).status).toBe(200)
     expect(files.size).toBe(1)
     expect(drive.generateFileId).toHaveBeenCalledOnce()

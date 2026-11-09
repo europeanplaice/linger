@@ -8,7 +8,7 @@ import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../
 import type { SessionData } from '../../../functions/_shared/session'
 import { authorizedSession } from './runtime'
 import type { WorkflowEnv } from './types'
-import { openVaultValue, sealVaultValue } from '../../../functions/_shared/vaultCrypto'
+import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functions/_shared/vaultCrypto'
 
 // One object per internal Linger account and deployment environment. All
 // sessions/devices use this queue, including folder discovery and restores. Do not hold a storage
@@ -37,6 +37,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   }
 
   private async folder(auth: DiaryWriterAuth, session: SessionData): Promise<string> {
+    await this.migrateLegacyMetadata(auth)
     const token = auth.accessToken
     const sessionFolderId = session.folder_id
     let stored = await this.readMetadata<string>('folder', auth)
@@ -117,7 +118,9 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         this.ctx.storage.list({ prefix: 'create:' }),
       ])
       const cacheKeys = [...files.keys(), ...creates.keys()]
-      if (cacheKeys.length) await this.ctx.storage.delete(cacheKeys)
+      for (let i = 0; i < cacheKeys.length; i += 128) {
+        await this.ctx.storage.delete(cacheKeys.slice(i, i + 128))
+      }
 
       session.folder_id = input.folderId
       session.changes_start_page_token = undefined
@@ -136,8 +139,10 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const session = await this.session(input)
       await this.folder(input, session)
       const token = input.accessToken
-      const key = `file:${input.date}`
-      const reservationKey = `create:${input.date}`
+      if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
+      const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
+      const key = `file:v2:${dateKey}`
+      const reservationKey = `create:v2:${dateKey}`
       const findEntry = async (): Promise<DriveFileMeta | null> => {
         const known = await this.readMetadata<string>(key, input)
         if (known) {
@@ -207,6 +212,46 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       return undefined
     }
     return openVaultValue<T>(auth.vaultKey, auth.accountKey, `diary-writer:${storageKey}`, envelope)
+  }
+
+  private async migrateDateMetadata(oldKey: string, newKey: string, auth: DiaryWriterAuth): Promise<void> {
+    const raw = await this.ctx.storage.get<unknown>(oldKey)
+    // A reservation from the pre-envelope format may already name a Drive file
+    // created before a response was lost. Preserve its ID when it has the
+    // expected shape; the create path still checks its folder and Drive result.
+    const legacyReservation = oldKey.startsWith('create:') && raw !== null && typeof raw === 'object'
+      && 'id' in raw && typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 512
+      && 'folderId' in raw && typeof raw.folderId === 'string' && raw.folderId.length > 0 && raw.folderId.length <= 512
+      ? { id: raw.id, folderId: raw.folderId } : undefined
+    const old = legacyReservation ?? await this.readMetadata<unknown>(oldKey, auth)
+    if (old === undefined) return
+    // A completed new write takes precedence if a previous migration was interrupted.
+    const existing = await this.ctx.storage.get<unknown>(newKey)
+    if (existing === undefined) {
+      await this.writeMetadata(newKey, auth, old)
+    } else {
+      if (typeof existing !== 'string' || !auth.vaultKey) throw new Error('Invalid protected diary metadata')
+      await openVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:${newKey}`, existing)
+    }
+    await this.ctx.storage.delete(oldKey)
+  }
+
+  private async migrateLegacyMetadata(auth: DiaryWriterAuth): Promise<void> {
+    if (!auth.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
+    // Retain create reservations: they are needed to safely retry an ambiguous
+    // Drive create. A restart can repeat this migration without replacing a more
+    // recent v2 value. Never store the vault key or plaintext date in v2 keys.
+    for (const prefix of ['file:', 'create:']) {
+      // Legacy dates start with a digit; v2 digests start with "v2:". Avoid
+      // loading every already-migrated entry on each diary operation.
+      const rows = await this.ctx.storage.list({ prefix, start: `${prefix}0`, end: `${prefix}:` })
+      for (const oldKey of rows.keys()) {
+        const date = oldKey.slice(prefix.length)
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+        const digest = await vaultLookupKey(auth.vaultKey, auth.accountKey, 'diary-writer-date', date)
+        await this.migrateDateMetadata(oldKey, `${prefix}v2:${digest}`, auth)
+      }
+    }
   }
 
   private async writeMetadata(storageKey: string, auth: DiaryWriterAuth, value: unknown): Promise<void> {

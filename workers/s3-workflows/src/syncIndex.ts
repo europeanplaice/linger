@@ -2,12 +2,12 @@ import { DurableObject } from 'cloudflare:workers'
 import { isAtLeast } from '../../../functions/_shared/s3'
 import type { BackfillJob, EntrySyncStatus, S3SyncState } from '../../../functions/_shared/s3Workflow'
 import type { WorkflowEnv } from './types'
-import { durableSessionHandle } from '../../../functions/_shared/authStore'
 import { authorizedSession, ensureAccountDiaryFolder, mirrorEntryCore, type MirrorEntryCoreInput, type S3Config } from './runtime'
 import { findJsonFile, readJsonFile, writeJsonFile } from '../../../functions/_shared/drive'
 import { getValidAccessToken } from '../../../functions/_shared/session'
 import { isValidS3Settings } from '../../../functions/_shared/s3Settings'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
+import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functions/_shared/vaultCrypto'
 
 interface JobReservation {
   job: BackfillJob
@@ -70,6 +70,8 @@ function isOrphaned(row: JobRow): boolean {
 
 export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   private tail: Promise<unknown> = Promise.resolve()
+  private entryTail: Promise<unknown> = Promise.resolve()
+  private entryGeneration = 0
   private settingsUpdating = false
 
   // Serialize remote S3 operations and target changes, without holding a storage
@@ -128,70 +130,10 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     if (active && !isOrphaned(active)) throw new Error('A backfill is already running')
   }
 
-  async queueDeletion(input: S3WorkflowAuth & { date: string }, requestId: string): Promise<void> {
-    await authorizedSession(this.env, input)
-    const durableSessionId = await durableSessionHandle(input.sessionId, this.env)
-    await this.ctx.storage.transaction(async () => {
-      this.ctx.storage.sql.exec(
-        `INSERT INTO pending_deletions (date, request_id, session_id, account_key, next_attempt, attempts)
-         VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(date) DO UPDATE SET request_id = excluded.request_id,
-         session_id = excluded.session_id, account_key = excluded.account_key, next_attempt = excluded.next_attempt, attempts = 0`,
-        input.date, requestId, durableSessionId, input.accountKey, Date.now() + 5 * 60_000,
-      )
-      await this.scheduleDeletionAlarm()
-    })
-  }
-
-  async completeDeletion(date: string, requestId: string): Promise<void> {
-    await this.ctx.storage.transaction(async () => {
-      this.ctx.storage.sql.exec('DELETE FROM pending_deletions WHERE date = ? AND request_id = ?', date, requestId)
-      await this.scheduleDeletionAlarm()
-    })
-  }
-
-  async deferDeletion(date: string, requestId: string, nextAttempt: number): Promise<void> {
-    await this.ctx.storage.transaction(async () => {
-      this.ctx.storage.sql.exec('UPDATE pending_deletions SET next_attempt = ? WHERE date = ? AND request_id = ?', nextAttempt, date, requestId)
-      await this.scheduleDeletionAlarm()
-    })
-  }
-
-  private async scheduleDeletionAlarm(): Promise<void> {
-    const next = this.ctx.storage.sql.exec<{ next: number | null }>('SELECT MIN(next_attempt) AS next FROM pending_deletions').one().next
-    if (next === null) await this.ctx.storage.deleteAlarm()
-    else await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, next))
-  }
-
+  // Old pending deletion alarms cannot safely run without an unlocked key.
   async alarm(): Promise<void> {
-    // Process one date per invocation to bound external subrequests. A deletion
-    // missed its Workflow (or exhausted its retries); reconciliation here uses no
-    // Workflow steps and survives object eviction. Never blindly replay DELETE.
-    const row = this.ctx.storage.sql.exec<{ date: string; request_id: string; session_id: string; account_key: string; attempts: number }>(
-      'SELECT date, request_id, session_id, account_key, attempts FROM pending_deletions WHERE next_attempt <= ? ORDER BY next_attempt LIMIT 1', Date.now(),
-    ).toArray()[0]
-    if (row && !row.session_id.startsWith('sha256:')) {
-      const storedId = await durableSessionHandle(row.session_id, this.env)
-      if (storedId !== row.session_id) {
-        this.ctx.storage.sql.exec(
-          'UPDATE pending_deletions SET session_id = ? WHERE date = ? AND request_id = ? AND session_id = ?',
-          storedId, row.date, row.request_id, row.session_id,
-        )
-      }
-    }
-    try {
-      if (row) {
-        await this.reconcileEntry({ sessionId: row.session_id, accountKey: row.account_key, date: row.date })
-        await this.completeDeletion(row.date, row.request_id)
-      }
-    } catch (error) {
-      console.warn('S3 deletion retry deferred')
-      if (row) {
-        const delay = Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(row.attempts, 5))
-        this.ctx.storage.sql.exec('UPDATE pending_deletions SET attempts = attempts + 1, next_attempt = ? WHERE date = ? AND request_id = ?', Date.now() + delay, row.date, row.request_id)
-      }
-    } finally {
-      await this.scheduleDeletionAlarm()
-    }
+    this.ctx.storage.sql.exec('DELETE FROM pending_deletions')
+    await this.ctx.storage.deleteAlarm()
   }
 
   constructor(ctx: DurableObjectState, env: WorkflowEnv) {
@@ -209,6 +151,20 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
           state TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS protected_entries (
+          lookup_key TEXT PRIMARY KEY,
+          envelope TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS protected_job_dates (
+          job_id TEXT NOT NULL,
+          chunk INTEGER NOT NULL,
+          envelope TEXT NOT NULL,
+          PRIMARY KEY (job_id, chunk)
+        );
+        CREATE TABLE IF NOT EXISTS protected_job_errors (
+          job_id TEXT PRIMARY KEY,
+          envelope TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS jobs (
           job_id TEXT PRIMARY KEY,
@@ -289,6 +245,18 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     const cutoff = new Date(now - COMPLETED_JOB_RETENTION_MS).toISOString()
     // Only terminal rows are candidates; keep the full retry window even during bursts.
     this.ctx.storage.sql.exec(
+      `DELETE FROM protected_job_dates WHERE job_id IN (
+         SELECT job_id FROM jobs
+         WHERE state IN ('complete', 'failed', 'cancelled') AND finished_at < ?
+       )`, cutoff,
+    )
+    this.ctx.storage.sql.exec(
+      `DELETE FROM protected_job_errors WHERE job_id IN (
+         SELECT job_id FROM jobs
+         WHERE state IN ('complete', 'failed', 'cancelled') AND finished_at < ?
+       )`, cutoff,
+    )
+    this.ctx.storage.sql.exec(
       `DELETE FROM processed_batches WHERE job_id IN (
          SELECT job_id FROM jobs
          WHERE state IN ('complete', 'failed', 'cancelled')
@@ -342,10 +310,11 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   markStartFailed(jobId: string, message: string, finishedAt: string): void {
+    void message
     this.ctx.storage.sql.exec(
       "UPDATE jobs SET state = 'failed', finished_at = ?, error = ? WHERE job_id = ? AND state = 'queued'",
       finishedAt,
-      message.slice(0, 200),
+      'Background backup could not start',
       jobId,
     )
   }
@@ -361,6 +330,9 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   recordProgress(jobId: string, batchKey: string, completed: number, failedDates: string[]): void {
+    // Durable background jobs have been retired. Refuse any old caller that
+    // tries to create another plaintext date list after the privacy cutover.
+    if (failedDates.length) throw new Error('Background backup is retired')
     const inserted = this.ctx.storage.sql.exec(
       'INSERT OR IGNORE INTO processed_batches (job_id, batch_key) VALUES (?, ?)',
       jobId,
@@ -370,14 +342,10 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
 
     const row = this.findJob(jobId)
     if (!row) throw new Error('Backfill job not found')
-    const failed = new Set(row.failed_dates ? parseFailedDates(row.failed_dates) : [])
-    for (const date of failedDates) failed.add(date)
     const now = new Date().toISOString()
     this.ctx.storage.sql.exec(
-      'UPDATE jobs SET completed = completed + ?, failed = ?, failed_dates = ?, updated_at = ? WHERE job_id = ?',
+      'UPDATE jobs SET completed = completed + ?, updated_at = ? WHERE job_id = ?',
       completed,
-      failed.size,
-      JSON.stringify([...failed].sort()),
       now,
       jobId,
     )
@@ -396,10 +364,11 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
   }
 
   failJob(jobId: string, message: string, finishedAt: string): void {
+    void message
     this.ctx.storage.sql.exec(
       "UPDATE jobs SET state = 'failed', finished_at = ?, error = ? WHERE job_id = ? AND state IN ('queued', 'running')",
       finishedAt,
-      message.slice(0, 200),
+      'Background backup could not finish',
       jobId,
     )
   }
@@ -432,8 +401,15 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     ).toArray()[0]
     if (active && !isOrphaned(active)) throw new Error('A backfill is already running')
 
+    // Invalidate crypto operations that were suspended while the folder or
+    // backup target changed, before clearing either index.
+    this.entryGeneration++
+
     this.ctx.storage.sql.exec('DELETE FROM entries')
+    this.ctx.storage.sql.exec('DELETE FROM protected_entries')
     this.ctx.storage.sql.exec('DELETE FROM jobs')
+    this.ctx.storage.sql.exec('DELETE FROM protected_job_dates')
+    this.ctx.storage.sql.exec('DELETE FROM protected_job_errors')
     this.ctx.storage.sql.exec('DELETE FROM processed_batches')
   }
 
@@ -478,75 +454,146 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     return row ? Number(row.value) : 0
   }
 
-  getEntry(date: string): EntrySyncStatus | null {
-    const row = this.ctx.storage.sql.exec<EntryRow>(
-      'SELECT date, drive_version, synced_version, state, updated_at, last_error FROM entries WHERE date = ?',
-      date,
-    ).toArray()[0]
-    if (!row) return null
-    return {
-      date: row.date,
-      ...(row.drive_version ? { driveVersion: row.drive_version } : {}),
-      ...(row.synced_version ? { syncedVersion: row.synced_version } : {}),
-      state: row.state as S3SyncState,
-      updatedAt: row.updated_at,
-      ...(row.last_error ? { lastError: row.last_error } : {}),
+  // Entry state is serialized separately from the remote-I/O queue because
+  // reconciliation itself calls these methods while holding that queue.
+  private async withEntryLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.entryTail.catch(() => {}).then(fn)
+    this.entryTail = run.then(() => {}, () => {})
+    return run
+  }
+
+  private async migrateEntries(auth: S3WorkflowAuth): Promise<void> {
+    if (!auth.vaultKey || !auth.accountKey) throw new Error('Vault key required for sync metadata')
+    const generation = this.entryGeneration
+    const rows = this.ctx.storage.sql.exec<EntryRow>('SELECT date, drive_version, synced_version, state, updated_at, last_error FROM entries').toArray()
+    for (const row of rows) {
+      const lookup = await vaultLookupKey(auth.vaultKey, auth.accountKey, 's3-sync-date', row.date)
+      const value: EntrySyncStatus = {
+        date: row.date, state: row.state as S3SyncState, updatedAt: row.updated_at,
+        ...(row.drive_version ? { driveVersion: row.drive_version } : {}),
+        ...(row.synced_version ? { syncedVersion: row.synced_version } : {}),
+        ...(row.last_error ? { lastError: row.last_error } : {}),
+      }
+      const envelope = await sealVaultValue(auth.vaultKey, auth.accountKey, `s3-sync-entry:${lookup}`, value)
+      const existing = this.ctx.storage.sql.exec<{ envelope: string }>('SELECT envelope FROM protected_entries WHERE lookup_key = ?', lookup).toArray()[0]
+      if (existing) await openVaultValue<EntrySyncStatus>(auth.vaultKey, auth.accountKey, `s3-sync-entry:${lookup}`, existing.envelope)
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec('INSERT OR IGNORE INTO protected_entries (lookup_key, envelope) VALUES (?, ?)', lookup, envelope)
+        this.ctx.storage.sql.exec('DELETE FROM entries WHERE date = ?', row.date)
+      })
     }
   }
 
-  markPending(date: string, driveVersion: string | undefined, updatedAt: string, _fileId?: string): EntrySyncStatus | null {
-    const current = this.getEntry(date)
-    if (current?.driveVersion && driveVersion && isAtLeast(current.driveVersion, driveVersion) && current.driveVersion !== driveVersion) {
-      return current
+  private async migrateJobDates(auth: S3WorkflowAuth): Promise<void> {
+    if (!auth.vaultKey || !auth.accountKey) throw new Error('Vault key required for sync metadata')
+    const generation = this.entryGeneration
+    const rows = this.ctx.storage.sql.exec<{ job_id: string; failed_dates: string }>("SELECT job_id, failed_dates FROM jobs WHERE failed_dates <> '[]'").toArray()
+    for (const row of rows) {
+      let dates: unknown
+      try { dates = JSON.parse(row.failed_dates) } catch { throw new Error('Invalid legacy failed-date list') }
+      if (!Array.isArray(dates) || !dates.every(date => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))) throw new Error('Invalid legacy failed-date list')
+      const prior = this.ctx.storage.sql.exec<{ chunk: number; envelope: string }>('SELECT chunk, envelope FROM protected_job_dates WHERE job_id = ? ORDER BY chunk', row.job_id).toArray()
+      const merged = new Set<string>(dates)
+      for (const part of prior) {
+        const previous = await openVaultValue<unknown>(auth.vaultKey, auth.accountKey, `s3-job-dates:${row.job_id}:${part.chunk}`, part.envelope)
+        if (!Array.isArray(previous) || !previous.every(date => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))) throw new Error('Invalid protected failed-date list')
+        for (const date of previous) merged.add(date)
+      }
+      const uniqueDates = [...merged].sort()
+      const envelopes: string[] = []
+      for (let i = 0; i < uniqueDates.length; i += 4000) {
+        const chunk = i / 4000
+        envelopes.push(await sealVaultValue(auth.vaultKey, auth.accountKey, `s3-job-dates:${row.job_id}:${chunk}`, uniqueDates.slice(i, i + 4000)))
+      }
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      this.ctx.storage.transactionSync(() => {
+        const updated = this.ctx.storage.sql.exec("UPDATE jobs SET failed_dates = '[]', failed = ? WHERE job_id = ? AND failed_dates = ?", uniqueDates.length, row.job_id, row.failed_dates)
+        if (updated.rowsWritten === 0) return
+        this.ctx.storage.sql.exec('DELETE FROM protected_job_dates WHERE job_id = ?', row.job_id)
+        for (let i = 0; i < envelopes.length; i++) {
+          this.ctx.storage.sql.exec('INSERT INTO protected_job_dates (job_id, chunk, envelope) VALUES (?, ?, ?)', row.job_id, i, envelopes[i])
+        }
+      })
     }
-    this.ctx.storage.sql.exec(
-      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
-       VALUES (?, ?, ?, 'pending', ?, NULL)
-       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, state = 'pending', updated_at = excluded.updated_at, last_error = NULL
-       WHERE entries.drive_version IS NULL OR excluded.drive_version IS NULL OR entries.drive_version = excluded.drive_version OR CAST(excluded.drive_version AS INTEGER) >= CAST(entries.drive_version AS INTEGER)`,
-      date,
-      driveVersion ?? current?.driveVersion ?? null,
-      current?.syncedVersion ?? null,
-      updatedAt,
-    )
-    return this.getEntry(date)
+    const errors = this.ctx.storage.sql.exec<{ job_id: string; error: string }>('SELECT job_id, error FROM jobs WHERE error IS NOT NULL').toArray()
+    for (const row of errors) {
+      const envelope = await sealVaultValue(auth.vaultKey, auth.accountKey, `s3-job-error:${row.job_id}`, row.error)
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      this.ctx.storage.transactionSync(() => {
+        const updated = this.ctx.storage.sql.exec('UPDATE jobs SET error = NULL WHERE job_id = ? AND error = ?', row.job_id, row.error)
+        if (updated.rowsWritten !== 0) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO protected_job_errors (job_id, envelope) VALUES (?, ?)', row.job_id, envelope)
+      })
+    }
   }
 
-  markSynced(date: string, driveVersion: string | undefined, updatedAt: string, _fileId?: string): EntrySyncStatus | null {
-    const current = this.getEntry(date)
-    if (current?.driveVersion && driveVersion && current.driveVersion !== driveVersion && isAtLeast(current.driveVersion, driveVersion)) return current
-    const syncedVersion = current?.syncedVersion && driveVersion && isAtLeast(current.syncedVersion, driveVersion)
-      ? current.syncedVersion
-      : driveVersion ?? current?.syncedVersion
-    this.ctx.storage.sql.exec(
-      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
-       VALUES (?, ?, ?, 'synced', ?, NULL)
-       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, synced_version = excluded.synced_version, state = 'synced', updated_at = excluded.updated_at, last_error = NULL`,
-      date,
-      driveVersion ?? current?.driveVersion ?? null,
-      syncedVersion ?? null,
-      updatedAt,
-    )
-    return this.getEntry(date)
+  async migrateLegacyMetadata(auth: S3WorkflowAuth): Promise<void> {
+    return this.withEntryLock(async () => {
+      await this.migrateEntries(auth)
+      await this.migrateJobDates(auth)
+    })
   }
 
-  markFailed(date: string, driveVersion: string | undefined, error: string, updatedAt: string): EntrySyncStatus | null {
-    const current = this.getEntry(date)
-    if (current?.driveVersion && driveVersion && current.driveVersion !== driveVersion && isAtLeast(current.driveVersion, driveVersion)) return current
-    this.ctx.storage.sql.exec(
-      `INSERT INTO entries (date, drive_version, synced_version, state, updated_at, last_error)
-       VALUES (?, ?, ?, 'failed', ?, ?)
-       ON CONFLICT(date) DO UPDATE SET drive_version = excluded.drive_version, state = 'failed', updated_at = excluded.updated_at, last_error = excluded.last_error`,
-      date,
-      driveVersion ?? current?.driveVersion ?? null,
-      current?.syncedVersion ?? null,
-      updatedAt,
-      error.slice(0, 200),
-    )
-    return this.getEntry(date)
+  async getProtectedJob(auth: S3WorkflowAuth, jobId?: string): Promise<BackfillJob | null> {
+    return this.withEntryLock(async () => {
+      if (!auth.vaultKey || !auth.accountKey) throw new Error('Vault key required for sync metadata')
+      await this.migrateEntries(auth)
+      await this.migrateJobDates(auth)
+      const job = this.getJob(jobId)
+      if (!job) return null
+      const chunks = this.ctx.storage.sql.exec<{ chunk: number; envelope: string }>('SELECT chunk, envelope FROM protected_job_dates WHERE job_id = ? ORDER BY chunk', job.jobId).toArray()
+      const dates: string[] = []
+      for (const row of chunks) {
+        dates.push(...await openVaultValue<string[]>(auth.vaultKey, auth.accountKey, `s3-job-dates:${job.jobId}:${row.chunk}`, row.envelope))
+      }
+      const errorRow = this.ctx.storage.sql.exec<{ envelope: string }>('SELECT envelope FROM protected_job_errors WHERE job_id = ?', job.jobId).toArray()[0]
+      const error = errorRow ? await openVaultValue<string>(auth.vaultKey, auth.accountKey, `s3-job-error:${job.jobId}`, errorRow.envelope) : job.error
+      return { ...job, failedDates: dates, ...(error ? { error } : {}) }
+    })
   }
 
-  markDeleted(date: string): void {
-    this.ctx.storage.sql.exec('DELETE FROM entries WHERE date = ?', date)
+  private async protectedEntry<T>(auth: S3WorkflowAuth, date: string, fn: (current: EntrySyncStatus | null) => T | Promise<T>): Promise<T> {
+    if (!auth.vaultKey || !auth.accountKey) throw new Error('Vault key required for sync metadata')
+    const key = auth.vaultKey
+    return this.withEntryLock(async () => {
+      const generation = this.entryGeneration
+      await this.migrateEntries(auth)
+      const lookup = await vaultLookupKey(key, auth.accountKey, 's3-sync-date', date)
+      const row = this.ctx.storage.sql.exec<{ envelope: string }>('SELECT envelope FROM protected_entries WHERE lookup_key = ?', lookup).toArray()[0]
+      const current = row ? await openVaultValue<EntrySyncStatus>(key, auth.accountKey, `s3-sync-entry:${lookup}`, row.envelope) : null
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      return fn(current)
+    })
   }
+
+  async getProtectedEntry(auth: S3WorkflowAuth, date: string): Promise<EntrySyncStatus | null> {
+    return this.protectedEntry(auth, date, current => current)
+  }
+
+  async updateProtectedEntry(auth: S3WorkflowAuth, date: string, state: 'pending' | 'synced' | 'failed' | 'deleted', version?: string, updatedAt?: string, error?: string): Promise<EntrySyncStatus | null> {
+    return this.protectedEntry(auth, date, async current => {
+      const generation = this.entryGeneration
+      const key = auth.vaultKey!
+      const lookup = await vaultLookupKey(key, auth.accountKey, 's3-sync-date', date)
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      if (state === 'deleted') {
+        this.ctx.storage.sql.exec('DELETE FROM protected_entries WHERE lookup_key = ?', lookup)
+        return null
+      }
+      if (current?.driveVersion && version && current.driveVersion !== version && isAtLeast(current.driveVersion, version)) return current
+      const syncedVersion = state === 'synced' && version && (!current?.syncedVersion || !isAtLeast(current.syncedVersion, version))
+        ? version : current?.syncedVersion
+      const next: EntrySyncStatus = {
+        date, state, updatedAt: updatedAt ?? new Date().toISOString(),
+        ...((version ?? current?.driveVersion) ? { driveVersion: version ?? current?.driveVersion } : {}),
+        ...(syncedVersion ? { syncedVersion } : {}),
+        ...(state === 'failed' && error ? { lastError: error.slice(0, 200) } : {}),
+      }
+      const envelope = await sealVaultValue(key, auth.accountKey, `s3-sync-entry:${lookup}`, next)
+      if (generation !== this.entryGeneration) throw new Error('Sync metadata was reset')
+      this.ctx.storage.sql.exec('INSERT INTO protected_entries (lookup_key, envelope) VALUES (?, ?) ON CONFLICT(lookup_key) DO UPDATE SET envelope = excluded.envelope', lookup, envelope)
+      return next
+    })
+  }
+
 }

@@ -32,7 +32,7 @@ describe('retired S3MirrorWorkflow', () => {
     await instance.waitForStatus('errored')
 
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
-    expect(await runInDurableObject(index, (state: S3SyncIndex) => state.getEntry('2026-04-02'))).toBeNull()
+    expect(await runInDurableObject(index, (_instance: S3SyncIndex, state) => state.storage.sql.exec('SELECT * FROM protected_entries').toArray())).toEqual([])
     const stored = await env.AUTH_DB.prepare('SELECT account_envelope FROM passkey_users WHERE id = ?').bind(accountKey).first<{ account_envelope: string }>()
     expect(stored!.account_envelope).not.toMatch(/access_token|refresh_token|id_token/)
   })

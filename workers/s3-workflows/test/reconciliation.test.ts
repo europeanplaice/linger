@@ -57,6 +57,23 @@ beforeEach(() => {
 })
 
 describe('metadata-only reconciliation boundaries', () => {
+  it('mirrors with request credentials and records only encrypted per-date state', async () => {
+    const { auth, index, service } = await seed()
+    vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'key', secretAccessKey: 'secret', sessionToken: 'token', expiresAt: Date.now() + 600_000 })
+    const input = { ...auth, date, accessToken: 'request-access', idToken: 'request-id', expiresAt: Date.now() + 600_000 }
+    expect(await service.mirrorEntryNow(input)).toEqual({ ok: true })
+    expect(s3.putObjectIfNewer).toHaveBeenCalledOnce()
+    expect(await index.getProtectedEntry(auth, date)).toMatchObject({ state: 'synced', driveVersion: '1', syncedVersion: '1' })
+    const stored = await runInDurableObject(index, (_instance: S3SyncIndex, state) => ({
+      entries: state.storage.sql.exec('SELECT * FROM entries').toArray(),
+      protected: state.storage.sql.exec('SELECT * FROM protected_entries').toArray(),
+    }))
+    expect(stored.entries).toEqual([])
+    expect(JSON.stringify(stored)).not.toContain(date)
+    expect(JSON.stringify(stored)).not.toContain(meta.id)
+    expect(JSON.stringify(stored)).not.toContain('request-access')
+  })
+
   it('refuses direct reconciliation without request-scoped credentials before Drive or S3 access', async () => {
     const { auth, index } = await seed()
     const result = await new Service(createExecutionContext(), env).mirrorEntryNow({ ...auth, date })
@@ -64,7 +81,7 @@ describe('metadata-only reconciliation boundaries', () => {
     expect(drive.findEntryMeta).not.toHaveBeenCalled()
     expect(s3.putObjectIfNewer).not.toHaveBeenCalled()
     expect(s3.deleteObject).not.toHaveBeenCalled()
-    expect(await index.getEntry(date)).toBeNull()
+    expect(await index.getProtectedEntry(auth, date)).toBeNull()
 
     const row = await env.AUTH_DB.prepare('SELECT data FROM auth_sessions WHERE id = ?').bind(await sessionStorageId(auth.sessionId)).first<{ data: string | null }>()
     expect(row!.data).toBeNull()
@@ -72,14 +89,10 @@ describe('metadata-only reconciliation boundaries', () => {
 
   it('drops legacy durable deletion retries after eviction because retries require a request unlock', async () => {
     const { auth, index } = await seed()
-    await index.queueDeletion({ ...auth, date }, 'delete-1')
     await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
-      expect(state.storage.sql.exec<{ session_id: string }>('SELECT session_id FROM pending_deletions').one().session_id)
-        .toBe(await sessionStorageId(auth.sessionId))
-      // Simulate a retry row written by the previous Worker version.
-      state.storage.sql.exec('UPDATE pending_deletions SET session_id = ?', auth.sessionId)
+      state.storage.sql.exec('INSERT INTO pending_deletions (date, request_id, session_id, account_key, next_attempt, attempts) VALUES (?, ?, ?, ?, ?, 0)', date, 'delete-1', auth.sessionId, auth.accountKey, Date.now() - 1)
+      await state.storage.setAlarm(Date.now() + 1)
     })
-    await index.deferDeletion(date, 'delete-1', Date.now() - 1)
     await evictDurableObject(index)
 
     expect(await runDurableObjectAlarm(index)).toBe(false)
@@ -95,34 +108,28 @@ describe('metadata-only reconciliation boundaries', () => {
     const result = await deleteEntryForAuth(env as unknown as WorkflowEnv, { ...auth, date })
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/request-scoped Google credentials/i) })
     expect(s3.deleteObject).not.toHaveBeenCalled()
-    expect(await index.getEntry(date)).toBeNull()
+    expect(await index.getProtectedEntry(auth, date)).toBeNull()
     await runInDurableObject(index, async (_instance: S3SyncIndex, state) => {
       expect(state.storage.sql.exec('SELECT * FROM pending_deletions').toArray()).toEqual([])
     })
   })
 
-  it('does not let an older deletion completion clear a newer queued request', async () => {
-    const { auth, index } = await seed()
-    await index.queueDeletion({ ...auth, date }, 'delete-1')
-    await index.queueDeletion({ ...auth, date }, 'delete-2')
-    await index.completeDeletion(date, 'delete-1')
-    const current = await runInDurableObject(index, (instance: S3SyncIndex, state) => ({
-      entry: instance.getEntry(date),
-      deletion: state.storage.sql.exec<{ request_id: string }>('SELECT request_id FROM pending_deletions').one(),
-    }))
-    expect(current.deletion.request_id).toBe('delete-2')
-    expect(current.entry).toBeNull()
-    expect(s3.deleteObject).not.toHaveBeenCalled()
+  it('does not expose the retired plaintext deletion queue', async () => {
+    const { index } = await seed()
+    await runInDurableObject(index, (instance: S3SyncIndex) => {
+      expect('queueDeletion' in instance).toBe(false)
+    })
   })
+
 })
 
 describe('metadata-only S3 settings boundary', () => {
   it('refuses a target change without a request token and leaves sync history untouched', async () => {
     const { auth, index, service } = await seed()
-    await index.markSynced(date, '1', new Date().toISOString(), meta.id)
+    await index.updateProtectedEntry(auth, date, 'synced', '1', new Date().toISOString())
     await expect(service.saveSettings({ ...auth, config: { ...config, bucket: 'other-bucket' } }))
       .rejects.toThrow(/Google credentials are request-scoped/i)
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
-    expect((await index.getEntry(date))?.state).toBe('synced')
+    expect((await index.getProtectedEntry(auth, date))?.state).toBe('synced')
   })
 })

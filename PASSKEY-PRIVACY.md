@@ -46,10 +46,22 @@ can retain tab state, so users of shared devices should explicitly sign out.
   authenticated against the internal account ID, record purpose, and version.
   Updates merge changed fields using optimistic revision checks.
 - DiaryWriter Durable Objects use internal account IDs and encrypt folder IDs,
-  per-date file IDs, and create reservations with the user key. S3 sync indexes
-  do not retain raw Drive file IDs.
-- Operational metadata such as diary dates, versions, counts, and sync status
-  remains visible. Browser diary caches/drafts retain their existing behavior.
+  per-date file IDs, and create reservations with the user key. New per-date
+  storage keys use a keyed digest instead of the date. Legacy date keys are
+  migrated on the next authenticated folder operation; historical copies can
+  still reveal dates. S3 sync indexes do not retain raw Drive file IDs.
+- Request-scoped S3 sync entries use a keyed digest for lookup and encrypt the
+  date, versions, state, update time, and error. Legacy entries and failed-date
+  lists and job errors migrate when the authenticated sync index is next accessed or an
+  authenticated diary operation starts. Until then, or if migration fails,
+  the old records remain visible; migration is retried on later operations and
+  a failure does not block diary access. Retired durable workflows fail closed rather
+  than adding new date-bearing checkpoints; historical workflow payloads and
+  steps are not rewritten. Job counts, timestamps, and state remain visible.
+  Browser diary caches/drafts retain their existing behavior.
+- Keyed lookups still expose the number of entries and repeat access to the same
+  lookup key. Dates can also appear in request paths or provider diagnostics;
+  account logging and retention settings must be reviewed separately.
 - New persistence paths must project fields explicitly; never serialize a whole
   request, auth object, or session object containing keys or credentials.
 

@@ -147,7 +147,7 @@ describe('entryStatusForAuth stale-pending aging', () => {
     const index = workflowEnv.S3_SYNC_INDEX.getByName(accountKey)
     await runInDurableObject(index, (instance: S3SyncIndex) => {
       instance.setBackupEnabled(true)
-      instance.markPending('2026-01-01', '5', updatedAt)
+      return instance.updateProtectedEntry({ sessionId: accountKey, accountKey, vaultKey: session.vault_key }, '2026-01-01', 'pending', '5', updatedAt)
     })
     return session.vault_key
   }

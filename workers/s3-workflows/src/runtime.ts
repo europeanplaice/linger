@@ -268,7 +268,7 @@ export function isMissingEntryError(error: unknown): boolean {
 
 export async function getJobForAuth(env: WorkflowEnv, input: GetJobInput) {
   await authorizedSession(env, input)
-  return indexFor(env, input.accountKey).getJob(input.jobId)
+  return indexFor(env, input.accountKey).getProtectedJob(input, input.jobId)
 }
 
 // A plain open or since-scoped status check reconciles missing or stale records in
@@ -291,7 +291,7 @@ export async function entryStatusForAuth(env: WorkflowEnv, input: GetEntryStatus
   const enabled = await index.getBackupEnabled()
   if (enabled !== true) return { status: 'disabled' as const }
 
-  const record = await index.getEntry(input.date)
+  const record = await index.getProtectedEntry(input, input.date)
   if (record?.syncedVersion && isAtLeast(record.syncedVersion, input.requestedVersion)) {
     return { status: 'synced' as const }
   }
@@ -342,7 +342,7 @@ export class SupersededBackfillError extends Error {
   constructor(message: string) { super(message); this.name = 'SupersededBackfillError' }
 }
 
-export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex, 'getJob' | 'markPending' | 'markSynced' | 'markDeleted' | 'setBackupEnabled'>, input: MirrorEntryCoreInput): Promise<void> {
+export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex, 'getJob' | 'updateProtectedEntry' | 'setBackupEnabled'>, input: MirrorEntryCoreInput): Promise<void> {
   const session = await authorizedSession(env, input)
   if (input.jobId) {
     const job = await index.getJob(input.jobId)
@@ -353,7 +353,7 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
   if (input.expectedBucket && config?.bucket !== input.expectedBucket) throw new SupersededBackfillError('S3 backup target changed')
   await index.setBackupEnabled(!!config?.enabled)
   if (!config?.enabled) {
-    await index.markDeleted(input.date)
+    await index.updateProtectedEntry(input, input.date, 'deleted')
     return
   }
   const creds = await assumeS3Credentials(idToken, input.sessionId, session, env, config)
@@ -365,11 +365,11 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
     if (!meta) {
       await deleteObject(creds, config.bucket, config.region, entryKey(input.date))
       if (await findCurrentEntry(accessToken, input.sessionId, session, env, input.date)) continue
-      await index.markDeleted(input.date)
+      await index.updateProtectedEntry(input, input.date, 'deleted')
       return
     }
     const version = meta.version
-    await index.markPending(input.date, version, new Date().toISOString())
+    await index.updateProtectedEntry(input, input.date, 'pending', version, new Date().toISOString())
     let content: string
     try {
       content = (await getEntryContent(accessToken, meta.id, input.date)).content
@@ -385,7 +385,7 @@ export async function mirrorEntryCore(env: WorkflowEnv, index: Pick<S3SyncIndex,
       if (isMissingEntryError(error)) continue
       throw error
     }
-    const synced = await index.markSynced(input.date, version, new Date().toISOString())
+    const synced = await index.updateProtectedEntry(input, input.date, 'synced', version, new Date().toISOString())
     if (synced?.driveVersion && version && synced.driveVersion !== version) continue
     return
   }
@@ -405,7 +405,7 @@ export async function mirrorEntryForAuthNow(env: WorkflowEnv, input: MirrorEntry
     return { ok: true }
   } catch (error) {
     const message = safeError(error)
-    await index.markFailed(input.date, input.driveVersion, message, new Date().toISOString())
+    await index.updateProtectedEntry(input, input.date, 'failed', input.driveVersion, new Date().toISOString(), message)
     return { ok: false, error: message }
   }
 }
@@ -447,13 +447,13 @@ export async function mirrorEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   if (backupEnabled === false) {
     return { ok: true }
   }
-  await index.markPending(input.date, input.driveVersion, new Date().toISOString())
+  await index.updateProtectedEntry(input, input.date, 'pending', input.driveVersion, new Date().toISOString())
   try {
     await index.reconcileEntry(input)
     return { ok: true }
   } catch (error) {
     const message = safeError(error)
-    await index.markFailed(input.date, input.driveVersion, message, new Date().toISOString())
+    await index.updateProtectedEntry(input, input.date, 'failed', input.driveVersion, new Date().toISOString(), message)
     return { ok: false, error: message }
   }
 }
@@ -462,13 +462,13 @@ export async function deleteEntryForAuth(env: WorkflowEnv, input: MirrorEntryCor
   const session = await authorizedSession(env, input)
   if (!session.access_token) return { ok: false, error: 'Request-scoped Google credentials are required' }
   const index = indexFor(env, input.accountKey)
-  await index.markPending(input.date, undefined, new Date().toISOString())
+  await index.updateProtectedEntry(input, input.date, 'pending', undefined, new Date().toISOString())
   try {
     await index.reconcileEntry(input)
     return { ok: true }
   } catch (error) {
     const message = safeError(error)
-    await index.markFailed(input.date, undefined, message, new Date().toISOString())
+    await index.updateProtectedEntry(input, input.date, 'failed', undefined, new Date().toISOString(), message)
     return { ok: false, error: message }
   }
 }
