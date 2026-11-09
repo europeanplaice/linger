@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { KeyRound, Plus } from 'lucide-react'
 import { deletePasskey, listPasskeys } from '../api/passkeys'
 import type { PasskeyCredentialSummary } from '../api/passkeys'
 import { useI18n } from '../i18n'
@@ -80,11 +81,13 @@ export function PasskeySettings({ userId, busy, error, onAdd }: { userId: string
   return <section className="settings-section passkey-settings" aria-labelledby="passkey-settings-title">
     <h4 className="settings-section-title" id="passkey-settings-title">{t.login.passkeyTitle}</h4>
     <p className="settings-section-description">{t.login.passkeyProviderHelp}</p>
-    {rememberedDevice && <button className="settings-copy-btn" type="button" onClick={() => { clearTabSession(); setRememberedDevice(false); setStatus(t.login.passkeyForgotDevice) }}>{t.login.passkeyForgetDevice}</button>}
-    <button className="settings-copy-btn" type="button" disabled={busy || !userId} onClick={() => { void add() }}>
-      {busy ? t.login.passkeyWorking : t.login.passkeyAdd}
-    </button>
-    <h5>{t.login.passkeySavedTitle}</h5>
+    <div className="passkey-settings-body">
+    <div className="passkey-list-heading">
+      <h5>{t.login.passkeySavedTitle}</h5>
+      <button className="settings-copy-btn passkey-add-btn" type="button" disabled={busy || !userId} onClick={() => { void add() }}>
+        <Plus size={15} aria-hidden="true" />{busy ? t.login.passkeyWorking : t.login.passkeyAdd}
+      </button>
+    </div>
     {loading && <p role="status">{t.login.passkeyLoading}</p>}
     {listError && <p role="alert">{listError}</p>}
     {!loading && !listError && credentials.length === 0 && <p>{t.login.passkeyEmpty}</p>}
@@ -93,15 +96,20 @@ export function PasskeySettings({ userId, busy, error, onAdd }: { userId: string
         const isCurrent = credential.credentialId === currentCredentialId
         const canDelete = !isCurrent && credentials.length > 1
         return <li key={credential.credentialId}>
-          <span>{t.login.passkeyShortId} {credential.credentialId.slice(0, 8)}…</span>
-          <span>{formatDate(credential.createdAt)}</span>
-          {isCurrent && <span>{t.login.passkeyCurrent}</span>}
-          {canDelete && <button className="settings-copy-btn" type="button" disabled={busy || deleting} onClick={() => setSelected(credential)}>{t.login.passkeyRemove}</button>}
+          <span className="passkey-credential-icon"><KeyRound size={17} aria-hidden="true" /></span>
+          <span className="passkey-credential-info">
+            <span className="passkey-credential-name">{t.login.passkeyShortId} {credential.credentialId.slice(0, 8)}…</span>
+            <span className="passkey-credential-date">{formatDate(credential.createdAt)}</span>
+            {isCurrent && <span className="passkey-current">{t.login.passkeyCurrent}</span>}
+          </span>
+          {canDelete && <button className="passkey-remove-btn" type="button" disabled={busy || deleting} onClick={() => setSelected(credential)}>{t.login.passkeyRemove}</button>}
         </li>
       })}
     </ul>}
+    {rememberedDevice && <button className="passkey-device-btn" type="button" onClick={() => { clearTabSession(); setRememberedDevice(false); setStatus(t.login.passkeyForgotDevice) }}>{t.login.passkeyForgetDevice}</button>}
     {error && <p role="alert">{error}</p>}
     {status && <p role="status">{status}</p>}
+    </div>
     <dialog className="passkey-delete-dialog" ref={dialog} aria-labelledby="passkey-delete-title" onClose={() => setSelected(null)}>
       <h4 id="passkey-delete-title">{t.login.passkeyDeleteTitle}</h4>
       <p>{t.login.passkeyDeleteWarning}</p>

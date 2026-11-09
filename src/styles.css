@@ -534,22 +534,63 @@ html.session-restoring .landing {
 .passkey-recovery-help summary { cursor: pointer; }
 .passkey-recovery-help input { width: 100%; }
 .passkey-settings .passkey-gate-actions { justify-content: start; }
+.passkey-settings-body { padding-inline: 1.35rem; }
+.passkey-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+.passkey-list-heading h5 { margin: 0; color: var(--text); font-size: 0.875rem; font-weight: 600; }
+.passkey-add-btn { min-height: 2.25rem; white-space: normal; }
 .passkey-credential-list {
   list-style: none;
   display: grid;
-  gap: 0.75rem;
   margin-block: 0.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 .passkey-credential-list li {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  padding-block: 0.5rem;
-  border-bottom: 1px solid var(--border);
+  gap: 0.75rem;
+  padding: 0.85rem;
   font-size: 0.85rem;
 }
-.passkey-credential-list li > span { overflow-wrap: anywhere; }
+.passkey-credential-list li + li { border-top: 1px solid var(--border); }
+.passkey-credential-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+}
+.passkey-credential-info { display: grid; gap: 0.2rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.passkey-credential-name { color: var(--text); font-weight: 600; }
+.passkey-credential-date { color: var(--text-muted); font-size: 0.78rem; }
+.passkey-current { color: var(--accent); font-size: 0.75rem; font-weight: 600; }
+.passkey-remove-btn, .passkey-device-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.5rem 0.7rem;
+}
+.passkey-remove-btn { flex: none; }
+.passkey-device-btn { margin-top: 0.5rem; text-align: start; }
+.passkey-remove-btn:hover, .passkey-device-btn:hover { color: var(--text); border-color: var(--text-muted); }
+.passkey-settings button:disabled { cursor: default; opacity: 0.6; }
+.passkey-settings-body > p { color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; margin-block: 0.75rem; }
+.passkey-settings-body > p[role="alert"] { color: var(--danger); }
 dialog.passkey-delete-dialog {
   border: 1px solid var(--border);
   border-radius: 10px;
