@@ -1863,7 +1863,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
       const date = new URL(route.request().url()).pathname.split('/').pop()
       statusRequestDates.push(date ?? '')
       // 05-01 is mid-retry throughout; 05-02 is already synced.
-      await route.fulfill({ json: { status: date === '2026-05-02' ? 'synced' : 'unconfirmed' } })
+      await route.fulfill({ json: { status: date === '2026-05-02' ? 'synced' : 'failed' } })
     })
     await page.route('**/api/s3/entry-resync/**', async route => {
       resyncDate = new URL(route.request().url()).pathname.split('/').pop() ?? null
@@ -1872,7 +1872,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     })
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    const badgeA = page.locator('.editor-meta-badge--unconfirmed')
+    const badgeA = page.locator('.editor-meta-badge--failed')
     await expect(badgeA).toBeVisible()
     await badgeA.click()
     await expect(badgeA).toHaveAttribute('aria-busy', 'true')
@@ -2020,9 +2020,8 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.getByTitle('Not backed up yet — tap to retry')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--unconfirmed/)
-    expect(requestCount).toBe(2)
-    // Fires once the retry also confirms it, not on the first (possibly-flaky) answer.
-    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(1)
+    expect(requestCount).toBe(4)
+    expect(await page.evaluate(() => window.editorHarness.staleEntryDetectedCalls())).toBe(0)
   })
 
   test('shows an unconfirmed S3 badge when nothing is actively working toward backing up this date', async ({ page }) => {
@@ -2047,6 +2046,10 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.route('**/api/s3/entry-resync/**', async route => {
       expect(route.request().method()).toBe('POST')
       resyncRequests++
+      if (resyncRequests === 1) {
+        await route.fulfill({ status: 502, json: { error: 'Temporary failure' } })
+        return
+      }
       await resyncGate
       backedUp = true
       await route.fulfill({ json: { ok: true } })
@@ -2066,7 +2069,24 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     resolveResync!()
     await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
-    expect(resyncRequests).toBe(1)
+    expect(resyncRequests).toBe(2)
+  })
+
+  test('automatically backs up an unconfirmed entry when it is opened', async ({ page }) => {
+    await loadHarness(page)
+    let backedUp = false
+    let retries = 0
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await route.fulfill({ json: { status: backedUp ? 'synced' : 'unconfirmed' } })
+    })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      retries++
+      backedUp = true
+      await route.fulfill({ json: { ok: true } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    expect(retries).toBe(1)
   })
 
   test('automatically retries once, without any user interaction, when a save-scoped check comes back unconfirmed', async ({ page }) => {

@@ -26,8 +26,8 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async (context) =
     if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
     if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
 
-    await resyncSingleEntry(accessToken, sessionId, session, context.env, record, date)
-    return jsonResponse({ ok: true })
+    const result = await resyncSingleEntry(accessToken, sessionId, session, context.env, record, date)
+    return jsonResponse(result, result.ok ? 200 : 502)
   } catch (e) {
     console.error('s3/entry-resync.ts: POST failed')
     return jsonResponse({ error: 'Internal server error' }, 500)

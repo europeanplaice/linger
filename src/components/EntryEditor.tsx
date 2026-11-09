@@ -427,7 +427,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       // tell the user ('unverified') — see S3EntrySyncStatus's doc comment.
       const effectiveStatus = exhausted ? (gotRealAnswer ? 'unconfirmed' : 'unverified') : result.status
 
-      // A save-scoped check (since set) that comes back unconfirmed gets one silent,
+      // An unconfirmed save or a confirmed missing backup on open gets one silent,
       // automatic re-mirror attempt before nagging the user to tap retry themselves —
       // covers a mirror that silently failed without ever recording an error (e.g. a
       // context.waitUntil task that didn't run to completion) as well as one that's
@@ -436,7 +436,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       // on a terminal, user-actionable badge instead of looping. The badge is left
       // showing 'pending' (not 'unconfirmed') while this runs, so it doesn't flash
       // unconfirmed-then-synced for what's really still one continuous save flow.
-      if (effectiveStatus === 'unconfirmed' && since) {
+      if (effectiveStatus === 'unconfirmed' && (since || (staleDetect && result.status === 'unconfirmed'))) {
         const autoRetryKey = `${forDate}|${version}`
         if (s3AutoRetryKeyRef.current !== autoRetryKey) {
           s3AutoRetryKeyRef.current = autoRetryKey

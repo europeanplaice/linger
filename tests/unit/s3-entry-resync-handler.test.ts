@@ -76,4 +76,11 @@ describe('POST /api/s3/entry-resync/[date]', () => {
       '2026-05-01',
     )
   })
+
+  it('reports a failed mirror instead of claiming the retry succeeded', async () => {
+    vi.mocked(s3Settings.resyncSingleEntry).mockResolvedValueOnce({ ok: false, error: 'S3 unavailable' })
+    const res = await onRequestPost(makeContext() as any)
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ ok: false, error: 'S3 unavailable' })
+  })
 })

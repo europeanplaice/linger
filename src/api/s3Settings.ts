@@ -77,7 +77,8 @@ export async function getS3EntryStatus(date: string, version: string, since: str
 // resolves once the retry has actually landed rather than leaving the caller to
 // poll for it.
 export async function retryS3EntrySync(date: string): Promise<void> {
-  await apiFetch(`/api/s3/entry-resync/${date}`, { method: 'POST' })
+  const { data, status } = await apiFetch<{ ok: boolean; error?: string }>(`/api/s3/entry-resync/${date}`, { method: 'POST' }, [502])
+  if (status === 502) throw new Error(data.error ?? 'S3 backup retry failed')
 }
 
 export interface S3RestoreResult {
