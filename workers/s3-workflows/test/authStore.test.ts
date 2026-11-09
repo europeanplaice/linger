@@ -27,6 +27,11 @@ async function bindCredential(sessionId: string, credentialId: string): Promise<
     .bind(credentialId, await sessionStorageId(sessionId)).run()
 }
 
+async function grantCredentialDeletion(sessionId: string): Promise<void> {
+  await env.AUTH_DB.prepare("INSERT OR REPLACE INTO passkey_management_grants (session_id, action, expires_at) VALUES (?, 'delete', ?)")
+    .bind(await sessionStorageId(sessionId), Date.now() + 60_000).run()
+}
+
 describe('encrypted passkey session storage', () => {
   it('stores only the random principal and encrypted account metadata in D1', async () => {
     const userId = `user-${crypto.randomUUID()}`
@@ -164,6 +169,9 @@ describe('encrypted passkey session storage', () => {
     const currentDelete = await deleteCredential(makeRequest('/auth/passkey/credentials/delete', { credentialId: currentId }), handlerEnv)
     expect(currentDelete.status).toBe(409)
 
+    const unverified = await deleteCredential(makeRequest('/auth/passkey/credentials/delete', { credentialId: removableId }), handlerEnv)
+    expect(unverified.status).toBe(401)
+    await grantCredentialDeletion(currentSessionId)
     const deleted = await deleteCredential(makeRequest('/auth/passkey/credentials/delete', { credentialId: removableId }), handlerEnv)
     expect(deleted.status).toBe(200)
     expect(await deleted.json()).toEqual({ ok: true })
@@ -176,6 +184,7 @@ describe('encrypted passkey session storage', () => {
     // attempt independently of the current-credential protection above.
     const legacySessionId = `session-legacy-${crypto.randomUUID()}`
     await createTestSession(legacySessionId, testSession(userId, { vault_key: key, google_sub: googleSub }), env)
+    await grantCredentialDeletion(legacySessionId)
     const lastDelete = await deleteCredential(makeRequest('/auth/passkey/credentials/delete', { credentialId: currentId }, {
       ...headers, Cookie: `linger_session=${legacySessionId}`,
     }), handlerEnv)

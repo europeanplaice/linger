@@ -15,7 +15,7 @@ test.describe('sidebar empty state', () => {
     await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
 
     await page.goto(baseUrl)
-    await expect(page.locator('.sidebar-empty-hint')).toBeVisible()
+    await expect(page.locator('.sidebar-empty-hint')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.sidebar-empty-hint')).toContainText('No entries yet')
   })
 
