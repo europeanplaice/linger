@@ -1952,6 +1952,14 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.clock.install({ time: 0 })
     await loadHarness(page)
     let requestCount = 0
+    let resyncRequests = 0
+    let resolveResync: (() => void) | undefined
+    const resyncGate = new Promise<void>(resolve => { resolveResync = resolve })
+    await page.route('**/api/s3/entry-resync/**', async route => {
+      resyncRequests++
+      await resyncGate
+      await route.fulfill({ json: { ok: true } })
+    })
     await page.route('**/api/s3/entry-status/**', async route => {
       requestCount++
       // The old schedule's 5th (and final) request landed at t=16500ms, still
@@ -1984,7 +1992,16 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     await page.clock.fastForward(1000)
     await expect.poll(() => requestCount).toBe(7)
+    await expect.poll(() => resyncRequests).toBe(1)
+    await expect(page.locator('.editor-meta-badge--pending')).toBeVisible()
+
+    // After the automatic re-mirror, the new since-less check gets its own
+    // soft retry before reporting that the backup is still unconfirmed.
+    resolveResync?.()
+    await expect.poll(() => requestCount).toBe(8)
+    await page.clock.fastForward(1000)
     await expect(page.locator('.editor-meta-badge--unconfirmed')).toBeVisible()
+    expect(requestCount).toBe(9)
   })
 
   test('a since-less open check recovers to synced if a single unconfirmed answer was just a transient blip', async ({ page }) => {
