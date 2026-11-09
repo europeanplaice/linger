@@ -171,9 +171,10 @@ async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal): P
   catch (error) { prf.prfOutput?.fill(0); throw error }
 }
 
-export async function registerPasskey(signal?: AbortSignal): Promise<{ userId: string }> {
+export async function registerPasskey(signal?: AbortSignal, email?: string): Promise<{ userId: string }> {
   requireWebAuthn()
   const envelope = await post<OptionsEnvelope>('register/options', undefined, undefined, signal)
+  if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
   throwIfAborted(signal)
   if (!envelope.userId) throw new Error('Passkey registration did not include an internal account identifier')
   const { credential, prfOutput, serialized, assertion } = await createCredential(envelope, signal)
@@ -206,13 +207,14 @@ export async function loginWithPasskey(signal?: AbortSignal): Promise<{ userId: 
   } finally { prfOutput.fill(0) }
 }
 
-export async function addPasskey(userId: string, signal?: AbortSignal): Promise<void> {
+export async function addPasskey(userId: string, signal?: AbortSignal, email?: string | null): Promise<void> {
   requireWebAuthn()
   const existingKey = getVaultKey(userId)
   if (!existingKey) throw new Error('Unlock the passkey vault before adding another passkey')
   let prfOutput: Uint8Array | null = null
   try {
     const envelope = await post<OptionsEnvelope>('add/options', undefined, userId, signal)
+    if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
     throwIfAborted(signal)
     const created = await createCredential(envelope, signal)
     prfOutput = created.prfOutput

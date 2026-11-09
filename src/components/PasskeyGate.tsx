@@ -5,12 +5,14 @@ interface Props {
   busy: boolean
   error: string | null
   onSetup: (remember: boolean) => void
+  setupEmail: string | null
+  onBeginSetup: () => void
+  onCancelSetup: () => void
   onUnlock: (remember: boolean) => void
   onClearError?: () => void
 }
 
-/** Passkey setup/unlock happens before Google OAuth so its popup remains a direct user gesture. */
-export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Props) {
+export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, onCancelSetup, onUnlock, onClearError }: Props) {
   const { t, language, setLanguage } = useI18n()
   const title = useRef<HTMLHeadingElement>(null)
   const [view, setView] = useState<'login' | 'setup'>('login')
@@ -21,6 +23,7 @@ export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Pr
     previousView.current = view
   }, [view])
   const changeView = (next: typeof view) => {
+    if (view === 'setup') onCancelSetup()
     onClearError?.()
     setView(next)
   }
@@ -31,6 +34,7 @@ export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Pr
       <h2 ref={title} tabIndex={-1} id="passkey-gate-title">{setup ? t.login.passkeySetupTitle : t.login.passkeySignInTitle}</h2>
       <p id="passkey-gate-description">{setup ? t.login.passkeyDescription : t.login.passkeySignInDescription}</p>
       {setup && <>
+        {setupEmail && <p>{setupEmail}</p>}
         <p>{t.login.passkeyProviderHelp}</p>
         <p className="passkey-setup-note" id="passkey-setup-note">{t.login.passkeySetupNote}</p>
       </>}
@@ -43,8 +47,8 @@ export function PasskeyGate({ busy, error, onSetup, onUnlock, onClearError }: Pr
       <div className="passkey-gate-actions passkey-gate-navigation">
         <button className="btn-signin-google passkey-primary" type="button" disabled={busy}
           aria-describedby={setup ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
-          onClick={() => (setup ? onSetup : onUnlock)(remember)}>
-          {busy ? t.login.passkeyWorking : setup ? t.login.passkeySetup : t.login.passkeyUnlock}
+          onClick={() => setup && !setupEmail ? onBeginSetup() : (setup ? onSetup : onUnlock)(remember)}>
+          {busy ? t.login.passkeyWorking : setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
         </button>
         <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'login' : 'setup')}>
           {setup ? t.login.passkeyBackToSignIn : t.login.passkeyFirstTime}

@@ -1,5 +1,15 @@
 # Authentication metadata in D1
 
+## Encrypted Google refresh credentials (migration 0007)
+
+Apply `0007_google_refresh_vault.sql` before deploying code that uses the Google
+refresh endpoint. The migration adds encrypted refresh-token storage without
+modifying existing passkeys or sessions. Existing users must authorize Google
+once after the update to obtain a refresh token. Test on staging with a real
+Google account, including passkey registration, reload, token refresh, revoked
+Google access, account mismatch, and multiple tabs. OAuth projects in Google
+Testing status can issue short-lived refresh tokens.
+
 ## Passkey metadata protection (migration 0005)
 
 Read [PASSKEY-PRIVACY.md](PASSKEY-PRIVACY.md) before this breaking rollout.

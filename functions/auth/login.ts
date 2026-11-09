@@ -18,8 +18,9 @@ function randomVerifier(): string {
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const sessionId = parseSessionId(request)
   const userId = sessionId ? await getPasskeySessionUserId(sessionId, env) : null
-  if (!sessionId || !userId) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
   const url = new URL(request.url)
+  const setup = url.searchParams.get('setup') === '1'
+  if ((!sessionId || !userId) && !setup) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
   const requestedChannelId = url.searchParams.get('channel_id')
   const channelId = requestedChannelId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedChannelId)
     ? requestedChannelId
@@ -33,7 +34,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
 
   // Keep the PKCE secret in a short lived, HttpOnly browser cookie. The server
   // store only needs nonce and response mode after atomically consuming state.
-  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId, userId, sessionHandle: await sessionStorageId(sessionId) }), env)
+  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId, setup, userId, sessionHandle: sessionId && userId ? await sessionStorageId(sessionId) : undefined }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -42,7 +43,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
     scope: SCOPE,
     state,
     nonce,
-    access_type: 'online',
+    access_type: 'offline',
     // Do not union these permissions with broader scopes granted in the past.
     include_granted_scopes: 'false',
     code_challenge: codeChallenge,
@@ -51,7 +52,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   // Let Google use its normal account/session selection for the primary
   // sign-in action. The explicit secondary action asks Google to show accounts.
   if (url.searchParams.get('select_account') === '1') {
-    params.set('prompt', 'select_account')
+    params.set('prompt', 'select_account consent')
+  } else {
+    params.set('prompt', 'consent')
   }
 
   const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })

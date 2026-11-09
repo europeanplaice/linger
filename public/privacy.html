@@ -85,23 +85,24 @@
     backend does not use its authentication database or sync index to store diary text.
   </p>
   <p>
-    Linger's application is designed to process diary text, Google OAuth access, refresh and identity
-    tokens, and AWS temporary credentials only in memory for the operation that needs them, including
-    its short-lived asynchronous work. It does not intentionally save these values to its databases,
-    KV, Durable Object storage, Workflow state, application logs, or server-side caches. Google Drive
+    Linger processes diary text, Google OAuth credentials, and AWS temporary credentials in memory
+    for the operation that needs them. A Google refresh token is encrypted with the
+    passkey-protected account key and saved in D1. Plaintext credentials are not intentionally
+    saved to databases, KV, Durable Object storage, Workflow state, logs, or server-side caches. Google Drive
     and your optional S3 bucket store the diary files you choose to save. OAuth state is temporarily
     stored to complete sign-in, while the PKCE verifier is kept in a short-lived browser cookie.
   </p>
   <p>
     Cloudflare D1 stores a random Linger account identifier, public passkey credentials, encrypted
     master keys, session ID hashes, and expiry. Your Google account identifier and cached Drive
-    identifiers are stored in an encrypted account envelope protected by your passkey-derived key.
+    identifiers and the Google refresh token are encrypted using your passkey-protected key.
     Historical records remain subject to separate retention and cleanup. Your email is read from the verified identity token
-    for display and is not stored in session records. OAuth access, refresh, and identity tokens and
+    for display and is not stored in session records. It is also sent as the passkey account name
+    to your browser and passkey provider so you can identify the credential. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
-    By default, reloading requires passkey unlock and Google authorization again. If you choose to
-    stay signed in on reload, the unlocked metadata key and short-lived Google tokens are also stored
+    By default, reloading requires passkey unlock, after which the saved refresh token can restore
+    Google access. If you choose to stay signed in on reload, the unlocked metadata key is stored
     in this tab's browser session storage for up to eight hours. Someone with access to this browser
     or malicious scripts running on this site could access them. Browser restore may retain tab data;
     sign out when using a shared device. New session records expire 30 days after
@@ -132,7 +133,7 @@
     <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare's Privacy Policy</a>.
   </p>
   <p>
-    When a session is invalidated, Linger removes its stored account identifiers and keeps an opaque
+    When a session is invalidated, Linger removes its session association and keeps an opaque
     revoked-session record until it expires to prevent reuse. Completed or failed S3 backfill job
     history older than 30 days is removed when a new backfill starts; inactive accounts may retain
     this history longer. Other sync metadata may remain to support synchronization and retries.
@@ -166,7 +167,7 @@
   </p>
   <h3>Information the host administrator may access, or cause Linger to access</h3>
   <ul>
-    <li>Cloudflare session metadata, including your Google account identifier. These records do not retain your email or OAuth credentials and cannot by themselves authorize requests to Drive.</li>
+    <li>Encrypted account metadata and a Google refresh credential in Cloudflare D1. The stored data alone does not reveal the credential or authorize Drive access.</li>
     <li>Diary entries and milestones while processing your authorized requests. The backend receives tokens transiently for these operations. An administrator who changes deployed code could capture those tokens or contents, so we cannot guarantee inaccessibility to an administrator with deployment access.</li>
     <li>If you enable S3 backup, the configured bucket's contents within the permissions of your AWS IAM role during authorized operations. Linger uses temporary credentials in request memory to mirror and restore entries.</li>
     <li>Operational records available in Cloudflare, such as sync status, entry dates and versions, backfill progress, and service logs or error details.</li>
@@ -255,7 +256,8 @@
     for deleting backups when you no longer want them. Turning off backup alone does not delete them.
   </p>
   <p>
-    Sign out to invalidate your Linger session and clear locally cached entries. Account-scoped
+    Sign out to invalidate your Linger session and clear locally cached entries. The encrypted
+    Google refresh credential remains available for the next passkey login. Account-scoped
     unsynced drafts remain in this browser so they can be restored after the same account is
     verified again; clear this site's browser data to remove them. To revoke Linger's Google
     authorization, visit
@@ -269,15 +271,16 @@
     with another registered passkey. Removing it also invalidates sessions authenticated with it.
     Recovery files containing the metadata master key are no longer issued or accepted. If every passkey is
     lost, old encrypted account metadata cannot be decrypted. Your plaintext diary files remain in
-    Google Drive: create a new Linger passkey and authorize the same Google account to reconnect.
-    A verified Google security event can invalidate all Linger sessions because the service does not
-    retain a readable Google-account lookup index.
+    Google Drive: authorize the same Google account and create a new Linger passkey to reconnect.
+    A verified Google security event can invalidate all Linger sessions and remove all saved refresh
+    credentials because the service does not retain a readable Google-account lookup index.
   </p>
 
   <h2>10. Security</h2>
   <p>
     The app uses HTTPS for communication between your browser, Cloudflare, Google, and AWS. OAuth
-    tokens are kept in browser memory, optionally in tab session storage as described above, and used transiently by the backend. No method of online storage or
+    access and identity tokens are kept in browser memory and used transiently by the backend. The
+    refresh token is stored encrypted as described above. No method of online storage or
     transmission is completely secure, and the security of your Google account, device, browser, and
     optional AWS account is also important.
   </p>

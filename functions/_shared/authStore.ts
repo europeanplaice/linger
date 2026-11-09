@@ -169,7 +169,10 @@ export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
 export async function revokeD1Account(field: 'email' | 'google_sub', value: string, env: AuthEnv): Promise<void> {
   void field
   void value
-  await env.AUTH_DB.prepare('UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1 WHERE revoked = 0').run()
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare('UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1 WHERE revoked = 0'),
+    env.AUTH_DB.prepare('DELETE FROM google_refresh_vault'),
+  ])
 }
 
 export async function saveOAuthState(state: string, data: string, env: Env): Promise<void> {

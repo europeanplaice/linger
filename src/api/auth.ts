@@ -4,12 +4,28 @@ import { clearVaultKey, getVaultUserId, setVaultKeyHeader } from '../lib/passkey
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
+let pendingRefreshToken: string | null = null
 
-export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<SessionInfo> {
+function updatePasskeyAccountName(userId: string | null, email: string | null): void {
+  if (!userId || !email || typeof PublicKeyCredential === 'undefined') return
+  const api = PublicKeyCredential as typeof PublicKeyCredential & {
+    signalCurrentUserDetails?: (options: { rpId: string; userId: string; name: string; displayName: string }) => Promise<void>
+  }
+  if (!api.signalCurrentUserDetails) return
+  const bytes = new TextEncoder().encode(userId)
+  const encoded = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  // This is a best-effort hint to the credential provider, never an auth step.
+  try {
+    void api.signalCurrentUserDetails({ rpId: location.hostname, userId: encoded, name: email, displayName: email }).catch(() => {})
+  } catch { /* A provider may reject the optional update synchronously. */ }
+}
+
+export function startSignIn(options: { selectAccount?: boolean; setup?: boolean } = {}): Promise<SessionInfo> {
   const generation = ++signInGeneration
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
   clearOAuthCredentials()
+  pendingRefreshToken = null
   return new Promise((resolve, reject) => {
     const channelId = crypto.randomUUID()
     let channel: BroadcastChannel | null = null
@@ -18,6 +34,7 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
     }
     const params = new URLSearchParams({ channel_id: channelId })
     if (options.selectAccount) params.set('select_account', '1')
+    if (options.setup) params.set('setup', '1')
     const loginUrl = `/auth/login?${params.toString()}`
     const popup = window.open(loginUrl, 'linger-google-signin', 'popup,width=520,height=680')
     if (!popup) {
@@ -51,7 +68,7 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
       if (message?.type !== 'linger-oauth-complete' || !message.credential || typeof message.credential !== 'object') return
       if (requireChannelId && message.channelId !== channelId) return
       if (message.channelId !== undefined && message.channelId !== channelId) return
-      const credential = message.credential as { accessToken?: unknown; idToken?: unknown; expiresAt?: unknown }
+      const credential = message.credential as { accessToken?: unknown; idToken?: unknown; expiresAt?: unknown; refreshToken?: unknown; email?: unknown }
       if (typeof credential.accessToken !== 'string' || typeof credential.idToken !== 'string' || typeof credential.expiresAt !== 'number') {
         finish(new Error('Google sign-in returned an invalid response'))
         return
@@ -60,6 +77,13 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
       receivedCredential = true
       try { setOAuthCredentials({ accessToken: credential.accessToken, idToken: credential.idToken, expiresAt: credential.expiresAt }) }
       catch (error) { finish(error instanceof Error ? error : new Error('Google sign-in failed')); return }
+      pendingRefreshToken = typeof credential.refreshToken === 'string' ? credential.refreshToken : null
+      if (options.setup) {
+        if (typeof credential.email !== 'string' || !credential.email) { finish(new Error('Google did not return a verified email')); return }
+        try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Optional acknowledgement. */ }
+        finish(undefined, { signedIn: false, email: credential.email, googleSub: null, googleClientId: null, userId: null })
+        return
+      }
       checkSession().then(info => {
         if (!info.signedIn) throw new Error('Google sign-in could not be verified')
         try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Sign-in can finish without the acknowledgement. */ }
@@ -84,6 +108,27 @@ export function startSignIn(options: { selectAccount?: boolean } = {}): Promise<
     cancelPendingSignIn = cancel
   })
 }
+
+export async function refreshGoogleCredentials(storePending = false): Promise<boolean> {
+  const generation = signInGeneration
+  const userId = getVaultUserId()
+  if (!userId) return false
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  setVaultKeyHeader(headers)
+  if (storePending && !pendingRefreshToken) return false
+  const response = await fetch('/auth/refresh', {
+    method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', headers,
+    body: JSON.stringify(storePending ? { refreshToken: pendingRefreshToken } : {}),
+  })
+  if (!response.ok) return false
+  const credentials = await response.json() as { accessToken: string; idToken: string; expiresAt: number }
+  if (generation !== signInGeneration || userId !== getVaultUserId()) return false
+  setOAuthCredentials(credentials)
+  if (storePending) pendingRefreshToken = null
+  return true
+}
+
+export function clearPendingGoogleCredential(): void { pendingRefreshToken = null }
 
 export interface SessionInfo {
   signedIn: boolean
@@ -116,6 +161,7 @@ export async function checkSession(): Promise<SessionInfo> {
       }
       return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
     }
+    if (data.signedIn && data.userId === unlockedUserId) updatePasskeyAccountName(data.userId, data.email ?? null)
     return {
       signedIn: Boolean(data.signedIn),
       email: data.email ?? null,
@@ -132,6 +178,7 @@ export async function revokeSession(): Promise<void> {
   signInGeneration++
   cancelPendingSignIn?.(new Error('Google sign-in was cancelled by logout'))
   cancelPendingSignIn = null
+  pendingRefreshToken = null
   clearOAuthCredentials()
   const { init } = accountRequest({ method: 'POST' })
   const headers = new Headers(init.headers)

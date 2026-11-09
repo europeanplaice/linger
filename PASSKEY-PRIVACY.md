@@ -1,7 +1,10 @@
 # Passkey-protected Cloudflare metadata
 
-Linger uses a discoverable passkey to identify a random internal account. Google
-authorization remains a separate authorization-code flow used to access Drive.
+Linger uses a discoverable passkey to identify a random internal account. New
+accounts authorize Google first and use the verified email as the passkey label.
+Google authorization remains a separate authorization-code flow used to access Drive.
+The email label is visible to the browser and passkey provider. Existing passkey
+labels are updated where the provider supports WebAuthn's user-details signal.
 Diary files in Drive and the optional S3 backup remain plaintext; this change is
 not end-to-end encryption for diary contents.
 
@@ -23,16 +26,17 @@ The user's master key and Google credentials may be used in request memory.
 Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
 persisted on the server, placed in workflow input/output, or retained in server global state.
-By default browser keys and OAuth credentials are memory-only. Users can opt in
+Browser keys and plaintext OAuth credentials are memory-only by default. Users can opt in
 to saving the unlocked key in the tab's sessionStorage
-for reloads, for at most eight hours. Google authorization is required again after a reload. This exposes the key to scripts running in the
+for reloads, for at most eight hours. A passkey-protected refresh token in D1
+can restore Google access after unlock. This exposes the key to scripts running in the
 origin and anyone with access to that browser profile. Sign-out, account changes,
 expiry and failed session validation clear the saved state. Browser restore behavior
 can retain tab state, so users of shared devices should explicitly sign out.
 
 ## Stored data
 
-- D1 stores random internal account IDs, public passkey credentials, wrapped
+- D1 stores an encrypted Google refresh token, random internal account IDs, public passkey credentials, wrapped
   master keys, and opaque hashes of session cookies. Session `data` must be NULL.
 - Google ID and cached Drive identifiers are inside an AES-GCM account envelope,
   authenticated against the internal account ID, record purpose, and version.
@@ -79,7 +83,8 @@ one; a lost Google session/device must also be secured through Google.
 ## Google security notifications
 
 There is no persistent Google-sub lookup index. A verified, supported RISC event
-therefore conservatively revokes all current Linger sessions. Users must unlock
+therefore conservatively revokes all current Linger sessions and deletes saved
+refresh credentials. Users must unlock
 and authorize again; their passkeys, keys, and diary files are not deleted. This
 trades targeted revocation for avoiding a server-readable identity index.
 

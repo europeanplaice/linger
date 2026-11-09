@@ -9,7 +9,7 @@ function base64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number }, origin: string, channelId: string | undefined, secure: boolean): Response {
+function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number; refreshToken?: string; email?: string }, origin: string, channelId: string | undefined, secure: boolean): Response {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(18)))
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)))
   const encodedChannelId = JSON.stringify(channelId ?? '')
@@ -88,7 +88,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
 
-  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; channelId?: string; userId?: string; sessionHandle?: string }
+  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; setup?: boolean; channelId?: string; userId?: string; sessionHandle?: string }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
     stateRecord = {
@@ -97,6 +97,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       sessionHandle: parsed.sessionHandle,
       nonce: parsed.nonce ?? '',
       popup: parsed.popup === true,
+      setup: parsed.setup === true,
       channelId: typeof parsed.channelId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.channelId)
         ? parsed.channelId
         : undefined,
@@ -107,12 +108,14 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   // The Strict session cookie is not sent on Google's cross-site callback.
   // Bind the one-use OAuth state to the passkey session captured before redirect.
-  if (!env.AUTH_DB || !stateRecord.userId || !/^sha256:[0-9a-f]{64}$/.test(stateRecord.sessionHandle ?? '')) {
+  if (!stateRecord.setup && (!env.AUTH_DB || !stateRecord.userId || !/^sha256:[0-9a-f]{64}$/.test(stateRecord.sessionHandle ?? ''))) {
     return consumedStateError({ error: 'Passkey session required' }, 401, secure)
   }
-  const active = await env.AUTH_DB.prepare('SELECT user_id FROM auth_sessions WHERE id = ? AND user_id = ? AND revoked = 0 AND expires_at > ?')
-    .bind(stateRecord.sessionHandle, stateRecord.userId, Date.now()).first()
-  if (!active) return consumedStateError({ error: 'Passkey session expired' }, 401, secure)
+  if (!stateRecord.setup) {
+    const active = await env.AUTH_DB!.prepare('SELECT user_id FROM auth_sessions WHERE id = ? AND user_id = ? AND revoked = 0 AND expires_at > ?')
+      .bind(stateRecord.sessionHandle, stateRecord.userId, Date.now()).first()
+    if (!active) return consumedStateError({ error: 'Passkey session expired' }, 401, secure)
+  }
 
   // Support attempts created before PKCE moved to the short lived browser cookie.
   const codeVerifier = stateRecord.codeVerifier ?? parseOAuthPkceCookie(request)
@@ -178,6 +181,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     accessToken: tokens.access_token,
     expiresAt: Date.now() + tokens.expires_in * 1000,
     idToken: tokens.id_token,
+    ...(typeof responseFields.refresh_token === 'string' && responseFields.refresh_token ? { refreshToken: responseFields.refresh_token } : {}),
+    ...(claims.email ? { email: claims.email } : {}),
   }
   if (stateRecord.popup) {
     const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure)

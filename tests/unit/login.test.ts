@@ -8,7 +8,7 @@ function loginRequest(path = '/auth/login', sessionId = 'sid123') {
 }
 
 describe('OAuth login popup redirect', () => {
-  it('starts an online authorization code flow only for an authenticated passkey session', async () => {
+  it('starts an offline authorization code flow for an authenticated passkey session', async () => {
     const { env, db, sessionId, userId } = await fixture()
     const response = await onRequestGet({ env, request: loginRequest('/auth/login', sessionId) } as never)
     const url = new URL(response.headers.get('Location')!)
@@ -20,8 +20,8 @@ describe('OAuth login popup redirect', () => {
     expect(url.searchParams.get('response_type')).toBe('code')
     expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual(['email', 'https://www.googleapis.com/auth/drive.file', 'openid'])
     expect(url.searchParams.get('include_granted_scopes')).toBe('false')
-    expect(url.searchParams.get('access_type')).toBe('online')
-    expect(url.searchParams.has('prompt')).toBe(false)
+    expect(url.searchParams.get('access_type')).toBe('offline')
+    expect(url.searchParams.get('prompt')).toBe('consent')
     expect(url.searchParams.get('nonce')).toBeTruthy()
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     const state = url.searchParams.get('state')!
@@ -38,7 +38,7 @@ describe('OAuth login popup redirect', () => {
   it('forces account selection only when explicitly requested', async () => {
     const { env, db, sessionId } = await fixture()
     const response = await onRequestGet({ env, request: loginRequest('/auth/login?select_account=1', sessionId) } as never)
-    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account')
+    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account consent')
     db.close()
   })
 
@@ -47,6 +47,17 @@ describe('OAuth login popup redirect', () => {
     const response = await onRequestGet({ env, request: loginRequest('/auth/login', 'missing-session') } as never)
     expect(response.status).toBe(401)
     expect(db.prepare('SELECT COUNT(*) AS count FROM auth_oauth_states').get()).toEqual({ count: 0 })
+    db.close()
+  })
+
+  it('allows Google authorization before passkey creation only in setup mode', async () => {
+    const { env, db } = await fixture()
+    const response = await onRequestGet({ env, request: loginRequest('/auth/login?setup=1', 'missing-session') } as never)
+    expect(response.status).toBe(302)
+    const state = new URL(response.headers.get('Location')!).searchParams.get('state')!
+    const row = db.prepare('SELECT data FROM auth_oauth_states WHERE id = ?').get(state) as { data: string }
+    expect(JSON.parse(row.data)).toMatchObject({ setup: true, popup: true, nonce: expect.any(String) })
+    expect(row.data).not.toContain('refresh_token')
     db.close()
   })
 

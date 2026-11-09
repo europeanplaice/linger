@@ -3,33 +3,34 @@
 The current passkey design is described in [PASSKEY-PRIVACY.md](PASSKEY-PRIVACY.md).
 Google identifiers and Drive metadata are sealed with a user key instead of
 stored as plaintext session fields. Google authorization still uses the backend
-authorization-code flow and request-memory tokens. Diary files remain plaintext.
+authorization-code flow. Diary files remain plaintext.
 The legacy credential cleanup requirements below are retained for historical
 deployments and must not be mistaken for operations already performed.
 
-The privacy requirement is that persisted application data must not give the host
-operator credentials to Google Drive. OAuth access, refresh, and identity tokens
-must not be written to D1, KV, Durable Object storage, Workflow parameters or
-results, application logs, or browser storage. AWS temporary credentials must not
-be persisted either: a Google identity token can authorize access to the user's
-optional S3 backup.
+Google refresh tokens are encrypted with the passkey-protected account key before
+being stored in D1. Plaintext OAuth credentials and AWS temporary credentials must
+not be persisted in D1, KV, Durable Objects, Workflow state, logs, or browser storage.
+The server handles the key and tokens in request memory, and a compromised server
+or maliciously modified application can capture them while the vault is unlocked.
 
 Short-lived Google credentials are kept in browser memory. A request may pass them
 to the backend for an operation the user authorizes. The backend may use them in
 request memory and synchronous service calls, but may persist only session and
-sync metadata. A session cookie or a database dump alone must not authorize a
-Drive operation. Server-side refresh tokens are no longer part of this design.
+sync metadata and the encrypted refresh token. A session cookie or a database dump
+alone cannot unlock the token and authorize a Drive operation.
 
 Session storage does not retain Google email addresses. The session endpoint reads
 the email for display from the verified request-scoped identity token. RISC events
 with a Google subject conservatively revoke all sessions because no readable
-subject index is retained; email-only events receive a retryable error. Migration 0004
+subject index is retained, and also clear all encrypted refresh credentials;
+email-only events receive a retryable error. Migration 0004
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 
-Reloading or closing the page discards its Google credentials. An optional
-tab session can retain the unlocked passkey key; see PASSKEY-PRIVACY.md. Reloading or expired tokens require
-another Google authorization. S3 work advances while the app is open and the
+Reloading or closing the page discards its plaintext Google credentials. An optional
+tab session can retain the unlocked passkey key; see PASSKEY-PRIVACY.md. After
+unlock, the saved refresh credential can renew access without another Google
+authorization. Revocation or expiry requires reconnecting Google. S3 work advances while the app is open and the
 user's authorization remains valid; progress metadata can survive a pause, but
 credentials cannot be placed in a durable job to keep it running unattended.
 

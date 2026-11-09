@@ -33,6 +33,18 @@ function mockTokenResponse(overrides: Record<string, unknown> = {}) {
 }
 
 describe('OAuth callback popup flow', () => {
+  it('returns a verified email and refresh token during setup without persisting either', async () => {
+    mockTokenResponse({ refresh_token: 'secret-refresh' })
+    const { env, db } = await makeEnv()
+    db.prepare('UPDATE auth_oauth_states SET data = ? WHERE id = ?').run(JSON.stringify({ nonce: 'nonce', popup: true, setup: true }), 'valid-state')
+    const response = await onRequestGet({ request: callbackRequest({ code: 'abc', state: 'valid-state' }), env } as never)
+    const html = await response.text()
+    expect(response.status).toBe(200)
+    const encoded = html.match(/const encoded = '([^']+)'/)![1]
+    expect(JSON.parse(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')))).toMatchObject({ email: 'user@example.com', refreshToken: 'secret-refresh' })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_refresh_vault').get()).toEqual({ n: 0 })
+    db.close()
+  })
   it('returns verified Google credentials to the popup while leaving passkey session metadata opaque', async () => {
     mockTokenResponse()
     const { env, db, userId, sessionId } = await makeEnv()

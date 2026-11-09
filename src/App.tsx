@@ -158,7 +158,7 @@ export default function App() {
     signOut,
     handleExpired,
     retryAfterExpired,
-    vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, unlockPasskey, addPasskey, lockVault, clearVaultError,
+    vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { accent: accentColor, setAccent } = useAccentColor()
@@ -677,7 +677,7 @@ export default function App() {
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
 
   const passkeyGate = vaultStatus !== 'unlocked' ? (
-    <PasskeyGate busy={vaultBusy} error={vaultError}
+    <PasskeyGate busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
       onSetup={remember => { void setupPasskey(remember) }} onUnlock={remember => { void unlockPasskey(remember) }}
       onClearError={clearVaultError} />
   ) : undefined

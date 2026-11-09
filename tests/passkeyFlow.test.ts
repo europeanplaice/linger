@@ -24,6 +24,16 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
   let registrationRequests = 0
+  await page.addInitScript(() => {
+    const create = navigator.credentials.create.bind(navigator.credentials)
+    navigator.credentials.create = async options => {
+      if (options?.publicKey) (window as unknown as { passkeyName?: string }).passkeyName = options.publicKey.user.name
+      return create(options)
+    }
+  })
+  await context.route('**/auth/login?*', async route => {
+    await route.fulfill({ contentType: 'text/html', body: `<script>window.opener.postMessage({type:'linger-oauth-complete',credential:{accessToken:'test-access',idToken:'test-id',expiresAt:Date.now()+3600000,email:'person@example.com'}}, location.origin)</script>` })
+  })
   await page.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
     const path = new URL(incoming.url()).pathname.replace('/auth/passkey', '')
@@ -74,8 +84,11 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
     await page.getByRole('checkbox', { name: 'Keep the passkey unlocked when this tab reloads' }).check()
+    await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
+    await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
+    expect(await page.evaluate(() => (window as unknown as { passkeyName?: string }).passkeyName)).toBe('person@example.com')
 
     const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
