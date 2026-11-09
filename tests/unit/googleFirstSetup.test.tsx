@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/api/auth', () => ({
   startSignIn: mocks.start, checkSession: mocks.session, refreshGoogleCredentials: mocks.refresh,
   clearPendingGoogleCredential: vi.fn(), revokeSession: vi.fn(),
+  hasPendingGoogleCredential: vi.fn().mockReturnValue(false),
 }))
 vi.mock('../../src/api/passkeys', () => ({ registerPasskey: mocks.register, loginWithPasskey: mocks.login, addPasskey: vi.fn() }))
 vi.mock('../../src/lib/passkeyVault', () => ({ getVaultUserId: mocks.vaultId, clearVaultKey: vi.fn() }))

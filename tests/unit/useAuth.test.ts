@@ -16,6 +16,7 @@ vi.mock('../../src/api/auth', () => ({
   revokeSession: mockRevokeSession,
   refreshGoogleCredentials: vi.fn().mockResolvedValue(false),
   clearPendingGoogleCredential: vi.fn(),
+  hasPendingGoogleCredential: vi.fn().mockReturnValue(false),
 }))
 
 beforeEach(() => {

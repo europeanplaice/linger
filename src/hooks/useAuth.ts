@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { startSignIn, checkSession, revokeSession, refreshGoogleCredentials, clearPendingGoogleCredential } from '../api/auth'
+import { startSignIn, checkSession, revokeSession, refreshGoogleCredentials, clearPendingGoogleCredential, hasPendingGoogleCredential } from '../api/auth'
 import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
 import { clearOAuthCredentials, getOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
@@ -85,6 +85,7 @@ export function useAuth(): AuthState {
       vaultOperation.current = null
       clearVaultKey()
       clearTabSession()
+      clearPendingGoogleCredential()
       setVaultUserId(null)
       setVaultStatus('locked')
       setVaultBusy(false)
@@ -376,28 +377,46 @@ export function useAuth(): AuthState {
   }, [])
 
   useEffect(() => {
-    if (status !== 'signedIn' || tokenExpired) return
+    if (status !== 'signedIn' || vaultStatus !== 'unlocked' || signingIn) return
     let stopped = false
+    let inFlight = false
+    let rejected = false
+    const revision = authRevision.current
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async () => {
-      const revision = authRevision.current
-      const refreshed = await refreshGoogleCredentials().catch(() => false)
-      if (stopped || revision !== authRevision.current) return
-      if (refreshed) schedule()
-      else {
-        const remaining = (getOAuthCredentials()?.expiresAt ?? 0) - Date.now()
-        if (remaining > 10_000) timer = setTimeout(refresh, Math.min(30_000, remaining - 5_000))
-        else handleExpired()
-      }
+      if (stopped || inFlight || rejected || revision !== authRevision.current) return
+      clearTimeout(timer)
+      inFlight = true
+      try {
+        const refreshed = await refreshGoogleCredentials()
+        if (stopped || revision !== authRevision.current) return
+        if (refreshed) {
+          setTokenExpired(false)
+          schedule()
+        } else {
+          rejected = true
+          handleExpired()
+        }
+      } catch {
+        // A temporary outage does not invalidate the saved Google authorization.
+        if (!stopped && revision === authRevision.current) timer = setTimeout(refresh, 30_000)
+      } finally { inFlight = false }
     }
     const schedule = () => {
       const credentials = getOAuthCredentials()
-      if (!credentials) return
-      timer = setTimeout(refresh, Math.max(1000, credentials.expiresAt - Date.now() - 60_000))
+      const delay = credentials ? credentials.expiresAt - Date.now() - 60_000 : 1000
+      timer = setTimeout(refresh, Math.max(1000, hasPendingGoogleCredential() ? Math.min(30_000, delay) : delay))
     }
-    schedule()
-    return () => { stopped = true; clearTimeout(timer) }
-  }, [status, tokenExpired, handleExpired])
+    const onOnline = () => { void refresh() }
+    window.addEventListener('online', onOnline)
+    if (tokenExpired) void refresh()
+    else schedule()
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [status, vaultStatus, signingIn, tokenExpired, handleExpired])
 
   const retryAfterExpired = useCallback((selectAccount = false) => {
     signIn({ selectAccount, expectedGoogleSub: googleSub })

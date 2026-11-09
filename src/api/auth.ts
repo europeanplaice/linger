@@ -4,7 +4,7 @@ import { clearVaultKey, getVaultUserId, setVaultKeyHeader } from '../lib/passkey
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
-let pendingRefreshToken: string | null = null
+let pendingRefreshToken: { token: string; userId: string | null } | null = null
 
 function updatePasskeyAccountName(userId: string | null, email: string | null): void {
   if (!userId || !email || typeof PublicKeyCredential === 'undefined') return
@@ -77,7 +77,9 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean 
       receivedCredential = true
       try { setOAuthCredentials({ accessToken: credential.accessToken, idToken: credential.idToken, expiresAt: credential.expiresAt }) }
       catch (error) { finish(error instanceof Error ? error : new Error('Google sign-in failed')); return }
-      pendingRefreshToken = typeof credential.refreshToken === 'string' ? credential.refreshToken : null
+      pendingRefreshToken = typeof credential.refreshToken === 'string'
+        ? { token: credential.refreshToken, userId: options.setup ? null : getVaultUserId() }
+        : null
       if (options.setup) {
         if (typeof credential.email !== 'string' || !credential.email) { finish(new Error('Google did not return a verified email')); return }
         try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Optional acknowledgement. */ }
@@ -116,19 +118,33 @@ export async function refreshGoogleCredentials(storePending = false): Promise<bo
   const headers = new Headers({ 'Content-Type': 'application/json' })
   setVaultKeyHeader(headers)
   if (storePending && !pendingRefreshToken) return false
+  // Retry an interrupted save before falling back to the stored credential.
+  // Bind Google-first setup's credential on its first authenticated save.
+  const pending = pendingRefreshToken
+  if (pending && pending.userId === null) pending.userId = userId
+  if (pending && pending.userId !== userId) return false
   const response = await fetch('/auth/refresh', {
     method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', headers,
-    body: JSON.stringify(storePending ? { refreshToken: pendingRefreshToken } : {}),
+    body: JSON.stringify(pending ? { refreshToken: pending.token } : {}),
   })
-  if (!response.ok) return false
+  if (!response.ok) {
+    // Network errors, throttling, conflicts, and server failures are retryable.
+    if (response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500) {
+      throw new Error('Google authorization temporarily unavailable')
+    }
+    if (generation === signInGeneration && pendingRefreshToken === pending) pendingRefreshToken = null
+    return false
+  }
   const credentials = await response.json() as { accessToken: string; idToken: string; expiresAt: number }
   if (generation !== signInGeneration || userId !== getVaultUserId()) return false
   setOAuthCredentials(credentials)
-  if (storePending) pendingRefreshToken = null
+  if (pendingRefreshToken === pending) pendingRefreshToken = null
   return true
 }
 
 export function clearPendingGoogleCredential(): void { pendingRefreshToken = null }
+
+export function hasPendingGoogleCredential(): boolean { return pendingRefreshToken !== null }
 
 export interface SessionInfo {
   signedIn: boolean
