@@ -8,6 +8,7 @@ const INVALIDATED_EVENT = 'linger-account-invalidated'
 interface AuthEvent { id: string; account: string | null; persisted?: boolean }
 interface AccountSnapshot { account: string | null; clearSharedData: boolean }
 let current: AccountSnapshot = { account: null, clearSharedData: true }
+let lastAnnouncedId: string | undefined
 
 export function accountIdentity(info: { googleSub?: string | null; email?: string | null }): string | null {
   if (info.googleSub) return `sub:${info.googleSub}`
@@ -36,6 +37,7 @@ export function readAuthEvent(): AuthEvent | null {
 export function announceAccount(account: string | null): void {
   if (account !== null && readAuthEvent()?.account === account) return
   const event = { id: crypto.randomUUID(), account, persisted: true }
+  lastAnnouncedId = event.id
   try { localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify(event)) } catch { event.persisted = false }
   broadcastMessage({ type: 'AUTH_CHANGED', ...event })
 }
@@ -49,6 +51,8 @@ export function subscribeAccountChanges(onChange: (event: AuthEvent) => void, on
     if (latest && event && event.persisted !== false && latest.id !== event.id) event = latest
     if (!event || event.id === lastId) return
     lastId = event.id
+    // Focus can rediscover this tab's own logout while a new login is underway.
+    if (event.id === lastAnnouncedId) return
     onChange(event)
   }
   const onStorage = (event: StorageEvent) => { if (event.key === AUTH_EVENT_KEY || event.key === null) receive(readAuthEvent()) }

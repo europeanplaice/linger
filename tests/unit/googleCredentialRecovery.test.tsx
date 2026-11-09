@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuth } from '../../src/hooks/useAuth'
 import { clearPendingGoogleCredential, hasPendingGoogleCredential, refreshGoogleCredentials } from '../../src/api/auth'
 import { getAccessToken, clearOAuthCredentials } from '../../src/lib/oauthCredentials'
-import { setActiveAccount } from '../../src/lib/accountSession'
+import { AUTH_EVENT_KEY, setActiveAccount } from '../../src/lib/accountSession'
 
 const mocks = vi.hoisted(() => ({ userId: null as string | null, register: vi.fn(), login: vi.fn() }))
 vi.mock('../../src/api/passkeys', () => ({ registerPasskey: mocks.register, loginWithPasskey: mocks.login, addPasskey: vi.fn() }))
@@ -73,6 +73,42 @@ async function setup() {
 }
 
 describe('Google credential recovery', () => {
+  it('does not cancel passkey login when focus returns after this tab signs out', async () => {
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    await act(async () => result.current.signOut())
+
+    let finishLogin!: (value: { userId: string }) => void
+    let signal: AbortSignal | undefined
+    mocks.login.mockImplementationOnce((s: AbortSignal) => {
+      signal = s
+      return new Promise(resolve => { finishLogin = resolve })
+    })
+    let pending!: Promise<void>
+    act(() => { pending = result.current.unlockPasskey() })
+    act(() => { window.dispatchEvent(new Event('focus')) })
+    expect(signal?.aborted).toBe(false)
+    await act(async () => { mocks.userId = 'vault-user'; finishLogin({ userId: 'vault-user' }); await pending })
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.vaultStatus).toBe('unlocked')
+  })
+
+  it('cancels an in-progress login when another tab signs out', async () => {
+    const { result } = await mount()
+    let signal: AbortSignal | undefined
+    mocks.login.mockImplementationOnce((s: AbortSignal) => {
+      signal = s
+      return new Promise(() => {})
+    })
+    act(() => { void result.current.unlockPasskey() })
+    act(() => {
+      localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'another-tab-logout', account: null }))
+      window.dispatchEvent(new StorageEvent('storage', { key: AUTH_EVENT_KEY }))
+    })
+    expect(signal?.aborted).toBe(true)
+    expect(result.current.vaultStatus).toBe('locked')
+  })
+
   it.each(['network', '503', '409', '429'])('retries a failed initial save (%s) with the pending credential', async failure => {
     if (failure === 'network') refresh.mockRejectedValueOnce(new TypeError('offline'))
     else refresh.mockResolvedValueOnce(new Response('{}', { status: Number(failure) }))

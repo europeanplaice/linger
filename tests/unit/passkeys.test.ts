@@ -58,6 +58,7 @@ it('sends only same-origin passkey routes and strips PRF bytes from assertion JS
   vi.stubGlobal('fetch', fetchMock)
   try {
     await expect(loginWithPasskey()).resolves.toEqual({ userId })
+    expect(navigator.credentials.get).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
   } finally {
     if (credentialsDescriptor) Object.defineProperty(navigator, 'credentials', credentialsDescriptor)
