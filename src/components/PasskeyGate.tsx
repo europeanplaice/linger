@@ -62,7 +62,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
         <button className="btn-signin-google passkey-primary" type="button" disabled={busy || (recovery && !recoveryConfirmed)}
           aria-describedby={setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
           onClick={() => setup && !setupEmail ? onBeginSetup() : (setup ? onSetup(0) : onUnlock(remember))}>
-          {busy ? progress : setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
+          {setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
         </button>
         <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'login' : 'setup')}>
           {setup ? t.login.passkeyBackToSignIn : t.login.passkeyFirstTime}
