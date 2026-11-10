@@ -1,7 +1,7 @@
-import { expect, test } from '@playwright/test'
-import { checkSession, revokeSession } from '../src/api/auth'
-import { clearOAuthCredentials, setOAuthCredentials } from '../src/lib/oauthCredentials'
-import { FetchMock, jsonResponse } from './helpers/mockFetch'
+import { expect, test } from 'vitest'
+import { checkSession, revokeSession } from '../../src/api/auth'
+import { clearOAuthCredentials, setOAuthCredentials } from '../../src/lib/oauthCredentials'
+import { FetchMock, jsonResponse } from '../helpers/mockFetch'
 
 const fetchMock = new FetchMock()
 

@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test'
-import type { DiaryEntry } from '../src/types'
-import { listRevisions, getRevisionContent } from '../src/api/driveRevisions'
-import { TokenExpiredError, DriveHttpError } from '../src/api/driveEntries'
-import { FetchMock, jsonResponse } from './helpers/mockFetch'
+import { expect, test } from 'vitest'
+import type { DiaryEntry } from '../../src/types'
+import { listRevisions, getRevisionContent } from '../../src/api/driveRevisions'
+import { TokenExpiredError, DriveHttpError } from '../../src/api/driveEntries'
+import { FetchMock, jsonResponse } from '../helpers/mockFetch'
 
 const fetchMock = new FetchMock()
 

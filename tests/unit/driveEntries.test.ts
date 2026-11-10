@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
-import type { DriveFileMeta } from '../src/types'
+import { expect, test } from 'vitest'
+import type { DriveFileMeta } from '../../src/types'
 import {
   TokenExpiredError,
   DriveHttpError,
@@ -10,8 +10,8 @@ import {
   saveEntry,
   deleteEntry,
   getChanges,
-} from '../src/api/driveEntries'
-import { FetchMock, jsonResponse, textResponse } from './helpers/mockFetch'
+} from '../../src/api/driveEntries'
+import { FetchMock, jsonResponse, textResponse } from '../helpers/mockFetch'
 
 const fetchMock = new FetchMock()
 

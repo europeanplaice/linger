@@ -203,3 +203,32 @@ describe('useDiary initial load parallelization', () => {
     await waitFor(() => expect(result.current.dates).toContain('2026-08-20'))
   })
 })
+
+
+describe('useDiary pending save after session expiry', () => {
+  it('returns null when there is no pending save', async () => {
+    const { result } = renderUseDiary()
+    await waitFor(() => expect(result.current.freshListLoaded).toBe(true))
+    await expect(result.current.retryPendingSave()).resolves.toBeNull()
+  })
+
+  it('replays the original content once after reauthentication', async () => {
+    const { result, onExpired } = renderUseDiary()
+    await waitFor(() => expect(result.current.freshListLoaded).toBe(true))
+    vi.mocked(driveEntries.saveEntry).mockRejectedValueOnce(new driveEntries.TokenExpiredError())
+    await act(async () => {
+      await expect(result.current.save('2026-05-01', 'my diary text', null)).rejects.toBeInstanceOf(driveEntries.TokenExpiredError)
+    })
+    expect(onExpired).toHaveBeenCalled()
+
+    vi.mocked(driveEntries.saveEntry).mockResolvedValueOnce(meta('2026-05-01'))
+    await act(async () => {
+      const saved = await result.current.retryPendingSave()
+      expect(saved?.entry.content).toBe('my diary text')
+    })
+    expect(driveEntries.saveEntry).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(driveEntries.saveEntry).mock.calls[1][1]).toMatchObject({ date: '2026-05-01', content: 'my diary text' })
+    await expect(result.current.retryPendingSave()).resolves.toBeNull()
+    expect(driveEntries.saveEntry).toHaveBeenCalledTimes(2)
+  })
+})
