@@ -9,24 +9,27 @@ async function expectLoginPopupUrl(page: import('@playwright/test').Page, select
   expect(url.searchParams.get('select_account')).toBe(selectAccount ? '1' : null)
 }
 
-test('App primary and alternate sign-in buttons open the intended OAuth URLs', async ({ page }) => {
-  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
-  await page.addInitScript(() => {
-    ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = ''
-    window.open = ((url?: string | URL) => {
-      ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = String(url ?? '')
-      return { closed: true, close() {} } as WindowProxy
-    }) as typeof window.open
+for (const selectAccount of [false, true]) {
+  test(`App ${selectAccount ? 'alternate' : 'primary'} sign-in button opens the intended OAuth URL`, async ({ page }) => {
+    await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
+    await page.addInitScript(() => {
+      ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = ''
+      window.open = ((url?: string | URL) => {
+        ;(window as Window & { lastPopupUrl?: string }).lastPopupUrl = String(url ?? '')
+        return { closed: true, close() {} } as WindowProxy
+      }) as typeof window.open
+    })
+    await page.goto(baseUrl)
+    // Each button starts its own flow. A closed popup can still complete over
+    // BroadcastChannel, so the mock leaves sign-in pending and disables both buttons.
+    const button = page.getByRole('button', { name: selectAccount ? 'Use another account' : 'Sign in with Google', exact: true })
+    await expect(button).toBeVisible()
+    await button.click()
+    await expectLoginPopupUrl(page, selectAccount)
+    await expect(page.getByRole('button', { name: 'Connecting Google Drive…', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Use another account', exact: true })).toBeDisabled()
   })
-  await page.goto(baseUrl)
-  const primary = page.getByRole('button', { name: 'Sign in with Google' })
-  await expect(primary).toBeVisible()
-  await primary.click()
-  await expectLoginPopupUrl(page)
-
-  await page.getByRole('button', { name: 'Use another account' }).click()
-  await expectLoginPopupUrl(page, true)
-})
+}
 
 test('a blocked Google popup preserves the unlocked passkey for retry', async ({ page }) => {
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
@@ -34,8 +37,9 @@ test('a blocked Google popup preserves the unlocked passkey for retry', async ({
   await page.goto(baseUrl)
   const google = page.getByRole('button', { name: 'Sign in with Google', exact: true })
   await google.click()
-  await expect(page.getByRole('alert')).toContainText('Google sign-in could not be completed')
+  await expect(page.getByRole('alert')).toHaveText('Allow popups for Linger, then try connecting Google again.')
   await expect(google).toBeVisible()
+  await expect(google).toBeEnabled()
   await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toHaveCount(0)
 })
 

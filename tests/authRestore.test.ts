@@ -35,7 +35,8 @@ test('an opted-in tab restores its vault but requires Google authorization on re
   })
   await page.route('/auth/refresh', route => route.fulfill({ status: 401, json: { error: 'Google authorization required' } }))
   await page.goto(baseUrl)
-  await page.evaluate(() => sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
+  // Seed before the reload's app scripts, so the initial page cannot clear it.
+  await page.addInitScript(() => sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
     userId: 'user', key: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), expiresAt: Date.now() + 3600_000,
     oauth: { accessToken: 'restored-access', idToken: 'restored-id', expiresAt: Date.now() + 1800_000 },
   })))
