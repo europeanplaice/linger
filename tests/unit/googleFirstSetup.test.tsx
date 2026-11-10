@@ -56,5 +56,22 @@ describe('Google-first registration', () => {
     expect(mocks.refresh).toHaveBeenCalledWith()
     expect(mocks.start).not.toHaveBeenCalled()
     expect(result.current.status).toBe('signedIn')
+    mocks.start.mockResolvedValue({ signedIn: true, userId: 'existing-vault', email: 'person@example.com', googleSub: 'sub' })
+    await act(async () => { result.current.signIn(); await Promise.resolve() })
+    expect(mocks.start).toHaveBeenCalledWith({ selectAccount: false, renew: false })
+  })
+
+  it('requests a new credential when unlock cannot restore Google authorization', async () => {
+    mocks.login.mockImplementation(async () => {
+      mocks.vaultId.mockReturnValue('existing-vault')
+      return { userId: 'existing-vault' }
+    })
+    mocks.refresh.mockResolvedValue(false)
+    mocks.start.mockResolvedValue({ signedIn: true, userId: 'existing-vault', email: 'person@example.com', googleSub: 'sub' })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(result.current.status).toBe('signedOut'))
+    await act(async () => result.current.unlockPasskey())
+    await act(async () => { result.current.signIn(); await Promise.resolve() })
+    expect(mocks.start).toHaveBeenCalledWith({ selectAccount: false, renew: true })
   })
 })

@@ -133,14 +133,14 @@ describe('useAuth', () => {
     await act(async () => { result.current.signIn(); await Promise.resolve() })
 
     expect(mockStartSignIn).toHaveBeenCalledOnce()
-    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: false })
+    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: false, renew: true })
   })
 
   it('requests account selection for the explicit alternate-account action', async () => {
     const { result } = renderHook(() => useAuth())
     await waitFor(() => expect(result.current.status).toBe('signedOut'))
     await act(async () => { result.current.signIn({ selectAccount: true }); await Promise.resolve() })
-    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: true })
+    expect(mockStartSignIn).toHaveBeenCalledWith({ selectAccount: true, renew: true })
   })
 
   it('tracks popup reauthentication and exposes failure for the in-place recovery UI', async () => {

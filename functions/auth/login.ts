@@ -51,11 +51,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   })
   // Let Google use its normal account/session selection for the primary
   // sign-in action. The explicit secondary action asks Google to show accounts.
-  if (url.searchParams.get('select_account') === '1') {
-    params.set('prompt', 'select_account consent')
-  } else {
-    params.set('prompt', 'consent')
-  }
+  const prompts: string[] = []
+  if (url.searchParams.get('select_account') === '1') prompts.push('select_account')
+  // Initial setup and credential recovery need a new offline credential.
+  // Otherwise a confirmed working saved credential can be retained.
+  if (setup || url.searchParams.get('reuse') !== '1') prompts.push('consent')
+  if (prompts.length) params.set('prompt', prompts.join(' '))
 
   const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })
   headers.append('Set-Cookie', makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')))

@@ -37,6 +37,20 @@ describe('OAuth login popup redirect', () => {
 
   it('forces account selection only when explicitly requested', async () => {
     const { env, db, sessionId } = await fixture()
+    const response = await onRequestGet({ env, request: loginRequest('/auth/login?select_account=1&reuse=1', sessionId) } as never)
+    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account')
+    db.close()
+  })
+
+  it('does not force consent or account selection when reusing a working credential', async () => {
+    const { env, db, sessionId } = await fixture()
+    const response = await onRequestGet({ env, request: loginRequest('/auth/login?reuse=1', sessionId) } as never)
+    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBeNull()
+    db.close()
+  })
+
+  it('requests consent when recovering an offline credential', async () => {
+    const { env, db, sessionId } = await fixture()
     const response = await onRequestGet({ env, request: loginRequest('/auth/login?select_account=1', sessionId) } as never)
     expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('select_account consent')
     db.close()
@@ -55,6 +69,7 @@ describe('OAuth login popup redirect', () => {
     const response = await onRequestGet({ env, request: loginRequest('/auth/login?setup=1', 'missing-session') } as never)
     expect(response.status).toBe(302)
     const state = new URL(response.headers.get('Location')!).searchParams.get('state')!
+    expect(new URL(response.headers.get('Location')!).searchParams.get('prompt')).toBe('consent')
     const row = db.prepare('SELECT data FROM auth_oauth_states WHERE id = ?').get(state) as { data: string }
     expect(JSON.parse(row.data)).toMatchObject({ setup: true, popup: true, nonce: expect.any(String) })
     expect(row.data).not.toContain('refresh_token')

@@ -20,7 +20,7 @@ function updatePasskeyAccountName(userId: string | null, email: string | null): 
   } catch { /* A provider may reject the optional update synchronously. */ }
 }
 
-export function startSignIn(options: { selectAccount?: boolean; setup?: boolean } = {}): Promise<SessionInfo> {
+export function startSignIn(options: { selectAccount?: boolean; setup?: boolean; renew?: boolean } = {}): Promise<SessionInfo> {
   const generation = ++signInGeneration
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
@@ -35,6 +35,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean 
     const params = new URLSearchParams({ channel_id: channelId })
     if (options.selectAccount) params.set('select_account', '1')
     if (options.setup) params.set('setup', '1')
+    if (options.renew === false) params.set('reuse', '1')
     const loginUrl = `/auth/login?${params.toString()}`
     const popup = window.open(loginUrl, 'linger-google-signin', 'popup,width=520,height=680')
     if (!popup) {

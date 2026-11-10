@@ -69,6 +69,8 @@ export function useAuth(): AuthState {
   const vaultOperation = useRef<AbortController | null>(null)
   const authRevision = useRef(0)
   const restoring = useRef(true)
+  // Only skip forced consent after a refresh has proved the stored credential works.
+  const needsGoogleCredential = useRef(true)
 
   useEffect(() => {
     const unsubscribe = subscribeAccountChanges(event => {
@@ -78,6 +80,7 @@ export function useAuth(): AuthState {
       if (event.account === null || event.account !== getAccountSnapshot().account) invalidateAccount()
     }, () => {
       authRevision.current++
+      needsGoogleCredential.current = true
       restoring.current = false
       rememberSession(false)
       vaultRevision.current++
@@ -151,7 +154,10 @@ export function useAuth(): AuthState {
     const startedEvent = readAuthEvent()?.id
     restoring.current = true
     restoreTabSession(() => !cancelled && revision === authRevision.current).then(async restored => {
-      if (restored) await refreshGoogleCredentials().catch(() => false)
+      if (restored) {
+        const refreshed = await refreshGoogleCredentials().catch(() => false)
+        if (!cancelled && revision === authRevision.current) needsGoogleCredential.current = !refreshed
+      }
       return checkSession()
     }).then(info => {
       if (cancelled || revision !== authRevision.current) return
@@ -191,7 +197,7 @@ export function useAuth(): AuthState {
     restoring.current = false
     setAuthError(null)
     setSigningIn(true)
-    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount) })
+    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current })
     // Do not retain the previous Google credentials during account switching.
     saveTabSession()
     pendingSignIn.then(async info => {
@@ -214,7 +220,11 @@ export function useAuth(): AuthState {
       }
       const account = accountIdentity(info)
       if (!account) throw new Error('Google sign-in did not return an account')
-      await refreshGoogleCredentials(true).catch(() => false)
+      if (hasPendingGoogleCredential()) {
+        const refreshed = await refreshGoogleCredentials(true).catch(() => false)
+        if (revision !== authRevision.current) return
+        needsGoogleCredential.current = !refreshed
+      }
       if (revision !== authRevision.current) return
       setActiveAccount(account, getAccountSnapshot().account !== account)
       announceAccount(account)
@@ -291,10 +301,16 @@ export function useAuth(): AuthState {
         if (remember) { enableTabSession(); saveTabSession() }
       }
       if (action !== 'add') {
-        if (action === 'unlock') await refreshGoogleCredentials().catch(() => false)
+        if (action === 'unlock') {
+          const refreshed = await refreshGoogleCredentials().catch(() => false)
+          if (revision !== vaultRevision.current) return
+          needsGoogleCredential.current = !refreshed
+        }
         let info = await checkSession()
         if (action === 'setup' && info.signedIn) {
-          await refreshGoogleCredentials(true).catch(() => false)
+          const refreshed = await refreshGoogleCredentials(true).catch(() => false)
+          if (revision !== vaultRevision.current) return
+          needsGoogleCredential.current = !refreshed
           info = await checkSession()
           setSetupEmail(null)
         }
@@ -332,6 +348,7 @@ export function useAuth(): AuthState {
   const unlockPasskey = useCallback((remember = false) => runVaultAction('unlock', remember), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
+    needsGoogleCredential.current = true
     vaultRevision.current++
     vaultOperation.current?.abort()
     vaultOperation.current = null
@@ -347,6 +364,7 @@ export function useAuth(): AuthState {
   const clearVaultError = useCallback(() => setVaultError(null), [])
 
   const signOut = useCallback(() => {
+    needsGoogleCredential.current = true
     const account = getAccountSnapshot().account
     revokeSession().then(() => {
       // A delayed logout completion must not clear a newly signed-in account.
@@ -391,9 +409,11 @@ export function useAuth(): AuthState {
         const refreshed = await refreshGoogleCredentials()
         if (stopped || revision !== authRevision.current) return
         if (refreshed) {
+          needsGoogleCredential.current = false
           setTokenExpired(false)
           schedule()
         } else {
+          needsGoogleCredential.current = true
           rejected = true
           handleExpired()
         }
