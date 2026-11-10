@@ -57,6 +57,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   // Otherwise a confirmed working saved credential can be retained.
   if (setup || url.searchParams.get('reuse') !== '1') prompts.push('consent')
   if (prompts.length) params.set('prompt', prompts.join(' '))
+  // A selection hint never proves identity; callback/session verification still
+  // enforces the linked Google subject. Do not hint during setup or switching.
+  const hint = url.searchParams.get('login_hint')
+  if (!setup && userId && url.searchParams.get('select_account') !== '1' && hint && /^[A-Za-z0-9._@+\-]{1,254}$/.test(hint)) params.set('login_hint', hint)
 
   const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })
   headers.append('Set-Cookie', makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')))

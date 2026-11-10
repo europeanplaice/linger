@@ -4,7 +4,7 @@ import type { Env } from '../functions/_shared/session'
 import { onRequestGet as restoreSession } from '../functions/auth/passkey/session'
 import {
   addOptions, addVerify, loginOptions, loginVerify,
-  deleteCredential, listCredentials, registrationOptions, registrationVerify,
+  deleteCredential, listCredentials, registrationOptions, registrationVerify, renameCredential,
 } from '../functions/_shared/passkeys'
 
 // Native Chrome WebAuthn + real server verification + migrated SQL. Only the
@@ -18,7 +18,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     '/register/options': registrationOptions, '/register/verify': registrationVerify,
     '/login/options': loginOptions, '/login/verify': loginVerify,
     '/add/options': addOptions, '/add/verify': addVerify,
-    '/credentials/list': listCredentials, '/credentials/delete': deleteCredential,
+    '/credentials/list': listCredentials, '/credentials/delete': deleteCredential, '/credentials/rename': renameCredential,
     '/session': async (request, env) => await restoreSession({ request, env } as Parameters<typeof restoreSession>[0]) as Response,
   }
   const forbiddenNetworkValues: string[] = []
@@ -69,6 +69,8 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     delete headers['set-cookie']
     await route.fulfill({ status: response.status, headers, body: await response.text() })
   })
+  await context.route('**/auth/refresh', route => route.fulfill({ status: 401, json: { error: 'Google authorization required' } }))
+  await context.route('**/auth/session', route => route.fulfill({ json: { signedIn: false } }))
   const cdp = await context.newCDPSession(page)
   await cdp.send('WebAuthn.enable')
   const authenticator = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
@@ -88,12 +90,17 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
-    await page.getByRole('checkbox', { name: 'Skip passkey on this device for 7 days' }).check()
+    await expect(page.getByRole('checkbox')).toHaveCount(0)
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
     await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
     expect(await page.evaluate(() => (window as unknown as { passkeyName?: string }).passkeyName)).toBe('person@example.com')
+    const remember = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
+    await expect(remember.getByRole('checkbox')).not.toBeChecked()
+    await remember.getByRole('checkbox').check()
+    await remember.getByRole('combobox').selectOption('7')
+    await remember.getByRole('button', { name: 'Save', exact: true }).click()
 
     const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
@@ -103,11 +110,11 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     // An opted-in reload validates the existing server session and restores the
     // vault, even before Google authorization has been completed.
     await page.reload()
-    await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
     expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).not.toBeNull()
     const reopened = await context.newPage()
     await reopened.goto(origin)
-    await expect(reopened.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
+    await expect(reopened.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
     await expect(reopened.getByRole('heading', { name: 'Sign in to Linger' })).toHaveCount(0)
     await reopened.close()
     await page.evaluate(() => localStorage.removeItem('linger_device_session_v1'))
@@ -119,7 +126,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible({ timeout: 20_000 })
     const firstPasskeyKey = await page.evaluate(async internalId => {
       const path = '/src/lib/passkeyVault.ts'
       const key = (await import(/* @vite-ignore */ path)).getVaultKey(internalId) as Uint8Array
@@ -131,6 +138,14 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     const firstSession = await page.evaluate(async internalId => {
       const path = '/src/api/passkeys.ts'
       return (await import(/* @vite-ignore */ path)).listPasskeys(internalId)
+    }, userId)
+    await page.evaluate(async internalId => {
+      const path = '/src/api/passkeys.ts'
+      const api = await import(/* @vite-ignore */ path)
+      const listed = await api.listPasskeys(internalId)
+      await api.renamePasskey(internalId, listed.currentCredentialId, 'Daily passkey')
+      const renamed = await api.listPasskeys(internalId)
+      if (renamed.credentials[0].name !== 'Daily passkey' || !renamed.credentials[0].lastUsedAt) throw new Error('Missing credential metadata')
     }, userId)
     const originalCredentialId = firstSession.currentCredentialId
     expect(originalCredentialId).toBeTruthy()

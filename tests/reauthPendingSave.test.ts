@@ -11,6 +11,7 @@ async function setUpExpiredSave(
     localStorage.setItem('linger_language', 'en')
   })
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0 })
+  await page.route('/auth/refresh', route => route.fulfill({ status: 401, json: { error: 'Google authorization required' } }))
 
   let popupCount = 0
   await page.context().route('**/auth/login**', async route => {
@@ -56,6 +57,7 @@ test('pending save waits for popup completion, then retries for the same Google 
   await page.getByRole('button', { name: 'Log in again' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState()
+  expect(new URL(popup.url()).searchParams.get('login_hint')).toBe('google-a')
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pendingSaveCount'))).toBe('1')
 
   await popup.evaluate(() => window.opener?.postMessage({

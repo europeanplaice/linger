@@ -5,10 +5,14 @@ import { clearOAuthCredentials, getOAuthCredentials } from '../lib/oauthCredenti
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
 import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../lib/tabSession'
+import type { RememberDays } from '../lib/tabSession'
+import { authFeedbackCode } from '../lib/authFeedback'
+import type { PasskeyPhase } from '../lib/authFeedback'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
-export type AuthErrorCode = 'sign_in_failed' | 'account_mismatch'
+export type AuthErrorCode = 'sign_in_failed' | 'account_mismatch' | 'cancelled' | 'network' | 'popup_blocked'
+export type GoogleConnection = 'idle' | 'restoring' | 'unavailable' | 'required'
 
 interface SignInOptions {
   selectAccount?: boolean
@@ -33,11 +37,16 @@ export interface AuthState {
   vaultBusy: boolean
   vaultError: string | null
   vaultUserId: string | null
-  setupPasskey: (remember?: boolean) => Promise<void>
+  vaultPhase: PasskeyPhase | null
+  googleConnection: GoogleConnection
+  retryGoogleConnection: () => Promise<void>
+  offerRememberDevice: boolean
+  dismissRememberDevice: () => void
+  setupPasskey: (remember?: RememberDays) => Promise<void>
   setupEmail: string | null
   beginSetup: () => void
   cancelSetup: () => void
-  unlockPasskey: (remember?: boolean) => Promise<void>
+  unlockPasskey: (remember?: RememberDays) => Promise<void>
   addPasskey: () => Promise<void>
   lockVault: () => void
   clearVaultError: () => void
@@ -65,12 +74,61 @@ export function useAuth(): AuthState {
   const [vaultError, setVaultError] = useState<string | null>(null)
   const [vaultUserId, setVaultUserId] = useState<string | null>(null)
   const [setupEmail, setSetupEmail] = useState<string | null>(null)
+  const [vaultPhase, setVaultPhase] = useState<PasskeyPhase | null>(null)
+  const [googleConnection, setGoogleConnection] = useState<GoogleConnection>('idle')
+  const [offerRememberDevice, setOfferRememberDevice] = useState(false)
+  const dismissRememberDevice = useCallback(() => setOfferRememberDevice(false), [])
+  const googleRetryInFlight = useRef(false)
   const vaultRevision = useRef(0)
   const vaultOperation = useRef<AbortController | null>(null)
   const authRevision = useRef(0)
   const restoring = useRef(true)
   // Only skip forced consent after a refresh has proved the stored credential works.
   const needsGoogleCredential = useRef(true)
+
+  const retryGoogleConnection = useCallback(async () => {
+    const userId = getVaultUserId()
+    if (!userId || googleRetryInFlight.current) return
+    googleRetryInFlight.current = true
+    const authVersion = authRevision.current
+    const vaultVersion = vaultRevision.current
+    const isCurrent = () => {
+      if (authVersion !== authRevision.current || vaultVersion !== vaultRevision.current) return false
+      if (userId === getVaultUserId()) return true
+      if (!getVaultUserId()) {
+        clearTabSession()
+        setVaultUserId(null)
+        setVaultStatus('locked')
+        setStatus('signedOut')
+        setGoogleConnection('idle')
+      }
+      return false
+    }
+    setGoogleConnection('restoring')
+    try {
+      // Setup may have been interrupted before the verified Google identity
+      // was linked to the new vault. Complete that step before saving its token.
+      if (hasPendingGoogleCredential()) await checkSession({ failOnUnavailable: true })
+      if (!isCurrent()) return
+      const refreshed = await refreshGoogleCredentials()
+      if (!isCurrent()) return
+      needsGoogleCredential.current = !refreshed
+      const info = await checkSession({ failOnUnavailable: true })
+      if (!isCurrent()) return
+      setGoogleConnection(info.signedIn ? 'idle' : 'required')
+      if (!info.signedIn) return
+      const account = accountIdentity(info)
+      if (account) { setActiveAccount(account); announceAccount(account) }
+      rememberSession(true)
+      setEmail(info.email)
+      setGoogleSub(info.googleSub)
+      setGoogleClientId(info.googleClientId)
+      setStatus('signedIn')
+      setTokenExpired(false)
+    } catch {
+      if (isCurrent()) setGoogleConnection('unavailable')
+    } finally { googleRetryInFlight.current = false }
+  }, [])
 
   useEffect(() => {
     const unsubscribe = subscribeAccountChanges(event => {
@@ -96,6 +154,9 @@ export function useAuth(): AuthState {
       setTokenExpired(false)
       setAuthError(null)
       setSigningIn(false)
+      setGoogleConnection('idle')
+      setVaultPhase(null)
+      setOfferRememberDevice(false)
     })
     return unsubscribe
   }, [])
@@ -150,15 +211,28 @@ export function useAuth(): AuthState {
       return
     }
     let cancelled = false
+    let connectionUnavailable = false
     const revision = authRevision.current
     const startedEvent = readAuthEvent()?.id
     restoring.current = true
     restoreTabSession(() => !cancelled && revision === authRevision.current).then(async restored => {
       if (restored) {
-        const refreshed = await refreshGoogleCredentials().catch(() => false)
-        if (!cancelled && revision === authRevision.current) needsGoogleCredential.current = !refreshed
+        try {
+          const refreshed = await refreshGoogleCredentials()
+          if (!cancelled && revision === authRevision.current) {
+            needsGoogleCredential.current = !refreshed
+            setGoogleConnection(refreshed ? 'idle' : 'required')
+          }
+        } catch {
+          connectionUnavailable = true
+          if (!cancelled && revision === authRevision.current) setGoogleConnection('unavailable')
+        }
       }
-      return checkSession()
+      return checkSession({ failOnUnavailable: true }).catch(() => {
+        connectionUnavailable = true
+        if (!cancelled && revision === authRevision.current && getVaultUserId()) setGoogleConnection('unavailable')
+        return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+      })
     }).then(info => {
       if (cancelled || revision !== authRevision.current) return
       const activeVaultUser = getVaultUserId()
@@ -176,11 +250,11 @@ export function useAuth(): AuthState {
         return
       }
       restoring.current = false
-      setActiveAccount(account, !info.signedIn)
+      setActiveAccount(account, !info.signedIn && !connectionUnavailable)
       if (account) announceAccount(account)
-      rememberSession(info.signedIn)
+      if (!connectionUnavailable || info.signedIn) rememberSession(info.signedIn)
       if (!info.signedIn) {
-        clearOAuthCredentials()
+        if (!connectionUnavailable) clearOAuthCredentials()
         if (getVaultUserId()) saveTabSession()
         else clearTabSession()
       }
@@ -197,7 +271,8 @@ export function useAuth(): AuthState {
     restoring.current = false
     setAuthError(null)
     setSigningIn(true)
-    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current })
+    const hint = options.expectedGoogleSub ?? googleSub
+    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current, ...(!options.selectAccount && hint ? { loginHint: hint } : {}) })
     // Do not retain the previous Google credentials during account switching.
     saveTabSession()
     pendingSignIn.then(async info => {
@@ -236,6 +311,7 @@ export function useAuth(): AuthState {
       setTokenExpired(false)
       setStatus('signedIn')
       setSigningIn(false)
+      setGoogleConnection('idle')
     }).catch(error => {
       if (revision !== authRevision.current) return
       // Cancelling Google consent does not lose the already-unlocked passkey.
@@ -245,10 +321,12 @@ export function useAuth(): AuthState {
         setVaultStatus('locked')
       }
       setSigningIn(false)
-      setAuthError(error instanceof Error && error.message === 'account_mismatch' ? 'account_mismatch' : 'sign_in_failed')
-      console.error('Google sign-in failed:', error)
+      const code = authFeedbackCode(error)
+      if (code === 'network' && getVaultUserId()) setGoogleConnection('unavailable')
+      setAuthError(['account_mismatch', 'cancelled', 'network', 'popup_blocked'].includes(code) ? code as AuthErrorCode : 'sign_in_failed')
+      if (code === 'verification_failed') console.error('Google sign-in failed:', error)
     })
-  }, [])
+  }, [googleSub])
 
   const beginSetup = useCallback(() => {
     const revision = ++authRevision.current
@@ -256,13 +334,14 @@ export function useAuth(): AuthState {
     setVaultBusy(true)
     setVaultError(null)
     setSetupEmail(null)
+    setVaultPhase('google')
     void startSignIn({ setup: true, selectAccount: true }).then(info => {
       if (revision !== authRevision.current) return
       if (!info.email) throw new Error('Google did not return an email address')
       setSetupEmail(info.email)
-    }).catch(() => {
-      if (revision === authRevision.current) setVaultError('Google sign-in could not be completed')
-    }).finally(() => { if (revision === authRevision.current) setVaultBusy(false) })
+    }).catch(error => {
+      if (revision === authRevision.current) setVaultError(authFeedbackCode(error))
+    }).finally(() => { if (revision === authRevision.current) { setVaultBusy(false); setVaultPhase(null) } })
   }, [])
 
   const cancelSetup = useCallback(() => {
@@ -273,17 +352,18 @@ export function useAuth(): AuthState {
     setVaultError(null)
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember = false) => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0) => {
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()
     vaultOperation.current = controller
     setVaultBusy(true)
     setVaultError(null)
+    const onPhase = (phase: PasskeyPhase) => { if (revision === vaultRevision.current) setVaultPhase(phase) }
     try {
       if (action === 'setup') {
         if (!setupEmail) throw new Error('Connect Google before creating a passkey')
-        const result = await registerPasskey(controller.signal, setupEmail)
+        const result = await registerPasskey(controller.signal, setupEmail, onPhase)
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'unlock') {
@@ -293,29 +373,45 @@ export function useAuth(): AuthState {
       } else if (action === 'add') {
         const userId = getVaultUserId()
         if (!userId) throw new Error('Unlock the vault before adding another passkey')
-        await addPasskeyCredential(userId, controller.signal, email)
+        await addPasskeyCredential(userId, controller.signal, email, onPhase)
         if (revision !== vaultRevision.current) return
       }
       if (action !== 'add') {
         clearTabSession()
-        if (remember) { enableTabSession(); saveTabSession() }
+        if (remember) { enableTabSession(remember); saveTabSession() }
       }
       if (action !== 'add') {
         if (action === 'unlock') {
-          const refreshed = await refreshGoogleCredentials().catch(() => false)
+          onPhase('restore')
+          await retryGoogleConnection()
           if (revision !== vaultRevision.current) return
-          needsGoogleCredential.current = !refreshed
+          if (!getVaultUserId()) return
+          setVaultStatus('unlocked')
+          return
         }
-        let info = await checkSession()
-        if (action === 'setup' && info.signedIn) {
-          const refreshed = await refreshGoogleCredentials(true).catch(() => false)
-          if (revision !== vaultRevision.current) return
-          needsGoogleCredential.current = !refreshed
-          info = await checkSession()
-          setSetupEmail(null)
+        let info
+        try {
+          onPhase('restore')
+          info = await checkSession({ failOnUnavailable: true })
+          if (info.signedIn) {
+            const refreshed = await refreshGoogleCredentials(true).catch(() => false)
+            if (revision !== vaultRevision.current) return
+            needsGoogleCredential.current = !refreshed
+            info = await checkSession({ failOnUnavailable: true })
+          }
+        } catch {
+          if (revision === vaultRevision.current) {
+            setGoogleConnection('unavailable')
+            setVaultStatus('unlocked')
+            setOfferRememberDevice(true)
+            setSetupEmail(null)
+          }
+          return
         }
         if (revision !== vaultRevision.current) return
+        setSetupEmail(null)
         setVaultStatus('unlocked')
+        setOfferRememberDevice(true)
         if (info.signedIn) {
           const account = accountIdentity(info)
           if (account) { setActiveAccount(account); announceAccount(account) }
@@ -334,20 +430,23 @@ export function useAuth(): AuthState {
           setVaultUserId(null)
           setVaultStatus('locked')
         }
-        const message = error instanceof Error ? error.message : 'Passkey setup could not be completed'
-        setVaultError(message)
-        if (action !== 'add' && /support|secure connection/i.test(message)) setVaultStatus('unsupported')
+        const code = authFeedbackCode(error)
+        setVaultError(code)
+        if (action !== 'add' && code === 'unsupported') setVaultStatus('unsupported')
       }
     } finally {
       if (vaultOperation.current === controller) vaultOperation.current = null
-      if (revision === vaultRevision.current) setVaultBusy(false)
+      if (revision === vaultRevision.current) { setVaultBusy(false); setVaultPhase(null) }
     }
-  }, [email, setupEmail])
+  }, [email, setupEmail, retryGoogleConnection])
 
-  const setupPasskey = useCallback((remember = false) => runVaultAction('setup', remember), [runVaultAction])
-  const unlockPasskey = useCallback((remember = false) => runVaultAction('unlock', remember), [runVaultAction])
+  const setupPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('setup', remember), [runVaultAction])
+  const unlockPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('unlock', remember), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
+    setOfferRememberDevice(false)
+    setGoogleConnection('idle')
+    setVaultPhase(null)
     needsGoogleCredential.current = true
     vaultRevision.current++
     vaultOperation.current?.abort()
@@ -364,6 +463,9 @@ export function useAuth(): AuthState {
   const clearVaultError = useCallback(() => setVaultError(null), [])
 
   const signOut = useCallback(() => {
+    setOfferRememberDevice(false)
+    setGoogleConnection('idle')
+    setVaultPhase(null)
     needsGoogleCredential.current = true
     const account = getAccountSnapshot().account
     revokeSession().then(() => {
@@ -395,6 +497,14 @@ export function useAuth(): AuthState {
   }, [])
 
   useEffect(() => {
+    if (status !== 'signedOut' || vaultStatus !== 'unlocked' || googleConnection !== 'unavailable') return
+    const retry = () => { void retryGoogleConnection() }
+    const timer = setTimeout(retry, 30_000)
+    window.addEventListener('online', retry)
+    return () => { clearTimeout(timer); window.removeEventListener('online', retry) }
+  }, [status, vaultStatus, googleConnection, retryGoogleConnection])
+
+  useEffect(() => {
     if (status !== 'signedIn' || vaultStatus !== 'unlocked' || signingIn) return
     let stopped = false
     let inFlight = false
@@ -411,13 +521,16 @@ export function useAuth(): AuthState {
         if (refreshed) {
           needsGoogleCredential.current = false
           setTokenExpired(false)
+          setGoogleConnection('idle')
           schedule()
         } else {
           needsGoogleCredential.current = true
           rejected = true
+          setGoogleConnection('required')
           handleExpired()
         }
       } catch {
+        if (!stopped && revision === authRevision.current) setGoogleConnection('unavailable')
         // A temporary outage does not invalidate the saved Google authorization.
         if (!stopped && revision === authRevision.current) timer = setTimeout(refresh, 30_000)
       } finally { inFlight = false }
@@ -442,5 +555,5 @@ export function useAuth(): AuthState {
     signIn({ selectAccount, expectedGoogleSub: googleSub })
   }, [googleSub, signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, vaultPhase, googleConnection, retryGoogleConnection, offerRememberDevice, dismissRememberDevice, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
 }

@@ -11,7 +11,7 @@ const webauthn = vi.hoisted(() => ({
 
 vi.mock('@simplewebauthn/server', () => webauthn)
 
-import { addOptions, addVerify, deleteCredential, listCredentials, loginOptions, loginVerify, registrationOptions, registrationVerify } from '../../functions/_shared/passkeys'
+import { addOptions, addVerify, deleteCredential, listCredentials, loginOptions, loginVerify, registrationOptions, registrationVerify, renameCredential } from '../../functions/_shared/passkeys'
 import { createPasskeySession, sessionStorageId } from '../../functions/_shared/authStore'
 
 const origin = 'https://example.com'
@@ -74,6 +74,55 @@ describe('passkey handlers', () => {
       registrationInfo: { credential: { id: credentialId, publicKey: new Uint8Array([1, 2, 3]), counter: 0 } },
     })
     webauthn.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 2 } })
+  })
+
+  it('stores credential names encrypted and binds each name to its credential', async () => {
+    const { env, db, headers, userId, key } = await createPasskeyTestEnv()
+    seedCredential(db, userId)
+    seedCredential(db, userId, 1, 'backup')
+    const response = await renameCredential(request('/auth/passkey/credentials/rename', { credentialId, name: '  Personal backup  ' }, headers), env)
+    expect(response.status).toBe(200)
+    const stored = db.prepare('SELECT name_envelope FROM passkey_credentials WHERE credential_id = ?').get(credentialId) as { name_envelope: string }
+    expect(stored.name_envelope).toMatch(/^v1\./)
+    expect(stored.name_envelope).not.toContain('Personal backup')
+    expect(stored.name_envelope).not.toContain(key)
+    // Copying ciphertext to another credential cannot move its label.
+    db.prepare('UPDATE passkey_credentials SET name_envelope = ? WHERE credential_id = ?').run(stored.name_envelope, 'backup')
+    const list = await (await listCredentials(request('/auth/passkey/credentials/list', {}, headers), env)).json() as { credentials: Array<{ credentialId: string; name?: string }> }
+    expect(list.credentials.find(c => c.credentialId === credentialId)?.name).toBe('Personal backup')
+    expect(list.credentials.find(c => c.credentialId === 'backup')?.name).toBeUndefined()
+    db.close()
+  })
+
+  it('rejects unauthorized, cross-origin and invalid credential renames', async () => {
+    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    seedCredential(db, userId)
+    const body = { credentialId, name: 'Backup' }
+    expect((await renameCredential(request('/auth/passkey/credentials/rename', body), env)).status).toBe(401)
+    expect((await renameCredential(request('/auth/passkey/credentials/rename', body, { ...headers, Origin: 'https://attacker.example' }), env)).status).toBe(403)
+    expect((await renameCredential(request('/auth/passkey/credentials/rename', body, { ...headers, 'X-Linger-Vault-Key': 'wrong-key' }), env)).status).toBe(401)
+    expect((await renameCredential(request('/auth/passkey/credentials/rename', body, { ...headers, 'X-Linger-Vault-User': 'other' }), env)).status).toBe(401)
+    for (const name of ['', ' ', 'x'.repeat(81), 'bad\nname']) expect((await renameCredential(request('/auth/passkey/credentials/rename', { credentialId, name }, headers), env)).status).toBe(400)
+    const otherUser = crypto.randomUUID()
+    db.prepare('INSERT INTO passkey_users (id, created_at) VALUES (?, ?)').run(otherUser, Date.now())
+    seedCredential(db, otherUser, 1, 'other-credential')
+    expect((await renameCredential(request('/auth/passkey/credentials/rename', { credentialId: 'other-credential', name: 'Forged' }, headers), env)).status).toBe(409)
+    expect(db.prepare('SELECT name_envelope FROM passkey_credentials WHERE credential_id = ?').get('other-credential')).toMatchObject({ name_envelope: null })
+    db.close()
+  })
+
+  it('rechecks session revocation atomically before committing a credential name', async () => {
+    const { env, db, headers, userId } = await createPasskeyTestEnv()
+    seedCredential(db, userId)
+    const prepare = env.AUTH_DB!.prepare.bind(env.AUTH_DB)
+    const spy = vi.spyOn(env.AUTH_DB!, 'prepare').mockImplementation(sql => {
+      if (sql.startsWith('UPDATE passkey_credentials SET name_envelope')) db.prepare('UPDATE auth_sessions SET revoked = 1').run()
+      return prepare(sql)
+    })
+    try {
+      expect((await renameCredential(request('/auth/passkey/credentials/rename', { credentialId, name: 'Too late' }, headers), env)).status).toBe(409)
+      expect(db.prepare('SELECT name_envelope FROM passkey_credentials WHERE credential_id = ?').get(credentialId)).toMatchObject({ name_envelope: null })
+    } finally { spy.mockRestore(); db.close() }
   })
 
   it('rejects a cross-origin options request before writing a challenge', async () => {

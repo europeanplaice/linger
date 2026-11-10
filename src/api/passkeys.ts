@@ -1,9 +1,13 @@
 import { copyPrfOutput, createWrappedMasterKey, getVaultKey, parseWrappedMasterKey, serializeWrappedMasterKey, setVaultKeyHeader, unlockWrappedMasterKey, wrapExistingMasterKey } from '../lib/passkeyVault'
 import type { WrappedMasterKeyPayload } from '../lib/passkeyVault'
+import { AuthFlowError } from '../lib/authFeedback'
+import type { PasskeyPhase } from '../lib/authFeedback'
 
 export interface PasskeyCredentialSummary {
   credentialId: string
   createdAt: number
+  name?: string | null
+  lastUsedAt?: number | null
 }
 
 export interface PasskeyCredentialList {
@@ -79,7 +83,7 @@ async function post<T>(path: string, body?: unknown, userId?: string, signal?: A
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({})) as { error?: unknown }
-    throw new Error(typeof data.error === 'string' ? data.error : `Passkey request failed (${response.status})`)
+    throw new AuthFlowError(response.status === 408 || response.status === 429 || response.status >= 500 ? 'network' : 'verification_failed', typeof data.error === 'string' ? data.error : `Passkey request failed (${response.status})`)
   }
   return response.json() as Promise<T>
 }
@@ -134,7 +138,8 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Passkey operation cancelled', 'AbortError')
 }
 
-async function createCredential(envelope: OptionsEnvelope, signal?: AbortSignal): Promise<{ credential: PublicKeyCredential; prfOutput: Uint8Array; serialized: JsonObject; assertion: JsonObject }> {
+async function createCredential(envelope: OptionsEnvelope, signal?: AbortSignal, onPhase?: (phase: PasskeyPhase) => void): Promise<{ credential: PublicKeyCredential; prfOutput: Uint8Array; serialized: JsonObject; assertion: JsonObject }> {
+  onPhase?.('create')
   const options = creationOptions(envelope)
   const credential = await navigator.credentials.create({ publicKey: options, signal })
   throwIfAborted(signal)
@@ -143,6 +148,7 @@ async function createCredential(envelope: OptionsEnvelope, signal?: AbortSignal)
   if (!envelope.wrapOptions) throw new Error('Passkey registration did not include PRF verification options')
   const wrapOptions = requestOptions({ ...envelope, options: envelope.wrapOptions })
   wrapOptions.allowCredentials = [{ type: 'public-key', id: credential.rawId }]
+  onPhase?.('verify')
   const prfAssertion = await navigator.credentials.get({ publicKey: wrapOptions, signal })
   throwIfAborted(signal)
   if (!(prfAssertion instanceof PublicKeyCredential) || prfAssertion.id !== credential.id) throw new Error('The new passkey could not be checked for vault support')
@@ -171,13 +177,13 @@ async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal): P
   catch (error) { prf.prfOutput?.fill(0); throw error }
 }
 
-export async function registerPasskey(signal?: AbortSignal, email?: string): Promise<{ userId: string }> {
+export async function registerPasskey(signal?: AbortSignal, email?: string, onPhase?: (phase: PasskeyPhase) => void): Promise<{ userId: string }> {
   requireWebAuthn()
   const envelope = await post<OptionsEnvelope>('register/options', undefined, undefined, signal)
   if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
   throwIfAborted(signal)
   if (!envelope.userId) throw new Error('Passkey registration did not include an internal account identifier')
-  const { credential, prfOutput, serialized, assertion } = await createCredential(envelope, signal)
+  const { credential, prfOutput, serialized, assertion } = await createCredential(envelope, signal, onPhase)
   try {
     throwIfAborted(signal)
     if (!envelope.prfSalt) throw new Error('Passkey registration did not include a wrapping salt')
@@ -221,7 +227,7 @@ async function verifyManagementAction(userId: string, action: 'add' | 'delete', 
   await post('login/verify', { response: serializeCredential(credential, safeResults), managementAction: action }, userId, signal)
 }
 
-export async function addPasskey(userId: string, signal?: AbortSignal, email?: string | null): Promise<void> {
+export async function addPasskey(userId: string, signal?: AbortSignal, email?: string | null, onPhase?: (phase: PasskeyPhase) => void): Promise<void> {
   requireWebAuthn()
   await verifyManagementAction(userId, 'add', signal)
   const existingKey = getVaultKey(userId)
@@ -231,7 +237,7 @@ export async function addPasskey(userId: string, signal?: AbortSignal, email?: s
     const envelope = await post<OptionsEnvelope>('add/options', undefined, userId, signal)
     if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
     throwIfAborted(signal)
-    const created = await createCredential(envelope, signal)
+    const created = await createCredential(envelope, signal, onPhase)
     prfOutput = created.prfOutput
     throwIfAborted(signal)
     if (!envelope.prfSalt) throw new Error('Passkey registration did not include a wrapping salt')
@@ -245,6 +251,10 @@ export async function addPasskey(userId: string, signal?: AbortSignal, email?: s
 
 export async function listPasskeys(userId: string, signal?: AbortSignal): Promise<PasskeyCredentialList> {
   return post<PasskeyCredentialList>('credentials/list', {}, userId, signal)
+}
+
+export async function renamePasskey(userId: string, credentialId: string, name: string, signal?: AbortSignal): Promise<void> {
+  await post('credentials/rename', { credentialId, name }, userId, signal)
 }
 
 export async function deletePasskey(userId: string, credentialId: string, signal?: AbortSignal): Promise<void> {

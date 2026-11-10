@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearVaultKey, getVaultUserId, unlockVaultWithKey } from '../../src/lib/passkeyVault'
 import { clearOAuthCredentials, getAccessToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
-import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../../src/lib/tabSession'
+import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession, getDeviceSessionExpiry } from '../../src/lib/tabSession'
 
 describe('optional tab session', () => {
   beforeEach(() => {
@@ -31,6 +31,20 @@ describe('optional tab session', () => {
     expect(getVaultUserId()).toBe('user')
     expect(getAccessToken()).toBeNull()
     expect(fetch).toHaveBeenCalledWith('/auth/passkey/session', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
+  })
+
+  it('supports a shorter one-day opt-in without extending it on restore', async () => {
+    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
+    const expiry = Date.now() + 24 * 60 * 60 * 1000
+    enableTabSession(1)
+    saveTabSession()
+    expect(getDeviceSessionExpiry()).toBe(expiry)
+    vi.advanceTimersByTime(60_000)
+    clearVaultKey()
+    expect(await restoreTabSession()).toBe(true)
+    expect(getDeviceSessionExpiry()).toBe(expiry)
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000)
+    expect(getDeviceSessionExpiry()).toBeNull()
   })
 
   it('removes legacy Google credentials before validating the session', async () => {

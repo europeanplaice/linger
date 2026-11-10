@@ -151,7 +151,7 @@ describe('useAuth', () => {
     await act(async () => { result.current.signIn() })
 
     expect(result.current.signingIn).toBe(false)
-    expect(result.current.authError).toBe('sign_in_failed')
+    expect(result.current.authError).toBe('popup_blocked')
   })
 
   it('signOut calls revokeSession and resets status', async () => {

@@ -33,13 +33,14 @@ test('an opted-in tab restores its vault but requires Google authorization on re
     vaultChecks++
     return route.fulfill({ json: { valid: true } })
   })
+  await page.route('/auth/refresh', route => route.fulfill({ status: 401, json: { error: 'Google authorization required' } }))
   await page.goto(baseUrl)
   await page.evaluate(() => sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
     userId: 'user', key: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), expiresAt: Date.now() + 3600_000,
     oauth: { accessToken: 'restored-access', idToken: 'restored-id', expiresAt: Date.now() + 1800_000 },
   })))
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
   expect(vaultChecks).toBeGreaterThan(0)
   expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).not.toContain('restored-')
 })

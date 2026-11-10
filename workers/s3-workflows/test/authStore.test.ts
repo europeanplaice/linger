@@ -10,7 +10,7 @@ import {
 } from '../../../functions/_shared/authStore'
 import { getSession, getSessionByStorageId, invalidateSession, saveSession } from '../../../functions/_shared/session'
 import { createTestSession, testSession } from './auth'
-import { deleteCredential, listCredentials } from '../../../functions/_shared/passkeys'
+import { deleteCredential, listCredentials, renameCredential } from '../../../functions/_shared/passkeys'
 
 const wrappedMasterKey = btoa(String.fromCharCode(...new Uint8Array(60)))
 const prfSalt = btoa(String.fromCharCode(...new Uint8Array(32)))
@@ -33,6 +33,31 @@ async function grantCredentialDeletion(sessionId: string): Promise<void> {
 }
 
 describe('encrypted passkey session storage', () => {
+  it('renames passkeys through migrated D1 without persisting plaintext labels', async () => {
+    const userId = `user-${crypto.randomUUID()}`
+    const sessionId = `session-${crypto.randomUUID()}`
+    const credentialId = `credential-${crypto.randomUUID()}`
+    const handlerEnv = { ...env, SESSION_DOMAIN: 'https://example.com' }
+    const session = testSession(userId)
+    await createTestSession(sessionId, session, env)
+    await insertCredential(userId, credentialId)
+    await bindCredential(sessionId, credentialId)
+    const request = (path: string, body: unknown) => new Request(`https://example.com/auth/passkey/credentials/${path}`, {
+      method: 'POST', headers: {
+        Origin: handlerEnv.SESSION_DOMAIN, Cookie: `linger_session=${sessionId}`, 'Content-Type': 'application/json',
+        'X-Linger-Vault-User': userId, 'X-Linger-Vault-Key': session.vault_key!,
+      }, body: JSON.stringify(body),
+    })
+    expect((await renameCredential(request('rename', { credentialId, name: 'Personal spare key' }), handlerEnv)).status).toBe(200)
+    const stored = await env.AUTH_DB.prepare('SELECT name_envelope FROM passkey_credentials WHERE credential_id = ?').bind(credentialId).first<{ name_envelope: string }>()
+    expect(stored!.name_envelope).toMatch(/^v1\./)
+    expect(stored!.name_envelope).not.toContain('Personal spare key')
+    const listed = await (await listCredentials(request('list', {}), handlerEnv)).json() as { credentials: Array<{ name: string }> }
+    expect(listed.credentials[0].name).toBe('Personal spare key')
+    await invalidateSession(sessionId, undefined, env)
+    expect((await renameCredential(request('rename', { credentialId, name: 'Revoked' }), handlerEnv)).status).toBe(401)
+  })
+
   it('stores only the random principal and encrypted account metadata in D1', async () => {
     const userId = `user-${crypto.randomUUID()}`
     const sessionId = `session-${crypto.randomUUID()}`

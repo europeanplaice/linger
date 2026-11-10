@@ -20,6 +20,7 @@ import { useS3StaleEntryAutoResync } from './hooks/useS3StaleEntryAutoResync'
 import { Keyboard } from 'lucide-react'
 import { Landing } from './components/Landing'
 import { PasskeyGate } from './components/PasskeyGate'
+import { RememberDevicePrompt } from './components/RememberDevicePrompt'
 import { PasskeySettings } from './components/PasskeySettings'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
@@ -159,6 +160,7 @@ export default function App() {
     handleExpired,
     retryAfterExpired,
     vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError,
+    vaultPhase, googleConnection, retryGoogleConnection, offerRememberDevice, dismissRememberDevice,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { accent: accentColor, setAccent } = useAccentColor()
@@ -600,8 +602,9 @@ export default function App() {
     setAccountSwitchBlocked(false)
     reauthAccountSubRef.current = googleSub
     setRetrySaveAfterReauth(true)
-    retryAfterExpired(selectAccount)
-  }, [googleSub, retryAfterExpired])
+    if (googleConnection === 'unavailable') void retryGoogleConnection()
+    else retryAfterExpired(selectAccount)
+  }, [googleSub, googleConnection, retryGoogleConnection, retryAfterExpired])
 
   const handleUseAnotherAccount = useCallback(() => {
     if (!accountSwitchCheckReady || !accountSwitchAvailable || editorDirtyRef.current) {
@@ -677,7 +680,7 @@ export default function App() {
   }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
 
   const passkeyGate = vaultStatus !== 'unlocked' ? (
-    <PasskeyGate busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
+    <PasskeyGate phase={vaultPhase} busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
       onSetup={remember => { void setupPasskey(remember) }} onUnlock={remember => { void unlockPasskey(remember) }}
       onClearError={clearVaultError} />
   ) : undefined
@@ -688,12 +691,17 @@ export default function App() {
     // build-time prerendered HTML so there is no flash before React mounts.
     return hadSession
       ? <RestoringScreen selectedDate={selectedDate} />
-      : <Landing passkeyGate={passkeyGate} onLockVault={vaultStatus === 'unlocked' ? lockVault : undefined} onSignIn={() => signIn()} onUseAnotherAccount={() => signIn({ selectAccount: true })} onRetry={() => retryAfterExpired()} authError={authError} onDismissAuthError={clearAuthError} />
+      : <Landing rememberDevicePrompt={offerRememberDevice && <RememberDevicePrompt onClose={dismissRememberDevice} />} googleConnection={googleConnection} onRetryConnection={() => { void retryGoogleConnection() }} signingIn={signingIn} email={email} passkeyGate={passkeyGate} onLockVault={vaultStatus === 'unlocked' ? lockVault : undefined} onSignIn={() => signIn()} onUseAnotherAccount={() => signIn({ selectAccount: true })} onRetry={() => retryAfterExpired()} authError={authError} onDismissAuthError={clearAuthError} />
   }
 
   if (status === 'signedOut' && !tokenExpired) {
     return (
       <Landing
+        rememberDevicePrompt={offerRememberDevice && <RememberDevicePrompt onClose={dismissRememberDevice} />}
+        googleConnection={googleConnection}
+        onRetryConnection={() => { void retryGoogleConnection() }}
+        signingIn={signingIn}
+        email={email}
         passkeyGate={passkeyGate}
         onLockVault={vaultStatus === 'unlocked' ? lockVault : undefined}
         onSignIn={() => signIn()}
@@ -714,7 +722,7 @@ export default function App() {
     </a>
     <div className="app">
       <AnimatePresence>
-        {tokenExpired && <SessionExpiredModal onReauth={() => handleReauth()} onUseAnotherAccount={handleUseAnotherAccount} switchBlocked={accountSwitchBlocked} switchAvailable={accountSwitchCheckReady && accountSwitchAvailable} signingIn={signingIn} authError={authError} />}
+        {tokenExpired && <SessionExpiredModal email={email} googleConnection={googleConnection} onRetryConnection={() => handleReauth()} onReauth={() => handleReauth()} onUseAnotherAccount={handleUseAnotherAccount} switchBlocked={accountSwitchBlocked} switchAvailable={accountSwitchCheckReady && accountSwitchAvailable} signingIn={signingIn} authError={authError} />}
       </AnimatePresence>
       {updatePending && (
         <div className="update-banner" role="status">
@@ -811,7 +819,7 @@ export default function App() {
               folderRecoveryDisabled={editorDirty || tokenExpired || vaultBusy || diary.loading}
               beforeDiaryFolderSelect={beforeDiaryFolderSelect}
               onDiaryFolderSelected={handleDiaryFolderSelected}
-              passkeyControls={<PasskeySettings userId={vaultUserId} busy={vaultBusy} error={vaultError} onAdd={addPasskey} />}
+              passkeyControls={<PasskeySettings key={vaultUserId} phase={vaultPhase} userId={vaultUserId} busy={vaultBusy} error={vaultError} onAdd={addPasskey} />}
               email={email ?? undefined}
               googleSub={googleSub ?? undefined}
               googleClientId={googleClientId ?? undefined}
@@ -856,6 +864,7 @@ export default function App() {
         )}
       </AnimatePresence>
       <main className="main" id="main-content" tabIndex={-1}>
+        {offerRememberDevice && <RememberDevicePrompt onClose={dismissRememberDevice} />}
         <EntryEditor
           key={`account:${googleSub ?? email ?? 'unknown'}`}
           date={selectedDate}

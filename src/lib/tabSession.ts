@@ -3,13 +3,22 @@ import { getVaultKey, getVaultUserId, unlockVaultWithKey } from './passkeyVault'
 const STORAGE_KEY = 'linger_tab_session_v1'
 const DEVICE_KEY = 'linger_device_session_v1'
 const LIFETIME = 7 * 24 * 60 * 60 * 1000
+export type RememberDays = 0 | 1 | 7
 let expiresAt = 0
 let persistent = false
 let newDeviceSession = false
 let expirationTimer: ReturnType<typeof setTimeout> | undefined
 
 export function hasDeviceSession(): boolean {
-  try { return localStorage.getItem(DEVICE_KEY) !== null } catch { return false }
+  return getDeviceSessionExpiry() !== null
+}
+
+export function getDeviceSessionExpiry(): number | null {
+  try {
+    const raw = localStorage.getItem(DEVICE_KEY)
+    const at = raw ? (JSON.parse(raw) as { expiresAt?: unknown }).expiresAt : null
+    return typeof at === 'number' && Number.isFinite(at) && at > Date.now() && at <= Date.now() + LIFETIME ? at : null
+  } catch { return null }
 }
 
 export function clearTabSession(): void {
@@ -39,7 +48,7 @@ function scheduleExpiry(at: number): void {
   }, Math.max(0, at - Date.now()))
 }
 
-export function enableTabSession(): void { persistent = true; newDeviceSession = true; scheduleExpiry(Date.now() + LIFETIME) }
+export function enableTabSession(days: 1 | 7 = 7): void { persistent = true; newDeviceSession = true; scheduleExpiry(Date.now() + (days === 1 ? 1 : 7) * 24 * 60 * 60 * 1000) }
 
 export function saveTabSession(): void {
   if (expiresAt <= Date.now()) { clearTabSession(); return }

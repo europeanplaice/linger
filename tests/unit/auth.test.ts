@@ -47,6 +47,13 @@ test.describe('checkSession', () => {
     expect(result.email).toBeNull()
   })
 
+  test('keeps temporary session-check failures distinct from signed-out responses', async () => {
+    fetchMock.mock(jsonResponse({ error: 'unavailable' }, 503))
+    await expect(checkSession({ failOnUnavailable: true })).rejects.toThrow('temporarily unavailable')
+    fetchMock.mock(jsonResponse({ signedIn: false }))
+    expect((await checkSession({ failOnUnavailable: true })).signedIn).toBe(false)
+  })
+
   test('does not call the session endpoint after a reload with no memory credentials', async () => {
     clearOAuthCredentials()
     const result = await checkSession()

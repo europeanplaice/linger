@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuth } from '../../src/hooks/useAuth'
 import { clearPendingGoogleCredential, hasPendingGoogleCredential, refreshGoogleCredentials } from '../../src/api/auth'
 import { getAccessToken, clearOAuthCredentials } from '../../src/lib/oauthCredentials'
-import { AUTH_EVENT_KEY, setActiveAccount } from '../../src/lib/accountSession'
+import { AUTH_EVENT_KEY, setActiveAccount, getAccountSnapshot } from '../../src/lib/accountSession'
+import { restoreTabSession } from '../../src/lib/tabSession'
 
 const mocks = vi.hoisted(() => ({ userId: null as string | null, register: vi.fn(), login: vi.fn() }))
 vi.mock('../../src/api/passkeys', () => ({ registerPasskey: mocks.register, loginWithPasskey: mocks.login, addPasskey: vi.fn() }))
@@ -73,6 +74,65 @@ async function setup() {
 }
 
 describe('Google credential recovery', () => {
+  it('preserves cached data and returning-user state during a reload outage', async () => {
+    localStorage.setItem('linger_had_session', 'true')
+    vi.mocked(restoreTabSession).mockImplementationOnce(async () => { mocks.userId = 'vault-user'; return true })
+    refresh.mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    const { result } = await mount()
+    expect(result.current.googleConnection).toBe('unavailable')
+    expect(result.current.vaultStatus).toBe('unlocked')
+    expect(getAccountSnapshot().clearSharedData).toBe(false)
+    expect(localStorage.getItem('linger_had_session')).toBe('true')
+  })
+
+  it.each(['network', '503', '429'])('keeps the unlocked vault and retries a transient login outage (%s)', async failure => {
+    if (failure === 'network') refresh.mockRejectedValueOnce(new TypeError('offline'))
+    else refresh.mockResolvedValueOnce(new Response('{}', { status: Number(failure) }))
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    expect(result.current.vaultStatus).toBe('unlocked')
+    expect(result.current.status).toBe('signedOut')
+    expect(result.current.googleConnection).toBe('unavailable')
+    expect(result.current.vaultError).toBeNull()
+    await act(async () => result.current.retryGoogleConnection())
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.googleConnection).toBe('idle')
+  })
+
+  it('automatically retries an initial outage when the connection returns', async () => {
+    refresh.mockRejectedValueOnce(new TypeError('offline'))
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    await act(async () => { window.dispatchEvent(new Event('online')) })
+    expect(result.current.status).toBe('signedIn')
+  })
+
+  it('does not retry a rejected credential automatically', async () => {
+    refresh.mockResolvedValue(new Response('{}', { status: 401 }))
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    expect(result.current.googleConnection).toBe('required')
+    expect(result.current.vaultStatus).toBe('unlocked')
+    const calls = refresh.mock.calls.length
+    await act(async () => { window.dispatchEvent(new Event('online')); await vi.advanceTimersByTimeAsync(60_000) })
+    expect(refresh).toHaveBeenCalledTimes(calls)
+  })
+
+  it('discards a connection retry that finishes after logout', async () => {
+    refresh.mockRejectedValueOnce(new TypeError('offline'))
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    let finish!: (response: Response) => void
+    refresh.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    let pending!: Promise<void>
+    act(() => { pending = result.current.retryGoogleConnection() })
+    await act(async () => result.current.signOut())
+    await act(async () => { finish(renewed()); await pending })
+    expect(result.current.status).toBe('signedOut')
+    expect(result.current.vaultStatus).toBe('locked')
+    expect(getAccessToken()).toBeNull()
+  })
+
   it('does not cancel passkey login when focus returns after this tab signs out', async () => {
     const { result } = await mount()
     await act(async () => result.current.unlockPasskey())

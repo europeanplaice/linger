@@ -1,60 +1,81 @@
 import { useI18n } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
+import { authFeedback } from '../lib/authFeedback'
+import type { PasskeyPhase } from '../lib/authFeedback'
+import type { RememberDays } from '../lib/tabSession'
+import { RememberDeviceChoice } from './RememberDeviceChoice'
 
 interface Props {
   busy: boolean
   error: string | null
-  onSetup: (remember: boolean) => void
+  onSetup: (remember: RememberDays) => void
   setupEmail: string | null
   onBeginSetup: () => void
   onCancelSetup: () => void
-  onUnlock: (remember: boolean) => void
+  onUnlock: (remember: RememberDays) => void
+  phase?: PasskeyPhase | null
   onClearError?: () => void
 }
 
-export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, onCancelSetup, onUnlock, onClearError }: Props) {
+export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, onCancelSetup, onUnlock, onClearError, phase }: Props) {
   const { t, language, setLanguage } = useI18n()
   const title = useRef<HTMLHeadingElement>(null)
-  const [view, setView] = useState<'login' | 'setup'>('login')
-  const [remember, setRemember] = useState(false)
+  const [view, setView] = useState<'login' | 'setup' | 'recovery'>('login')
+  const [remember, setRemember] = useState<RememberDays>(0)
+  const [recoveryConfirmed, setRecoveryConfirmed] = useState(false)
   const previousView = useRef(view)
   useEffect(() => {
     if (previousView.current !== view) title.current?.focus()
     previousView.current = view
   }, [view])
   const changeView = (next: typeof view) => {
-    if (view === 'setup') onCancelSetup()
+    if (view !== 'login') onCancelSetup()
     onClearError?.()
     setView(next)
+    setRecoveryConfirmed(false)
   }
-  const setup = view === 'setup'
+  const setup = view !== 'login'
+  const recovery = view === 'recovery'
+  const progress = phase === 'google' ? t.login.googleConnecting : phase === 'create' ? t.login.passkeyCreating : phase === 'verify' ? t.login.passkeyVerifying : phase === 'restore' ? t.login.googleRestoring : t.login.passkeyWorking
+  const currentStep = !setupEmail ? 0 : phase === 'verify' ? 2 : 1
   return (
     <section className="login-screen passkey-gate" aria-labelledby="passkey-gate-title">
       <div className="login-card passkey-gate-card">
-      <h2 ref={title} tabIndex={-1} id="passkey-gate-title">{setup ? t.login.passkeySetupTitle : t.login.passkeySignInTitle}</h2>
-      <p id="passkey-gate-description">{setup ? t.login.passkeyDescription : t.login.passkeySignInDescription}</p>
+      <h2 ref={title} tabIndex={-1} id="passkey-gate-title">{recovery ? t.login.passkeyRecoverySetupTitle : setup ? t.login.passkeySetupTitle : t.login.passkeySignInTitle}</h2>
+      <p id="passkey-gate-description">{recovery ? t.login.passkeyRecoveryHelp : setup ? t.login.passkeyDescription : t.login.passkeySignInDescription}</p>
       {setup && <>
+        <ol className="passkey-steps" aria-label={t.login.passkeySetupTitle}>
+          {[t.login.passkeyStepGoogle, t.login.passkeyStepCreate, t.login.passkeyStepVerify].map((step, index) => <li key={step} aria-current={currentStep === index ? 'step' : undefined}>{step}</li>)}
+        </ol>
         {setupEmail && <p>{setupEmail}</p>}
-        <p>{t.login.passkeyProviderHelp}</p>
-        <p className="passkey-setup-note" id="passkey-setup-note">{t.login.passkeySetupNote}</p>
+        {(!recovery || setupEmail) && <p>{t.login.passkeyProviderHelp}</p>}
+        {!recovery && <p className="passkey-setup-note" id="passkey-setup-note">{t.login.passkeySetupNote}</p>}
+        <p>{t.login.passkeyVerifyHelp}</p>
+        {recovery && <>
+          <label className="passkey-remember"><input type="checkbox" checked={recoveryConfirmed} disabled={busy} onChange={event => setRecoveryConfirmed(event.target.checked)} /><span>{t.login.passkeyRecoveryConfirm}</span></label>
+        </>}
       </>}
-      {error && <p className="session-expired-msg" role="alert">{error}</p>}
-      <label className="passkey-remember">
-        <input type="checkbox" checked={remember} disabled={busy} aria-describedby="passkey-remember-help" onChange={event => setRemember(event.target.checked)} />
-        <span>{t.login.passkeyRemember}</span>
-      </label>
-      <p className="passkey-remember-help" id="passkey-remember-help">{t.login.passkeyRememberHelp}</p>
+      {error && <p className={`session-expired-msg${error === 'cancelled' ? ' neutral' : ''}`} role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
+      {!setup && <RememberDeviceChoice value={remember} onChange={setRemember} disabled={busy} />}
+      <p className="passkey-progress" role="status">{busy ? progress : ''}</p>
       <div className="passkey-gate-actions passkey-gate-navigation">
-        <button className="btn-signin-google passkey-primary" type="button" disabled={busy}
-          aria-describedby={setup ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
-          onClick={() => setup && !setupEmail ? onBeginSetup() : (setup ? onSetup : onUnlock)(remember)}>
-          {busy ? t.login.passkeyWorking : setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
+        <button className="btn-signin-google passkey-primary" type="button" disabled={busy || (recovery && !recoveryConfirmed)}
+          aria-describedby={setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
+          onClick={() => setup && !setupEmail ? onBeginSetup() : (setup ? onSetup(0) : onUnlock(remember))}>
+          {busy ? progress : setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
         </button>
         <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'login' : 'setup')}>
           {setup ? t.login.passkeyBackToSignIn : t.login.passkeyFirstTime}
         </button>
       </div>
-      <p className="passkey-recovery-help">{t.login.passkeyRecoveryHelp}</p>
+      {!setup && <details className="passkey-recovery-help">
+        <summary>{t.login.passkeyRecoveryTitle}</summary>
+        <h3>{t.login.passkeyOtherDeviceTitle}</h3>
+        <p>{t.login.passkeyOtherDeviceHelp}</p>
+        <h3>{t.login.passkeyLostTitle}</h3>
+        <p>{t.login.passkeyRecoveryHelp}</p>
+        <button type="button" className="btn-use-another-account" disabled={busy} onClick={() => changeView('recovery')}>{t.login.passkeyRecoveryStart}</button>
+      </details>}
       {error && onClearError && <button className="passkey-error-dismiss" type="button" onClick={onClearError}>{t.common.close}</button>}
       <p className="login-footer">
         <a href="/home" target="_blank" rel="noopener noreferrer">{t.login.aboutLinger}</a>

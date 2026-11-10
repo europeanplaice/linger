@@ -1,6 +1,7 @@
 import { accountRequest } from '../lib/accountSession'
 import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId, setVaultKeyHeader } from '../lib/passkeyVault'
+import { AuthFlowError } from '../lib/authFeedback'
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
@@ -20,7 +21,7 @@ function updatePasskeyAccountName(userId: string | null, email: string | null): 
   } catch { /* A provider may reject the optional update synchronously. */ }
 }
 
-export function startSignIn(options: { selectAccount?: boolean; setup?: boolean; renew?: boolean } = {}): Promise<SessionInfo> {
+export function startSignIn(options: { selectAccount?: boolean; setup?: boolean; renew?: boolean; loginHint?: string } = {}): Promise<SessionInfo> {
   const generation = ++signInGeneration
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
@@ -36,6 +37,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
     if (options.selectAccount) params.set('select_account', '1')
     if (options.setup) params.set('setup', '1')
     if (options.renew === false) params.set('reuse', '1')
+    if (options.loginHint && !options.setup && !options.selectAccount) params.set('login_hint', options.loginHint)
     const loginUrl = `/auth/login?${params.toString()}`
     const popup = window.open(loginUrl, `linger-google-signin-${channelId}`, 'popup,width=520,height=680')
     if (!popup) {
@@ -87,7 +89,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
         finish(undefined, { signedIn: false, email: credential.email, googleSub: null, googleClientId: null, userId: null })
         return
       }
-      checkSession().then(info => {
+      checkSession({ failOnUnavailable: true }).then(info => {
         if (!info.signedIn) throw new Error('Google sign-in could not be verified')
         try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Sign-in can finish without the acknowledgement. */ }
         finish(undefined, info)
@@ -155,7 +157,7 @@ export interface SessionInfo {
   userId: string | null
 }
 
-export async function checkSession(): Promise<SessionInfo> {
+export async function checkSession({ failOnUnavailable = false }: { failOnUnavailable?: boolean } = {}): Promise<SessionInfo> {
   const accessToken = getAccessToken()
   if (!accessToken) return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
   const requestVaultUserId = getVaultUserId()
@@ -166,6 +168,7 @@ export async function checkSession(): Promise<SessionInfo> {
     if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
     const resp = await fetch('/auth/session', { credentials: 'include', headers, cache: 'no-store', redirect: 'error' })
     if (resp.status === 401) return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
+    if (!resp.ok) throw new AuthFlowError('network', 'Session check temporarily unavailable')
     const data = await resp.json() as { signedIn: boolean; email?: string | null; googleSub?: string | null; googleClientId?: string | null; userId?: string | null }
     const unlockedUserId = getVaultUserId()
     if (requestVaultUserId && unlockedUserId !== requestVaultUserId) {
@@ -186,7 +189,8 @@ export async function checkSession(): Promise<SessionInfo> {
       googleClientId: data.googleClientId ?? null,
       userId: data.userId ?? null,
     }
-  } catch {
+  } catch (error) {
+    if (failOnUnavailable) throw error
     return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
   }
 }

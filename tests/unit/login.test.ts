@@ -35,6 +35,20 @@ describe('OAuth login popup redirect', () => {
     db.close()
   })
 
+  it('passes an account hint only for reconnecting an existing passkey session', async () => {
+    const { env, db, sessionId } = await fixture()
+    const redirect = async (path: string) => {
+      const response = await onRequestGet({ env, request: loginRequest(path, sessionId) } as never)
+      return new URL(response.headers.get('Location')!)
+    }
+    expect((await redirect('/auth/login?login_hint=existing-sub')).searchParams.get('login_hint')).toBe('existing-sub')
+    expect((await redirect('/auth/login?setup=1&login_hint=existing-sub')).searchParams.has('login_hint')).toBe(false)
+    expect((await redirect('/auth/login?select_account=1&login_hint=existing-sub')).searchParams.has('login_hint')).toBe(false)
+    expect((await redirect('/auth/login?login_hint=bad%0Ahint')).searchParams.has('login_hint')).toBe(false)
+    expect(db.prepare('SELECT data FROM auth_oauth_states').all().every(row => !String(row.data).includes('existing-sub'))).toBe(true)
+    db.close()
+  })
+
   it('forces account selection only when explicitly requested', async () => {
     const { env, db, sessionId } = await fixture()
     const response = await onRequestGet({ env, request: loginRequest('/auth/login?select_account=1&reuse=1', sessionId) } as never)

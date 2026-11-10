@@ -354,8 +354,8 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
     if (!result.verified) throw new Error('Not verified')
     const nextCounter = result.authenticationInfo.newCounter
     if (row.counter > 0 && nextCounter <= row.counter) throw new Error('Authenticator counter did not advance')
-    const update = await env.AUTH_DB.prepare('UPDATE passkey_credentials SET counter = ? WHERE credential_id = ? AND counter = ?')
-      .bind(nextCounter, row.credential_id, row.counter).run()
+    const update = await env.AUTH_DB.prepare('UPDATE passkey_credentials SET counter = ?, last_used_at = ? WHERE credential_id = ? AND counter = ?')
+      .bind(nextCounter, Date.now(), row.credential_id, row.counter).run()
     if (!update.success || update.meta.changes !== 1) throw new Error('Credential changed concurrently')
     if (body.managementAction === 'add' || body.managementAction === 'delete') {
       const currentId = parseSessionId(request)
@@ -467,12 +467,48 @@ export async function listCredentials(request: Request, env: Env): Promise<Respo
   if (request.headers.get('X-Linger-Vault-User') !== session.userId || !await validateUnlockedProfile(request, env, session.userId)) {
     return jsonResponse({ error: 'Vault unlock required' }, 401)
   }
-  const result = await env.AUTH_DB.prepare('SELECT credential_id, created_at FROM passkey_credentials WHERE user_id = ? ORDER BY created_at, credential_id')
-    .bind(session.userId).all<{ credential_id: string; created_at: number }>()
+  const result = await env.AUTH_DB.prepare('SELECT credential_id, created_at, name_envelope, last_used_at FROM passkey_credentials WHERE user_id = ? ORDER BY created_at, credential_id')
+    .bind(session.userId).all<{ credential_id: string; created_at: number; name_envelope: string | null; last_used_at: number | null }>()
+  const credentials = await Promise.all((result.results ?? []).map(async row => {
+    let name: string | undefined
+    if (row.name_envelope) {
+      try {
+        const metadata = await openVaultValue<{ name: string }>(request.headers.get('X-Linger-Vault-Key')!, session.userId, `passkey-name:${row.credential_id}`, row.name_envelope)
+        if (typeof metadata.name === 'string') name = metadata.name
+      } catch { /* A damaged label must not prevent credential management. */ }
+    }
+    return { credentialId: row.credential_id, createdAt: row.created_at, ...(name ? { name } : {}), ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}) }
+  }))
   return jsonResponse({
-    credentials: (result.results ?? []).map(row => ({ credentialId: row.credential_id, createdAt: row.created_at })),
+    credentials,
     currentCredentialId: session.credentialId,
   })
+}
+
+export async function renameCredential(request: Request, env: Env): Promise<Response> {
+  const rejected = sameOrigin(request, env)
+  if (rejected) return rejected
+  if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
+  const sessionId = parseSessionId(request)
+  const session = sessionId ? await getPasskeySessionInfo(sessionId, env) : null
+  if (!session || !await validateUnlockedProfile(request, env, session.userId)) return jsonResponse({ error: 'Vault unlock required' }, 401)
+  const body = await readJson(request)
+  if (!body || typeof body.credentialId !== 'string' || !body.credentialId || body.credentialId.length > 1024 ||
+    typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(body.name)) {
+    return jsonResponse({ error: 'Invalid passkey name' }, 400)
+  }
+  const envelope = await sealVaultValue(request.headers.get('X-Linger-Vault-Key')!, session.userId, `passkey-name:${body.credentialId}`, { name: body.name.trim() })
+  // Rename changes display metadata only, and still requires a live unlocked
+  // session at commit time. It cannot modify keys or authorize another account.
+  const updated = await env.AUTH_DB.prepare(`UPDATE passkey_credentials SET name_envelope = ?
+    WHERE credential_id = ? AND user_id = ? AND EXISTS (
+      SELECT 1 FROM auth_sessions s WHERE s.id = ? AND s.user_id = ? AND s.revoked = 0 AND s.expires_at > ?
+        AND (s.credential_id IS NULL OR EXISTS (
+          SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
+        ))
+    ) RETURNING credential_id`)
+    .bind(envelope, body.credentialId, session.userId, await sessionStorageId(sessionId!), session.userId, Date.now()).first()
+  return updated ? jsonResponse({ ok: true }) : jsonResponse({ error: 'Credential or session unavailable' }, 409)
 }
 
 export async function deleteCredential(request: Request, env: Env): Promise<Response> {

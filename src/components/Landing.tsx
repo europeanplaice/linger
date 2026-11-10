@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { LoginScreen } from './LoginScreen'
 import { DeploymentVerification } from './DeploymentVerification'
-import type { AuthErrorCode } from '../hooks/useAuth'
+import type { AuthErrorCode, GoogleConnection } from '../hooks/useAuth'
 
 interface Props {
   passkeyGate?: ReactNode
@@ -13,13 +13,18 @@ interface Props {
   authResolved?: boolean
   authError?: AuthErrorCode | null
   onDismissAuthError?: () => void
+  googleConnection?: GoogleConnection
+  onRetryConnection?: () => void
+  signingIn?: boolean
+  email?: string | null
+  rememberDevicePrompt?: ReactNode
 }
 
 // The signed-out view at `/`. The hero is the existing sign-in card; the
 // long-form marketing content below makes `/` the canonical, crawlable landing
 // page (it is rendered into the initial HTML by the build-time prerender). The
 // copy here is intentionally English — it is the canonical content for `/`.
-export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError }: Props) {
+export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError, googleConnection, onRetryConnection, signingIn, email, rememberDevicePrompt }: Props) {
   return (
     <div className="landing">
       {passkeyGate ?? <LoginScreen
@@ -31,7 +36,12 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
         authResolved={authResolved}
         authError={authError}
         onDismissAuthError={onDismissAuthError}
+        googleConnection={googleConnection}
+        onRetryConnection={onRetryConnection}
+        signingIn={signingIn}
+        email={email}
       />}
+      {rememberDevicePrompt}
 
       <div className="landing-content">
         <section className="landing-shots" aria-label="Screenshots">

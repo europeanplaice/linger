@@ -1,6 +1,7 @@
 import { AppIcon } from './AppIcon'
 import { useI18n } from '../i18n'
-import type { AuthErrorCode } from '../hooks/useAuth'
+import type { AuthErrorCode, GoogleConnection } from '../hooks/useAuth'
+import { authFeedback } from '../lib/authFeedback'
 
 interface Props {
   onSignIn: () => void
@@ -11,9 +12,13 @@ interface Props {
   authResolved?: boolean
   authError?: AuthErrorCode | null
   onDismissAuthError?: () => void
+  googleConnection?: GoogleConnection
+  onRetryConnection?: () => void
+  signingIn?: boolean
+  email?: string | null
 }
 
-export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError }: Props) {
+export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, googleConnection, onRetryConnection, signingIn, email }: Props) {
   const { t, language, setLanguage } = useI18n()
 
   const cardBody = (
@@ -21,8 +26,12 @@ export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetr
         <AppIcon className="login-logo" fetchPriority="high" />
         <h1>{t.documentTitle}</h1>
         {authError === 'sign_in_failed' && <p className="session-expired-msg" role="alert">{t.login.signInFailed}</p>}
+        {authError && authError !== 'sign_in_failed' && <p className="session-expired-msg" role={authError === 'cancelled' ? 'status' : 'alert'}>{authFeedback(authError, t.login)}</p>}
         <p>{t.login.privateDiary}</p>
         <p className="login-scope-note">{t.login.driveFileScope}</p>
+        {email && <p className="login-account">{t.login.googleAccount}<br /><strong>{email}</strong></p>}
+        {googleConnection === 'unavailable' && <p role="status">{t.login.googleUnavailable}</p>}
+        {googleConnection === 'restoring' && <p role="status">{t.login.googleRestoring}</p>}
         {tokenExpired && (
           <p className="session-expired-msg">
             {t.login.sessionExpiredShort}
@@ -31,7 +40,7 @@ export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetr
             </button>
           </p>
         )}
-        <button className="btn-signin-google" onClick={onSignIn}>
+        <button className="btn-signin-google" disabled={signingIn || googleConnection === 'restoring'} onClick={googleConnection === 'unavailable' ? onRetryConnection : onSignIn}>
           <svg
             className="google-logo"
             xmlns="http://www.w3.org/2000/svg"
@@ -43,14 +52,14 @@ export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetr
             <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
             <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
           </svg>
-          {t.login.signInWithGoogle}
+          {googleConnection === 'unavailable' ? t.login.googleRetry : googleConnection === 'restoring' ? t.login.googleRestoring : signingIn ? t.login.googleConnecting : googleConnection === 'required' ? t.login.googleReconnect : t.login.signInWithGoogle}
         </button>
-        {onUseAnotherAccount && (
-          <button className="btn-use-another-account" type="button" onClick={onUseAnotherAccount}>
+        {onUseAnotherAccount && googleConnection !== 'unavailable' && googleConnection !== 'restoring' && (
+          <button className="btn-use-another-account" disabled={signingIn} type="button" onClick={onUseAnotherAccount}>
             {t.login.useAnotherAccount}
           </button>
         )}
-        {onLockVault && <button className="btn-use-another-account" type="button" onClick={onLockVault}>{t.login.passkeyChange}</button>}
+        {onLockVault && <button className="btn-use-another-account" disabled={signingIn || googleConnection === 'restoring'} type="button" onClick={onLockVault}>{t.login.passkeyChange}</button>}
         <p className="login-footer">
           <a href="/home" target="_blank" rel="noopener noreferrer">
             {t.login.aboutLinger}
