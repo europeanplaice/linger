@@ -167,9 +167,22 @@ async function createCredential(envelope: OptionsEnvelope, signal?: AbortSignal,
   }
 }
 
-async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal): Promise<{ credential: PublicKeyCredential; prfOutput: Uint8Array; serialized: JsonObject }> {
+async function supportsImmediateSignIn(): Promise<boolean> {
+  try {
+    const browser = PublicKeyCredential as unknown as { getClientCapabilities?: () => Promise<Record<string, boolean>> }
+    return (await browser.getClientCapabilities?.())?.immediateGet === true
+  } catch { return false }
+}
+
+async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal, immediate = false): Promise<{ credential: PublicKeyCredential; prfOutput: Uint8Array; serialized: JsonObject }> {
   const options = requestOptions(envelope)
-  const credential = await navigator.credentials.get({ publicKey: options, signal })
+  throwIfAborted(signal)
+  // Immediate UI cannot be dismissed programmatically. Still discard any late
+  // result after cancellation before reading PRF bytes or verifying it.
+  const request: CredentialRequestOptions & { uiMode?: 'immediate' } = immediate
+    ? { publicKey: options, uiMode: 'immediate' }
+    : { publicKey: options, signal }
+  const credential = await navigator.credentials.get(request)
   throwIfAborted(signal)
   if (!(credential instanceof PublicKeyCredential)) throw new Error('Passkey sign-in was cancelled')
   const prf = extensionResults(credential)
@@ -199,11 +212,13 @@ export async function registerPasskey(signal?: AbortSignal, email?: string, onPh
   } finally { prfOutput.fill(0) }
 }
 
-export async function loginWithPasskey(signal?: AbortSignal): Promise<{ userId: string }> {
+export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = false): Promise<{ userId: string }> {
   requireWebAuthn()
+  const immediate = preferImmediate && await supportsImmediateSignIn()
+  throwIfAborted(signal)
   const envelope = await post<OptionsEnvelope>('login/options', undefined, undefined, signal)
   throwIfAborted(signal)
-  const { prfOutput, serialized } = await getCredential(envelope, signal)
+  const { prfOutput, serialized } = await getCredential(envelope, signal, immediate)
   try {
     const verified = await post<VerifyEnvelope & { credentialId?: string; wrapper?: WrappedMasterKeyPayload }>('login/verify', { response: serialized }, undefined, signal)
     throwIfAborted(signal)

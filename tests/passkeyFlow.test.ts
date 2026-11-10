@@ -31,6 +31,16 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       if (options?.publicKey) (window as unknown as { passkeyName?: string }).passkeyName = options.publicKey.user.name
       return create(options)
     }
+    // Dismiss the first chooser to reach registration. All subsequent WebAuthn
+    // operations use the real virtual authenticator and server verification.
+    const get = navigator.credentials.get.bind(navigator.credentials)
+    navigator.credentials.get = async options => {
+      if (!sessionStorage.getItem('test-passkey-dismissed')) {
+        sessionStorage.setItem('test-passkey-dismissed', 'true')
+        throw new DOMException('No passkey selected', 'NotAllowedError')
+      }
+      return get(options)
+    }
   })
   await context.route('**/auth/login?*', async route => {
     await route.fulfill({ contentType: 'text/html', body: `<script>window.opener.postMessage({type:'linger-oauth-complete',credential:{accessToken:'test-access',idToken:'test-id',expiresAt:Date.now()+3600000,email:'person@example.com'}}, location.origin)</script>` })
@@ -82,13 +92,15 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   try {
     await page.goto(origin)
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open Linger', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Choose how to continue' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Start using Linger' })).toBeFocused()
     expect(registrationRequests).toBe(0)
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
+    await expect(page.getByRole('heading', { name: 'Choose how to continue' })).toBeFocused()
     await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
     await expect(page.getByRole('checkbox')).toHaveCount(0)
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
@@ -125,7 +137,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     })
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true }).click()
+    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible({ timeout: 20_000 })
     const firstPasskeyKey = await page.evaluate(async internalId => {
       const path = '/src/lib/passkeyVault.ts'

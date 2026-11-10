@@ -46,7 +46,7 @@ export interface AuthState {
   setupEmail: string | null
   beginSetup: () => void
   cancelSetup: () => void
-  unlockPasskey: (remember?: RememberDays) => Promise<void>
+  unlockPasskey: (remember?: RememberDays, preferImmediate?: boolean) => Promise<void>
   addPasskey: () => Promise<void>
   lockVault: () => void
   clearVaultError: () => void
@@ -352,7 +352,7 @@ export function useAuth(): AuthState {
     setVaultError(null)
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0) => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false) => {
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()
@@ -367,7 +367,7 @@ export function useAuth(): AuthState {
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'unlock') {
-        const result = await loginWithPasskey(controller.signal)
+        const result = await loginWithPasskey(controller.signal, preferImmediate)
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'add') {
@@ -387,6 +387,7 @@ export function useAuth(): AuthState {
           if (revision !== vaultRevision.current) return
           if (!getVaultUserId()) return
           setVaultStatus('unlocked')
+          setOfferRememberDevice(!remember)
           return
         }
         let info
@@ -441,7 +442,7 @@ export function useAuth(): AuthState {
   }, [email, setupEmail, retryGoogleConnection])
 
   const setupPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('setup', remember), [runVaultAction])
-  const unlockPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('unlock', remember), [runVaultAction])
+  const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false) => runVaultAction('unlock', remember, preferImmediate), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
     setOfferRememberDevice(false)

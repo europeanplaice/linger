@@ -38,20 +38,56 @@ async function cancellableLogin() {
   return { userId, credentialId, wrapper, credential, get, fetchMock, controller, copy }
 }
 
-it('ignores a WebAuthn result delivered after cancellation without verifying or unlocking it', async () => {
+it.each([false, true])('ignores a late WebAuthn result without verifying or unlocking it (immediate: %s)', async immediate => {
   const { credential, get, fetchMock, controller, copy } = await cancellableLogin()
+  Object.assign(PublicKeyCredential, { getClientCapabilities: async () => ({ immediateGet: immediate }) })
   const entered = deferred<void>()
   const release = deferred<typeof credential>()
   get.mockImplementationOnce(() => { entered.resolve(); return release.promise })
-  const login = loginWithPasskey(controller.signal)
+  const login = loginWithPasskey(controller.signal, immediate)
   const rejected = expect(login).rejects.toMatchObject({ name: 'AbortError' })
   await entered.promise
   controller.abort()
   release.resolve(credential)
   await rejected
-  expect(get).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }))
+  if (immediate) {
+    expect(get).toHaveBeenCalledWith(expect.objectContaining({ uiMode: 'immediate' }))
+    expect(get.mock.calls[0][0]).not.toHaveProperty('signal')
+  } else expect(get).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }))
   expect(fetchMock).toHaveBeenCalledTimes(1)
   expect(copy).not.toHaveBeenCalled()
+  expect(vault.getVaultKey()).toBeNull()
+})
+
+it.each(['supported', 'unsupported', 'missing', 'failed'])('opens the vault using the available sign-in UI (%s)', async capability => {
+  const { userId, credentialId, wrapper, get, fetchMock, controller } = await cancellableLogin()
+  if (capability !== 'missing') Object.assign(PublicKeyCredential, {
+    getClientCapabilities: async () => {
+      if (capability === 'failed') throw new Error('Capability check unavailable')
+      return { immediateGet: capability === 'supported' }
+    },
+  })
+  fetchMock.mockResolvedValueOnce(Response.json({ options: { challenge: 'AQ', allowCredentials: [] }, prfInput: 'Ag' }))
+    .mockResolvedValueOnce(Response.json({ userId, credentialId, wrapper }))
+  await expect(loginWithPasskey(controller.signal, true)).resolves.toEqual({ userId })
+  const request = get.mock.calls[0][0]
+  if (capability === 'supported') {
+    expect(request.uiMode).toBe('immediate')
+    expect(request).not.toHaveProperty('signal')
+  } else {
+    expect(request).not.toHaveProperty('uiMode')
+    expect(request.signal).toBe(controller.signal)
+  }
+  expect(request.publicKey.extensions.prf.eval.first).toBeInstanceOf(Uint8Array)
+  expect(vault.getVaultKey(userId)).not.toBeNull()
+})
+
+it('returns dismissal to the caller without verifying or creating a passkey', async () => {
+  const { get, fetchMock, controller } = await cancellableLogin()
+  Object.assign(PublicKeyCredential, { getClientCapabilities: async () => ({ immediateGet: true }) })
+  get.mockRejectedValueOnce(new DOMException('No credential selected', 'NotAllowedError'))
+  await expect(loginWithPasskey(controller.signal, true)).rejects.toMatchObject({ name: 'NotAllowedError' })
+  expect(fetchMock).toHaveBeenCalledTimes(1)
   expect(vault.getVaultKey()).toBeNull()
 })
 

@@ -681,7 +681,7 @@ export default function App() {
 
   const passkeyGate = vaultStatus !== 'unlocked' ? (
     <PasskeyGate phase={vaultPhase} busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
-      onSetup={remember => { void setupPasskey(remember) }} onUnlock={remember => { void unlockPasskey(remember) }}
+      onSetup={remember => { void setupPasskey(remember) }} onUnlock={(remember, preferImmediate) => { void unlockPasskey(remember, preferImmediate) }}
       onClearError={clearVaultError} />
   ) : undefined
 

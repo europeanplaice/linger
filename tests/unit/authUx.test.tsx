@@ -11,14 +11,44 @@ afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers() })
 
 function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
   const actions = { onSetup: vi.fn(), onBeginSetup: vi.fn(), onCancelSetup: vi.fn(), onUnlock: vi.fn() }
-  render(<I18nProvider initialLanguage="en"><PasskeyGate busy={false} error={null} setupEmail={null} {...actions} {...props} /></I18nProvider>)
-  return actions
+  const rendered = render(<I18nProvider initialLanguage="en"><PasskeyGate busy={false} error={null} setupEmail={null} {...actions} {...props} /></I18nProvider>)
+  return { ...actions, ...rendered }
 }
 
 describe('authentication guidance', () => {
-  it('requires acknowledgement before reconnecting a completely lost account', () => {
+  it('starts with one action and tries a saved passkey before offering registration', () => {
     const actions = gate()
-    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'First time using Linger? Get started' })).toBeNull()
+    expect(screen.queryByText('Having trouble with your passkey?')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Linger' }))
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, true)
+    expect(actions.onBeginSetup).not.toHaveBeenCalled()
+    expect(actions.onSetup).not.toHaveBeenCalled()
+  })
+
+  it('offers explicit alternatives after dismissal and retries with the full browser chooser', () => {
+    const actions = gate()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Linger' }))
+    const renderGate = (error: string | null, busy = false) => actions.rerender(
+      <I18nProvider initialLanguage="en"><PasskeyGate {...actions} busy={busy} error={error} setupEmail={null} /></I18nProvider>,
+    )
+    renderGate(null, true)
+    expect(screen.getAllByText('Waiting for your passkey…')).toHaveLength(1)
+    expect((screen.getByRole('button', { name: 'Open Linger' }) as HTMLButtonElement).disabled).toBe(true)
+    renderGate('cancelled')
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Choose how to continue' }))
+    expect(actions.onBeginSetup).not.toHaveBeenCalled()
+    expect(actions.onSetup).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a saved passkey' }))
+    expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false)
+    renderGate(null, true)
+    expect(screen.getByRole('heading', { name: 'Choose how to continue' })).toBeTruthy()
+  })
+
+  it('requires acknowledgement before reconnecting a completely lost account', () => {
+    const actions = gate({ error: 'cancelled' })
     fireEvent.click(screen.getByText('Having trouble with your passkey?'))
     expect(screen.getByText('Use a passkey saved on another device')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Set up again with the same Google account' }))
@@ -34,7 +64,7 @@ describe('authentication guidance', () => {
   })
 
   it('explains the extra verification and does not offer key persistence before registration', () => {
-    const actions = gate({ setupEmail: 'person@example.com' })
+    const actions = gate({ setupEmail: 'person@example.com', error: 'cancelled' })
     fireEvent.click(screen.getByRole('button', { name: 'First time using Linger? Get started' }))
     expect(screen.getByText(/confirm it once more/)).toBeTruthy()
     expect(screen.queryByRole('checkbox')).toBeNull()
