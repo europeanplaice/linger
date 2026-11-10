@@ -301,4 +301,19 @@ describe('browser credential lifetime', () => {
     expect(popup.close).toHaveBeenCalledOnce()
     expect(getAccessToken()).toBeNull()
   })
+
+  it('uses a distinct popup name for each Google authorization attempt', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => ({ closed: false, close: vi.fn() }) as unknown as Window)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+    const first = startSignIn().catch(error => error)
+    const second = startSignIn().catch(error => error)
+    expect(open).toHaveBeenCalledTimes(2)
+    const firstName = open.mock.calls[0][1]
+    const secondName = open.mock.calls[1][1]
+    expect(firstName).toMatch(/^linger-google-signin-/)
+    expect(secondName).toMatch(/^linger-google-signin-/)
+    expect(firstName).not.toBe(secondName)
+    await revokeSession()
+    await Promise.all([first, second])
+  })
 })

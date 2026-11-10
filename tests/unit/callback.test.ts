@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { onRequestGet } from '../../functions/auth/callback'
+import { onRequestGet as startLogin } from '../../functions/auth/login'
 import { verifyGoogleIdToken } from '../../functions/_shared/google'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { sessionStorageId } from '../../functions/_shared/authStore'
@@ -27,12 +28,53 @@ function callbackRequest(params: Record<string, string>, cookieState = 'valid-st
 }
 
 function mockTokenResponse(overrides: Record<string, unknown> = {}) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
     access_token: 'short-lived-access', expires_in: 3600, id_token: 'verified-id-token', ...overrides,
-  }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
 }
 
 describe('OAuth callback popup flow', () => {
+  it('completes concurrent browser attempts in reverse order with their own PKCE verifier', async () => {
+    mockTokenResponse()
+    const { env, db, sessionId } = await makeEnv()
+    const request = new Request('https://example.com/auth/login', { headers: { Cookie: `linger_session=${sessionId}` } })
+    const first = await startLogin({ request, env } as never)
+    const second = await startLogin({ request, env } as never)
+    const state1 = new URL(first.headers.get('Location')!).searchParams.get('state')!
+    const state2 = new URL(second.headers.get('Location')!).searchParams.get('state')!
+    expect(state1).not.toBe(state2)
+    const cookies = [...first.headers.getSetCookie(), ...second.headers.getSetCookie()].map(cookie => cookie.split(';')[0]).join('; ')
+    const callback = (state: string) => new Request(`https://example.com/auth/callback?code=abc&state=${state}`, { headers: { Cookie: cookies } })
+    const verifier = (state: string) => cookies.match(new RegExp(`linger_oauth_pkce_${state}=([^;]+)`))![1]
+    const result2 = await onRequestGet({ request: callback(state2), env } as never)
+    expect(result2.status).toBe(200)
+    expect(result2.headers.get('Set-Cookie')).toContain(`linger_oauth_pkce_${state2}=`)
+    expect(result2.headers.get('Set-Cookie')).not.toContain(state1)
+    const result1 = await onRequestGet({ request: callback(state1), env } as never)
+    expect(result1.status).toBe(200)
+    const calls = vi.mocked(fetch).mock.calls
+    expect(new URLSearchParams(String(calls[0][1]?.body)).get('code_verifier')).toBe(verifier(state2))
+    expect(new URLSearchParams(String(calls[1][1]?.body)).get('code_verifier')).toBe(verifier(state1))
+    expect((await onRequestGet({ request: callback(state2), env } as never)).status).toBe(400)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    db.close()
+  })
+
+  it('keeps another attempt usable when one callback fails', async () => {
+    mockTokenResponse()
+    const { env, db, sessionId } = await makeEnv()
+    const request = new Request('https://example.com/auth/login', { headers: { Cookie: `linger_session=${sessionId}` } })
+    const first = await startLogin({ request, env } as never)
+    const second = await startLogin({ request, env } as never)
+    const state1 = new URL(first.headers.get('Location')!).searchParams.get('state')!
+    const state2 = new URL(second.headers.get('Location')!).searchParams.get('state')!
+    const cookies = [...first.headers.getSetCookie(), ...second.headers.getSetCookie()].map(cookie => cookie.split(';')[0]).join('; ')
+    const cancelled = await onRequestGet({ request: new Request(`https://example.com/auth/callback?error=access_denied&state=${state1}`, { headers: { Cookie: cookies } }), env } as never)
+    expect(cancelled.status).toBe(400)
+    const completed = await onRequestGet({ request: new Request(`https://example.com/auth/callback?code=abc&state=${state2}`, { headers: { Cookie: cookies } }), env } as never)
+    expect(completed.status).toBe(200)
+    db.close()
+  })
   it('returns a verified email and refresh token during setup without persisting either', async () => {
     mockTokenResponse({ refresh_token: 'secret-refresh' })
     const { env, db } = await makeEnv()

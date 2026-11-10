@@ -37,7 +37,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
     if (options.setup) params.set('setup', '1')
     if (options.renew === false) params.set('reuse', '1')
     const loginUrl = `/auth/login?${params.toString()}`
-    const popup = window.open(loginUrl, 'linger-google-signin', 'popup,width=520,height=680')
+    const popup = window.open(loginUrl, `linger-google-signin-${channelId}`, 'popup,width=520,height=680')
     if (!popup) {
       channel?.close()
       reject(new Error('Google sign-in popup was blocked. Allow popups and try again.'))

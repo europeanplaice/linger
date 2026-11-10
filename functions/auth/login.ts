@@ -60,7 +60,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
 
   const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })
   headers.append('Set-Cookie', makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')))
-  headers.append('Set-Cookie', makeOAuthPkceCookie(codeVerifier, !env.SESSION_DOMAIN.startsWith('http://')))
+  headers.append('Set-Cookie', makeOAuthPkceCookie(codeVerifier, !env.SESSION_DOMAIN.startsWith('http://'), state))
   return new Response(null, {
     status: 302,
     headers,

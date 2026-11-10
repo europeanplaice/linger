@@ -142,43 +142,51 @@ export function clearSessionCookie(secure = true): string {
   return `${COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Strict; Path=/; Max-Age=0`
 }
 
+function oauthCookieName(base: string, state?: string): string {
+  if (state === undefined) return base
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state)) throw new Error('Invalid OAuth state')
+  return `${base}_${state}`
+}
+
 export function makeOAuthStateCookie(state: string, secure = true): string {
   const secureFlag = secure ? '; Secure' : ''
-  return `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(state)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${OAUTH_STATE_TTL}`
+  return `${oauthCookieName(OAUTH_STATE_COOKIE_NAME, state)}=${encodeURIComponent(state)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${OAUTH_STATE_TTL}`
 }
 
-export function clearOAuthStateCookie(secure = true): string {
+export function clearOAuthStateCookie(secure = true, state?: string): string {
   const secureFlag = secure ? '; Secure' : ''
-  return `${OAUTH_STATE_COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=0`
+  return `${oauthCookieName(OAUTH_STATE_COOKIE_NAME, state)}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=0`
 }
 
-export function makeOAuthPkceCookie(verifier: string, secure = true): string {
+export function makeOAuthPkceCookie(verifier: string, secure = true, state?: string): string {
   const secureFlag = secure ? '; Secure' : ''
-  return `${OAUTH_PKCE_COOKIE_NAME}=${encodeURIComponent(verifier)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=${OAUTH_STATE_TTL}`
+  return `${oauthCookieName(OAUTH_PKCE_COOKIE_NAME, state)}=${encodeURIComponent(verifier)}; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=${OAUTH_STATE_TTL}`
 }
 
-export function clearOAuthPkceCookie(secure = true): string {
+export function clearOAuthPkceCookie(secure = true, state?: string): string {
   const secureFlag = secure ? '; Secure' : ''
-  return `${OAUTH_PKCE_COOKIE_NAME}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=0`
+  return `${oauthCookieName(OAUTH_PKCE_COOKIE_NAME, state)}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/auth/callback; Max-Age=0`
 }
 
-export function parseOAuthPkceCookie(request: Request): string | null {
+export function parseOAuthPkceCookie(request: Request, state?: string): string | null {
+  const name = oauthCookieName(OAUTH_PKCE_COOKIE_NAME, state)
   const header = request.headers.get('Cookie') ?? ''
   for (const part of header.split(';')) {
     const trimmed = part.trim()
     const eq = trimmed.indexOf('=')
-    if (eq === -1 || trimmed.slice(0, eq) !== OAUTH_PKCE_COOKIE_NAME) continue
+    if (eq === -1 || trimmed.slice(0, eq) !== name) continue
     try { return decodeURIComponent(trimmed.slice(eq + 1)) || null } catch { return null }
   }
   return null
 }
 
-export function parseOAuthStateCookie(request: Request): string | null {
+export function parseOAuthStateCookie(request: Request, state?: string): string | null {
+  const name = oauthCookieName(OAUTH_STATE_COOKIE_NAME, state)
   const header = request.headers.get('Cookie') ?? ''
   for (const part of header.split(';')) {
     const trimmed = part.trim()
     const eq = trimmed.indexOf('=')
-    if (eq === -1 || trimmed.slice(0, eq) !== OAUTH_STATE_COOKIE_NAME) continue
+    if (eq === -1 || trimmed.slice(0, eq) !== name) continue
     try { return decodeURIComponent(trimmed.slice(eq + 1)) || null } catch { return null }
   }
   return null

@@ -9,7 +9,7 @@ function base64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number; refreshToken?: string; email?: string }, origin: string, channelId: string | undefined, secure: boolean): Response {
+function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number; refreshToken?: string; email?: string }, origin: string, channelId: string | undefined, secure: boolean, cookieState?: string): Response {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(18)))
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)))
   const encodedChannelId = JSON.stringify(channelId ?? '')
@@ -60,16 +60,16 @@ function popupCredentialResponse(payload: { accessToken: string; idToken: string
       'Referrer-Policy': 'no-referrer',
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'`,
-      'Set-Cookie': clearOAuthStateCookie(secure),
+      'Set-Cookie': clearOAuthStateCookie(secure, cookieState),
     },
   })
 }
 
-function consumedStateError(body: unknown, status: number, secure: boolean): Response {
+function consumedStateError(body: unknown, status: number, secure: boolean, cookieState?: string): Response {
   const response = jsonResponse(body, status)
   const headers = new Headers(response.headers)
-  headers.append('Set-Cookie', clearOAuthStateCookie(secure))
-  headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
+  headers.append('Set-Cookie', clearOAuthStateCookie(secure, cookieState))
+  headers.append('Set-Cookie', clearOAuthPkceCookie(secure, cookieState))
   return new Response(response.body, { status, headers })
 }
 
@@ -81,9 +81,14 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const state = stateParam
   const secure = !env.SESSION_DOMAIN.startsWith('http://')
 
-  if (!code || !state || parseOAuthStateCookie(request) !== state) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state)
+  const scoped = isUuid && parseOAuthStateCookie(request, state) === state
+  // Accept the old fixed-name cookies only for an authorization already in flight.
+  const legacy = !scoped && parseOAuthStateCookie(request) === state
+  if (!code || !state || (!scoped && !legacy)) {
     return jsonResponse({ error: 'Missing code or state' }, 400)
   }
+  const cookieState = scoped ? state : undefined
 
   const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
@@ -109,17 +114,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // The Strict session cookie is not sent on Google's cross-site callback.
   // Bind the one-use OAuth state to the passkey session captured before redirect.
   if (!stateRecord.setup && (!env.AUTH_DB || !stateRecord.userId || !/^sha256:[0-9a-f]{64}$/.test(stateRecord.sessionHandle ?? ''))) {
-    return consumedStateError({ error: 'Passkey session required' }, 401, secure)
+    return consumedStateError({ error: 'Passkey session required' }, 401, secure, cookieState)
   }
   if (!stateRecord.setup) {
     const active = await env.AUTH_DB!.prepare('SELECT user_id FROM auth_sessions WHERE id = ? AND user_id = ? AND revoked = 0 AND expires_at > ?')
       .bind(stateRecord.sessionHandle, stateRecord.userId, Date.now()).first()
-    if (!active) return consumedStateError({ error: 'Passkey session expired' }, 401, secure)
+    if (!active) return consumedStateError({ error: 'Passkey session expired' }, 401, secure, cookieState)
   }
 
   // Support attempts created before PKCE moved to the short lived browser cookie.
-  const codeVerifier = stateRecord.codeVerifier ?? parseOAuthPkceCookie(request)
-  if (!codeVerifier) return consumedStateError({ error: 'Invalid or expired state' }, 400, secure)
+  const codeVerifier = stateRecord.codeVerifier ?? parseOAuthPkceCookie(request, cookieState)
+  if (!codeVerifier) return consumedStateError({ error: 'Invalid or expired state' }, 400, secure, cookieState)
 
   let tokenResp: Response
   try {
@@ -136,30 +141,30 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       }).toString(),
     })
   } catch {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
 
   if (!tokenResp.ok) {
     // Not 502/503/504 — Cloudflare's edge silently replaces those status codes with
     // its own branded error page, discarding this JSON body entirely.
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
 
   let tokenPayload: unknown
   try {
     tokenPayload = await tokenResp.json()
   } catch {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
 
   if (!tokenPayload || typeof tokenPayload !== 'object' || Array.isArray(tokenPayload)) {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
   const responseFields = tokenPayload as Record<string, unknown>
   if (typeof responseFields.access_token !== 'string' || !responseFields.access_token ||
     typeof responseFields.id_token !== 'string' || !responseFields.id_token ||
     typeof responseFields.expires_in !== 'number' || !Number.isFinite(responseFields.expires_in) || responseFields.expires_in <= 0) {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
   const tokens = {
     access_token: responseFields.access_token,
@@ -170,7 +175,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   try {
     claims = await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID, stateRecord.nonce || undefined)
   } catch {
-    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure)
+    return consumedStateError({ error: 'Authentication failed. Please try again.' }, 500, secure, cookieState)
   }
   // Google identity and credentials remain in this response's memory only.
   // /auth/session verifies them again and seals account metadata with the user's
@@ -185,10 +190,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     ...(claims.email ? { email: claims.email } : {}),
   }
   if (stateRecord.popup) {
-    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure)
+    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure, cookieState)
     const headers = new Headers(response.headers)
-    headers.append('Set-Cookie', clearOAuthPkceCookie(secure))
+    headers.append('Set-Cookie', clearOAuthPkceCookie(secure, cookieState))
     return new Response(response.body, { status: response.status, headers })
   }
-  return consumedStateError({ error: 'Popup sign-in required' }, 400, secure)
+  return consumedStateError({ error: 'Popup sign-in required' }, 400, secure, cookieState)
 }
