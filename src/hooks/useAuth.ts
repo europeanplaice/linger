@@ -9,6 +9,7 @@ import type { RememberDays } from '../lib/tabSession'
 import { rememberDevicePromptDismissal, shouldOfferRememberDevicePrompt } from '../lib/rememberDevicePrompt'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
+import { hasRegisteredPasskey } from '../lib/passkeyRegistrationHistory'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
@@ -43,9 +44,9 @@ export interface AuthState {
   retryGoogleConnection: () => Promise<void>
   offerRememberDevice: boolean
   dismissRememberDevice: () => void
-  setupPasskey: (remember?: RememberDays) => Promise<void>
+  setupPasskey: (remember?: RememberDays, recovery?: boolean) => Promise<void>
   setupEmail: string | null
-  beginSetup: () => void
+  beginSetup: (recovery?: boolean) => void
   cancelSetup: () => void
   unlockPasskey: (remember?: RememberDays, preferImmediate?: boolean) => Promise<void>
   addPasskey: () => Promise<void>
@@ -337,16 +338,24 @@ export function useAuth(): AuthState {
     })
   }, [googleSub])
 
-  const beginSetup = useCallback(() => {
+  const beginSetup = useCallback((recovery = false) => {
     const revision = ++authRevision.current
     restoring.current = false
     setVaultBusy(true)
     setVaultError(null)
     setSetupEmail(null)
     setVaultPhase('google')
-    void startSignIn({ setup: true, selectAccount: true }).then(info => {
+    void startSignIn({ setup: true, selectAccount: true }).then(async info => {
       if (revision !== authRevision.current) return
       if (!info.email) throw new Error('Google did not return an email address')
+      const registered = !recovery && await hasRegisteredPasskey(info.email)
+      if (revision !== authRevision.current) return
+      if (registered) {
+        clearOAuthCredentials()
+        clearPendingGoogleCredential()
+        setVaultError('already_registered')
+        return
+      }
       setSetupEmail(info.email)
     }).catch(error => {
       if (revision === authRevision.current) setVaultError(authFeedbackCode(error))
@@ -361,7 +370,7 @@ export function useAuth(): AuthState {
     setVaultError(null)
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false) => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false, recovery = false) => {
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()
@@ -372,7 +381,7 @@ export function useAuth(): AuthState {
     try {
       if (action === 'setup') {
         if (!setupEmail) throw new Error('Connect Google before creating a passkey')
-        const result = await registerPasskey(controller.signal, setupEmail, onPhase)
+        const result = await registerPasskey(controller.signal, setupEmail, onPhase, recovery)
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'unlock') {
@@ -450,7 +459,7 @@ export function useAuth(): AuthState {
     }
   }, [email, setupEmail, retryGoogleConnection, offerRememberDeviceChoice])
 
-  const setupPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('setup', remember), [runVaultAction])
+  const setupPasskey = useCallback((remember: RememberDays = 0, recovery = false) => runVaultAction('setup', remember, false, recovery), [runVaultAction])
   const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false) => runVaultAction('unlock', remember, preferImmediate), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {

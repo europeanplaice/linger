@@ -2,6 +2,7 @@ import { accountRequest } from '../lib/accountSession'
 import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId, setVaultKeyHeader } from '../lib/passkeyVault'
 import { AuthFlowError } from '../lib/authFeedback'
+import { rememberPasskeyRegistration } from '../lib/passkeyRegistrationHistory'
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
@@ -181,7 +182,10 @@ export async function checkSession({ failOnUnavailable = false }: { failOnUnavai
       }
       return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
     }
-    if (data.signedIn && data.userId === unlockedUserId) updatePasskeyAccountName(data.userId, data.email ?? null)
+    if (data.signedIn && unlockedUserId && data.userId === unlockedUserId) {
+      updatePasskeyAccountName(data.userId, data.email ?? null)
+      if (data.email) await rememberPasskeyRegistration(data.email)
+    }
     return {
       signedIn: Boolean(data.signedIn),
       email: data.email ?? null,

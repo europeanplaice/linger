@@ -4,13 +4,45 @@ import { deletePasskey, listPasskeys, loginWithPasskey, registerPasskey } from '
 import { clearVaultKey, createWrappedMasterKey, serializeWrappedMasterKey } from '../../src/lib/passkeyVault'
 import * as vault from '../../src/lib/passkeyVault'
 import { deferred } from '../helpers/deferred'
+import { hasRegisteredPasskey, rememberPasskeyRegistration } from '../../src/lib/passkeyRegistrationHistory'
 
 const toBase64Url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 
 afterEach(() => {
+  localStorage.clear()
   clearVaultKey()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+})
+
+it('blocks repeat registration for the same normalized email before contacting the server', async () => {
+  const { fetchMock } = await cancellableLogin()
+  await rememberPasskeyRegistration(' Person@Example.com ')
+  await expect(registerPasskey(undefined, 'person@example.com')).rejects.toMatchObject({ code: 'already_registered' })
+  expect(fetchMock).not.toHaveBeenCalled()
+  expect(await hasRegisteredPasskey('other@example.com')).toBe(false)
+  expect(localStorage.length).toBe(1)
+  expect(localStorage.key(0)).toMatch(/^linger_passkey_registered_v1:[0-9a-f]{64}$/)
+  expect(localStorage.getItem(localStorage.key(0)!)).toBe('1')
+})
+
+it('allows the explicit recovery flow through the browser history guard', async () => {
+  const { fetchMock } = await cancellableLogin()
+  await rememberPasskeyRegistration('person@example.com')
+  fetchMock.mockRejectedValueOnce(new TypeError('Offline'))
+  await expect(registerPasskey(undefined, 'person@example.com', undefined, true)).rejects.toThrow('Offline')
+  expect(fetchMock).toHaveBeenCalledWith('/auth/passkey/register/options', expect.anything())
+})
+
+it('does not remember failed registration or fail sign-in when browser storage is unavailable', async () => {
+  const { fetchMock } = await cancellableLogin()
+  fetchMock.mockRejectedValueOnce(new TypeError('Offline'))
+  await expect(registerPasskey(undefined, 'person@example.com')).rejects.toThrow('Offline')
+  expect(await hasRegisteredPasskey('person@example.com')).toBe(false)
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Storage unavailable', 'SecurityError') })
+  await expect(rememberPasskeyRegistration('person@example.com')).resolves.toBeUndefined()
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Storage unavailable', 'SecurityError') })
+  await expect(hasRegisteredPasskey('person@example.com')).resolves.toBe(false)
 })
 
 async function cancellableLogin() {
@@ -301,7 +333,10 @@ it('strips PRF outputs from both the attestation and verification assertion sent
   })
   vi.stubGlobal('fetch', fetchMock)
   try {
-    await expect(registerPasskey()).resolves.toEqual({ userId })
+    await expect(registerPasskey(undefined, 'person@example.com')).resolves.toEqual({ userId })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(await hasRegisteredPasskey('PERSON@example.com')).toBe(true)
+    await expect(registerPasskey(undefined, 'person@example.com')).rejects.toMatchObject({ code: 'already_registered' })
     expect(fetchMock).toHaveBeenCalledTimes(2)
   } finally {
     if (credentialsDescriptor) Object.defineProperty(navigator, 'credentials', credentialsDescriptor)

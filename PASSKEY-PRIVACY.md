@@ -5,6 +5,14 @@ accounts authorize Google first and use the verified email as the passkey label.
 Google authorization remains a separate authorization-code flow used to access Drive.
 The email label is visible to the browser and passkey provider. Existing passkey
 labels are updated where the provider supports WebAuthn's user-details signal.
+After successful registration or verified sign-in, this browser remembers a
+SHA-256 digest of the normalized email in localStorage to prevent accidental
+repeat registration. This hint contains no keys, tokens, or internal account IDs,
+is never sent to the server, and remains after sign-out. It is not anonymization:
+someone with browser storage access can test a known email against the digest.
+Existing accounts acquire this hint on their next verified sign-in. Other browser
+profiles, cleared or unavailable storage, and other devices cannot use it.
+The explicit lost-all-passkeys recovery flow can bypass the hint after confirmation.
 Diary files in Drive and the optional S3 backup remain plaintext; this change is
 not end-to-end encryption for diary contents.
 

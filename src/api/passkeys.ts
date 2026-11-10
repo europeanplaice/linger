@@ -1,6 +1,7 @@
 import { copyPrfOutput, createWrappedMasterKey, getVaultKey, parseWrappedMasterKey, serializeWrappedMasterKey, setVaultKeyHeader, unlockWrappedMasterKey, wrapExistingMasterKey } from '../lib/passkeyVault'
 import type { WrappedMasterKeyPayload } from '../lib/passkeyVault'
 import { AuthFlowError } from '../lib/authFeedback'
+import { hasRegisteredPasskey, rememberPasskeyRegistration } from '../lib/passkeyRegistrationHistory'
 import type { PasskeyPhase } from '../lib/authFeedback'
 
 export interface PasskeyCredentialSummary {
@@ -190,8 +191,12 @@ async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal, im
   catch (error) { prf.prfOutput?.fill(0); throw error }
 }
 
-export async function registerPasskey(signal?: AbortSignal, email?: string, onPhase?: (phase: PasskeyPhase) => void): Promise<{ userId: string }> {
+export async function registerPasskey(signal?: AbortSignal, email?: string, onPhase?: (phase: PasskeyPhase) => void, recovery = false): Promise<{ userId: string }> {
   requireWebAuthn()
+  if (!recovery && email && await hasRegisteredPasskey(email)) {
+    throw new AuthFlowError('already_registered', 'A Linger passkey was already registered in this browser for this email')
+  }
+  throwIfAborted(signal)
   const envelope = await post<OptionsEnvelope>('register/options', undefined, undefined, signal)
   if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
   throwIfAborted(signal)
@@ -206,8 +211,11 @@ export async function registerPasskey(signal?: AbortSignal, email?: string, onPh
       assertion,
       ...wrappedMasterKey,
     }, envelope.userId, signal)
-    throwIfAborted(signal)
     if (verified.userId !== envelope.userId) throw new Error('Passkey registration returned a mismatched account')
+    // Remember a committed registration even if the user cancelled while the
+    // server response was in flight. Retrying must not create another vault.
+    if (email) await rememberPasskeyRegistration(email)
+    throwIfAborted(signal)
     return { userId: verified.userId }
   } finally { prfOutput.fill(0) }
 }

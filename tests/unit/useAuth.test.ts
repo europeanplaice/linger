@@ -3,6 +3,8 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAuth } from '../../src/hooks/useAuth'
 import { AUTH_EVENT_KEY, getAccountSnapshot, setActiveAccount } from '../../src/lib/accountSession'
 import { clearOAuthCredentials, getAccessToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
+import { webcrypto } from 'node:crypto'
+import { rememberPasskeyRegistration } from '../../src/lib/passkeyRegistrationHistory'
 
 const { mockStartSignIn, mockCheckSession, mockRevokeSession } = vi.hoisted(() => ({
   mockStartSignIn: vi.fn(),
@@ -31,6 +33,24 @@ beforeEach(() => {
 })
 
 describe('useAuth', () => {
+  it('routes an already registered email to sign-in after Google account selection, even after sign-out', async () => {
+    vi.stubGlobal('crypto', webcrypto)
+    try {
+      await rememberPasskeyRegistration('USER@example.com')
+      mockRevokeSession.mockResolvedValue(undefined)
+      const { result } = renderHook(() => useAuth())
+      await waitFor(() => expect(result.current.status).toBe('signedOut'))
+      act(() => result.current.signOut())
+      act(() => result.current.beginSetup())
+      await waitFor(() => expect(result.current.vaultError).toBe('already_registered'))
+      expect(result.current.setupEmail).toBeNull()
+      expect(result.current.vaultBusy).toBe(false)
+      act(() => result.current.beginSetup(true))
+      await waitFor(() => expect(result.current.setupEmail).toBe('user@example.com'))
+      expect(result.current.vaultError).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('clears local authentication when another tab signs a different account in', async () => {
     mockCheckSession.mockResolvedValue({ signedIn: true, email: 'a@example.com', googleSub: 'a' })
     const { result } = renderHook(() => useAuth())

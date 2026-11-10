@@ -59,6 +59,7 @@ describe('authentication guidance', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
     fireEvent.click(connect)
     expect(actions.onBeginSetup).toHaveBeenCalledOnce()
+    expect(actions.onBeginSetup).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByRole('button', { name: 'Already have a Linger passkey? Sign in' }))
     expect(actions.onCancelSetup).toHaveBeenCalledOnce()
   })
@@ -70,7 +71,28 @@ describe('authentication guidance', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByText('Create a passkey').getAttribute('aria-current')).toBe('step')
     fireEvent.click(screen.getByRole('button', { name: 'Create my first Linger passkey' }))
-    expect(actions.onSetup).toHaveBeenCalledWith(0)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, false)
+  })
+
+  it('offers sign-in instead of registration for an email already used in this browser', () => {
+    const actions = gate({ error: 'already_registered' })
+    expect(screen.getByRole('alert').textContent).toContain('already been used')
+    expect(screen.queryByRole('button', { name: 'Create my first Linger passkey' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a saved passkey' }))
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, false)
+    expect(actions.onSetup).not.toHaveBeenCalled()
+  })
+
+  it('passes the recovery bypass only after acknowledgement, including with Google connected', () => {
+    const actions = gate({ error: 'cancelled', setupEmail: 'person@example.com' })
+    fireEvent.click(screen.getByText('Having trouble with your passkey?'))
+    fireEvent.click(screen.getByRole('button', { name: 'Set up again with the same Google account' }))
+    const create = screen.getByRole('button', { name: 'Create my first Linger passkey' })
+    fireEvent.click(create)
+    expect(actions.onSetup).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
+    fireEvent.click(create)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, true)
   })
 
   it('announces Google connection progress separately from passkey verification', () => {

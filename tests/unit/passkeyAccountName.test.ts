@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { webcrypto } from 'node:crypto'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkSession } from '../../src/api/auth'
+import { hasRegisteredPasskey } from '../../src/lib/passkeyRegistrationHistory'
 
 vi.mock('../../src/lib/oauthCredentials', () => ({
   getAccessToken: () => 'access', getIdToken: () => 'id',
@@ -9,7 +11,8 @@ vi.mock('../../src/lib/passkeyVault', () => ({
   getVaultUserId: () => 'user-123', setVaultKeyHeader: vi.fn(), clearVaultKey: vi.fn(),
 }))
 
-afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
+afterEach(() => { localStorage.clear(); vi.unstubAllGlobals() })
 
 describe('passkey account name', () => {
   it('signals the verified email for the unlocked passkey account', async () => {
@@ -20,9 +23,16 @@ describe('passkey account name', () => {
     }))))
 
     expect((await checkSession()).signedIn).toBe(true)
+    expect(await hasRegisteredPasskey('person@example.com')).toBe(true)
     expect(signalCurrentUserDetails).toHaveBeenCalledWith({
       rpId: location.hostname, userId: 'dXNlci0xMjM', name: 'person@example.com', displayName: 'person@example.com',
     })
+  })
+
+  it('does not remember an email from a signed-out session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ signedIn: false, email: 'person@example.com' })))
+    expect((await checkSession()).signedIn).toBe(false)
+    expect(await hasRegisteredPasskey('person@example.com')).toBe(false)
   })
 
   it('keeps login working when the provider rejects the optional update', async () => {

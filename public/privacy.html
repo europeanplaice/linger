@@ -217,6 +217,14 @@
     display preferences can also remain. You can remove local data by clearing this site's data in your browser.
   </p>
   <p>
+    To help prevent accidental repeat passkey registration, this browser also stores a hash of
+    the email used after successful registration or verified sign-in. This local hint remains
+    after sign-out until you clear this site's data. It is not sent to the server and contains
+    no keys or tokens. A hash does not make an email anonymous: someone with access to browser
+    storage can test a known email against it. The check only works in this browser profile
+    while storage is available; the confirmed lost-passkey setup flow lets you start again.
+  </p>
+  <p>
     If you export a ZIP or portable HTML file, the resulting file is downloaded to a location chosen
     by your browser. If you use the entry-sharing control, the selected text is passed to your device's
     share sheet or clipboard. What happens after that depends on the destination app or service you

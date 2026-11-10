@@ -7,9 +7,9 @@ import type { RememberDays } from '../lib/tabSession'
 interface Props {
   busy: boolean
   error: string | null
-  onSetup: (remember: RememberDays) => void
+  onSetup: (remember: RememberDays, recovery?: boolean) => void
   setupEmail: string | null
-  onBeginSetup: () => void
+  onBeginSetup: (recovery?: boolean) => void
   onCancelSetup: () => void
   onUnlock: (remember: RememberDays, preferImmediate?: boolean) => void
   phase?: PasskeyPhase | null
@@ -20,7 +20,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
   const { t, language, setLanguage } = useI18n()
   const title = useRef<HTMLHeadingElement>(null)
   const [view, setView] = useState<'welcome' | 'options' | 'setup' | 'recovery'>('welcome')
-  const currentView = view === 'welcome' && error ? 'options' : view
+  const currentView = error === 'already_registered' || (view === 'welcome' && error) ? 'options' : view
   const [recoveryConfirmed, setRecoveryConfirmed] = useState(false)
   const previousView = useRef(currentView)
   useEffect(() => {
@@ -28,7 +28,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
     previousView.current = currentView
   }, [currentView])
   const changeView = (next: typeof view) => {
-    if (currentView === 'setup' || currentView === 'recovery') onCancelSetup()
+    if (setupEmail || currentView === 'setup' || currentView === 'recovery') onCancelSetup()
     onClearError?.()
     setView(next)
     setRecoveryConfirmed(false)
@@ -67,7 +67,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
         <button className="btn-signin-google passkey-primary" type="button" disabled={busy || (recovery && !recoveryConfirmed)}
           aria-describedby={setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
           aria-busy={busy}
-          onClick={() => setup && !setupEmail ? onBeginSetup() : (setup ? onSetup(0) : unlock())}>
+          onClick={() => setup && !setupEmail ? onBeginSetup(recovery) : (setup ? onSetup(0, recovery) : unlock())}>
           {setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : options ? t.login.passkeyUnlock : t.login.passkeyOpen}
         </button>
         {(setup || options) && <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'options' : 'setup')}>

@@ -229,6 +229,40 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }))
     expect(JSON.stringify(storage)).not.toContain(keyEncoding)
 
+    // A repeat Google-first signup in the same browser must stop before a new
+    // WebAuthn registration, including after reload with the vault locked.
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Open Linger', exact: true })).toBeVisible()
+    await page.evaluate(() => {
+      navigator.credentials.get = async () => { throw new DOMException('Dismissed', 'NotAllowedError') }
+    })
+    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
+    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('already been used')
+    await expect(page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
+    expect(registrationRequests).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 1 })
+
+    // The explicit lost-all-passkeys path still creates a usable new vault.
+    await page.getByText('Having trouble with your passkey?', { exact: true }).click()
+    await page.getByRole('button', { name: 'Set up again with the same Google account' }).click()
+    await expect(page.getByRole('button', { name: 'Connect Google Drive', exact: true })).toBeDisabled()
+    await page.getByRole('checkbox', { name: /I understand/ }).check()
+    await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
+    await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
+    // Restore native WebAuthn for the new credential's PRF assertion.
+    await page.evaluate(() => {
+      navigator.credentials.get = CredentialsContainer.prototype.get.bind(navigator.credentials)
+    })
+    await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
+    expect(registrationRequests).toBe(2)
+    const recoveryUsers = db.prepare('SELECT user_id FROM passkey_credentials WHERE user_id != ?').all(userId)
+    expect(recoveryUsers).toHaveLength(1)
+    expect(forbiddenNetworkValues).toEqual([])
+
   } finally {
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId })
     db.close()
