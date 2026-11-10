@@ -70,9 +70,9 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
           onClick={() => setup && !setupEmail ? onBeginSetup(recovery) : (setup ? onSetup(0, recovery) : unlock())}>
           {setup ? (setupEmail ? t.login.passkeySetup : t.login.passkeyConnectGoogle) : options ? t.login.passkeyUnlock : t.login.passkeyOpen}
         </button>
-        {(setup || options) && <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'options' : 'setup')}>
+        <button className="btn-use-another-account" type="button" disabled={busy} onClick={() => changeView(setup ? 'options' : 'setup')}>
           {setup ? t.login.passkeyBackToSignIn : t.login.passkeyFirstTime}
-        </button>}
+        </button>
       </div>
       {options && <details className="passkey-recovery-help">
         <summary>{t.login.passkeyRecoveryTitle}</summary>

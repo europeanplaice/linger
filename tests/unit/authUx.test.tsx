@@ -16,15 +16,18 @@ function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
 }
 
 describe('authentication guidance', () => {
-  it('starts with one action and tries a saved passkey before offering registration', () => {
+  it('offers registration with another Google account from the welcome screen', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'First time using Linger? Get started' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Get started with another Google account' })).toBeTruthy()
     expect(screen.queryByText('Having trouble with your passkey?')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open Linger' }))
     expect(actions.onUnlock).toHaveBeenCalledWith(0, true)
     expect(actions.onBeginSetup).not.toHaveBeenCalled()
     expect(actions.onSetup).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Get started with another Google account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' }))
+    expect(actions.onBeginSetup).toHaveBeenCalledWith(false)
   })
 
   it('offers explicit alternatives after dismissal and retries with the full browser chooser', () => {
@@ -66,7 +69,7 @@ describe('authentication guidance', () => {
 
   it('explains the extra verification and does not offer key persistence before registration', () => {
     const actions = gate({ setupEmail: 'person@example.com', error: 'cancelled' })
-    fireEvent.click(screen.getByRole('button', { name: 'First time using Linger? Get started' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Get started with another Google account' }))
     expect(screen.getByText(/confirm it once more/)).toBeTruthy()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByText('Create a passkey').getAttribute('aria-current')).toBe('step')
