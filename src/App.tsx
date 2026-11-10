@@ -2,8 +2,8 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Sus
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
-import { clearCache, getAllDrafts } from './lib/diaryCache'
-import { announceAccount } from './lib/accountSession'
+import { clearCache, getAllDrafts, getDraft } from './lib/diaryCache'
+import { announceAccount, getAccountSnapshot } from './lib/accountSession'
 import { LocalStorageAdapter } from './lib/storageAdapter'
 import { SyncQueueManager } from './lib/syncQueue'
 import { useTheme } from './hooks/useTheme'
@@ -23,8 +23,10 @@ import { PasskeyGate } from './components/PasskeyGate'
 import { RememberDevicePrompt } from './components/RememberDevicePrompt'
 import { PasskeySettings } from './components/PasskeySettings'
 import { SessionExpiredModal } from './components/SessionExpiredModal'
+import type { AccountSwitchAvailability } from './components/SessionExpiredModal'
 import { CalendarView } from './components/CalendarView'
 import { EntryEditor } from './components/EntryEditor'
+import type { ReauthSaveFailure } from './components/EntryEditor'
 import { SearchBar } from './components/SearchBar'
 import type { SearchBarHandle } from './components/SearchBar'
 import { SettingsModal, RecollectionJourney, KeyboardShortcutsModal } from './components/lazy'
@@ -160,7 +162,7 @@ export default function App() {
     handleExpired,
     retryAfterExpired,
     vaultStatus, vaultBusy, vaultError, vaultUserId, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError,
-    vaultPhase, googleConnection, retryGoogleConnection, offerRememberDevice, dismissRememberDevice,
+    vaultPhase, googleConnection, retryGoogleConnection, savedSessionConnection, retrySavedSession, offerRememberDevice, dismissRememberDevice,
   } = useAuth()
   const { mode: themeMode, setMode: setThemeMode, toggleTheme } = useTheme()
   const { accent: accentColor, setAccent } = useAccentColor()
@@ -192,12 +194,10 @@ export default function App() {
   }, [])
   const [autoSave, setAutoSave] = useState(() => localStorage.getItem('linger_autosave') === 'true')
   const [pendingDate, setPendingDate] = useState<string | null>(null)
-  const [retrySaveAfterReauth, setRetrySaveAfterReauth] = useState(false)
-  const [accountSwitchBlocked, setAccountSwitchBlocked] = useState(false)
-  const [accountSwitchCheckReady, setAccountSwitchCheckReady] = useState(false)
-  const [accountSwitchAvailable, setAccountSwitchAvailable] = useState(false)
+  const [accountSwitch, setAccountSwitch] = useState<AccountSwitchAvailability>('checking')
   const reauthAccountSubRef = useRef<string | null>(null)
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
+  const [reauthSaveFailure, setReauthSaveFailure] = useState<ReauthSaveFailure | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recollectionOpen, setRecollectionOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -219,18 +219,19 @@ export default function App() {
 
   useEffect(() => {
     if (!tokenExpired) {
-      setAccountSwitchCheckReady(false)
-      setAccountSwitchAvailable(false)
+      setAccountSwitch('checking')
+      return
+    }
+    if (editorDirty) {
+      setAccountSwitch('blocked')
       return
     }
     let cancelled = false
-    setAccountSwitchCheckReady(false)
+    setAccountSwitch('checking')
     getAllDrafts(email ?? undefined).then(drafts => {
-      if (!cancelled) setAccountSwitchAvailable(!editorDirty && drafts.length === 0)
+      if (!cancelled) setAccountSwitch(drafts.length === 0 ? 'available' : 'blocked')
     }).catch(() => {
-      if (!cancelled) setAccountSwitchAvailable(false)
-    }).finally(() => {
-      if (!cancelled) setAccountSwitchCheckReady(true)
+      if (!cancelled) setAccountSwitch('unavailable')
     })
     return () => { cancelled = true }
   }, [tokenExpired, email, editorDirty])
@@ -598,52 +599,48 @@ export default function App() {
     [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
   )
 
-  const handleReauth = useCallback((selectAccount = false) => {
-    setAccountSwitchBlocked(false)
-    reauthAccountSubRef.current = googleSub
-    setRetrySaveAfterReauth(true)
+  const handleReauth = useCallback(() => {
     if (googleConnection === 'unavailable') void retryGoogleConnection()
-    else retryAfterExpired(selectAccount)
-  }, [googleSub, googleConnection, retryGoogleConnection, retryAfterExpired])
+    else retryAfterExpired()
+  }, [googleConnection, retryGoogleConnection, retryAfterExpired])
 
   const handleUseAnotherAccount = useCallback(() => {
-    if (!accountSwitchCheckReady || !accountSwitchAvailable || editorDirtyRef.current) {
-      setAccountSwitchBlocked(true)
-      return
-    }
+    if (accountSwitch !== 'available' || editorDirtyRef.current || diary.pendingSaveDate) return
     // A different Google sub needs a clean sign-in flow so its cache and
     // session cannot overlap the expired editor's account.
     signOut()
-  }, [accountSwitchAvailable, accountSwitchCheckReady, signOut])
+  }, [accountSwitch, diary.pendingSaveDate, signOut])
 
   useEffect(() => {
-    if (!isSignedIn || tokenExpired || !retrySaveAfterReauth) return
-    // The pending edit belongs to the account that expired. Never replay it
-    // with credentials for a different Google identity.
-    if (!reauthAccountSubRef.current || googleSub !== reauthAccountSubRef.current) {
-      setRetrySaveAfterReauth(false)
+    if (!isSignedIn) {
+      reauthAccountSubRef.current = null
+      setReauthSaveResult(null)
+      setReauthSaveFailure(null)
       return
     }
-
-    let cancelled = false
+    if (tokenExpired) {
+      reauthAccountSubRef.current = googleSub
+      setReauthSaveResult(null)
+      setReauthSaveFailure(null)
+      return
+    }
+    // The pending edit belongs to the account that expired. Never replay it
+    // with credentials for a different Google identity.
+    const previousSub = reauthAccountSubRef.current
+    reauthAccountSubRef.current = null
+    const date = diary.pendingSaveDate
+    if (!date || !previousSub || googleSub !== previousSub) return
+    const account = getAccountSnapshot()
     diary.retryPendingSave()
       .then(result => {
-        if (!cancelled && result) {
-          setReauthSaveResult(result)
-        }
+        if (result && getAccountSnapshot() === account) setReauthSaveResult(result)
       })
-      .catch(e => {
-        if (e instanceof TokenExpiredError) return
-        if (!cancelled) console.error('Pending save retry failed:', e)
+      .catch(async error => {
+        if (error instanceof TokenExpiredError || getAccountSnapshot() !== account) return
+        const draft = email ? await getDraft(date, email).catch(() => undefined) : undefined
+        if (getAccountSnapshot() === account) setReauthSaveFailure({ date, error, draftRetained: Boolean(draft) })
       })
-      .finally(() => {
-        if (!cancelled) setRetrySaveAfterReauth(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [isSignedIn, tokenExpired, retrySaveAfterReauth, googleSub, diary.retryPendingSave])
+  }, [isSignedIn, tokenExpired, googleSub, email, diary.pendingSaveDate, diary.retryPendingSave])
 
   useEffect(() => {
     if (!isSignedIn || tokenExpired || !initialLoadComplete) return
@@ -682,7 +679,7 @@ export default function App() {
   const passkeyGate = vaultStatus !== 'unlocked' ? (
     <PasskeyGate phase={vaultPhase} busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
       onSetup={(remember, recovery) => { void setupPasskey(remember, recovery) }} onUnlock={(remember, preferImmediate) => { void unlockPasskey(remember, preferImmediate) }}
-      onClearError={clearVaultError} />
+      onClearError={clearVaultError} savedSessionConnection={savedSessionConnection} onRetrySavedSession={retrySavedSession} />
   ) : undefined
 
   if (status === 'initializing') {
@@ -722,7 +719,9 @@ export default function App() {
     </a>
     <div className="app">
       <AnimatePresence>
-        {tokenExpired && <SessionExpiredModal email={email} googleConnection={googleConnection} onRetryConnection={() => handleReauth()} onReauth={() => handleReauth()} onUseAnotherAccount={handleUseAnotherAccount} switchBlocked={accountSwitchBlocked} switchAvailable={accountSwitchCheckReady && accountSwitchAvailable} signingIn={signingIn} authError={authError} />}
+        {tokenExpired && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
+          onUseAnotherAccount={handleUseAnotherAccount} accountSwitch={editorDirty || diary.pendingSaveDate ? 'blocked' : accountSwitch}
+          pendingSave={!!diary.pendingSaveDate} signingIn={signingIn} authError={authError} />}
       </AnimatePresence>
       {updatePending && (
         <div className="update-banner" role="status">
@@ -886,6 +885,7 @@ export default function App() {
           onPendingNavigate={handlePendingNavigate}
           onCancelNavigation={handleCancelNavigation}
           reauthSaveResult={reauthSaveResult}
+          reauthSaveFailure={reauthSaveFailure}
           isSignedIn={!tokenExpired}
           draftOwner={status === 'signedIn' ? email : null}
           isOnline={isOnline}

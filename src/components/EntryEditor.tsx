@@ -65,6 +65,12 @@ function stripInsertedIdeaText(text: string, inserted: readonly string[]): strin
   return inserted.reduce((acc, snippet) => (snippet ? acc.split(snippet).join(' ') : acc), text)
 }
 
+export interface ReauthSaveFailure {
+  date: string
+  error: unknown
+  draftRetained: boolean
+}
+
 interface Props {
   date: string
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
@@ -80,6 +86,7 @@ interface Props {
   onPendingNavigate: () => void
   onCancelNavigation: () => void
   reauthSaveResult: LoadedDiaryEntry | null
+  reauthSaveFailure?: ReauthSaveFailure | null
   isSignedIn: boolean
   draftOwner: string | null
   isOnline: boolean
@@ -220,7 +227,7 @@ function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeP
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, onS3StaleEntryDetected }: Props) {
+export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, reauthSaveFailure, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, onS3StaleEntryDetected }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -665,8 +672,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     onDirtyChange(isDirty)
   }, [isDirty, onDirtyChange])
 
+  const displayedReauthResult = useRef<LoadedDiaryEntry | null>(null)
   useEffect(() => {
-    if (!reauthSaveResult || reauthSaveResult.entry.date !== date) return
+    if (!reauthSaveResult || reauthSaveResult.entry.date !== date || displayedReauthResult.current === reauthSaveResult) return
+    displayedReauthResult.current = reauthSaveResult
 
     const content = reauthSaveResult.entry.content
     const currentText = textRef.current
@@ -689,9 +698,20 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
     if (currentText === previousSavedText || currentText === content) {
       setText(content)
-      setStatus(savedStatus)
+      setStatus(t.session.saveRestored)
     }
-  }, [date, reauthSaveResult, savedStatus, setBaseVersionValue, setSavedTextValue, resetS3ForVersion])
+  }, [date, reauthSaveResult, t.session.saveRestored, setBaseVersionValue, setSavedTextValue, resetS3ForVersion])
+
+  const displayedReauthFailure = useRef<ReauthSaveFailure | null>(null)
+  useEffect(() => {
+    if (!reauthSaveFailure || reauthSaveFailure.date !== date || displayedReauthFailure.current === reauthSaveFailure) return
+    displayedReauthFailure.current = reauthSaveFailure
+    if (reauthSaveFailure.error instanceof EntryConflictError) {
+      setHasConflict(true)
+      setConflictRemote(reauthSaveFailure.error.remote)
+    }
+    setStatus(reauthSaveFailure.draftRetained ? t.session.saveStillDraft : t.session.saveStillUnsaved)
+  }, [date, reauthSaveFailure, t.session.saveStillDraft, t.session.saveStillUnsaved])
 
   const pendingNavDateRef = useLatestRef(pendingNavDate)
   const onCancelNavigationRef = useLatestRef(onCancelNavigation)

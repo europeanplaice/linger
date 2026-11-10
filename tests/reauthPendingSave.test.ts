@@ -5,6 +5,7 @@ import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 async function setUpExpiredSave(
   page: import('@playwright/test').Page,
   reauthSub: 'google-a' | 'google-b',
+  retryStatus: 200 | 503 = 200,
 ) {
   await page.addInitScript(() => {
     localStorage.clear()
@@ -36,6 +37,7 @@ async function setUpExpiredSave(
       const count = Number(await page.evaluate(() => Number(sessionStorage.getItem('pendingSaveCount') ?? 0))) + 1
       await page.evaluate(value => sessionStorage.setItem('pendingSaveCount', String(value)), count)
       if (count === 1) return route.fulfill({ status: 401, body: '{}' })
+      if (retryStatus === 503) return route.fulfill({ status: 503, body: '{}' })
       return route.fulfill({ json: { id: 'saved-entry', name: 'diary-entry.txt', version: String(count) } })
     }
     return route.fulfill({ status: 404, body: '' })
@@ -46,7 +48,11 @@ async function setUpExpiredSave(
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
   await page.locator('textarea.editor-textarea').fill('Unsaved draft that must stay with Google A')
   await page.locator('button.btn-save').click()
-  await expect(page.locator('.session-expired-dialog')).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: 'Google Drive connection' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Use another account' })).toBeDisabled()
+  await expect(dialog.getByText(/Save your unsaved changes/)).toBeVisible()
+  await expect(dialog.getByText(/Linger will retry the save/)).toBeVisible()
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pendingSaveCount'))).toBe('1')
 }
 
@@ -54,7 +60,7 @@ test('pending save waits for popup completion, then retries for the same Google 
   await setUpExpiredSave(page, 'google-a')
 
   const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Log in again' }).click()
+  await page.getByRole('button', { name: 'Reconnect Google Drive' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState()
   expect(new URL(popup.url()).searchParams.get('login_hint')).toBe('google-a')
@@ -65,6 +71,21 @@ test('pending save waits for popup completion, then retries for the same Google 
     credential: { accessToken: 'token-a-reauth', idToken: 'google-a', expiresAt: Date.now() + 3600000 },
   }, location.origin))
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pendingSaveCount'))).toBe('2')
+  await expect(page.getByText('Saved to Google Drive.', { exact: true })).toBeVisible()
+  await expect(page.locator('textarea.editor-textarea')).toHaveValue('Unsaved draft that must stay with Google A')
+})
+
+test('shows that the local draft remains when the save fails after reconnection', async ({ page }) => {
+  await setUpExpiredSave(page, 'google-a', 503)
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Reconnect Google Drive' }).click()
+  const popup = await popupPromise
+  await popup.waitForLoadState()
+  await popup.evaluate(() => window.opener?.postMessage({
+    type: 'linger-oauth-complete',
+    credential: { accessToken: 'token-a-reauth', idToken: 'google-a', expiresAt: Date.now() + 3600000 },
+  }, location.origin))
+  await expect(page.getByText('Could not save to Google Drive. Your draft is still on this device.')).toBeVisible()
   await expect(page.locator('textarea.editor-textarea')).toHaveValue('Unsaved draft that must stay with Google A')
 })
 
@@ -72,7 +93,7 @@ test('pending save is not retried when reauth returns a different Google sub', a
   await setUpExpiredSave(page, 'google-b')
 
   const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Log in again' }).click()
+  await page.getByRole('button', { name: 'Reconnect Google Drive' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState()
   await popup.evaluate(() => window.opener?.postMessage({

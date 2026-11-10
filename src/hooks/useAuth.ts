@@ -15,6 +15,7 @@ export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
 export type AuthErrorCode = 'sign_in_failed' | 'account_mismatch' | 'cancelled' | 'network' | 'popup_blocked'
 export type GoogleConnection = 'idle' | 'restoring' | 'unavailable' | 'required'
+export type SavedSessionConnection = Exclude<GoogleConnection, 'required'>
 
 interface SignInOptions {
   selectAccount?: boolean
@@ -42,6 +43,8 @@ export interface AuthState {
   vaultPhase: PasskeyPhase | null
   googleConnection: GoogleConnection
   retryGoogleConnection: () => Promise<void>
+  savedSessionConnection: SavedSessionConnection
+  retrySavedSession: () => void
   offerRememberDevice: boolean
   dismissRememberDevice: () => void
   setupPasskey: (remember?: RememberDays, recovery?: boolean) => Promise<void>
@@ -78,6 +81,12 @@ export function useAuth(): AuthState {
   const [setupEmail, setSetupEmail] = useState<string | null>(null)
   const [vaultPhase, setVaultPhase] = useState<PasskeyPhase | null>(null)
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>('idle')
+  const [savedSessionConnection, setSavedSessionConnection] = useState<SavedSessionConnection>('idle')
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
+  const retrySavedSession = useCallback(() => {
+    setSavedSessionConnection('restoring')
+    setRestoreAttempt(attempt => attempt + 1)
+  }, [])
   const [offerRememberDevice, setOfferRememberDevice] = useState(false)
   const rememberDevicePromptDismissed = useRef(false)
   const dismissRememberDevice = useCallback(() => {
@@ -165,6 +174,7 @@ export function useAuth(): AuthState {
       setAuthError(null)
       setSigningIn(false)
       setGoogleConnection('idle')
+      setSavedSessionConnection('idle')
       setVaultPhase(null)
       setOfferRememberDevice(false)
     })
@@ -224,9 +234,11 @@ export function useAuth(): AuthState {
     let connectionUnavailable = false
     const revision = authRevision.current
     const startedEvent = readAuthEvent()?.id
+    const isCurrent = () => !cancelled && revision === authRevision.current
     restoring.current = true
-    restoreTabSession(() => !cancelled && revision === authRevision.current).then(async restored => {
-      if (restored) {
+    restoreTabSession(isCurrent).then(async restored => {
+      if (!isCurrent() || restored === 'unavailable') return null
+      if (restored === 'restored') {
         try {
           const refreshed = await refreshGoogleCredentials()
           if (!cancelled && revision === authRevision.current) {
@@ -244,7 +256,20 @@ export function useAuth(): AuthState {
         return { signedIn: false, email: null, googleSub: null, googleClientId: null, userId: null }
       })
     }).then(info => {
-      if (cancelled || revision !== authRevision.current) return
+      if (!isCurrent()) return
+      const account = info?.signedIn ? accountIdentity(info) : null
+      const latest = readAuthEvent()
+      if (latest && latest.id !== startedEvent && latest.account !== account) {
+        invalidateAccount()
+        return
+      }
+      restoring.current = false
+      if (!info) {
+        setSavedSessionConnection('unavailable')
+        setStatus('signedOut')
+        return
+      }
+      setSavedSessionConnection('idle')
       const activeVaultUser = getVaultUserId()
       if (activeVaultUser) {
         setVaultUserId(activeVaultUser)
@@ -253,20 +278,12 @@ export function useAuth(): AuthState {
         setVaultUserId(null)
         setVaultStatus('locked')
       }
-      const account = info.signedIn ? accountIdentity(info) : null
-      const latest = readAuthEvent()
-      if (latest && latest.id !== startedEvent && latest.account !== account) {
-        invalidateAccount()
-        return
-      }
-      restoring.current = false
       setActiveAccount(account, !info.signedIn && !connectionUnavailable)
       if (account) announceAccount(account)
       if (!connectionUnavailable || info.signedIn) rememberSession(info.signedIn)
       if (!info.signedIn) {
         if (!connectionUnavailable) clearOAuthCredentials()
         if (getVaultUserId()) saveTabSession()
-        else clearTabSession()
       }
       setStatus(info.signedIn ? 'signedIn' : 'signedOut')
       setEmail(info.email)
@@ -274,7 +291,14 @@ export function useAuth(): AuthState {
       setGoogleClientId(info.googleClientId)
     })
     return () => { cancelled = true }
-  }, [])
+  }, [restoreAttempt])
+
+  useEffect(() => {
+    if (savedSessionConnection !== 'unavailable') return
+    const timer = window.setTimeout(retrySavedSession, 30_000)
+    window.addEventListener('online', retrySavedSession)
+    return () => { window.clearTimeout(timer); window.removeEventListener('online', retrySavedSession) }
+  }, [savedSessionConnection, retrySavedSession])
 
   const signIn = useCallback((options: SignInOptions = {}) => {
     const revision = ++authRevision.current
@@ -465,6 +489,7 @@ export function useAuth(): AuthState {
   const lockVault = useCallback(() => {
     setOfferRememberDevice(false)
     setGoogleConnection('idle')
+    setSavedSessionConnection('idle')
     setVaultPhase(null)
     needsGoogleCredential.current = true
     vaultRevision.current++
@@ -484,6 +509,7 @@ export function useAuth(): AuthState {
   const signOut = useCallback(() => {
     setOfferRememberDevice(false)
     setGoogleConnection('idle')
+    setSavedSessionConnection('idle')
     setVaultPhase(null)
     needsGoogleCredential.current = true
     const account = getAccountSnapshot().account
@@ -574,5 +600,5 @@ export function useAuth(): AuthState {
     signIn({ selectAccount, expectedGoogleSub: googleSub })
   }, [googleSub, signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, vaultPhase, googleConnection, retryGoogleConnection, offerRememberDevice, dismissRememberDevice, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
+  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, vaultPhase, googleConnection, retryGoogleConnection, savedSessionConnection, retrySavedSession, offerRememberDevice, dismissRememberDevice, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
 }

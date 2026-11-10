@@ -13,7 +13,7 @@ vi.mock('../../src/lib/passkeyVault', () => ({
   clearVaultKey: () => { mocks.userId = null },
   setVaultKeyHeader: (headers: Headers) => { headers.set('X-Linger-Vault-User', mocks.userId ?? '') },
 }))
-vi.mock('../../src/lib/tabSession', () => ({ clearTabSession: vi.fn(), enableTabSession: vi.fn(), restoreTabSession: vi.fn().mockResolvedValue(false), saveTabSession: vi.fn() }))
+vi.mock('../../src/lib/tabSession', () => ({ clearTabSession: vi.fn(), enableTabSession: vi.fn(), restoreTabSession: vi.fn().mockResolvedValue('missing'), saveTabSession: vi.fn() }))
 // This suite controls refresh timers, not registration history. Native digest
 // work is not drained by fake timers or act(), so keep that separate concern
 // deterministic. Real history and crypto are covered by the passkey API tests.
@@ -81,9 +81,26 @@ async function setup() {
 }
 
 describe('Google credential recovery', () => {
+  it('validates the saved sign-in again when the browser comes back online', async () => {
+    localStorage.setItem('linger_had_session', 'true')
+    vi.mocked(restoreTabSession)
+      .mockResolvedValueOnce('unavailable')
+      .mockImplementationOnce(async () => { mocks.userId = 'vault-user'; return 'restored' })
+    const { result } = await mount()
+    expect(result.current.savedSessionConnection).toBe('unavailable')
+    expect(result.current.vaultStatus).toBe('locked')
+    expect(refresh).not.toHaveBeenCalled()
+    expect(localStorage.getItem('linger_had_session')).toBe('true')
+
+    await act(async () => { window.dispatchEvent(new Event('online')) })
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.savedSessionConnection).toBe('idle')
+    expect(result.current.vaultStatus).toBe('unlocked')
+  })
+
   it('preserves cached data and returning-user state during a reload outage', async () => {
     localStorage.setItem('linger_had_session', 'true')
-    vi.mocked(restoreTabSession).mockImplementationOnce(async () => { mocks.userId = 'vault-user'; return true })
+    vi.mocked(restoreTabSession).mockImplementationOnce(async () => { mocks.userId = 'vault-user'; return 'restored' })
     refresh.mockResolvedValueOnce(new Response('{}', { status: 503 }))
     const { result } = await mount()
     expect(result.current.googleConnection).toBe('unavailable')

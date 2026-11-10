@@ -41,6 +41,7 @@ export interface DiaryState {
   search: (query: string) => Promise<SearchResult>
   refreshEntries: () => Promise<void>
   prefetch: (dates: string[], concurrency?: number) => Promise<void>
+  pendingSaveDate: string | null
   retryPendingSave: () => Promise<LoadedDiaryEntry | null>
   exportAll: (onProgress?: (done: number, total: number) => void) => Promise<{ date: string; content: string }[]>
   importAll: (entries: { date: string; content: string }[], onProgress?: (done: number, total: number) => void) => Promise<ImportResult>
@@ -162,6 +163,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const bgActiveRef = useRef(0)
   const fgActiveRef = useRef(0)
   const pendingSaveRef = useRef<PendingSave | null>(null)
+  const [pendingSaveDate, setPendingSaveDate] = useState<string | null>(null)
   const replayingDraftsRef = useRef(false)
   const onExpiredRef = useLatestRef(onExpired)
   const onEvictedRef = useLatestRef(onEntriesEvicted)
@@ -183,6 +185,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     inflightRef.current.clear()
     saveQueueRef.current.clear()
     pendingSaveRef.current = null
+    setPendingSaveDate(null)
     replayingDraftsRef.current = false
     bgQueueRef.current.splice(0).forEach(task => task.cancel())
     bgActiveRef.current = 0
@@ -613,6 +616,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
         if (e instanceof TokenExpiredError) {
           pendingSaveRef.current = { date, content, baseVersion, baseContent }
+          setPendingSaveDate(date)
           onExpiredRef.current()
           throw e
         }
@@ -884,6 +888,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     const pending = pendingSaveRef.current
     if (!pending) return null
     pendingSaveRef.current = null
+    setPendingSaveDate(null)
     return save(pending.date, pending.content, pending.baseVersion, false, pending.baseContent, { skipDraftCheckpoint: true })
   }, [save])
 
@@ -983,5 +988,5 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const dates = useMemo(() => getScope() ? Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)) : [], [cache, getScope])
   const hasLegacyMdFiles = useMemo(() => Boolean(getScope()) && Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache, getScope])
 
-  return { loading, freshListLoaded, error, deletionCancelled, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, retryPendingSave, exportAll, importAll }
+  return { loading, freshListLoaded, error, deletionCancelled, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, pendingSaveDate, retryPendingSave, exportAll, importAll }
 }

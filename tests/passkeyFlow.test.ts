@@ -24,22 +24,13 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
   let registrationRequests = 0
+  let savedSessionUnavailable = false
   let removeCredentialBeforeAdd: { authenticatorId: string; credentialId: string } | null = null
   await page.addInitScript(() => {
     const create = navigator.credentials.create.bind(navigator.credentials)
     navigator.credentials.create = async options => {
       if (options?.publicKey) (window as unknown as { passkeyName?: string }).passkeyName = options.publicKey.user.name
       return create(options)
-    }
-    // Dismiss the first chooser to reach registration. All subsequent WebAuthn
-    // operations use the real virtual authenticator and server verification.
-    const get = navigator.credentials.get.bind(navigator.credentials)
-    navigator.credentials.get = async options => {
-      if (!sessionStorage.getItem('test-passkey-dismissed')) {
-        sessionStorage.setItem('test-passkey-dismissed', 'true')
-        throw new DOMException('No passkey selected', 'NotAllowedError')
-      }
-      return get(options)
     }
   })
   await context.route('**/auth/login?*', async route => {
@@ -48,6 +39,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   await context.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
     const path = new URL(incoming.url()).pathname.replace('/auth/passkey', '')
+    if (path === '/session' && savedSessionUnavailable) return route.fulfill({ status: 503 })
     if (path === '/register/options') registrationRequests++
     const handler = handlers[path]
     if (!handler) { await route.fulfill({ status: 404 }); return }
@@ -92,16 +84,14 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   try {
     await page.goto(origin)
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open Linger', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Choose how to continue' })).toBeFocused()
-    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await page.getByRole('button', { name: 'Get started with a Google account', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Start using Linger' })).toBeFocused()
     expect(registrationRequests).toBe(0)
     await page.getByRole('button', { name: 'Already have a Linger passkey? Sign in', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Choose how to continue' })).toBeFocused()
-    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeFocused()
+    await page.getByRole('button', { name: 'Get started with a Google account', exact: true }).click()
     await expect(page.getByRole('checkbox')).toHaveCount(0)
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
     await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
@@ -119,11 +109,21 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     expect(forbiddenNetworkValues).toEqual([])
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
 
-    // An opted-in reload validates the existing server session and restores the
-    // vault, even before Google authorization has been completed.
+    const getSavedExpiry = () => page.evaluate(() => {
+      const saved = localStorage.getItem('linger_device_session_v1')
+      return saved ? (JSON.parse(saved) as { expiresAt: number }).expiresAt : null
+    })
+    const savedExpiry = await getSavedExpiry()
+    expect(savedExpiry).toBeGreaterThan(Date.now())
+    savedSessionUnavailable = true
     await page.reload()
+    await expect(page.getByRole('heading', { name: 'Sign in on this device' })).toBeVisible()
+    await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
+    expect(await getSavedExpiry()).toBe(savedExpiry)
+    savedSessionUnavailable = false
+    await page.getByRole('button', { name: 'Retry connection' }).click()
     await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
-    expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).not.toBeNull()
+    expect(await getSavedExpiry()).toBe(savedExpiry)
     const reopened = await context.newPage()
     await reopened.goto(origin)
     await expect(reopened.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
@@ -137,7 +137,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     })
     await expect(page.getByRole('heading', { name: 'Sign in to Linger' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
+    await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible({ timeout: 20_000 })
     const firstPasskeyKey = await page.evaluate(async internalId => {
       const path = '/src/lib/passkeyVault.ts'
@@ -232,15 +232,11 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     // A repeat Google-first signup in the same browser must stop before a new
     // WebAuthn registration, including after reload with the vault locked.
     await page.reload()
-    await expect(page.getByRole('button', { name: 'Open Linger', exact: true })).toBeVisible()
-    await page.evaluate(() => {
-      navigator.credentials.get = async () => { throw new DOMException('Dismissed', 'NotAllowedError') }
-    })
-    await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
-    await page.getByRole('button', { name: 'First time using Linger? Get started', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Get started with a Google account', exact: true }).click()
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
     await expect(page.getByRole('alert')).toContainText('already been used')
-    await expect(page.getByRole('button', { name: 'Sign in with a saved passkey', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create my first Linger passkey', exact: true })).toHaveCount(0)
     expect(registrationRequests).toBe(1)
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get()).toEqual({ count: 1 })
@@ -248,15 +244,12 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     // The explicit lost-all-passkeys path still creates a usable new vault.
     await page.getByText('Having trouble with your passkey?', { exact: true }).click()
     await page.getByRole('button', { name: 'Set up again with the same Google account' }).click()
-    await expect(page.getByRole('button', { name: 'Connect Google Drive', exact: true })).toBeDisabled()
-    await page.getByRole('checkbox', { name: /I understand/ }).check()
     await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
     await expect(page.getByText('person@example.com', { exact: true })).toBeVisible()
-    // Restore native WebAuthn for the new credential's PRF assertion.
-    await page.evaluate(() => {
-      navigator.credentials.get = CredentialsContainer.prototype.get.bind(navigator.credentials)
-    })
-    await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
+    const createReplacement = page.getByRole('button', { name: 'Create a new Linger passkey', exact: true })
+    await expect(createReplacement).toBeDisabled()
+    await page.getByRole('checkbox', { name: /I understand/ }).check()
+    await createReplacement.click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
     expect(registrationRequests).toBe(2)
     const recoveryUsers = db.prepare('SELECT user_id FROM passkey_credentials WHERE user_id != ?').all(userId)
@@ -264,7 +257,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     expect(forbiddenNetworkValues).toEqual([])
 
   } finally {
-    await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId })
+    await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId }).catch(() => {})
     db.close()
   }
 })

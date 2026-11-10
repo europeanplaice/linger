@@ -531,13 +531,14 @@ html.session-restoring .landing {
 .passkey-gate-navigation .btn-use-another-account { margin: 0; min-height: 44px; padding: 0.5rem; }
 .passkey-setup-note { text-align: start; border-inline-start: 3px solid var(--border); padding-inline-start: 1rem; }
 .passkey-recovery-help { margin-top: 1.5rem; text-align: start; }
-.passkey-recovery-help summary { cursor: pointer; }
+.passkey-recovery-help summary { cursor: pointer; min-height: 44px; padding-block: 0.65rem; }
+.passkey-recovery-help .btn-use-another-account { min-height: 44px; margin: 0; padding-inline: 0; text-align: start; }
 .passkey-recovery-help input { width: 100%; }
-.passkey-recovery-help h3 { font-size: .95rem; margin-block: 1.25rem .5rem; }
+.passkey-recovery-help h2 { font-size: .95rem; margin-block: 1.25rem .5rem; }
 .passkey-recovery-help p { color: var(--text-muted); font-size: .85rem; }
 .passkey-steps { display: grid; gap: .5rem; padding-inline-start: 1.5rem; text-align: start; color: var(--text-muted); font-size: .85rem; margin-block: 1rem; }
 .passkey-steps [aria-current="step"] { color: var(--accent); font-weight: 600; }
-.passkey-progress:empty { display: none; }
+.passkey-progress:empty { position: absolute; }
 .passkey-progress { color: var(--text-muted); font-size: .85rem; }
 .passkey-duration { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-block: .5rem; }
 .passkey-duration select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: .4rem; min-height: 44px; padding: .4rem; }
@@ -4486,13 +4487,17 @@ dialog.session-expired-dialog {
   padding: 2rem;
   width: min(380px, 90vw);
   box-shadow: 0 8px 32px var(--shadow-heavy);
-  display: flex;
+  max-height: calc(100dvh - 2rem);
+  overscroll-behavior: contain;
   flex-direction: column;
   gap: 1rem;
   align-items: center;
   text-align: center;
   margin: auto;
 }
+dialog.session-expired-dialog[open] { display: flex; }
+.session-expired-dialog .btn-use-another-account { margin: 0; min-height: 44px; }
+.session-expired-dialog .btn-use-another-account:disabled { cursor: default; color: var(--text-muted); text-decoration: none; }
 dialog.session-expired-dialog::backdrop {
   background: var(--overlay-darkest);
 }

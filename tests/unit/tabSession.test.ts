@@ -27,7 +27,7 @@ describe('optional tab session', () => {
     sessionStorage.clear() // A new browser session still has the device record.
     clearVaultKey()
     clearOAuthCredentials()
-    expect(await restoreTabSession()).toBe(true)
+    expect(await restoreTabSession()).toBe('restored')
     expect(getVaultUserId()).toBe('user')
     expect(getAccessToken()).toBeNull()
     expect(fetch).toHaveBeenCalledWith('/auth/passkey/session', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
@@ -41,7 +41,7 @@ describe('optional tab session', () => {
     expect(getDeviceSessionExpiry()).toBe(expiry)
     vi.advanceTimersByTime(60_000)
     clearVaultKey()
-    expect(await restoreTabSession()).toBe(true)
+    expect(await restoreTabSession()).toBe('restored')
     expect(getDeviceSessionExpiry()).toBe(expiry)
     vi.advanceTimersByTime(24 * 60 * 60 * 1000)
     expect(getDeviceSessionExpiry()).toBeNull()
@@ -56,7 +56,7 @@ describe('optional tab session', () => {
       expect(sessionStorage.getItem('linger_tab_session_v1')).not.toContain('legacy-')
       return new Response(null, { status: 200 })
     })
-    expect(await restoreTabSession()).toBe(true)
+    expect(await restoreTabSession()).toBe('restored')
     expect(getVaultUserId()).toBe('user')
     expect(getAccessToken()).toBeNull()
   })
@@ -67,9 +67,42 @@ describe('optional tab session', () => {
     saveTabSession()
     clearVaultKey()
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 401 }))
-    expect(await restoreTabSession()).toBe(false)
+    expect(await restoreTabSession()).toBe('missing')
     expect(getVaultUserId()).toBeNull()
     expect(localStorage.getItem('linger_device_session_v1')).toBeNull()
+  })
+
+  it.each([503, 'offline'] as const)('keeps the saved session locked during a temporary failure (%s)', async failure => {
+    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
+    enableTabSession(1)
+    saveTabSession()
+    clearVaultKey()
+    const expiry = getDeviceSessionExpiry()
+
+    if (failure === 'offline') vi.mocked(fetch).mockRejectedValueOnce(new TypeError('offline'))
+    else vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: failure }))
+    expect(await restoreTabSession()).toBe('unavailable')
+    expect(getVaultUserId()).toBeNull()
+    expect(getDeviceSessionExpiry()).toBe(expiry)
+
+    vi.advanceTimersByTime(60_000)
+    expect(await restoreTabSession()).toBe('restored')
+    expect(getVaultUserId()).toBe('user')
+    expect(getDeviceSessionExpiry()).toBe(expiry)
+  })
+
+  it('does not remove another tab’s replacement when validation fails', async () => {
+    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
+    enableTabSession()
+    saveTabSession()
+    clearVaultKey()
+    const replacement = JSON.stringify({ userId: 'other', key: btoa('x'.repeat(32)), expiresAt: Date.now() + 60_000 })
+    vi.mocked(fetch).mockImplementationOnce(async () => {
+      localStorage.setItem('linger_device_session_v1', replacement)
+      return new Response(null, { status: 401 })
+    })
+    expect(await restoreTabSession()).toBe('missing')
+    expect(localStorage.getItem('linger_device_session_v1')).toBe(replacement)
   })
 
   it('expires the saved session', async () => {
@@ -80,7 +113,7 @@ describe('optional tab session', () => {
     clearVaultKey()
     clearOAuthCredentials()
     vi.advanceTimersByTime(61_000)
-    expect(await restoreTabSession()).toBe(true)
+    expect(await restoreTabSession()).toBe('restored')
     expect(getVaultUserId()).toBe('user')
     expect(getAccessToken()).toBeNull()
     vi.advanceTimersByTime(7 * 24 * 60 * 60 * 1000)
@@ -94,7 +127,7 @@ describe('optional tab session', () => {
     const initial = JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt
     vi.advanceTimersByTime(24 * 60 * 60 * 1000)
     clearVaultKey()
-    expect(await restoreTabSession()).toBe(true)
+    expect(await restoreTabSession()).toBe('restored')
     saveTabSession()
     expect(JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt).toBe(initial)
   })
@@ -108,7 +141,7 @@ describe('optional tab session', () => {
       localStorage.removeItem('linger_device_session_v1')
       return new Response(null, { status: 200 })
     })
-    expect(await restoreTabSession()).toBe(false)
+    expect(await restoreTabSession()).toBe('missing')
     expect(getVaultUserId()).toBeNull()
   })
 

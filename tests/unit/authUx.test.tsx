@@ -16,51 +16,47 @@ function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
 }
 
 describe('authentication guidance', () => {
-  it('offers registration with another Google account from the welcome screen', () => {
+  it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Get started with another Google account' })).toBeTruthy()
-    expect(screen.queryByText('Having trouble with your passkey?')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open Linger' }))
+    expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
+    expect(screen.getByText('Having trouble with your passkey?')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
     expect(actions.onUnlock).toHaveBeenCalledWith(0, true)
     expect(actions.onBeginSetup).not.toHaveBeenCalled()
     expect(actions.onSetup).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Get started with another Google account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Get started with a Google account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' }))
     expect(actions.onBeginSetup).toHaveBeenCalledWith(false)
   })
 
   it('offers explicit alternatives after dismissal and retries with the full browser chooser', () => {
     const actions = gate()
-    fireEvent.click(screen.getByRole('button', { name: 'Open Linger' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
     const renderGate = (error: string | null, busy = false) => actions.rerender(
       <I18nProvider initialLanguage="en"><PasskeyGate {...actions} busy={busy} error={error} setupEmail={null} /></I18nProvider>,
     )
     renderGate(null, true)
     expect(screen.getAllByText('Waiting for your passkey…')).toHaveLength(1)
-    expect((screen.getByRole('button', { name: 'Open Linger' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Sign in with a passkey' }) as HTMLButtonElement).disabled).toBe(true)
     renderGate('cancelled')
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Choose how to continue' }))
     expect(actions.onBeginSetup).not.toHaveBeenCalled()
     expect(actions.onSetup).not.toHaveBeenCalled()
     expect(screen.queryByRole('alert')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a saved passkey' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
     expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false)
     renderGate(null, true)
     expect(screen.getByRole('heading', { name: 'Choose how to continue' })).toBeTruthy()
   })
 
-  it('requires acknowledgement before reconnecting a completely lost account', () => {
-    const actions = gate({ error: 'cancelled' })
+  it('lets a user who lost all passkeys choose Google directly from the welcome screen', () => {
+    const actions = gate()
     fireEvent.click(screen.getByText('Having trouble with your passkey?'))
     expect(screen.getByText('Use a passkey saved on another device')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Set up again with the same Google account' }))
-    const connect = screen.getByRole('button', { name: 'Connect Google Drive' }) as HTMLButtonElement
-    expect(connect.disabled).toBe(true)
-    fireEvent.click(connect)
-    expect(actions.onBeginSetup).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
-    fireEvent.click(connect)
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' }))
     expect(actions.onBeginSetup).toHaveBeenCalledOnce()
     expect(actions.onBeginSetup).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByRole('button', { name: 'Already have a Linger passkey? Sign in' }))
@@ -69,7 +65,7 @@ describe('authentication guidance', () => {
 
   it('explains the extra verification and does not offer key persistence before registration', () => {
     const actions = gate({ setupEmail: 'person@example.com', error: 'cancelled' })
-    fireEvent.click(screen.getByRole('button', { name: 'Get started with another Google account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Get started with a Google account' }))
     expect(screen.getByText(/confirm it once more/)).toBeTruthy()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByText('Create a passkey').getAttribute('aria-current')).toBe('step')
@@ -81,16 +77,18 @@ describe('authentication guidance', () => {
     const actions = gate({ error: 'already_registered' })
     expect(screen.getByRole('alert').textContent).toContain('already been used')
     expect(screen.queryByRole('button', { name: 'Create my first Linger passkey' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a saved passkey' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
     expect(actions.onUnlock).toHaveBeenCalledWith(0, false)
     expect(actions.onSetup).not.toHaveBeenCalled()
   })
 
-  it('passes the recovery bypass only after acknowledgement, including with Google connected', () => {
+  it('requires acknowledgement for the selected Google account before creating a replacement passkey', () => {
     const actions = gate({ error: 'cancelled', setupEmail: 'person@example.com' })
     fireEvent.click(screen.getByText('Having trouble with your passkey?'))
     fireEvent.click(screen.getByRole('button', { name: 'Set up again with the same Google account' }))
-    const create = screen.getByRole('button', { name: 'Create my first Linger passkey' })
+    const create = screen.getByRole('button', { name: 'Create a new Linger passkey' })
+    expect(screen.getByText('person@example.com')).toBeTruthy()
+    expect(screen.getByText(/Drafts and settings stored only on a device may be lost/)).toBeTruthy()
     fireEvent.click(create)
     expect(actions.onSetup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
