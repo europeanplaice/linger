@@ -45,6 +45,25 @@ npm run build
 npm run ci:local     # build, lint, audit, privacy, unit, Worker, and end-to-end checks
 ```
 
+### Testing
+
+Put state transitions, validation, and UI branches in Vitest (`tests/unit`). Use
+React Testing Library for components and Hooks. For behavior spanning a Hook,
+API client, and persistent cache, keep those modules real and replace only HTTP;
+`useDiary.integration.test.ts` uses fake-indexeddb this way. Control concurrent
+responses with deferred promises and debounce time with fake timers.
+
+Keep Playwright for browser behavior (native input constraints, focus, layout,
+reloads, cross-tab messaging) and representative App journeys. SearchBar's branch
+coverage runs in Vitest; Playwright checks native length enforcement and selecting
+a search result in the App. When moving a case, verify its replacement before
+removing the browser test.
+
+```bash
+npm run test:unit -- tests/unit/searchBar.test.tsx tests/unit/useDiary.integration.test.ts
+npm test -- tests/searchBar.test.ts tests/useDiary.test.ts --project=chromium
+```
+
 ## Deployment and self-hosting
 
 GitHub Actions validates pull requests to `main` and `staging`. Pushes to those branches deploy production (`linger`) and staging (`linger-staging`); the workflow applies D1 migrations, deploys the Workflows Worker, then deploys Pages and checks the public endpoints.
