@@ -14,6 +14,13 @@ vi.mock('../../src/lib/passkeyVault', () => ({
   setVaultKeyHeader: (headers: Headers) => { headers.set('X-Linger-Vault-User', mocks.userId ?? '') },
 }))
 vi.mock('../../src/lib/tabSession', () => ({ clearTabSession: vi.fn(), enableTabSession: vi.fn(), restoreTabSession: vi.fn().mockResolvedValue(false), saveTabSession: vi.fn() }))
+// This suite controls refresh timers, not registration history. Native digest
+// work is not drained by fake timers or act(), so keep that separate concern
+// deterministic. Real history and crypto are covered by the passkey API tests.
+vi.mock('../../src/lib/passkeyRegistrationHistory', () => ({
+  hasRegisteredPasskey: vi.fn().mockResolvedValue(false),
+  rememberPasskeyRegistration: vi.fn().mockResolvedValue(undefined),
+}))
 
 const refresh = vi.fn()
 const renewed = () => new Response(JSON.stringify({ accessToken: 'renewed-access', idToken: 'renewed-id', expiresAt: Date.now() + 120_000 }))

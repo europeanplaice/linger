@@ -77,7 +77,7 @@ describe('Google-first registration', () => {
     await waitFor(() => expect(result.current.setupEmail).toBe('person@example.com'))
     await act(async () => result.current.setupPasskey())
     expect(mocks.start).toHaveBeenCalledWith({ setup: true, selectAccount: true })
-    expect(mocks.register).toHaveBeenCalledWith(expect.any(AbortSignal), 'person@example.com', expect.any(Function))
+    expect(mocks.register).toHaveBeenCalledWith(expect.any(AbortSignal), 'person@example.com', expect.any(Function), false)
     expect(mocks.refresh).toHaveBeenCalledWith(true)
     expect(result.current.status).toBe('signedIn')
   })
