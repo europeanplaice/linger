@@ -2,12 +2,103 @@ import { webcrypto } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { deletePasskey, listPasskeys, loginWithPasskey, registerPasskey } from '../../src/api/passkeys'
 import { clearVaultKey, createWrappedMasterKey, serializeWrappedMasterKey } from '../../src/lib/passkeyVault'
+import * as vault from '../../src/lib/passkeyVault'
+import { deferred } from '../helpers/deferred'
 
 const toBase64Url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 
 afterEach(() => {
   clearVaultKey()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
+})
+
+async function cancellableLogin() {
+  vi.stubGlobal('crypto', webcrypto)
+  class FakePublicKeyCredential {}
+  vi.stubGlobal('PublicKeyCredential', FakePublicKeyCredential)
+  vi.stubGlobal('isSecureContext', true)
+  const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
+  const credentialId = 'AQ'
+  const browserPrf = new Uint8Array(32).fill(0x5d)
+  const wrapper = serializeWrappedMasterKey(await createWrappedMasterKey(browserPrf, userId, credentialId))
+  clearVaultKey()
+  const credential = Object.assign(new FakePublicKeyCredential(), {
+    id: credentialId,
+    rawId: new Uint8Array([1]).buffer,
+    getClientExtensionResults: () => ({ prf: { results: { first: browserPrf.buffer } } }),
+    toJSON: () => ({ id: credentialId, rawId: credentialId, type: 'public-key', response: {} }),
+  })
+  const get = vi.fn().mockResolvedValue(credential)
+  vi.stubGlobal('navigator', { credentials: { get } })
+  const fetchMock = vi.fn(async () => Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
+  vi.stubGlobal('fetch', fetchMock)
+  const controller = new AbortController()
+  const copy = vi.spyOn(vault, 'copyPrfOutput')
+  return { userId, credentialId, wrapper, credential, get, fetchMock, controller, copy }
+}
+
+it('ignores a WebAuthn result delivered after cancellation without verifying or unlocking it', async () => {
+  const { credential, get, fetchMock, controller, copy } = await cancellableLogin()
+  const entered = deferred<void>()
+  const release = deferred<typeof credential>()
+  get.mockImplementationOnce(() => { entered.resolve(); return release.promise })
+  const login = loginWithPasskey(controller.signal)
+  const rejected = expect(login).rejects.toMatchObject({ name: 'AbortError' })
+  await entered.promise
+  controller.abort()
+  release.resolve(credential)
+  await rejected
+  expect(get).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }))
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(copy).not.toHaveBeenCalled()
+  expect(vault.getVaultKey()).toBeNull()
+})
+
+it('ignores a verification response delivered after cancellation and clears the copied PRF output', async () => {
+  const { userId, credentialId, wrapper, fetchMock, controller, copy } = await cancellableLogin()
+  const entered = deferred<void>()
+  const release = deferred<Response>()
+  fetchMock.mockImplementationOnce(async () => Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
+    .mockImplementationOnce(() => { entered.resolve(); return release.promise })
+  const login = loginWithPasskey(controller.signal)
+  const rejected = expect(login).rejects.toMatchObject({ name: 'AbortError' })
+  await entered.promise
+  const prfCopy = copy.mock.results[0].value as Uint8Array
+  expect(prfCopy).toEqual(new Uint8Array(32).fill(0x5d))
+  controller.abort()
+  release.resolve(Response.json({ userId, credentialId, wrapper }))
+  await rejected
+  expect(prfCopy).toEqual(new Uint8Array(32))
+  expect(vault.getVaultKey()).toBeNull()
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+})
+
+it('does not unlock after cancellation during decryption and clears both decrypted key and PRF output', async () => {
+  const { userId, credentialId, wrapper, fetchMock, controller, copy } = await cancellableLogin()
+  fetchMock.mockResolvedValueOnce(Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
+    .mockResolvedValueOnce(Response.json({ userId, credentialId, wrapper }))
+  const entered = deferred<ArrayBuffer>()
+  const release = deferred<void>()
+  const decrypt = webcrypto.subtle.decrypt.bind(webcrypto.subtle)
+  vi.spyOn(webcrypto.subtle, 'decrypt').mockImplementationOnce(async (...args) => {
+    const plaintext = await decrypt(...args)
+    entered.resolve(plaintext)
+    await release.promise
+    return plaintext
+  })
+  const login = loginWithPasskey(controller.signal)
+  const rejected = expect(login).rejects.toThrow()
+  const plaintext = new Uint8Array(await entered.promise)
+  expect(plaintext).toHaveLength(32)
+  expect(plaintext.some(byte => byte !== 0)).toBe(true)
+  const prfCopy = copy.mock.results[0].value as Uint8Array
+  controller.abort()
+  release.resolve()
+  await rejected
+  expect(plaintext).toEqual(new Uint8Array(32))
+  expect(prfCopy).toEqual(new Uint8Array(32))
+  expect(vault.getVaultKey()).toBeNull()
 })
 
 it('sends only same-origin passkey routes and strips PRF bytes from assertion JSON', async () => {

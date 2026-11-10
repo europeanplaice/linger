@@ -3,6 +3,7 @@ import { onRequestPost as onLogout } from '../../functions/auth/logout'
 import { onRequestGet as onSessionCheck } from '../../functions/auth/session'
 import { sessionStorageId } from '../../functions/_shared/authStore'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { GoogleAccessTokenValidationError, GoogleIdTokenValidationError } from '../../functions/_shared/google'
 
 const { mockVerifyAccess, mockVerifyId } = vi.hoisted(() => ({
   mockVerifyAccess: vi.fn().mockResolvedValue(3600),
@@ -67,6 +68,53 @@ describe('logout handler', () => {
 })
 
 describe('session check handler', () => {
+  it.each([
+    ['ID token', mockVerifyId, GoogleIdTokenValidationError],
+    ['access token', mockVerifyAccess, GoogleAccessTokenValidationError],
+  ] as const)('preserves the session and retries after a temporary %s validation failure', async (_label, verify, ValidationError) => {
+    const { env, db, headers, sessionId } = await createPasskeyTestEnv({ google_sub: 'google-sub-123' })
+    try {
+      const storedSession = db.prepare('SELECT * FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId))
+      const storedProfile = db.prepare('SELECT * FROM passkey_users').all()
+      verify.mockRejectedValueOnce(new ValidationError('private upstream details', true))
+      const invoke = () => onSessionCheck({ env, request: new Request('https://example.com/auth/session', {
+        headers: { ...headers, Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'request-id-token' },
+      }) } as never)
+      const unavailable = await invoke()
+      expect(unavailable.status).toBe(503)
+      expect(unavailable.headers.get('Retry-After')).toBe('1')
+      expect(unavailable.headers.get('Cache-Control')).toBe('no-store')
+      expect(unavailable.headers.get('Set-Cookie')).toBeNull()
+      const body = await unavailable.json()
+      expect(body).not.toHaveProperty('signedIn')
+      expect(JSON.stringify(body)).not.toContain('private upstream details')
+      expect(db.prepare('SELECT * FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId))).toEqual(storedSession)
+      expect(db.prepare('SELECT * FROM passkey_users').all()).toEqual(storedProfile)
+      const recovered = await invoke()
+      expect(recovered.status).toBe(200)
+      expect(await recovered.json()).toMatchObject({ signedIn: true, googleSub: 'google-sub-123' })
+    } finally { db.close() }
+  })
+
+  it.each([
+    ['ID token', mockVerifyId, GoogleIdTokenValidationError],
+    ['access token', mockVerifyAccess, GoogleAccessTokenValidationError],
+  ] as const)('reports signed out for a rejected %s instead of a temporary outage', async (_label, verify, ValidationError) => {
+    const { env, db, headers } = await createPasskeyTestEnv({ google_sub: 'google-sub-123' })
+    try {
+      const storedProfile = db.prepare('SELECT * FROM passkey_users').all()
+      verify.mockRejectedValueOnce(new ValidationError('invalid token', false))
+      const response = await onSessionCheck({ env, request: new Request('https://example.com/auth/session', {
+        headers: { ...headers, Authorization: 'Bearer request-access', 'X-Linger-Google-ID-Token': 'request-id-token' },
+      }) } as never)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ signedIn: false })
+      expect(response.headers.get('Retry-After')).toBeNull()
+      expect(response.headers.get('Set-Cookie')).toBeNull()
+      expect(db.prepare('SELECT * FROM passkey_users').all()).toEqual(storedProfile)
+    } finally { db.close() }
+  })
+
   it('verifies request-scoped Google credentials and seals account metadata', async () => {
     const { env, db, headers, sessionId, userId, key } = await createPasskeyTestEnv()
     const request = new Request('https://example.com/auth/session', {

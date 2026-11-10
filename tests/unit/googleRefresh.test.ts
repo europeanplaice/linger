@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost } from '../../functions/auth/refresh'
-import { openVaultValue } from '../../functions/_shared/vaultCrypto'
+import { openVaultValue, sealVaultValue } from '../../functions/_shared/vaultCrypto'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { deferred } from '../helpers/deferred'
 import { revokeD1Account, sessionStorageId } from '../../functions/_shared/authStore'
 
 const mocks = vi.hoisted(() => ({ id: vi.fn(), access: vi.fn() }))
@@ -10,6 +11,66 @@ vi.mock('../../functions/_shared/google', () => ({ verifyGoogleIdToken: mocks.id
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('encrypted Google refresh credential', () => {
+  it('encrypts a rotated refresh token and uses it for the next refresh', async () => {
+    const { env, db, headers, key, userId } = await createPasskeyTestEnv({ google_sub: 'google-user' })
+    try {
+      const envelope = await sealVaultValue(key, userId, 'google-refresh-token', { token: 'original-refresh' })
+      db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(userId, envelope, Date.now())
+      mocks.id.mockResolvedValue({ sub: 'google-user' })
+      mocks.access.mockResolvedValue(3600)
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(Response.json({ access_token: 'access', id_token: 'id', expires_in: 3600, refresh_token: 'rotated-refresh' }))
+        .mockResolvedValueOnce(Response.json({ access_token: 'access-next', id_token: 'id-next', expires_in: 3600 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const invoke = () => onRequestPost({ env, request: new Request('https://example.com/auth/refresh', {
+        method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: '{}',
+      }) } as never)
+      expect((await invoke()).status).toBe(200)
+      const stored = db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get(userId) as { envelope: string }
+      expect(stored.envelope).not.toBe(envelope)
+      expect(stored.envelope).not.toContain('rotated-refresh')
+      expect(await openVaultValue(key, userId, 'google-refresh-token', stored.envelope)).toEqual({ token: 'rotated-refresh' })
+      expect((await invoke()).status).toBe(200)
+      expect(new URLSearchParams(fetchMock.mock.calls[0][1].body).get('refresh_token')).toBe('original-refresh')
+      expect(new URLSearchParams(fetchMock.mock.calls[1][1].body).get('refresh_token')).toBe('rotated-refresh')
+      expect(db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get(userId)).toEqual(stored)
+    } finally { db.close() }
+  })
+
+  it('returns 409 instead of overwriting a newer credential when an older refresh finishes last', async () => {
+    const { env, db, headers, key, userId } = await createPasskeyTestEnv({ google_sub: 'google-user' })
+    const entered = deferred<void>()
+    const release = deferred<Response>()
+    try {
+      const envelope = await sealVaultValue(key, userId, 'google-refresh-token', { token: 'original-refresh' })
+      db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(userId, envelope, Date.now())
+      mocks.id.mockResolvedValue({ sub: 'google-user' })
+      mocks.access.mockResolvedValue(3600)
+      const fetchMock = vi.fn()
+        .mockImplementationOnce(() => { entered.resolve(); return release.promise })
+        .mockResolvedValueOnce(Response.json({ access_token: 'new-access', id_token: 'new-id', expires_in: 3600, refresh_token: 'newer-refresh' }))
+      vi.stubGlobal('fetch', fetchMock)
+      const invoke = () => onRequestPost({ env, request: new Request('https://example.com/auth/refresh', {
+        method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: '{}',
+      }) } as never)
+      const older = invoke()
+      await entered.promise
+      const newer = await invoke()
+      expect(newer.status).toBe(200)
+      const stored = db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get(userId) as { envelope: string }
+      release.resolve(Response.json({ access_token: 'old-access', id_token: 'old-id', expires_in: 3600, refresh_token: 'older-refresh' }))
+      const stale = await older
+      expect(stale.status).toBe(409)
+      expect(await stale.json()).toEqual({ error: 'Session or credential changed; retry' })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(new URLSearchParams(init.body).get('refresh_token')).toBe('original-refresh')
+      }
+      expect(db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get(userId)).toEqual(stored)
+      expect(await openVaultValue(key, userId, 'google-refresh-token', stored.envelope)).toEqual({ token: 'newer-refresh' })
+    } finally { release.resolve(new Response('{}', { status: 503 })); db.close() }
+  })
+
   it('stores only encrypted credentials, then restores them after passkey unlock', async () => {
     const { env, db, headers, key, userId } = await createPasskeyTestEnv({ google_sub: 'google-user' })
     mocks.id.mockResolvedValue({ sub: 'google-user' })
@@ -48,7 +109,6 @@ describe('encrypted Google refresh credential', () => {
 
   it('requires Google reconnection when the refresh token is rejected', async () => {
     const { env, db, headers, userId, key } = await createPasskeyTestEnv({ google_sub: 'google-user' })
-    const { sealVaultValue } = await import('../../functions/_shared/vaultCrypto')
     const envelope = await sealVaultValue(key, userId, 'google-refresh-token', { token: 'revoked' })
     db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(userId, envelope, Date.now())
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 400 })))

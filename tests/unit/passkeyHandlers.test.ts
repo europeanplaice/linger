@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { deferred } from '../helpers/deferred'
 
 const webauthn = vi.hoisted(() => ({
   generateAuthenticationOptions: vi.fn(),
@@ -54,6 +55,14 @@ async function grant(db: Awaited<ReturnType<typeof createPasskeyTestEnv>>['db'],
   db.prepare('INSERT OR REPLACE INTO passkey_management_grants (session_id, action, expires_at) VALUES (?, ?, ?)')
     .run(await sessionStorageId(sessionId), action, Date.now() + 60_000)
 }
+
+function seedCredential(db: Awaited<ReturnType<typeof createPasskeyTestEnv>>['db'], userId: string, counter = 1, id = credentialId) {
+  db.prepare(`INSERT INTO passkey_credentials (credential_id, user_id, public_key, counter, transports, prf_salt, wrapped_master_key, created_at)
+    VALUES (?, ?, ?, ?, '[]', ?, ?, ?)`)
+    .run(id, userId, new Uint8Array([1, 2, 3]), counter, prfSalt, wrappedMasterKey, Date.now())
+}
+
+afterEach(() => { vi.useRealTimers() })
 
 describe('passkey handlers', () => {
   beforeEach(() => {
@@ -184,6 +193,142 @@ describe('passkey handlers', () => {
     }))
     expect(verified.headers.get('set-cookie')).toContain('linger_session=')
     db.close()
+  })
+
+  it.each([2, 1, 0])('rejects a non-advancing signature counter of %i without issuing a session', async nextCounter => {
+    const { env, db, userId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId, 2)
+      const sessionsBefore = db.prepare('SELECT * FROM auth_sessions').all()
+      const options = await loginOptions(request('/auth/passkey/login/options'), env)
+      webauthn.verifyAuthenticationResponse.mockResolvedValueOnce({ verified: true, authenticationInfo: { newCounter: nextCounter } })
+      const result = await loginVerify(request('/auth/passkey/login/verify', {
+        response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+      }, { Cookie: challengeCookie(options) }), env)
+      expect(result.status).toBe(401)
+      expect(result.headers.get('set-cookie')).not.toContain('linger_session=')
+      expect(db.prepare('SELECT counter FROM passkey_credentials WHERE credential_id = ?').get(credentialId)).toEqual({ counter: 2 })
+      expect(db.prepare('SELECT * FROM auth_sessions').all()).toEqual(sessionsBefore)
+    } finally { db.close() }
+  })
+
+  it('allows repeated logins with an authenticator that always reports a zero counter', async () => {
+    const { env, db, userId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId, 0)
+      webauthn.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 0 } })
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const options = await loginOptions(request('/auth/passkey/login/options'), env)
+        const result = await loginVerify(request('/auth/passkey/login/verify', {
+          response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+        }, { Cookie: challengeCookie(options) }), env)
+        expect(result.status).toBe(200)
+        expect(result.headers.get('set-cookie')).toContain('linger_session=')
+      }
+      expect(db.prepare('SELECT counter FROM passkey_credentials WHERE credential_id = ?').get(credentialId)).toEqual({ counter: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS n FROM auth_sessions').get()).toEqual({ n: 3 })
+    } finally { db.close() }
+  })
+
+  it('issues only one session when simultaneous assertions race to update the same counter', async () => {
+    const { env, db, userId } = await createPasskeyTestEnv()
+    const entered = deferred<void>()
+    const release = deferred<void>()
+    try {
+      seedCredential(db, userId)
+      const firstOptions = await loginOptions(request('/auth/passkey/login/options'), env)
+      const secondOptions = await loginOptions(request('/auth/passkey/login/options'), env)
+      webauthn.verifyAuthenticationResponse.mockImplementationOnce(async () => {
+        entered.resolve()
+        await release.promise
+        return { verified: true, authenticationInfo: { newCounter: 2 } }
+      })
+      const body = { response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } } }
+      const first = loginVerify(request('/auth/passkey/login/verify', body, { Cookie: challengeCookie(firstOptions) }), env)
+      await entered.promise
+      const winner = await loginVerify(request('/auth/passkey/login/verify', body, { Cookie: challengeCookie(secondOptions) }), env)
+      release.resolve()
+      const loser = await first
+      expect(winner.status).toBe(200)
+      expect(winner.headers.get('set-cookie')).toContain('linger_session=')
+      expect(loser.status).toBe(401)
+      expect(loser.headers.get('set-cookie')).not.toContain('linger_session=')
+      expect(db.prepare('SELECT counter FROM passkey_credentials WHERE credential_id = ?').get(credentialId)).toEqual({ counter: 2 })
+      expect(db.prepare('SELECT COUNT(*) AS n FROM auth_sessions').get()).toEqual({ n: 2 })
+    } finally { release.resolve(); db.close() }
+  })
+
+  it('rejects a login challenge exactly at its expiry without checking WebAuthn or issuing a session', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-10T00:00:00Z'))
+    const { env, db, userId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId)
+      const options = await loginOptions(request('/auth/passkey/login/options'), env)
+      const expiresAt = db.prepare('SELECT expires_at FROM passkey_challenges').get() as { expires_at: number }
+      vi.setSystemTime(expiresAt.expires_at)
+      const result = await loginVerify(request('/auth/passkey/login/verify', {
+        response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+      }, { Cookie: challengeCookie(options) }), env)
+      expect(result.status).toBe(400)
+      expect(webauthn.verifyAuthenticationResponse).not.toHaveBeenCalled()
+      expect(result.headers.get('set-cookie')).toContain('Max-Age=0')
+      expect(result.headers.get('set-cookie')).not.toContain('linger_session=')
+      expect(db.prepare('SELECT COUNT(*) AS n FROM auth_sessions').get()).toEqual({ n: 1 })
+    } finally { db.close() }
+  })
+
+  it('does not accept a registration challenge for login or consume it for the wrong purpose', async () => {
+    const { env, db, userId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId)
+      const options = await registrationOptions(request('/auth/passkey/register/options'), env)
+      const challengeBefore = db.prepare('SELECT * FROM passkey_challenges').all()
+      const result = await loginVerify(request('/auth/passkey/login/verify', {
+        response: { ...assertionResponse, response: { ...assertionResponse.response, userHandle: base64url(userId) } },
+      }, { Cookie: challengeCookie(options) }), env)
+      expect(result.status).toBe(400)
+      expect(webauthn.verifyAuthenticationResponse).not.toHaveBeenCalled()
+      expect(db.prepare('SELECT * FROM passkey_challenges').all()).toEqual(challengeBefore)
+      expect(db.prepare('SELECT COUNT(*) AS n FROM auth_sessions').get()).toEqual({ n: 1 })
+    } finally { db.close() }
+  })
+
+  it.each(['add', 'delete'] as const)('rejects a %s management grant exactly at its expiry', async action => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-10T00:00:00Z'))
+    const { env, db, headers, userId, sessionId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId)
+      seedCredential(db, userId, 1, 'other-credential')
+      const credentialsBefore = db.prepare('SELECT * FROM passkey_credentials').all()
+      await grant(db, sessionId, action)
+      vi.setSystemTime(Date.now() + 60_000)
+      const result = action === 'add'
+        ? await addOptions(request('/auth/passkey/add/options', {}, headers), env)
+        : await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId: 'other-credential' }, headers), env)
+      expect(result.status).toBe(401)
+      expect(webauthn.generateRegistrationOptions).not.toHaveBeenCalled()
+      expect(db.prepare('SELECT COUNT(*) AS n FROM passkey_challenges').get()).toEqual({ n: 0 })
+      expect(db.prepare('SELECT * FROM passkey_credentials').all()).toEqual(credentialsBefore)
+    } finally { db.close() }
+  })
+
+  it.each(['add', 'delete'] as const)('does not allow a %s grant to authorize the other management action', async action => {
+    const { env, db, headers, userId, sessionId } = await createPasskeyTestEnv()
+    try {
+      seedCredential(db, userId)
+      seedCredential(db, userId, 1, 'other-credential')
+      const credentialsBefore = db.prepare('SELECT * FROM passkey_credentials').all()
+      await grant(db, sessionId, action)
+      const result = action === 'add'
+        ? await deleteCredential(request('/auth/passkey/credentials/delete', { credentialId: 'other-credential' }, headers), env)
+        : await addOptions(request('/auth/passkey/add/options', {}, headers), env)
+      expect(result.status).toBe(401)
+      expect(db.prepare('SELECT * FROM passkey_credentials').all()).toEqual(credentialsBefore)
+      expect(db.prepare('SELECT COUNT(*) AS n FROM passkey_challenges').get()).toEqual({ n: 0 })
+      expect(db.prepare('SELECT action FROM passkey_management_grants WHERE session_id = ?').get(await sessionStorageId(sessionId))).toEqual({ action })
+    } finally { db.close() }
   })
 
   it('requires a fresh, single-use assertion for credential management', async () => {
