@@ -6,6 +6,7 @@ import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
 import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../lib/tabSession'
 import type { RememberDays } from '../lib/tabSession'
+import { rememberDevicePromptDismissal, shouldOfferRememberDevicePrompt } from '../lib/rememberDevicePrompt'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
 
@@ -77,7 +78,15 @@ export function useAuth(): AuthState {
   const [vaultPhase, setVaultPhase] = useState<PasskeyPhase | null>(null)
   const [googleConnection, setGoogleConnection] = useState<GoogleConnection>('idle')
   const [offerRememberDevice, setOfferRememberDevice] = useState(false)
-  const dismissRememberDevice = useCallback(() => setOfferRememberDevice(false), [])
+  const rememberDevicePromptDismissed = useRef(false)
+  const dismissRememberDevice = useCallback(() => {
+    rememberDevicePromptDismissed.current = true
+    rememberDevicePromptDismissal()
+    setOfferRememberDevice(false)
+  }, [])
+  const offerRememberDeviceChoice = useCallback((remember: RememberDays) => {
+    setOfferRememberDevice(!remember && !rememberDevicePromptDismissed.current && shouldOfferRememberDevicePrompt())
+  }, [])
   const googleRetryInFlight = useRef(false)
   const vaultRevision = useRef(0)
   const vaultOperation = useRef<AbortController | null>(null)
@@ -387,7 +396,7 @@ export function useAuth(): AuthState {
           if (revision !== vaultRevision.current) return
           if (!getVaultUserId()) return
           setVaultStatus('unlocked')
-          setOfferRememberDevice(!remember)
+          offerRememberDeviceChoice(remember)
           return
         }
         let info
@@ -404,7 +413,7 @@ export function useAuth(): AuthState {
           if (revision === vaultRevision.current) {
             setGoogleConnection('unavailable')
             setVaultStatus('unlocked')
-            setOfferRememberDevice(true)
+            offerRememberDeviceChoice(remember)
             setSetupEmail(null)
           }
           return
@@ -412,7 +421,7 @@ export function useAuth(): AuthState {
         if (revision !== vaultRevision.current) return
         setSetupEmail(null)
         setVaultStatus('unlocked')
-        setOfferRememberDevice(true)
+        offerRememberDeviceChoice(remember)
         if (info.signedIn) {
           const account = accountIdentity(info)
           if (account) { setActiveAccount(account); announceAccount(account) }
@@ -439,7 +448,7 @@ export function useAuth(): AuthState {
       if (vaultOperation.current === controller) vaultOperation.current = null
       if (revision === vaultRevision.current) { setVaultBusy(false); setVaultPhase(null) }
     }
-  }, [email, setupEmail, retryGoogleConnection])
+  }, [email, setupEmail, retryGoogleConnection, offerRememberDeviceChoice])
 
   const setupPasskey = useCallback((remember: RememberDays = 0) => runVaultAction('setup', remember), [runVaultAction])
   const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false) => runVaultAction('unlock', remember, preferImmediate), [runVaultAction])

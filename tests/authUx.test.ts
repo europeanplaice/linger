@@ -60,8 +60,12 @@ test('offers optional device persistence inside the editor after registration', 
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
   await page.route('**/src/api/passkeys.ts*', route => route.fulfill({ contentType: 'application/javascript', body: `
     import { unlockVaultWithKey } from '/src/lib/passkeyVault.ts';
-    export async function registerPasskey() { unlockVaultWithKey('${userId}', new Uint8Array(32).fill(7)); return { userId: '${userId}' }; }
-    export async function loginWithPasskey() { throw new DOMException('No passkey selected', 'NotAllowedError'); }
+    function unlock() { unlockVaultWithKey('${userId}', new Uint8Array(32).fill(7)); return { userId: '${userId}' }; }
+    export async function registerPasskey() { sessionStorage.setItem('test-passkey-registered', 'true'); return unlock(); }
+    export async function loginWithPasskey() {
+      if (sessionStorage.getItem('test-passkey-registered')) return unlock();
+      throw new DOMException('No passkey selected', 'NotAllowedError');
+    }
     export async function addPasskey() {}
     export async function listPasskeys() { return { credentials: [], currentCredentialId: null }; }
     export async function renamePasskey() {}
@@ -90,4 +94,12 @@ test('offers optional device persistence inside the editor after registration', 
   const remaining = await page.evaluate(() => JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt - Date.now())
   expect(remaining).toBeGreaterThan(23 * 3600000)
   expect(remaining).toBeLessThanOrEqual(24 * 3600000)
+  // Requiring a new passkey after a reload must not renew the saved session or
+  // repeat a prompt the user has already answered on this browser.
+  await page.evaluate(() => localStorage.removeItem('linger_device_session_v1'))
+  await page.reload()
+  await page.getByRole('button', { name: 'Open Linger', exact: true }).click()
+  await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+  await expect(prompt).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
 })

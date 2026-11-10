@@ -6,6 +6,8 @@ import { useI18n } from '../i18n'
 import { clearTabSession, getDeviceSessionExpiry } from '../lib/tabSession'
 import { authFeedback } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
+import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
+import { RememberDevicePrompt } from './RememberDevicePrompt'
 
 export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId: string | null; busy: boolean; error: string | null; onAdd: () => Promise<void>; phase?: PasskeyPhase | null }) {
   const { t, language } = useI18n()
@@ -18,12 +20,14 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
   const [listError, setListError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deviceExpiry, setDeviceExpiry] = useState(getDeviceSessionExpiry)
+  const [choosingSignIn, setChoosingSignIn] = useState(false)
   const [renaming, setRenaming] = useState<PasskeyCredentialSummary | null>(null)
   const [name, setName] = useState('')
   const [savingName, setSavingName] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const renameDialog = useRef<HTMLDialogElement>(null)
+  const signInChoiceButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const sync = () => setDeviceExpiry(getDeviceSessionExpiry())
@@ -149,6 +153,13 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
       <p>{t.login.passkeyRememberUntil}: {new Intl.DateTimeFormat(language === 'ja' ? 'ja-JP' : 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(deviceExpiry)}</p>
       <button className="passkey-device-btn" type="button" onClick={() => { clearTabSession(); setDeviceExpiry(null); setStatus(t.login.passkeyForgotDevice) }}>{t.login.passkeyForgetDevice}</button>
     </>}
+    <button ref={signInChoiceButton} className="passkey-device-btn" type="button" disabled={busy || !userId} aria-expanded={choosingSignIn} onClick={() => setChoosingSignIn(value => !value)}>{t.login.passkeyRememberPrompt}</button>
+    {choosingSignIn && <RememberDevicePrompt onClose={() => {
+      rememberDevicePromptDismissal()
+      setChoosingSignIn(false)
+      setDeviceExpiry(getDeviceSessionExpiry())
+      signInChoiceButton.current?.focus()
+    }} />}
     {error && <p role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
     {status && <p role="status">{status}</p>}
     </div>
