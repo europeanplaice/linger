@@ -1451,20 +1451,26 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             {isFuture && t.entry.daysAhead(daysDiff)}
           </span>
         )}
-        {milestoneBadges.map(({ id, label, date: milestoneDate, distance, emoji, nthYear }) => (
-          <button
-            key={id}
-            type="button"
-            className={`editor-meta-milestone${distance === 0 ? ' editor-meta-milestone--on' : ''}`}
-            onClick={() => onSelectDate(milestoneDate)}
-            aria-label={t.entry.milestoneOpen(label, milestoneDate)}
-          >
-            {emoji ?? '🎀'}{' '}
-            {distance === 0 ? t.entry.milestoneOn(label, nthYear)
-             : distance > 0 ? t.entry.milestoneBefore(label, distance, nthYear)
-             : t.entry.milestoneAfter(label, Math.abs(distance), nthYear)}
-          </button>
-        ))}
+        {milestoneBadges.length > 0 && (
+          <div className="editor-meta-milestones">
+            {milestoneBadges.map(({ id, label, date: milestoneDate, distance, emoji, nthYear }) => (
+              <button
+                key={id}
+                type="button"
+                className={`editor-meta-milestone${distance === 0 ? ' editor-meta-milestone--on' : ''}`}
+                onClick={() => onSelectDate(milestoneDate)}
+                aria-label={t.entry.milestoneOpen(label, milestoneDate)}
+              >
+                <span className="editor-meta-milestone-label">
+                  {emoji ?? '🎀'}{' '}
+                  {distance === 0 ? t.entry.milestoneOn(label, nthYear)
+                   : distance > 0 ? t.entry.milestoneBefore(label, distance, nthYear)
+                   : t.entry.milestoneAfter(label, Math.abs(distance), nthYear)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <AnimatePresence initial={false}>
           {!isOnline && (
             <motion.span

@@ -3911,6 +3911,9 @@ dialog.milestone-form-dialog::backdrop {
   background: currentColor;
   opacity: 0.85;
 }
+.editor-meta-milestones {
+  display: contents;
+}
 .editor-meta-milestone {
   -webkit-appearance: none;
   appearance: none;
@@ -5335,6 +5338,46 @@ dialog.history-dialog::backdrop {
   .editor-meta {
     gap: 0.3rem 0.4rem;
     padding-bottom: 0.4rem;
+  }
+  .editor-meta-milestones {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 0.4rem;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  .editor-meta-milestone {
+    flex: 0 0 auto;
+    max-width: none;
+    border: none;
+    padding: 6px 0;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .editor-meta-milestone,
+  .editor-meta-milestone:hover {
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+  }
+  .editor-meta-milestone-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: inherit;
+  }
+  .editor-meta-milestone:hover .editor-meta-milestone-label {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .editor-meta-milestone--on .editor-meta-milestone-label {
+    background: var(--accent);
+  }
+  .editor-meta-milestone--on:hover .editor-meta-milestone-label {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
   }
 
   .conflict-panel {
