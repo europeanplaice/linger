@@ -33,15 +33,15 @@
     "aws4fetch": "^1.0.20",
     "diff": "^9.0.0",
     "jszip": "^3.10.2",
-    "lucide-react": "^1.70.0",
-    "motion": "^14.10.1",
+    "lucide-react": "^1.72.0",
+    "motion": "^14.12.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "unicode-emoji-json": "^0.9.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.6.0",
-    "@cloudflare/workers-types": "^5.20261108.1",
+    "@cloudflare/vitest-plugin": "^1.8.0",
+    "@cloudflare/workers-types": "^5.20261110.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.0",
     "@testing-library/react": "^16.3.3",
@@ -50,19 +50,19 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "@vitejs/plugin-react": "^6.1.2",
-    "@vitest/ui": "5.0.5",
+    "@vitejs/plugin-react": "^6.3.0",
+    "@vitest/ui": "5.1.0",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-security": "^4.2.1",
-    "fake-indexeddb": "^6.2.7",
+    "fake-indexeddb": "^6.2.8",
     "jsdom": "^31.0.0",
-    "rollup-plugin-license": "^3.7.1",
+    "rollup-plugin-license": "^3.7.2",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.72.1",
-    "vite": "^8.3.6",
-    "vitest": "5.0.5",
-    "wrangler": "^4.158.0"
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.8",
+    "vitest": "5.1.0",
+    "wrangler": "^4.160.1"
   },
   "overrides": {
     "esbuild": "^0.28.2",
@@ -76,6 +76,6 @@
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
-    "workerd@1.20261104.1": true
+    "workerd@1.20261110.1": true
   }
 }
