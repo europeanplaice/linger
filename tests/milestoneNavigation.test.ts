@@ -15,8 +15,8 @@ test.beforeEach(async ({ page }) => {
   await page.route('/api/drive/entries', route => route.fulfill({
     json: {
       files: [
-        { id: 'current-file', name: `diary-${currentDate}.txt`, version: '1' },
-        { id: 'milestone-file', name: `diary-${milestoneDate}.txt`, version: '1' },
+        { id: `${currentDate}-file`, name: `diary-${currentDate}.txt`, version: '1' },
+        { id: `${milestoneDate}-file`, name: `diary-${milestoneDate}.txt`, version: '1' },
       ],
     },
   }))
