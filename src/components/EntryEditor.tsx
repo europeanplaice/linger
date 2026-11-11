@@ -196,31 +196,32 @@ interface SyncBadgeProps {
 }
 
 function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeProps) {
+  const Badge = onClick ? 'button' : 'div'
   return (
-    <div
+    <Badge
+      type={onClick ? 'button' : undefined}
       className={`editor-meta-badge editor-meta-badge--${status}`}
       title={title}
       aria-label={label}
       aria-busy={busy || undefined}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
     >
-      <div className="editor-meta-badge-icon-wrapper">{busy ? <SpinnerIcon /> : children}</div>
-      <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
-        {status === 'synced' && (
-          <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
-            <path d="M2.5 5L4.5 7L7.5 3" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        )}
-        {status === 'failed' && (
-          <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
-            <path d="M3 3L7 7M7 3L3 7" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round"/>
-          </svg>
-        )}
+      <span className="editor-meta-badge-icon-wrapper">
+        {busy ? <SpinnerIcon /> : children}
+        <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
+          {status === 'synced' && (
+            <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
+              <path d="M2.5 5L4.5 7L7.5 3" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+          {status === 'failed' && (
+            <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
+              <path d="M3 3L7 7M7 3L3 7" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+          )}
+        </span>
       </span>
-    </div>
+    </Badge>
   )
 }
 

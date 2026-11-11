@@ -1877,13 +1877,14 @@ dialog.settings-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
-  font-size: 0.62rem;
+  font-size: 0.8125rem;
   font-weight: 700;
-  color: var(--save-success-flash);
-  background: color-mix(in srgb, var(--save-success-flash) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--save-success-flash) 35%, transparent);
+  color: var(--deployment-success);
+  background: color-mix(in srgb, var(--deployment-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--deployment-success) 35%, transparent);
   border-radius: 999px;
-  padding: 0.12rem 0.45rem;
+  padding: 0.2rem 0.5rem;
+  line-height: 1.4;
   animation: settings-applied-pop 0.18s ease-out;
 }
 @keyframes settings-applied-pop {
@@ -2544,7 +2545,7 @@ dialog.settings-dialog::backdrop {
   height: 1rem;
   left: 0.5rem;
   position: absolute;
-  top: 0.5rem;
+  top: calc(50% - 0.5rem);
   transition: background 0.15s;
   width: 1.75rem;
 }
@@ -2562,7 +2563,7 @@ dialog.settings-dialog::backdrop {
   height: 0.75rem;
   left: 0.625rem;
   position: absolute;
-  top: 0.625rem;
+  top: calc(50% - 0.375rem);
   transition: transform 0.15s;
   width: 0.75rem;
 }
@@ -2577,7 +2578,7 @@ dialog.settings-dialog::backdrop {
 .settings-milestone-badge-label {
   color: var(--text-muted);
   cursor: default;
-  font-size: 0.72rem;
+  font-size: 0.8125rem;
   user-select: none;
   display: inline-flex;
   align-items: center;
@@ -3019,11 +3020,11 @@ dialog.settings-dialog::backdrop {
   display: inline-block;
 }
 .settings-milestone-recurring-tag {
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   font-weight: 600;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
-  padding: 0.05rem 0.35rem;
+  padding: 0.2rem 0.4rem;
   border-radius: 4px;
   margin-left: 0.4rem;
   vertical-align: middle;
@@ -3784,8 +3785,14 @@ dialog.milestone-form-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   border-radius: 6px;
   cursor: default;
   transition: background-color 0.2s ease;
@@ -3796,17 +3803,23 @@ dialog.milestone-form-dialog::backdrop {
 }
 
 .editor-meta-badge-icon-wrapper {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  width: 24px;
+  height: 24px;
 }
 
 .editor-meta-badge-icon-wrapper svg {
   display: block;
   opacity: 0.85;
   transition: opacity 0.2s ease;
+}
+
+.editor-meta-badge-icon-wrapper > svg {
+  width: 22px;
+  height: 22px;
 }
 
 .editor-meta-badge:hover svg {
@@ -3817,8 +3830,8 @@ dialog.milestone-form-dialog::backdrop {
   position: absolute;
   bottom: -1px;
   right: -1px;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -3880,8 +3893,8 @@ dialog.milestone-form-dialog::backdrop {
 }
 
 .editor-meta-badge-status-svg {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   display: block;
   color: #ffffff;
 }
@@ -3907,21 +3920,21 @@ dialog.milestone-form-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   font-family: inherit;
-  font-size: 0.68rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--accent);
   background: transparent;
   border-radius: 999px;
-  padding: 0.1rem 0.5rem;
+  padding: 0.25rem 0.6rem;
+  min-height: 28px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: start;
   line-height: 1.4;
   position: relative;
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s, transform 0.15s;
-}
-.editor-meta-milestone::after {
-  content: '';
-  position: absolute;
-  inset: -6px -4px;
 }
 .editor-meta-milestone:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -3944,14 +3957,15 @@ dialog.milestone-form-dialog::backdrop {
 .editor-meta-today {
   display: inline-flex;
   align-items: center;
-  font-size: 0.68rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--today-text);
   background: color-mix(in srgb, var(--today-text) 14%, transparent);
   border-radius: 999px;
-  padding: 0.1rem 0.5rem;
+  padding: 0.2rem 0.6rem;
+  min-height: 24px;
   line-height: 1.4;
 }
 .entry-date-weekday {
@@ -5036,14 +5050,14 @@ dialog.history-dialog::backdrop {
   color: var(--text);
 }
 .history-revision-badge {
-  font-size: 0.7rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .unsaved-badge {
-  color: var(--warn, #e0a800);
+  color: var(--unsaved-text);
 }
 .history-preview-pane {
   flex: 1;
@@ -5167,6 +5181,32 @@ dialog.history-dialog::backdrop {
   padding: 0.75rem 1rem;
   font-size: 0.82rem;
   color: var(--danger);
+}
+
+/* Keep compact icons inside separate touch targets, without overlapping hit areas. */
+@media (max-width: 640px), (pointer: coarse) {
+  .editor-meta-badge {
+    width: 44px;
+    height: 44px;
+  }
+
+  .editor-meta-milestone {
+    min-width: 44px;
+    min-height: 44px;
+    padding-block: 0.5rem;
+  }
+
+  .infotip-btn,
+  .settings-milestone-badge-toggle,
+  .settings-milestone-edit,
+  .settings-milestone-remove {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .settings-item-label-group {
+    flex-wrap: wrap;
+  }
 }
 
 /* ── Mobile ── */
@@ -5295,22 +5335,6 @@ dialog.history-dialog::backdrop {
   .editor-meta {
     gap: 0.3rem 0.4rem;
     padding-bottom: 0.4rem;
-  }
-
-  .editor-meta-badge {
-    width: 18px;
-    height: 18px;
-    border-radius: 5px;
-  }
-
-  .editor-meta-badge-icon-wrapper svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .editor-meta-badge-status {
-    width: 7px;
-    height: 7px;
   }
 
   .conflict-panel {
