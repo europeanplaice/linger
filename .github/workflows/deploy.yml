@@ -107,6 +107,7 @@ jobs:
 
   e2e-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -119,9 +120,18 @@ jobs:
 
       - run: npm ci
 
-      - run: npx playwright install --with-deps chromium webkit
+      - name: Install Playwright browsers and system dependencies
+        timeout-minutes: 5
+        run: |
+          # Skip the Azure mirror when its DNS or downloads are unavailable.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          npx playwright install --with-deps chromium webkit
 
-      - run: npm test
+      - name: Run E2E tests
+        timeout-minutes: 20
+        run: npm test
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()
