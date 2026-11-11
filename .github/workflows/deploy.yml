@@ -110,7 +110,7 @@ jobs:
     timeout-minutes: 30
     container:
       # Keep this version aligned with Playwright in package-lock.json.
-      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:824eba0ac40c10825ec9fb2e64c80d4dea66af55dbc4d25018f40f6f9a99e585
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
       options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
