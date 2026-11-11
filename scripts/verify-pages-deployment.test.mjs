@@ -104,3 +104,45 @@ test('rejects an asset redirect outside the Pages deployment origin', async () =
     globalThis.fetch = originalFetch
   }
 })
+
+test('verifies the configured Pages Analytics injection while rejecting other byte changes', async (t) => {
+  const originalFetch = globalThis.fetch
+  const deploymentUrl = new URL('https://preview.example.pages.dev')
+  const token = '0123456789abcdef0123456789abcdef'
+  const source = '<!doctype html><html><body>Home</body></html>'
+  // Captured format from an actual Pages response; keep this independent of
+  // the verifier's template so changes to the accepted injection are reviewed.
+  const beacon = '<!-- Cloudflare Pages Analytics --><script defer src=\'https://static.cloudflareinsights.com/beacon.min.js\' data-cf-beacon=\'{"token": "0123456789abcdef0123456789abcdef"}\'></script><!-- Cloudflare Pages Analytics -->'
+  const injected = source.replace('</body>', `${beacon}</body>`)
+  const cases = [
+    { name: 'original bytes still match', served: source, config: { web_analytics_token: token }, accepted: true },
+    { name: 'exact injection matches project metadata', served: injected, config: { web_analytics_token: token }, accepted: true },
+    { name: 'missing project token', served: injected, config: {} },
+    { name: 'different project token', served: injected, config: { web_analytics_token: 'f'.repeat(32) } },
+    { name: 'changed page content', served: injected.replace('Home', 'Changed'), config: { web_analytics_token: token } },
+    { name: 'changed beacon source', served: injected.replace('static.cloudflareinsights.com', 'example.com'), config: { web_analytics_token: token } },
+    { name: 'additional script attributes', served: injected.replace('<script defer', '<script onload="alert(1)" defer'), config: { web_analytics_token: token } },
+    { name: 'duplicate beacon', served: injected.replace('</body>', `${beacon}</body>`), config: { web_analytics_token: token } },
+    { name: 'injection at a different location', served: source.replace('Home', `${beacon}Home`), config: { web_analytics_token: token } },
+    { name: 'non-HTML content type', served: injected, config: { web_analytics_token: token }, contentType: 'text/plain' },
+    { name: 'non-HTML asset', served: injected, config: { web_analytics_token: token }, relativePath: 'asset.js' },
+  ]
+
+  try {
+    for (const example of cases) {
+      await t.test(example.name, async () => {
+        globalThis.fetch = async () => new Response(example.served, {
+          headers: { 'content-type': example.contentType ?? 'text/html; charset=utf-8' },
+        })
+        await withAsset(source, async (asset) => {
+          if (example.relativePath) asset.relativePath = example.relativePath
+          const verification = verifyAsset(deploymentUrl, asset, example.config)
+          if (example.accepted) await verification
+          else await assert.rejects(verification, /SHA-256 mismatch/)
+        })
+      })
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

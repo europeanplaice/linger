@@ -61,6 +61,9 @@ resource "cloudflare_pages_project" "linger" {
 
   lifecycle {
     ignore_changes = [
+      # Preserve Analytics settings managed in the Pages dashboard.
+      build_config.web_analytics_tag,
+      build_config.web_analytics_token,
       deployment_configs.preview.env_vars,
       deployment_configs.production.env_vars,
       # Wrangler deploys service bindings; provider 5.22 cannot round-trip their

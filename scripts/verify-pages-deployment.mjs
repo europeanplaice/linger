@@ -99,6 +99,21 @@ async function getProductionDeployments(accountId, projectName, apiToken) {
     .sort((left, right) => Date.parse(right.created_on) - Date.parse(left.created_on))
 }
 
+async function getPagesBuildConfig(accountId, projectName, apiToken) {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}` +
+    `/pages/projects/${encodeURIComponent(projectName)}`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || !payload?.success || payload.result?.name !== projectName) {
+    throw new Error(`Could not read Cloudflare Pages project configuration (HTTP ${response.status})`)
+  }
+  return payload.result.build_config ?? {}
+}
+
 async function waitForExpectedDeployment({ accountId, projectName, apiToken, expectedSha, expectedBranch, expectedDirty, deployStartedAt }) {
   const deadline = Date.now() + POLL_TIMEOUT_MS
   let latest
@@ -164,7 +179,20 @@ export function deploymentOrigin(deploymentUrl, expectedDeploymentUrl) {
   return url
 }
 
-export async function verifyAsset(deploymentUrl, asset) {
+function withPagesAnalytics(expectedBytes, token) {
+  if (typeof token !== 'string' || !/^[\da-f]{32}$/i.test(token)) return undefined
+  const html = expectedBytes.toString('utf8')
+  const bodyEnd = html.lastIndexOf('</body>')
+  if (bodyEnd === -1 || !Buffer.from(html).equals(expectedBytes)) return undefined
+
+  // Pages inserts this exact block immediately before the closing body tag.
+  // The token comes from this project's authenticated API metadata. Pages can
+  // inject it even when the deployment's build_config omits Analytics settings.
+  const beacon = `<!-- Cloudflare Pages Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${token}"}'></script><!-- Cloudflare Pages Analytics -->`
+  return Buffer.from(html.slice(0, bodyEnd) + beacon + html.slice(bodyEnd))
+}
+
+export async function verifyAsset(deploymentUrl, asset, buildConfig = {}) {
   const encodedPath = asset.relativePath.split('/').map(encodeURIComponent).join('/')
   const url = new URL(encodedPath, deploymentUrl)
   const [expectedBytes, response] = await Promise.all([
@@ -183,6 +211,11 @@ export async function verifyAsset(deploymentUrl, asset) {
   const expectedHash = sha256(expectedBytes)
   const deployedHash = sha256(deployedBytes)
   if (expectedHash !== deployedHash) {
+    const analyticsBytes = asset.relativePath.endsWith('.html') &&
+      response.headers.get('content-type')?.includes('text/html')
+      ? withPagesAnalytics(expectedBytes, buildConfig.web_analytics_token)
+      : undefined
+    if (analyticsBytes && sha256(analyticsBytes) === deployedHash) return
     throw new Error(`${asset.relativePath}: SHA-256 mismatch (build=${expectedHash}, deployed=${deployedHash})`)
   }
 }
@@ -245,13 +278,13 @@ async function fetchAsset(url, deploymentUrl, relativePath) {
   throw new Error(`${relativePath}: deployment exceeded ${MAX_ASSET_REDIRECTS} redirects`)
 }
 
-async function verifyAssets(deployment, origin, distDirectory) {
+async function verifyAssets(origin, distDirectory, buildConfig) {
   const files = await listStaticFiles(distDirectory)
   if (files.length === 0) throw new Error(`No static files found in ${distDirectory}`)
 
   const concurrency = 6
   for (let offset = 0; offset < files.length; offset += concurrency) {
-    await Promise.all(files.slice(offset, offset + concurrency).map((file) => verifyAsset(origin, file)))
+    await Promise.all(files.slice(offset, offset + concurrency).map((file) => verifyAsset(origin, file, buildConfig)))
   }
 
   return files.length
@@ -290,11 +323,12 @@ async function main() {
     deployStartedAt,
   })
   const origin = deploymentOrigin(deployment.url, expectedDeploymentUrl)
-  const assetCount = await verifyAssets(deployment, origin, distDirectory)
+  const buildConfig = await getPagesBuildConfig(accountId, projectName, apiToken)
+  const assetCount = await verifyAssets(origin, distDirectory, buildConfig)
 
   console.log(
     `Verified Cloudflare Pages production deployment ${deployment.id}: ` +
-    `sha=${expectedSha}, branch=${expectedBranch}, ${assetCount} static assets match ${deployment.url}`,
+    `sha=${expectedSha}, branch=${expectedBranch}, ${assetCount} static assets verified at ${deployment.url}`,
   )
 }
 
