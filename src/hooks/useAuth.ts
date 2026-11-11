@@ -395,6 +395,14 @@ export function useAuth(): AuthState {
   }, [])
 
   const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false, recovery = false) => {
+    if (action !== 'add') {
+      // Explicit authentication supersedes startup restoration. A delayed
+      // response must not invalidate the account unlocked by this operation.
+      authRevision.current++
+      restoring.current = false
+      setSavedSessionConnection('idle')
+      setStatus(current => current === 'initializing' ? 'signedOut' : current)
+    }
     const revision = ++vaultRevision.current
     vaultOperation.current?.abort()
     const controller = new AbortController()

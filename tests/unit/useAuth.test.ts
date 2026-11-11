@@ -5,6 +5,15 @@ import { AUTH_EVENT_KEY, getAccountSnapshot, setActiveAccount } from '../../src/
 import { clearOAuthCredentials, getAccessToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 import { webcrypto } from 'node:crypto'
 import { rememberPasskeyRegistration } from '../../src/lib/passkeyRegistrationHistory'
+import { clearVaultKey, getVaultUserId, unlockVaultWithKey } from '../../src/lib/passkeyVault'
+import { loginWithPasskey } from '../../src/api/passkeys'
+import { deferred } from '../helpers/deferred'
+
+vi.mock('../../src/api/passkeys', () => ({
+  loginWithPasskey: vi.fn(),
+  registerPasskey: vi.fn(),
+  addPasskey: vi.fn(),
+}))
 
 const { mockStartSignIn, mockCheckSession, mockRevokeSession } = vi.hoisted(() => ({
   mockStartSignIn: vi.fn(),
@@ -23,8 +32,10 @@ vi.mock('../../src/api/auth', () => ({
 
 beforeEach(() => {
   localStorage.clear()
+  clearVaultKey()
   clearOAuthCredentials()
   setActiveAccount(null, true)
+  vi.mocked(loginWithPasskey).mockReset()
   mockStartSignIn.mockReset()
   mockStartSignIn.mockResolvedValue({ signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123', googleClientId: 'client-id' })
   mockCheckSession.mockReset()
@@ -33,6 +44,73 @@ beforeEach(() => {
 })
 
 describe('useAuth', () => {
+  it.each([false, true])('ignores a late startup session response after passkey sign-in (previously signed in: %s)', async previouslySignedIn => {
+    const startup = deferred<{ signedIn: boolean; email: string | null; googleSub?: string }>()
+    mockCheckSession.mockReturnValueOnce(startup.promise)
+    const signedIn = { signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123', userId: 'vault-user' }
+    mockCheckSession.mockResolvedValue(signedIn)
+    vi.mocked(loginWithPasskey).mockImplementationOnce(async () => {
+      unlockVaultWithKey('vault-user', new Uint8Array(32).fill(7))
+      return { userId: 'vault-user' }
+    })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(mockCheckSession).toHaveBeenCalledTimes(1))
+
+    await act(async () => { await result.current.unlockPasskey() })
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.vaultStatus).toBe('unlocked')
+
+    await act(async () => {
+      startup.resolve(previouslySignedIn
+        ? { signedIn: true, email: 'previous@example.com', googleSub: 'previous-account' }
+        : { signedIn: false, email: null })
+    })
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.vaultStatus).toBe('unlocked')
+    expect(result.current.email).toBe(signedIn.email)
+    expect(getVaultUserId()).toBe('vault-user')
+    expect(getAccountSnapshot().account).toBe('sub:google-sub-123')
+  })
+
+  it('keeps the passkey unlocked when startup finishes during Google restoration', async () => {
+    const startup = deferred<{ signedIn: boolean; email: null }>()
+    const connection = deferred<{ signedIn: boolean; email: string; googleSub: string }>()
+    mockCheckSession.mockReturnValueOnce(startup.promise).mockReturnValueOnce(connection.promise)
+    vi.mocked(loginWithPasskey).mockImplementationOnce(async () => {
+      unlockVaultWithKey('vault-user', new Uint8Array(32).fill(7))
+      return { userId: 'vault-user' }
+    })
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(mockCheckSession).toHaveBeenCalledTimes(1))
+
+    let login!: Promise<void>
+    act(() => { login = result.current.unlockPasskey() })
+    await waitFor(() => expect(result.current.googleConnection).toBe('restoring'))
+    await act(async () => { startup.resolve({ signedIn: false, email: null }) })
+    expect(getVaultUserId()).toBe('vault-user')
+    expect(result.current.vaultBusy).toBe(true)
+
+    await act(async () => {
+      connection.resolve({ signedIn: true, email: 'user@example.com', googleSub: 'google-sub-123' })
+      await login
+    })
+    expect(result.current.status).toBe('signedIn')
+    expect(result.current.vaultStatus).toBe('unlocked')
+    expect(result.current.vaultBusy).toBe(false)
+  })
+
+  it('leaves initialization when passkey sign-in supersedes startup but is cancelled', async () => {
+    mockCheckSession.mockReturnValueOnce(new Promise(() => {}))
+    vi.mocked(loginWithPasskey).mockRejectedValueOnce(new DOMException('Cancelled', 'NotAllowedError'))
+    const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(mockCheckSession).toHaveBeenCalledTimes(1))
+    await act(async () => { await result.current.unlockPasskey() })
+    expect(result.current.status).toBe('signedOut')
+    expect(result.current.vaultStatus).toBe('locked')
+    expect(result.current.vaultBusy).toBe(false)
+    expect(result.current.vaultError).toBe('cancelled')
+  })
+
   it('routes an already registered email to sign-in after Google account selection, even after sign-out', async () => {
     vi.stubGlobal('crypto', webcrypto)
     try {
