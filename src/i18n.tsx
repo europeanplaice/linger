@@ -39,7 +39,8 @@ const dictionaries = {
       deletionCancelled: 'A queued deletion was cancelled because the entry changed or could not be verified. Open the entry to review it.',
       noEntriesHint: 'No entries yet. Start by writing today\'s diary.',
       loading: 'Loading…',
-      updateAvailable: 'An update is available. Save your work and the app will refresh automatically.',
+      updateAvailable: 'An update is available. Save your work first; you may need to sign in again.',
+      updateNow: 'Update',
     },
     recollection: {
       open: 'Looking back',
@@ -548,7 +549,8 @@ const dictionaries = {
       deletionCancelled: '日記の変更、または削除対象を確認できなかったため、予約していた削除を取り消しました。日記を開いて確認してください。',
       noEntriesHint: 'まだ日記がありません。今日から書き始めましょう！',
       loading: '読み込み中...',
-      updateAvailable: 'アップデートがあります。作業内容を保存すると、アプリが自動的に更新されます。',
+      updateAvailable: 'アップデートがあります。作業内容を保存してください。再ログインが必要になる場合があります。',
+      updateNow: '更新',
     },
     recollection: {
       open: 'ふりかえり',

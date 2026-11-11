@@ -349,7 +349,7 @@ describe('useServiceWorkerUpdate', () => {
   })
 
   describe('updatePending banner', () => {
-    it('returns updatePending=false initially', async () => {
+    it('shows a waiting update immediately', async () => {
       const reg = new MockRegistration()
       reg.waiting = new MockServiceWorker()
       Object.defineProperty(navigator, 'serviceWorker', {
@@ -359,7 +359,7 @@ describe('useServiceWorkerUpdate', () => {
       const { result } = renderHook(() => useServiceWorkerUpdate(false))
       await act(async () => {})
 
-      expect(result.current.updatePending).toBe(false)
+      expect(result.current.updatePending).toBe(true)
     })
 
     it('sets updatePending=true after 30 minutes when a waiting SW is present', async () => {
@@ -416,22 +416,6 @@ describe('useServiceWorkerUpdate', () => {
       expect(result.current.updatePending).toBe(true)
     })
 
-    it('clears the banner timer on unmount', async () => {
-      const reg = new MockRegistration()
-      reg.waiting = new MockServiceWorker()
-      Object.defineProperty(navigator, 'serviceWorker', {
-        configurable: true,
-        value: makeMockContainer(reg),
-      })
-      const { result, unmount } = renderHook(() => useServiceWorkerUpdate(false))
-      await act(async () => {})
-
-      unmount()
-      act(() => { vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
-
-      expect(result.current.updatePending).toBe(false)
-    })
-
     it('ignores sw.ready resolution after unmount (cancelled flag)', async () => {
       const reg = new MockRegistration()
       reg.waiting = new MockServiceWorker()
@@ -468,6 +452,33 @@ describe('useServiceWorkerUpdate', () => {
 
       act(() => { result.current.dismissUpdate() })
       expect(result.current.updatePending).toBe(false)
+    })
+  })
+
+  describe('manual update', () => {
+    it('activates and reloads a visible signed-in session when requested', async () => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      const container = makeMockContainer(reg)
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+      const { result } = renderHook(() => useServiceWorkerUpdate(false, true))
+      await act(async () => {})
+      act(() => { result.current.applyUpdate() })
+      expect(reg.waiting.postMessage).toHaveBeenCalledWith('SKIP_WAITING')
+      act(() => { container.dispatchEvent(new Event('controllerchange')) })
+      expect(window.location.reload).toHaveBeenCalledOnce()
+    })
+
+    it('does not apply a manual update while edits are unsaved', async () => {
+      const reg = new MockRegistration()
+      reg.waiting = new MockServiceWorker()
+      Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: makeMockContainer(reg) })
+      const { result } = renderHook(() => useServiceWorkerUpdate(true, true))
+      await act(async () => {})
+      act(() => { result.current.applyUpdate() })
+      expect(reg.waiting.postMessage).not.toHaveBeenCalled()
+      expect(window.location.reload).not.toHaveBeenCalled()
     })
   })
 

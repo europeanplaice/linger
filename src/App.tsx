@@ -183,7 +183,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(todayYmd)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
-  const { triggerUpdateCheck, updatePending, dismissUpdate } = useServiceWorkerUpdate(
+  const { triggerUpdateCheck, updatePending, dismissUpdate, applyUpdate } = useServiceWorkerUpdate(
     editorDirty,
     status !== 'signedOut' || vaultStatus === 'unlocked' || vaultBusy || signingIn || setupEmail !== null,
   )
@@ -729,6 +729,7 @@ export default function App() {
       {updatePending && (
         <div className="update-banner" role="status">
           <span>{t.app.updateAvailable}</span>
+          <button className="update-banner-action" onClick={applyUpdate} disabled={editorDirty}>{t.app.updateNow}</button>
           <button className="update-banner-dismiss" onClick={dismissUpdate} aria-label="Dismiss">✕</button>
         </div>
       )}
