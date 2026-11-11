@@ -183,7 +183,10 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(todayYmd)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editorDirty, setEditorDirty] = useState(false)
-  const { triggerUpdateCheck, updatePending, dismissUpdate } = useServiceWorkerUpdate(editorDirty)
+  const { triggerUpdateCheck, updatePending, dismissUpdate } = useServiceWorkerUpdate(
+    editorDirty,
+    status !== 'signedOut' || vaultStatus === 'unlocked' || vaultBusy || signingIn || setupEmail !== null,
+  )
   useDeployVersionCheck(triggerUpdateCheck)
 
   // The `session-restoring` class (set by an inline script in index.html when a

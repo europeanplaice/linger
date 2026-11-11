@@ -211,12 +211,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const updateCache = useCallback((updater: (prev: Map<string, EntryCache>) => Map<string, EntryCache>) => {
     const scope = getScope()
     if (!scope) return
-    setCache(prev => {
-      if (!scope.active) return prev
-      const next = updater(prev)
-      cacheRef.current = next
-      return next
-    })
+    // Async completions must see the latest cache before React commits a render.
+    const next = updater(cacheRef.current)
+    cacheRef.current = next
+    setCache(next)
   }, [getScope])
 
   const loadEntryList = useCallback(async (preserveExistingContent: boolean, syncPersistentCache: boolean): Promise<Map<string, EntryCache>> => {
@@ -313,7 +311,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         const current = cacheRef.current.get(date)
         const loaded = await getEntryByDate(date, undefined, current?.meta.id, scope.controller.signal)
         if (!scope.active) return null
+        const latest = cacheRef.current.get(date)
+        // A read started before a completed deletion must not recreate it.
+        if (current && !latest) return null
         if (!loaded || loaded === 'not-modified') {
+          if (latest !== current) {
+            if (latest?.content) return { entry: latest.content, meta: latest.meta }
+            throw new Error('Diary entry changed while loading')
+          }
           if (options.forceNetwork && current) {
             updateCache(prev => {
               const next = new Map(prev)
@@ -325,17 +330,18 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           return null
         }
         const { entry: content, meta } = loaded
+        if (latest && (
+          (latest.meta.id === meta.id && Number(latest.meta.version ?? 0) > Number(meta.version ?? 0)) ||
+          (latest !== current && latest.meta.id !== meta.id)
+        )) {
+          // Keep content and version together, including the caller's result
+          // and persistent cache, when a save or newer read finished first.
+          if (latest.content) return { entry: latest.content, meta: latest.meta }
+          throw new Error('Diary entry changed while loading')
+        }
         updateCache(prev => {
           const next = new Map(prev)
-          const existing = next.get(date)
-          if (existing) {
-            const existingV = Number(existing.meta.version ?? 0)
-            const fetchedV = Number(meta.version ?? 0)
-            const safeMeta = fetchedV >= existingV ? meta : existing.meta
-            next.set(date, { ...existing, meta: safeMeta, content, snippet: existing.snippet ?? content.content.slice(0, 500) })
-          } else {
-            next.set(date, { meta, content, snippet: content.content.slice(0, 500) })
-          }
+          next.set(date, { meta, content, snippet: content.content.slice(0, 500) })
           return next
         })
         if (email !== null) putCached({ owner: email, date, meta, content, snippet: content.content.slice(0, 500) }).catch(() => {})

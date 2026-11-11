@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLatestRef } from './useEvent'
 
 const BANNER_DELAY = 30 * 60 * 1000
 
@@ -8,66 +9,79 @@ export interface ServiceWorkerUpdateHandle {
   dismissUpdate: () => void
 }
 
-export function useServiceWorkerUpdate(editorDirty: boolean): ServiceWorkerUpdateHandle {
+export function useServiceWorkerUpdate(editorDirty: boolean, sessionActive = false): ServiceWorkerUpdateHandle {
   const regRef = useRef<ServiceWorkerRegistration | null>(null)
-  const dirtyRef = useRef(editorDirty)
-  const reloadingRef = useRef(false)
-  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const cancelledRef = useRef(false)
+  // Reloading discards in-memory credentials as well as unsaved edits.
+  const reloadBlocked = useLatestRef(editorDirty || sessionActive)
   const [updatePending, setUpdatePending] = useState(false)
-
-  function scheduleBanner() {
-    if (bannerTimerRef.current) return
-    bannerTimerRef.current = setTimeout(() => {
-      if (!cancelledRef.current && regRef.current?.waiting) setUpdatePending(true)
-    }, BANNER_DELAY)
-  }
-
-  function maybeApply() {
-    if (reloadingRef.current || dirtyRef.current) return
-    const waiting = regRef.current?.waiting
-    if (!waiting) return
-    reloadingRef.current = true
-    const fallbackTimer = setTimeout(() => window.location.reload(), 4000)
-    navigator.serviceWorker.addEventListener(
-      'controllerchange',
-      () => {
-        clearTimeout(fallbackTimer)
-        window.location.reload()
-      },
-      { once: true },
-    )
-    waiting.postMessage('SKIP_WAITING')
-  }
-
-  useEffect(() => {
-    dirtyRef.current = editorDirty
-    // Intentionally no maybeApply() here — updates apply only when the tab
-    // is hidden so the user is never interrupted mid-session.
-  }, [editorDirty])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator) || import.meta.env.DEV) return
     const sw = navigator.serviceWorker
     if (!sw) return
+    let cancelled = false
+    let activating = false
+    let reloadReady = false
+    let reloaded = false
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined
+    let bannerTimer: ReturnType<typeof setTimeout> | undefined
+    const listeners: (() => void)[] = []
+
+    function canReload() {
+      return !cancelled && !reloadBlocked.current && document.visibilityState === 'hidden'
+    }
+
+    function scheduleBanner() {
+      if (bannerTimer) return
+      bannerTimer = setTimeout(() => {
+        if (!cancelled && regRef.current?.waiting) setUpdatePending(true)
+      }, BANNER_DELAY)
+    }
+
+    function finishActivation() {
+      reloadReady = true
+      clearTimeout(fallbackTimer)
+      // Activation may finish after the user returned, started typing, or
+      // signed in. Keep the update ready for a later safe opportunity.
+      if (!canReload() || reloaded) return
+      reloaded = true
+      window.location.reload()
+    }
+
+    function maybeApply() {
+      if (!canReload() || reloaded) return
+      if (reloadReady) { finishActivation(); return }
+      if (activating) return
+      const waiting = regRef.current?.waiting
+      if (!waiting) return
+      activating = true
+      fallbackTimer = setTimeout(finishActivation, 4000)
+      sw.addEventListener('controllerchange', finishActivation, { once: true })
+      listeners.push(() => sw.removeEventListener('controllerchange', finishActivation))
+      waiting.postMessage('SKIP_WAITING')
+    }
 
     function watchRegistration(reg: ServiceWorkerRegistration) {
-      if (cancelledRef.current) return
+      if (cancelled) return
       regRef.current = reg
       if (reg.waiting) {
         scheduleBanner()
         maybeApply()
       }
-      reg.addEventListener('updatefound', () => {
+      const onUpdateFound = () => {
         const installing = reg.installing
         if (!installing) return
-        installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && sw.controller) {
+        const onStateChange = () => {
+          if (!cancelled && installing.state === 'installed' && sw.controller) {
             scheduleBanner()
             maybeApply()
           }
-        })
-      })
+        }
+        installing.addEventListener('statechange', onStateChange)
+        listeners.push(() => installing.removeEventListener('statechange', onStateChange))
+      }
+      reg.addEventListener('updatefound', onUpdateFound)
+      listeners.push(() => reg.removeEventListener('updatefound', onUpdateFound))
     }
 
     sw.ready.then(watchRegistration)
@@ -81,11 +95,14 @@ export function useServiceWorkerUpdate(editorDirty: boolean): ServiceWorkerUpdat
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => {
-      cancelledRef.current = true
+      cancelled = true
+      regRef.current = null
       document.removeEventListener('visibilitychange', handleVisibility)
-      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
+      listeners.forEach(remove => remove())
+      clearTimeout(bannerTimer)
+      clearTimeout(fallbackTimer)
     }
-  }, [])
+  }, [reloadBlocked])
 
   return {
     triggerUpdateCheck: () => regRef.current?.update(),

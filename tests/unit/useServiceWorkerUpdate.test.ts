@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useServiceWorkerUpdate } from '../../src/hooks/useServiceWorkerUpdate'
+import { StrictMode, createElement } from 'react'
 
 const UPDATE_BANNER_DELAY = 30 * 60 * 1000 // 30 minutes
 
@@ -29,6 +30,7 @@ beforeEach(() => {
   originalDEV = import.meta.env.DEV
   ;(import.meta.env as Record<string, unknown>).DEV = false
   vi.stubGlobal('location', { reload: vi.fn() })
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   vi.useFakeTimers()
 })
 
@@ -40,6 +42,100 @@ afterEach(() => {
 })
 
 describe('useServiceWorkerUpdate', () => {
+  it('does not interrupt a visible page when a delayed update finishes installing', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    const reg = new MockRegistration()
+    const installing = new MockServiceWorker()
+    const container = makeMockContainer(reg)
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+    renderHook(() => useServiceWorkerUpdate(false))
+    await act(async () => {})
+    act(() => { reg.installing = installing; reg.dispatchEvent(new Event('updatefound')) })
+    act(() => {
+      installing.state = 'installed'
+      reg.waiting = installing
+      installing.dispatchEvent(new Event('statechange'))
+    })
+    expect(installing.postMessage).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(window.location.reload).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['typing', 'controllerchange'], ['typing', 'timeout'],
+    ['authentication', 'controllerchange'], ['authentication', 'timeout'],
+  ])('postpones a delayed %s reload on %s until a safe opportunity', async (block, completion) => {
+    const reg = new MockRegistration()
+    reg.waiting = new MockServiceWorker()
+    const container = makeMockContainer(reg)
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+    const { rerender } = renderHook(({ dirty, active }) => useServiceWorkerUpdate(dirty, active), {
+      initialProps: { dirty: false, active: false },
+    })
+    await act(async () => {})
+    await act(async () => { rerender({ dirty: block === 'typing', active: block === 'authentication' }) })
+    act(() => {
+      reg.waiting = null
+      if (completion === 'controllerchange') container.dispatchEvent(new Event('controllerchange'))
+      vi.advanceTimersByTime(5000)
+    })
+    expect(window.location.reload).not.toHaveBeenCalled()
+    await act(async () => { rerender({ dirty: false, active: false }) })
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(window.location.reload).toHaveBeenCalledOnce()
+  })
+
+  it('preserves authentication even when an idle tab is hidden', async () => {
+    const reg = new MockRegistration()
+    reg.waiting = new MockServiceWorker()
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: makeMockContainer(reg) })
+    const { result } = renderHook(() => useServiceWorkerUpdate(false, true))
+    await act(async () => {})
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); vi.advanceTimersByTime(UPDATE_BANNER_DELAY) })
+    expect(reg.waiting.postMessage).not.toHaveBeenCalled()
+    expect(window.location.reload).not.toHaveBeenCalled()
+    expect(result.current.updatePending).toBe(true)
+  })
+
+  it('does not reload a page that becomes visible during activation', async () => {
+    const reg = new MockRegistration()
+    reg.waiting = new MockServiceWorker()
+    const container = makeMockContainer(reg)
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+    renderHook(() => useServiceWorkerUpdate(false))
+    await act(async () => {})
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    act(() => { container.dispatchEvent(new Event('controllerchange')); vi.advanceTimersByTime(5000) })
+    expect(window.location.reload).not.toHaveBeenCalled()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(window.location.reload).toHaveBeenCalledOnce()
+  })
+
+  it('observes updates after StrictMode replays effect setup', async () => {
+    const reg = new MockRegistration()
+    const container = makeMockContainer(reg)
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+    const { result } = renderHook(() => useServiceWorkerUpdate(false), {
+      wrapper: ({ children }) => createElement(StrictMode, null, children),
+    })
+    await act(async () => {})
+    act(() => { result.current.triggerUpdateCheck() })
+    expect(reg.update).toHaveBeenCalledOnce()
+  })
+
+  it('cancels activation callbacks and timers on unmount', async () => {
+    const reg = new MockRegistration()
+    reg.waiting = new MockServiceWorker()
+    const container = makeMockContainer(reg)
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: container })
+    const { unmount } = renderHook(() => useServiceWorkerUpdate(false))
+    await act(async () => {})
+    unmount()
+    act(() => { container.dispatchEvent(new Event('controllerchange')); vi.advanceTimersByTime(5000) })
+    expect(window.location.reload).not.toHaveBeenCalled()
+  })
+
   describe('apply on startup', () => {
     it('posts SKIP_WAITING when a waiting SW is present and not dirty', async () => {
       const reg = new MockRegistration()

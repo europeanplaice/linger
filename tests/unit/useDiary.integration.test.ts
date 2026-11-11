@@ -155,6 +155,47 @@ describe('useDiary HTTP and storage integration', () => {
     expect((await getAllCached())[0].content?.content).toBe('fresh text')
   })
 
+  it.each(['older', 'missing'] as const)('keeps a completed save when an earlier read returns %s content', async response => {
+    const { result } = await start()
+    write.mockResolvedValueOnce(json(meta()))
+    await act(async () => { await result.current.save(date, 'original text', null) })
+    const delayed = deferred<Response>()
+    read.mockReturnValueOnce(delayed.promise)
+    let reading!: ReturnType<typeof result.current.getContent>
+    act(() => { reading = result.current.getContent(date, { forceNetwork: true }) })
+    await waitFor(() => expect(read).toHaveBeenCalledOnce())
+
+    write.mockResolvedValueOnce(json(meta(date, '2')))
+    await act(async () => { await result.current.save(date, 'newly saved text', '1') })
+    await act(async () => {
+      delayed.resolve(response === 'older' ? json(entry(date, '1', 'original text')) : json(null, 404))
+      expect(await reading).toEqual(entry(date, '2', 'newly saved text'))
+    })
+    expect(await result.current.getContent(date)).toEqual(entry(date, '2', 'newly saved text'))
+    expect(await getAllCached()).toEqual([expect.objectContaining({
+      meta: meta(date, '2'), content: entry(date, '2', 'newly saved text').entry,
+    })])
+  })
+
+  it('does not recreate a deleted entry when an older read finishes', async () => {
+    const { result } = await start()
+    write.mockResolvedValueOnce(json(meta()))
+    await act(async () => { await result.current.save(date, 'original text', null) })
+    const delayed = deferred<Response>()
+    read.mockReturnValueOnce(delayed.promise)
+    let reading!: ReturnType<typeof result.current.getContent>
+    act(() => { reading = result.current.getContent(date, { forceNetwork: true }) })
+    await waitFor(() => expect(read).toHaveBeenCalledOnce())
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await act(async () => { await result.current.remove(date) })
+    await act(async () => {
+      delayed.resolve(json(entry()))
+      expect(await reading).toBeNull()
+    })
+    expect(result.current.dates).not.toContain(date)
+    expect(await getAllCached()).toEqual([])
+  })
+
   it('notifies onExpired and rethrows TokenExpiredError on a read returning 401', async () => {
     const { result, onExpired } = await start()
     read.mockResolvedValueOnce(json({}, 401))

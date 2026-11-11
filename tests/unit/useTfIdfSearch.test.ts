@@ -11,6 +11,7 @@ vi.mock('../../src/lib/diaryCache', () => ({
 }))
 
 import { useTfIdfSearch } from '../../src/hooks/useTfIdfSearch'
+import { deferred } from '../helpers/deferred'
 
 function makeEntry(date: string, content: string): CachedEntry {
   return {
@@ -25,6 +26,18 @@ beforeEach(() => {
 })
 
 describe('useTfIdfSearch', () => {
+  it('keeps a newer entry update when initial cache loading finishes last', async () => {
+    const initial = deferred<CachedEntry[]>()
+    mockGetAllCached.mockReturnValueOnce(initial.promise).mockResolvedValueOnce([])
+    const { result } = renderHook(() => useTfIdfSearch())
+    await act(async () => { result.current.updateEntry('2024-01-01', 'volcano eruption') })
+    expect(result.current.ready).toBe(true)
+    expect(result.current.searchLocal('volcano').map(hit => hit.date)).toEqual(['2024-01-01'])
+    await act(async () => { initial.resolve([makeEntry('2024-01-01', 'old weather report')]) })
+    expect(result.current.searchLocal('volcano').map(hit => hit.date)).toEqual(['2024-01-01'])
+    expect(result.current.searchLocal('volcano')[0].snippet).toBe('volcano eruption')
+  })
+
   it('starts with ready=false and becomes true after cache loads', async () => {
     mockGetAllCached.mockResolvedValueOnce([makeEntry('2024-01-01', 'hello world')])
     const { result } = renderHook(() => useTfIdfSearch())

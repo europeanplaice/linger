@@ -13,13 +13,15 @@ export function useTfIdfSearch() {
   const [ready, setReady] = useState(false)
   const [indexVersion, setIndexVersion] = useState(0)
   const indexRef = useRef<TfIdfIndex | null>(null)
+  const rebuildGenerationRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    const generation = ++rebuildGenerationRef.current
 
     getAllCached()
       .then(entries => {
-        if (cancelled) return
+        if (cancelled || generation !== rebuildGenerationRef.current) return
         const docs: TfIdfDoc[] = entries
           .filter(e => e.content?.content)
           .map(e => ({ date: e.date, content: e.content!.content }))
@@ -31,10 +33,8 @@ export function useTfIdfSearch() {
         // IndexedDB unavailable — feature silently disabled
       })
 
-    return () => { cancelled = true }
+    return () => { cancelled = true; rebuildGenerationRef.current++ }
   }, [])
-
-  const rebuildGenerationRef = useRef(0)
 
   const rebuildFromCache = useCallback((overrides: Record<string, string> = {}) => {
     const generation = ++rebuildGenerationRef.current
@@ -51,6 +51,7 @@ export function useTfIdfSearch() {
           if (!docs.find(d => d.date === date)) docs.push({ date, content })
         }
         indexRef.current = buildIndex(docs)
+        setReady(true)
         setIndexVersion(v => v + 1)
       })
       .catch(() => {})
