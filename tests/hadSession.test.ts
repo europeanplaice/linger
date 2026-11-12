@@ -37,7 +37,7 @@ test('app shell shown during auth check when prior session hint is set', async (
 
   await page.route('/auth/session', async route => {
     await sessionGate
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
   await page.route('/api/drive/entries', async route => {
     await route.fulfill({ json: { files: [] } })
@@ -60,7 +60,7 @@ test('app shell shown during auth check when prior session hint is set', async (
 
 test('sets linger_had_session to true after successful session check', async ({ page }) => {
   await page.route('/auth/session', async route => {
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
   await page.route('/api/drive/entries', async route => {
     await route.fulfill({ json: { files: [] } })
@@ -97,7 +97,7 @@ test('clears linger_had_session on sign-out', async ({ page }) => {
   })
 
   await page.route('/auth/session', async route => {
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
   await page.route('/api/drive/entries', async route => {
     await route.fulfill({ json: { files: [] } })

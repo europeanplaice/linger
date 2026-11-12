@@ -23,7 +23,7 @@ test('searching in the app and selecting a result opens that diary entry', async
   const meta = { id: 'search-entry', name: 'diary-2026-04-01.txt', version: '1' }
   await page.route('/api/**', route => route.fulfill({ status: 404, json: {} }))
   await page.route('/api/s3/entry-status/**', route => route.fulfill({ json: { status: 'disabled' } }))
-  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
   await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [meta] } }))
   await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
   await page.route('/api/drive/search', route => route.fulfill({ json: { files: [meta] } }))

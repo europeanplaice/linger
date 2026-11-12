@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem('linger_language', 'en')
     localStorage.setItem('linger_autosave', 'false')
   })
-  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
   await page.route('/api/drive/entries', route => route.fulfill({
     json: {
       files: [

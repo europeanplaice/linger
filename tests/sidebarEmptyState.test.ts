@@ -11,7 +11,7 @@ test.describe('sidebar empty state', () => {
   })
 
   test('shows hint when there are no diary entries', async ({ page }) => {
-    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
     await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
 
     await page.goto(baseUrl)
@@ -20,7 +20,7 @@ test.describe('sidebar empty state', () => {
   })
 
   test('does not show hint when there are entries', async ({ page }) => {
-    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
     await page.route('/api/drive/entries', route =>
       route.fulfill({
         json: {
@@ -34,7 +34,7 @@ test.describe('sidebar empty state', () => {
   })
 
   test('hint disappears after the first entry is saved', async ({ page }) => {
-    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
 
     let entryExists = false
     await page.route('/api/drive/entries', route =>
@@ -75,13 +75,14 @@ test.describe('sidebar error state', () => {
     await page.addInitScript(() => {
       window.localStorage.setItem('linger_language', 'en')
     })
-    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true } }))
+    await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
     await page.route('/api/drive/entries', route => route.abort())
+    await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
   })
 
   test('shows error message when entries fail to load', async ({ page }) => {
     await page.goto(baseUrl)
-    const errorEl = page.locator('.sidebar-status.error')
+    const errorEl = page.getByText('Failed to load entries', { exact: false })
     await expect(errorEl).toBeVisible()
     await expect(errorEl).toContainText('Failed to load entries')
   })

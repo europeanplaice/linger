@@ -65,4 +65,21 @@ export async function installMockOAuthCredentials(
     `
     return route.fulfill({ status: 200, contentType: 'application/javascript', body })
   })
+  // Browser tests mock the endpoints they exercise. Keep unrelated S3 polling
+  // from reaching the local Pages worker, where an unauthenticated 401 would
+  // open the session-expired dialog and obscure the UI under test. Per-test
+  // routes registered later still take precedence for the endpoint being tested.
+  await target.route('**/api/s3/**', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === '/api/s3/settings' && route.request().method() === 'GET') {
+      return route.fulfill({ json: null })
+    }
+    if (pathname.startsWith('/api/s3/entry-status/')) {
+      return route.fulfill({ json: { status: 'disabled' } })
+    }
+    if (pathname === '/api/s3/restore' && route.request().method() === 'GET') {
+      return route.fulfill({ json: { dates: [] } })
+    }
+    return route.fulfill({ status: 404, json: { error: 'Not mocked' } })
+  })
 }

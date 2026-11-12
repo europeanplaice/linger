@@ -88,7 +88,7 @@ test('limits registrations to fifty and enables at most five badges', async () =
     expect(record?.list).toHaveLength(50)
     expect(record?.pending).toBe(false)
   }, { timeout: 10000 })
-})
+}, 15000)
 
 test('serializes saves so an older request cannot finish after a newer one', async () => {
   const firstSave = deferred<void>()

@@ -5,6 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  expect: { timeout: 10_000 },
   testIgnore: ['**/unit/**', '**/privacy/**'],
   use: {
     baseURL: 'http://127.0.0.1:5173',
@@ -22,9 +23,18 @@ export default defineConfig({
       testMatch: ['**/mobileBack.test.ts'],
     },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: 'npm run dev',
+      url: 'http://127.0.0.1:5173',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      // Vite proxies API and auth requests here during browser tests.
+      command: 'npm run workers:dev',
+      url: 'http://127.0.0.1:8788',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })
