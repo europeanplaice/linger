@@ -34,8 +34,9 @@ export default defineConfig({
     },
     {
       // Vite proxies API and auth requests here during browser tests.
+      // This API-only server returns 404 for /, so wait for its port instead.
       command: 'npm run workers:dev',
-      url: 'http://127.0.0.1:8788',
+      port: 8788,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       stdout: process.env.CI ? 'pipe' : 'ignore',
