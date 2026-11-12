@@ -349,6 +349,7 @@ const dictionaries = {
       viewInDrive: 'View diary folder in Google Drive',
       sectionS3: 'S3 backup',
       s3Help: 'Optionally mirror your entries to an S3 bucket in your own AWS account. Backfills pause when you close or reload this tab, so keep Linger open until they finish. In short:',
+      s3FederationHelp: 'How access works: AWS verifies your Google sign-in and grants Linger temporary access to your bucket through an IAM role (identity federation). You do not need to give Linger long-lived AWS access keys.',
       s3Steps: [
         "Run Terraform in your AWS account to create an IAM role and S3 bucket, using linger's Client ID and your Google account ID below.",
         'Paste the resulting Role ARN, bucket name, and region into the fields below.',
@@ -846,6 +847,7 @@ const dictionaries = {
       viewInDrive: 'Google Drive でフォルダを開く',
       sectionS3: 'S3バックアップ',
       s3Help: '自分のAWSアカウントのS3バケットに日記をミラーできます。タブを閉じたり再読み込みするとバックアップが一時停止するため、完了までLingerを開いたままにしてください。手順の概要:',
+      s3FederationHelp: 'アクセスの仕組み: AWSがGoogleログインを確認し、IAMロールを通じてLingerにバケットへの一時的なアクセス権を与えます（ID連携）。長期間有効なAWSアクセスキーをLingerに渡す必要はありません。',
       s3Steps: [
         '下記のClient IDとGoogleアカウントIDを使い、AWSアカウント上でTerraformを実行してIAMロールとS3バケットを作成します。',
         '作成されたRole ARN、バケット名、リージョンを下の入力欄に貼り付けます。',

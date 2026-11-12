@@ -1119,6 +1119,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <ol className="settings-about-list settings-s3-help">
             {t.settings.s3Steps.map((step, i) => <li key={i}>{step}</li>)}
           </ol>
+          <p className="settings-about-text settings-s3-help">
+            {t.settings.s3FederationHelp}
+          </p>
 
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3Bucket}</span>
