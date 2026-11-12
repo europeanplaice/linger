@@ -4,7 +4,7 @@ import { useAuth, type AuthState } from '../src/hooks/useAuth'
 import { useDiary, type DiaryState } from '../src/hooks/useDiary'
 import { SyncQueueManager } from '../src/lib/syncQueue'
 import { deleteEntry } from '../src/api/driveEntries'
-import { getAllCached } from '../src/lib/diaryCache'
+import { getAllCached } from '../src/lib/secureCache'
 
 declare global {
   interface Window {

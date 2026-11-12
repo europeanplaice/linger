@@ -27,6 +27,7 @@ export interface EncryptedVaultValue {
 }
 
 let current: { internalUserId: string; rawKey: Bytes } | null = null
+let vaultRevision = 0
 
 function toBase64(bytes: Uint8Array): string {
   let binary = ''
@@ -152,9 +153,12 @@ export function getVaultInternalUserId(): string | null {
   return current?.internalUserId ?? null
 }
 
+export function getVaultRevision(): number { return vaultRevision }
+
 export const getVaultUserId = getVaultInternalUserId
 
 export function clearVaultKey(): void {
+  vaultRevision++
   current?.rawKey.fill(0)
   current = null
 }

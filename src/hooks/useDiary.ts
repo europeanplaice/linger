@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError, DriveHttpError } from '../api/driveEntries'
-import { getAllCached, putCached, deleteCached, clearCache, getAllDrafts, getDraft, putDraft, deleteDraft, markDraftConflicted } from '../lib/diaryCache'
+import { getAllCached, putCached, deleteCached, clearCache } from '../lib/secureCache'
+import { getAllDrafts, getDraft, putDraft, deleteDraft, markDraftConflicted, nextDraftCheckpointTime, reportDraftStorageError } from '../lib/draftStorage'
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
 import { SyncQueueManager } from '../lib/syncQueue'
@@ -33,6 +34,7 @@ export interface DiaryState {
   freshListLoaded: boolean
   error: string | null
   deletionCancelled: boolean
+  queueError: boolean
   dates: string[]                                      // sorted desc
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
   getContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
@@ -152,6 +154,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const [freshListLoaded, setFreshListLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletionCancelled, setDeletionCancelled] = useState(false)
+  const [queueError, setQueueError] = useState(false)
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
   const cacheRef = useLatestRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
@@ -182,6 +185,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     cacheRef.current = new Map()
     setCache(new Map())
     setDeletionCancelled(false)
+    setQueueError(false)
     inflightRef.current.clear()
     saveQueueRef.current.clear()
     pendingSaveRef.current = null
@@ -410,9 +414,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         const storedUser = localStorage.getItem('linger_session_user')
         if (getAccountSnapshot().clearSharedData && (!storedUser || storedUser === email)) {
           clearLocalData().catch(() => {})
-          if (storedUser) new SyncQueueManager(storedUser).clear().catch(() => {})
-          else syncQueue.clear().catch(() => {})
-        } else syncQueue.clear().catch(() => {})
+        }
       }
       return
     }
@@ -427,13 +429,25 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         const canUsePersistentCache = email !== null
         const storedUser = localStorage.getItem('linger_session_user')
         if (!canUsePersistentCache) {
-          await clearLocalData()
-          if (storedUser) await new SyncQueueManager(storedUser).clear()
+          // Without a verified owner no encrypted data can safely be opened or
+          // cleared. Preserve any old unscoped recovery records as well.
+          if (Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')) && !localStorage.getItem('linger_local_mirror_legacy_owner')) {
+            localStorage.setItem('linger_local_mirror_legacy_owner', storedUser ?? '__unknown__')
+          }
+          if (localStorage.getItem('linger_pending_sync_queue') && !localStorage.getItem('linger_legacy_queue_owner')) {
+            localStorage.setItem('linger_legacy_queue_owner', storedUser ?? '__unknown__')
+          }
           if (!scope.active) return
           localStorage.removeItem('linger_session_user')
         } else if (storedUser !== email) {
-          await clearLocalData()
-          if (storedUser) await new SyncQueueManager(storedUser).clear()
+          // Remember the old unscoped mirror's owner before changing the shared
+          // session marker. Never attribute it to the next signed-in account.
+          if (Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')) && !localStorage.getItem('linger_local_mirror_legacy_owner')) {
+            localStorage.setItem('linger_local_mirror_legacy_owner', storedUser ?? '__unknown__')
+          }
+          if (localStorage.getItem('linger_pending_sync_queue') && !localStorage.getItem('linger_legacy_queue_owner')) {
+            localStorage.setItem('linger_legacy_queue_owner', storedUser ?? '__unknown__')
+          }
           if (!scope.active) return
           localStorage.setItem('linger_session_user', email)
         }
@@ -589,22 +603,27 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
   }, [isSignedIn, email, updateCache, getScope])
 
-  const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean }): Promise<LoadedDiaryEntry> => {
+  const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean; draftSavedAt?: number }): Promise<LoadedDiaryEntry> => {
     const scope = getScope()
     if (!isSignedIn || !scope) throw new Error('Not signed in')
 
     // Dispatch the checkpoint at call time, before this operation can wait behind
     // another save for the same date. Later typing checkpoints are therefore
     // ordered after this captured snapshot.
-    const checkpoint = email !== null && !options?.skipDraftCheckpoint
-      ? putDraft({ owner: email, date, content, baseVersion, baseContent: baseContent ?? null, savedAt: Date.now() }).catch(() => {})
-      : Promise.resolve()
+    const checkpointTime = email !== null && !options?.skipDraftCheckpoint ? nextDraftCheckpointTime() : options?.draftSavedAt
+    const checkpoint = email !== null && !options?.skipDraftCheckpoint && checkpointTime !== undefined
+      ? putDraft({ owner: email, date, content, baseVersion, baseContent: baseContent ?? null, savedAt: checkpointTime }).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+      : Promise.resolve({ ok: true as const })
     const prev = saveQueueRef.current.get(date) ?? Promise.resolve()
     const run = prev.catch(() => {}).then(async (): Promise<LoadedDiaryEntry> => {
       if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
-      await checkpoint
       const entry: DiaryEntry = { date, content }
       try {
+        const checkpointResult = await checkpoint
+        if (!checkpointResult.ok) throw checkpointResult.error ?? new Error('Could not save recovery draft')
         const cachedMeta = cacheRef.current.get(date)?.meta ?? null
         const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force, signal: scope.controller.signal })
         if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
@@ -616,7 +635,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (email !== null) putCached({ owner: email, date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
         storageAdapter.saveEntry(date, content).catch(() => {})
         broadcastMessage({ type: 'DIARY_UPDATED', date })
-        deleteDraft(date, email ?? undefined, content).catch(() => {})
+        await deleteDraft(date, email ?? undefined, content, checkpointTime).catch(reportDraftStorageError)
         return { entry, meta }
       } catch (e) {
         if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
@@ -673,6 +692,22 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       await syncQueue.process(async (item) => {
         if (!scope.active) return false
         try {
+          if (item.type === 'SAVE') {
+            // Old queues can contain unsynced text. Preserve it as a draft for
+            // review instead of acknowledging a SAVE without applying it.
+            try {
+              if (typeof item.content !== 'string' || !scope.email) throw new Error('Legacy queued save cannot be recovered')
+              const existing = await getDraft(item.date, scope.email)
+              if (!scope.active) return false
+              if (existing && existing.content !== item.content) throw new Error('Queued save conflicts with an existing draft')
+              if (!existing) await putDraft({ owner: scope.email, date: item.date, content: item.content,
+                baseVersion: item.baseVersion ?? null, baseContent: null, savedAt: item.timestamp, conflicted: true })
+              return scope.active
+            } catch {
+              if (scope.active) setQueueError(true)
+              return false
+            }
+          }
           if (item.type === 'REMOVE') {
             // Legacy queues lack an identity/version precondition. Cancel them
             // rather than apply an old intention to a newly created entry.
@@ -697,7 +732,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
           }
           return false
         }
-      }).catch(() => {})
+      }).catch(() => { if (scope.active) setQueueError(true) })
 
       const drafts = await getAllDrafts(scope.email ?? undefined).catch(() => [] as DraftEntry[])
       for (const draft of drafts) {
@@ -710,11 +745,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (!latestDraft || latestDraft.content !== draft.content || latestDraft.savedAt !== draft.savedAt) continue
         const cached = cacheRef.current.get(draft.date)
         if (cached?.content?.content === draft.content) {
-          deleteDraft(draft.date, scope.email ?? undefined, draft.content).catch(() => {})
+          deleteDraft(draft.date, scope.email ?? undefined, draft.content, draft.savedAt).catch(() => {})
           continue
         }
         try {
-          await save(draft.date, draft.content, draft.baseVersion, false, draft.baseContent, { skipDraftCheckpoint: true })
+          await save(draft.date, draft.content, draft.baseVersion, false, draft.baseContent, { skipDraftCheckpoint: true, draftSavedAt: draft.savedAt })
         } catch (e) {
           if (!scope.active) return
           if (e instanceof TokenExpiredError) return
@@ -773,9 +808,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const remove = useCallback(async (date: string, target?: { fileId: string; baseVersion: string }): Promise<void> => {
     const scope = getScope()
     if (!isSignedIn || !scope) throw new Error('Not signed in')
+    const draft = scope.email ? await getDraft(date, scope.email) : undefined
+    if (!scope.active) return
     const existing = cacheRef.current.get(date)
     if (!existing && !target) {
-      deleteDraft(date, scope.email ?? undefined).catch(() => {})
+      if (draft) await deleteDraft(date, scope.email ?? undefined, draft.content, draft.savedAt)
       return
     }
     const expected = target ?? (existing?.meta.version ? { fileId: existing.meta.id, baseVersion: existing.meta.version } : undefined)
@@ -790,21 +827,21 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       })
       storageAdapter.deleteEntry(date).catch(() => {})
       deleteCached(date).catch(() => {})
-      deleteDraft(date, scope.email ?? undefined).catch(() => {})
+      if (draft) await deleteDraft(date, scope.email ?? undefined, draft.content, draft.savedAt).catch(reportDraftStorageError)
       broadcastMessage({ type: 'DIARY_REMOVED', date })
     } catch (e) {
       if (!scope.active) return
       if (e instanceof TokenExpiredError) { onExpiredRef.current(); throw e }
       if (e instanceof SaveConflictError) throw new EntryConflictError(e.remote)
       if (isNetworkFailure(e)) {
-        syncQueue.enqueue({
+        await syncQueue.enqueue({
           id: `remove-${date}-${Date.now()}`,
           type: 'REMOVE',
           date,
           timestamp: Date.now(),
           fileId: expected.fileId,
           baseVersion: expected.baseVersion,
-        }).catch(() => {})
+        }).catch(() => { if (scope.active) setQueueError(true) })
       }
       throw e
     }
@@ -994,5 +1031,5 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const dates = useMemo(() => getScope() ? Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)) : [], [cache, getScope])
   const hasLegacyMdFiles = useMemo(() => Boolean(getScope()) && Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache, getScope])
 
-  return { loading, freshListLoaded, error, deletionCancelled, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, pendingSaveDate, retryPendingSave, exportAll, importAll }
+  return { loading, freshListLoaded, error, deletionCancelled, queueError, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, pendingSaveDate, retryPendingSave, exportAll, importAll }
 }

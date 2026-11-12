@@ -24,7 +24,6 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
   let registrationRequests = 0
-  let savedSessionUnavailable = false
   let removeCredentialBeforeAdd: { authenticatorId: string; credentialId: string } | null = null
   await page.addInitScript(() => {
     const create = navigator.credentials.create.bind(navigator.credentials)
@@ -39,7 +38,6 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   await context.route('**/auth/passkey/**', async route => {
     const incoming = route.request()
     const path = new URL(incoming.url()).pathname.replace('/auth/passkey', '')
-    if (path === '/session' && savedSessionUnavailable) return route.fulfill({ status: 503 })
     if (path === '/register/options') registrationRequests++
     const handler = handlers[path]
     if (!handler) { await route.fulfill({ status: 404 }); return }
@@ -98,38 +96,14 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
     expect(await page.evaluate(() => (window as unknown as { passkeyName?: string }).passkeyName)).toBe('person@example.com')
-    const remember = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
-    await expect(remember.getByRole('checkbox')).not.toBeChecked()
-    await remember.getByRole('checkbox').check()
-    await remember.getByRole('combobox').selectOption('7')
-    await remember.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
 
     const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
     expect(forbiddenNetworkValues).toEqual([])
     expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials WHERE user_id = ?').get(userId)).toEqual({ count: 1 })
 
-    const getSavedExpiry = () => page.evaluate(() => {
-      const saved = localStorage.getItem('linger_device_session_v1')
-      return saved ? (JSON.parse(saved) as { expiresAt: number }).expiresAt : null
-    })
-    const savedExpiry = await getSavedExpiry()
-    expect(savedExpiry).toBeGreaterThan(Date.now())
-    savedSessionUnavailable = true
-    await page.reload()
-    await expect(page.getByRole('heading', { name: 'Sign in on this device' })).toBeVisible()
-    await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
-    expect(await getSavedExpiry()).toBe(savedExpiry)
-    savedSessionUnavailable = false
-    await page.getByRole('button', { name: 'Retry connection' }).click()
-    await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
-    expect(await getSavedExpiry()).toBe(savedExpiry)
-    const reopened = await context.newPage()
-    await reopened.goto(origin)
-    await expect(reopened.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
-    await expect(reopened.getByRole('heading', { name: 'Sign in to Linger' })).toHaveCount(0)
-    await reopened.close()
-    await page.evaluate(() => localStorage.removeItem('linger_device_session_v1'))
+    expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
 
     await page.evaluate(async () => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
@@ -145,6 +119,15 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       try { return Array.from(key) } finally { key.fill(0) }
     }, userId)
     expect(firstPasskeyKey).toHaveLength(32)
+    await page.evaluate(async internalId => {
+      const path = '/src/lib/encryptedLocalStore.ts'
+      const store = await import(/* @vite-ignore */ path)
+      const guard = await store.verifyDraftKey('person@example.com', internalId)
+      await store.writeEncryptedLocal(internalId, 'draft', '2026-01-02', { content: 'passkey protected draft' }, null, guard)
+      for (const kind of ['diary-cache', 'local-mirror', 'milestones', 'sync-queue']) {
+        await store.writeEncryptedLocal(internalId, kind, 'private-id', { content: `private-${kind}` }, null, guard)
+      }
+    }, userId)
     const originalSessionCookie = (await context.cookies(origin)).find(cookie => cookie.name === 'linger_session')
     expect(originalSessionCookie).toBeTruthy()
     const firstSession = await page.evaluate(async internalId => {
@@ -193,6 +176,33 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       try { return Array.from(key) } finally { key.fill(0) }
     }, userId)
     expect(secondPasskeyKey).toEqual(firstPasskeyKey)
+    const restoredCategories = await page.evaluate(async internalId => {
+      const path = '/src/lib/encryptedLocalStore.ts'
+      const store = await import(/* @vite-ignore */ path)
+      const result: string[] = []
+      for (const kind of ['diary-cache', 'local-mirror', 'milestones', 'sync-queue']) {
+        result.push((await store.readEncryptedLocal(internalId, kind, 'private-id')).value.content)
+      }
+      const request = indexedDB.open('linger_diary_cache')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error) })
+      const rows = await new Promise<unknown[]>((resolve, reject) => {
+        const read = db.transaction('secureRecords').objectStore('secureRecords').getAll()
+        read.onsuccess = () => resolve(read.result)
+        read.onerror = () => reject(read.error)
+      })
+      db.close()
+      return { result, raw: JSON.stringify(rows) }
+    }, userId)
+    expect(restoredCategories.result).toEqual(['private-diary-cache', 'private-local-mirror', 'private-milestones', 'private-sync-queue'])
+    expect(restoredCategories.raw).not.toContain('private-id')
+    for (const value of restoredCategories.result) expect(restoredCategories.raw).not.toContain(value)
+    const restoredDraft = await page.evaluate(async internalId => {
+      const path = '/src/lib/encryptedLocalStore.ts'
+      const store = await import(/* @vite-ignore */ path)
+      await store.verifyDraftKey('person@example.com', internalId)
+      return store.readEncryptedLocal(internalId, 'draft', '2026-01-02')
+    }, userId)
+    expect(restoredDraft).toMatchObject({ value: { content: 'passkey protected draft' } })
     const listed = await page.evaluate(async internalId => {
       const path = '/src/api/passkeys.ts'
       return (await import(/* @vite-ignore */ path)).listPasskeys(internalId)

@@ -3,8 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { PasskeySettings } from '../../src/components/PasskeySettings'
 import { I18nProvider } from '../../src/i18n'
 import * as passkeys from '../../src/api/passkeys'
-import { clearTabSession, getDeviceSessionExpiry } from '../../src/lib/tabSession'
-import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
+import { clearTabSession } from '../../src/lib/tabSession'
+import { clearVaultKey } from '../../src/lib/passkeyVault'
 
 vi.mock('../../src/api/passkeys', () => ({
   deletePasskey: vi.fn(),
@@ -34,36 +34,10 @@ function renderSettings() {
 }
 
 describe('PasskeySettings', () => {
-  it('lets the user enable and disable device persistence later from settings', async () => {
-    unlockVaultWithKey('user-id', new Uint8Array(32).fill(7))
+  it('does not offer a remembered device setting', async () => {
     renderSettings()
     await screen.findByText('Current sign-in passkey')
-    fireEvent.click(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
-    const prompt = within(screen.getByRole('complementary', { name: 'Choose how to sign in next time' }))
-    expect(getDeviceSessionExpiry()).toBeNull()
-    fireEvent.click(prompt.getByRole('checkbox'))
-    fireEvent.change(prompt.getByRole('combobox'), { target: { value: '7' } })
-    fireEvent.click(prompt.getByRole('button', { name: 'Save' }))
-    expect(getDeviceSessionExpiry()).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60 * 1000)
-    expect(screen.queryByRole('complementary')).toBeNull()
-    expect(screen.getByText(/Passkey skipped until:/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Stop skipping passkey on this device' }))
-    expect(getDeviceSessionExpiry()).toBeNull()
-  })
-
-  it('does not change an existing device session when the options are only closed', async () => {
-    unlockVaultWithKey('user-id', new Uint8Array(32).fill(7))
-    renderSettings()
-    await screen.findByText('Current sign-in passkey')
-    fireEvent.click(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
-    const prompt = within(screen.getByRole('complementary', { name: 'Choose how to sign in next time' }))
-    fireEvent.click(prompt.getByRole('checkbox'))
-    fireEvent.click(prompt.getByRole('button', { name: 'Save' }))
-    const expiresAt = getDeviceSessionExpiry()
-    fireEvent.click(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
-    fireEvent.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Close' }))
-    expect(getDeviceSessionExpiry()).toBe(expiresAt)
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
+    expect(screen.queryByRole('button', { name: 'Choose how to sign in next time' })).toBeNull()
   })
 
   it('shows custom names and usage dates and submits a trimmed new name', async () => {

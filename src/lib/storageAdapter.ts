@@ -1,138 +1,111 @@
-import type { LoadedDiaryEntry, StorageMode } from '../types';
+import type { LoadedDiaryEntry, StorageMode } from '../types'
+import { SecureLocalData } from './secureLocalData'
+import { prepareLocalContext, sameLocalOwner } from './secureLocalContext'
 
 export interface StorageAdapter {
-  getMode(): StorageMode;
-  listEntries(): Promise<string[]>;
-  getEntry(date: string): Promise<LoadedDiaryEntry | null>;
-  saveEntry(date: string, content: string): Promise<LoadedDiaryEntry>;
-  deleteEntry(date: string): Promise<void>;
-  // Wipes every locally persisted entry. Called on sign-out and account
-  // switch so one account's diary text never lingers for the next one.
-  clearAll(): Promise<void>;
+  getMode(): StorageMode
+  listEntries(): Promise<string[]>
+  getEntry(date: string): Promise<LoadedDiaryEntry | null>
+  saveEntry(date: string, content: string): Promise<LoadedDiaryEntry>
+  deleteEntry(date: string): Promise<void>
+  clearAll(): Promise<void>
 }
 
-const LOCAL_STORAGE_PREFIX = 'linger_local_entry_';
-const LOCAL_STORAGE_INDEX = 'linger_local_entries_index';
+const LOCAL_STORAGE_PREFIX = 'linger_local_entry_'
+const LOCAL_STORAGE_INDEX = 'linger_local_entries_index'
 
 interface StoredEntry {
-  content: string;
-  version: string;
-  modifiedTime: string;
+  date: string
+  content: string
+  version: string
+  modifiedTime: string
 }
 
 export class LocalStorageAdapter implements StorageAdapter {
-  getMode(): StorageMode {
-    return 'local';
-  }
+  private readonly records = new SecureLocalData<StoredEntry>('local-mirror')
 
-  private getIndex(): string[] {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_INDEX);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
+  getMode(): StorageMode { return 'local' }
 
-  private setIndex(dates: string[]): void {
-    const sorted = Array.from(new Set(dates)).sort().reverse();
-    try {
-      localStorage.setItem(LOCAL_STORAGE_INDEX, JSON.stringify(sorted));
-    } catch {
-      // Catch quota errors
-    }
-  }
-
-  private readRecord(date: string): StoredEntry | null {
-    let raw: string | null;
-    try {
-      raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${date}`);
-    } catch {
-      return null;
-    }
-    if (raw === null) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string') {
-        return {
-          content: parsed.content,
-          version: typeof parsed.version === 'string' ? parsed.version : '1',
-          modifiedTime: typeof parsed.modifiedTime === 'string' ? parsed.modifiedTime : new Date(0).toISOString(),
-        };
+  private async migrate(allowLegacy = false): Promise<void> {
+    if (!allowLegacy) return
+    const state = await prepareLocalContext()
+    const previousOwner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
+    // These records predate account-bound storage. The user must explicitly
+    // choose to import them; a known different owner is never imported.
+    if (previousOwner && previousOwner !== '__unknown__' && !sameLocalOwner(previousOwner, state.owner)) throw new Error('Legacy mirror belongs to another account')
+    const keys = Object.keys(localStorage).filter(key => key.startsWith(LOCAL_STORAGE_PREFIX))
+    for (const key of keys) {
+      state.assertCurrent()
+      const date = key.slice(LOCAL_STORAGE_PREFIX.length)
+      const raw = localStorage.getItem(key)
+      if (!date || raw === null) continue
+      let value: unknown
+      try { value = JSON.parse(raw) } catch { value = raw }
+      const old = value && typeof value === 'object' ? value as Partial<StoredEntry> : null
+      const entry: StoredEntry = {
+        date,
+        content: typeof old?.content === 'string' ? old.content : raw,
+        version: typeof old?.version === 'string' ? old.version : '1',
+        modifiedTime: typeof old?.modifiedTime === 'string' ? old.modifiedTime : new Date(0).toISOString(),
       }
-    } catch {
-      // Fall through: value predates the JSON record format
+      await this.records.update(date, current => {
+        if (current && JSON.stringify(current) !== JSON.stringify(entry)) throw new Error('Conflicting local mirror requires recovery')
+        return current ?? entry
+      })
+      state.assertCurrent()
+      const owner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
+      if (owner === previousOwner && localStorage.getItem(key) === raw) localStorage.removeItem(key)
     }
-    return { content: raw, version: '1', modifiedTime: new Date(0).toISOString() };
+    state.assertCurrent()
+    const owner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
+    if (owner === previousOwner && !Object.keys(localStorage).some(key => key.startsWith(LOCAL_STORAGE_PREFIX))) {
+      localStorage.removeItem(LOCAL_STORAGE_INDEX)
+      localStorage.removeItem('linger_local_mirror_legacy_owner')
+    }
   }
 
-  private toLoadedEntry(date: string, record: StoredEntry): LoadedDiaryEntry {
+  async recoverLegacy(): Promise<void> {
+    await this.migrate(true)
+    if (Object.keys(localStorage).some(key => key.startsWith(LOCAL_STORAGE_PREFIX))) throw new Error('Legacy mirror could not be imported')
+  }
+
+  private toLoadedEntry(record: StoredEntry): LoadedDiaryEntry {
     return {
-      entry: { date, content: record.content },
-      meta: {
-        id: `local-${date}`,
-        name: `diary-${date}.txt`,
-        version: record.version,
-        modifiedTime: record.modifiedTime,
-      },
-    };
+      entry: { date: record.date, content: record.content },
+      meta: { id: `local-${record.date}`, name: `diary-${record.date}.txt`, version: record.version, modifiedTime: record.modifiedTime },
+    }
   }
 
   async listEntries(): Promise<string[]> {
-    return this.getIndex();
+    await this.migrate()
+    return (await this.records.list()).map(entry => entry.date).sort().reverse()
   }
 
   async getEntry(date: string): Promise<LoadedDiaryEntry | null> {
-    const record = this.readRecord(date);
-    if (record === null) return null;
-    return this.toLoadedEntry(date, record);
+    await this.migrate()
+    const record = await this.records.get(date)
+    return record ? this.toLoadedEntry(record) : null
   }
 
   async saveEntry(date: string, content: string): Promise<LoadedDiaryEntry> {
-    const previous = this.readRecord(date);
-    const record: StoredEntry = {
-      content,
+    await this.migrate()
+    const record = await this.records.update(date, previous => ({
+      date, content,
       version: String(previous ? Number(previous.version) + 1 : 1),
       modifiedTime: new Date().toISOString(),
-    };
-    try {
-      localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${date}`, JSON.stringify(record));
-    } catch (e) {
-      throw new Error('Local storage limit exceeded', { cause: e });
-    }
-    const index = this.getIndex();
-    if (!index.includes(date)) {
-      index.push(date);
-      this.setIndex(index);
-    }
-    return this.toLoadedEntry(date, record);
+    }))
+    return this.toLoadedEntry(record)
   }
 
   async deleteEntry(date: string): Promise<void> {
-    try {
-      localStorage.removeItem(`${LOCAL_STORAGE_PREFIX}${date}`);
-    } catch {
-      // Ignore
-    }
-    const index = this.getIndex().filter((d) => d !== date);
-    this.setIndex(index);
+    await this.migrate()
+    await this.records.remove(date)
   }
 
   async clearAll(): Promise<void> {
-    try {
-      // Scan actual keys rather than trusting the index — a failed index
-      // write must not leave orphaned entry records behind.
-      const doomed: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key !== null && key.startsWith(LOCAL_STORAGE_PREFIX)) doomed.push(key);
-      }
-      for (const key of doomed) localStorage.removeItem(key);
-      localStorage.removeItem(LOCAL_STORAGE_INDEX);
-    } catch {
-      // Ignore
+    await this.migrate()
+    for (const entry of await this.records.list()) {
+      await this.records.remove(entry.date, current => JSON.stringify(current) === JSON.stringify(entry))
     }
   }
 }

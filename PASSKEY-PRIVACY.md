@@ -34,17 +34,12 @@ The user's master key and Google credentials may be used in request memory.
 Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
 persisted on the server, placed in workflow input/output, or retained in server global state.
-Browser keys and plaintext OAuth credentials are memory-only by default. Users can opt in
-to saving the unlocked key in the browser's localStorage for up to seven days,
-including across browser restarts. The fixed expiry is not extended by use.
-If the browser is closed at expiry, the expired record is removed on the next
-app launch; browser storage cannot be erased while the app is not running.
-Users can remove the saved key in passkey settings or by signing out. Existing
-tab-only sessions remain limited to their original expiry. A passkey-protected refresh token in D1
-can restore Google access after unlock. This exposes the key to scripts running in the
-origin and anyone with access to that browser profile. Sign-out, account changes,
-expiry and failed session validation clear the saved state. Browser restore behavior
-can retain tab state, so users of shared devices should explicitly sign out.
+Browser keys and plaintext OAuth credentials are memory-only. A passkey-protected
+refresh token in D1 can restore Google access after unlock. Earlier releases could
+save an unlocked key in browser storage; current code removes those records on launch
+and does not restore them. Copies outside live browser storage are not erased by this
+cleanup. Scripts running on the origin can access keys while unlocked; users of shared
+devices should explicitly sign out.
 
 ## Stored data
 
@@ -66,7 +61,8 @@ can retain tab state, so users of shared devices should explicitly sign out.
   a failure does not block diary access. Retired durable workflows fail closed rather
   than adding new date-bearing checkpoints; historical workflow payloads and
   steps are not rewritten. Job counts, timestamps, and state remain visible.
-  Browser diary caches/drafts retain their existing behavior.
+  Browser drafts, diary caches, local mirrors, milestones, and sync queues are
+  encrypted as described below.
 - Keyed lookups still expose the number of entries and repeat access to the same
   lookup key. Dates can also appear in request paths or provider diagnostics;
   account logging and retention settings must be reviewed separately.
@@ -78,6 +74,42 @@ protected metadata. An operator or attacker who can inspect request memory or
 change the served code can capture a key during use. Public source and deployment
 verification help review that risk; they do not eliminate it. The backend still
 processes plaintext diary requests and Google identity during authorized operations.
+
+## Browser-local encrypted data
+
+Account-scoped drafts, diary caches, local mirrors, milestones, and sync queues
+use AES-GCM keys derived from the unlocked master key. New data categories use
+distinct HKDF purposes. Keyed identifiers avoid storing their date and email in
+cleartext in the encrypted-record index. A separate marker stores a
+hash of the normalized email, a vault ID, and the keyed draft group; the email
+hash is vulnerable to guessing and the marker and group reveal activity and
+record counts. The marker prevents a replacement vault from treating encrypted
+local records under a lost key as absent. A marker can be replaced only when
+there are no protected records for that account.
+
+Account-owned plaintext drafts migrate after the corresponding Google account
+is verified and the passkey vault unlocked. The old record and encrypted copy
+are changed atomically in one IndexedDB transaction after checking their versions.
+Unowned or conflicting legacy copies are retained for recovery and can remain
+plaintext. Owner-tagged diary caches migrate atomically in IndexedDB. Ownerless cached entries, old local mirrors, milestones, and unscoped sync queues
+cannot be reliably attributed to an
+account; users may explicitly import them into the unlocked account. Unimported,
+malformed, or conflicting records remain plaintext. Account-scoped queue items
+migrate after an encrypted copy is committed and the source is rechecked. IndexedDB
+and localStorage cannot participate in one transaction, so a crash can leave both
+copies; importing is safe to retry. Browser backups and old filesystem snapshots
+are not securely erased.
+Before opening a legacy database at the new schema version, the app asks the user
+to save edits and close other Linger tabs. Older releases may close their database
+connection on upgrade without notifying their editor, so ignoring that instruction
+can leave an old tab unable to save drafts. A blocked upgrade shows a notice and
+continues when the blocking connection closes; newer tabs show a warning when
+another tab changes the database version.
+If all passkeys for the old vault are lost, its encrypted local records cannot
+be decrypted. Unsynced drafts and pending changes may be lost; Drive and S3 files
+remain accessible separately. Sync requires an unlocked account. Milestone
+changes stay encrypted and pending when cross-tab locking is unavailable; Drive
+milestone updates remain last-write-wins across different devices.
 
 ## Recovery
 
@@ -95,8 +127,11 @@ erase previously obtained keys or data, and does not rotate the master key.
 
 If every passkey is lost, register a new internal account/passkey and authorize
 the same Google account. Diary files, milestones, and S3 settings stored in Drive
-can be loaded again; Cloudflare identity/cache metadata is rebuilt. Local-only
-preferences and unsaved drafts are not guaranteed by this process. Keep the
+can be loaded again; Cloudflare identity/cache metadata is rebuilt. If this
+browser still contains local records protected by the old vault, it refuses to
+silently treat them as absent. Use another browser to reconnect without removing
+them; clearing this site's data deletes those local records. Local-only preferences
+and unsaved drafts are not guaranteed by this process. Keep the
 existing OAuth client/project and Drive file grants. If the diary folder was
 renamed or automatic discovery cannot identify it, select the existing accessible
 Drive folder in settings. This requires continued access to that Google account

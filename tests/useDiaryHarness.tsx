@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useDiary, EntryConflictError } from '../src/hooks/useDiary'
-import { getAllDrafts, putCached, putDraft } from '../src/lib/diaryCache'
+import { confirmLegacyUpgrade, getDatabaseNotice, putCached, putDraft, subscribeDatabaseNotice } from '../src/lib/diaryCache'
+import { getAllDrafts } from '../src/lib/draftStorage'
+import { setActiveAccount } from '../src/lib/accountSession'
+import { clearVaultKey, unlockVaultWithKey } from '../src/lib/passkeyVault'
 import type { CachedEntry } from '../src/lib/diaryCache'
 import type { LoadedDiaryEntry } from '../src/types'
 import type { ImportResult } from '../src/hooks/useDiary'
+
+subscribeDatabaseNotice(() => { if (getDatabaseNotice() === 'confirm-upgrade') queueMicrotask(confirmLegacyUpgrade) })
 
 type FetchCall = { url: string; method: string; body?: string }
 type QueuedResponse = { status: number; body: unknown; delayMs?: number }
@@ -81,7 +86,16 @@ window.diaryHarness = {
   q: (...responses) => queue.push(...responses),
   calls: () => [...fetchCalls],
   clearCalls: () => fetchCalls.splice(0),
-  start: () => root.render(<Harness />),
+  start: () => {
+    if (currentEmail) {
+      unlockVaultWithKey(`harness:${currentEmail}`, new Uint8Array(32).fill(17))
+      setActiveAccount(`email:${encodeURIComponent(currentEmail)}`, false, currentEmail)
+    } else {
+      clearVaultKey()
+      setActiveAccount(null)
+    }
+    root.render(<Harness />)
+  },
   save: async (date, content, baseVersion, force, baseContent) => {
     if (!_save) throw new Error('harness not started')
     try {
@@ -149,12 +163,12 @@ window.diaryHarness = {
     if (u === null) localStorage.removeItem('linger_session_user')
     else localStorage.setItem('linger_session_user', u)
   },
-  seedIdb: async (entries: { date: string; meta: unknown; content?: unknown; snippet?: string }[]) => {
+  seedIdb: async (entries: { owner?: string; date: string; meta: unknown; content?: unknown; snippet?: string }[]) => {
     await Promise.all(entries.map(e => putCached(e as CachedEntry)))
   },
   seedDrafts: async (drafts) => {
     const owner = localStorage.getItem('linger_session_user') ?? currentEmail ?? undefined
     await Promise.all(drafts.map(d => putDraft({ ...d, owner })))
   },
-  getDrafts: () => getAllDrafts(),
+  getDrafts: () => getAllDrafts(currentEmail ?? undefined),
 }

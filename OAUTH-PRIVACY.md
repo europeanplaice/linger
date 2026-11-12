@@ -27,8 +27,8 @@ email-only events receive a retryable error. Migration 0004
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 
-Reloading or closing the page discards its plaintext Google credentials. An optional
-tab session can retain the unlocked passkey key; see PASSKEY-PRIVACY.md. After
+Reloading or closing the page discards its plaintext Google credentials and unlocked
+passkey key; see PASSKEY-PRIVACY.md. After
 unlock, the saved refresh credential can renew access without another Google
 authorization. Revocation or expiry requires reconnecting Google. S3 work advances while the app is open and the
 user's authorization remains valid; progress metadata can survive a pause, but

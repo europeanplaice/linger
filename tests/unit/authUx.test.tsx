@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '../../src/i18n'
 import { PasskeyGate } from '../../src/components/PasskeyGate'
 import { LoginScreen } from '../../src/components/LoginScreen'
-import { RememberDevicePrompt } from '../../src/components/RememberDevicePrompt'
-import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
-import { clearTabSession, getDeviceSessionExpiry } from '../../src/lib/tabSession'
+import { clearVaultKey } from '../../src/lib/passkeyVault'
+import { clearTabSession } from '../../src/lib/tabSession'
 
 afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers() })
 
@@ -116,18 +115,5 @@ describe('authentication guidance', () => {
     expect(screen.getByText('person@example.com')).toBeTruthy()
   })
 
-  it('keeps persistence off until the user opts in after registration', () => {
-    vi.useFakeTimers()
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    const close = vi.fn()
-    render(<I18nProvider initialLanguage="en"><RememberDevicePrompt onClose={close} /></I18nProvider>)
-    const prompt = within(screen.getByRole('complementary'))
-    expect((prompt.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
-    expect(getDeviceSessionExpiry()).toBeNull()
-    fireEvent.click(prompt.getByRole('checkbox'))
-    expect(prompt.getByRole('option', { selected: true }).textContent).toBe('1 day')
-    fireEvent.click(prompt.getByRole('button', { name: 'Save' }))
-    expect(getDeviceSessionExpiry()).toBe(Date.now() + 24 * 60 * 60 * 1000)
-    expect(close).toHaveBeenCalledOnce()
-  })
+
 })

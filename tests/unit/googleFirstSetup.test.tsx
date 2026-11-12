@@ -25,45 +25,6 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('Google-first registration', () => {
-  it('remembers dismissal after locking and after remounting without enabling device persistence', async () => {
-    mocks.login.mockImplementation(async () => {
-      mocks.vaultId.mockReturnValue('existing-vault')
-      return { userId: 'existing-vault' }
-    })
-    const first = renderHook(() => useAuth())
-    await waitFor(() => expect(first.result.current.status).toBe('signedOut'))
-    await act(async () => first.result.current.unlockPasskey())
-    expect(first.result.current.offerRememberDevice).toBe(true)
-    act(() => first.result.current.dismissRememberDevice())
-    act(() => first.result.current.lockVault())
-    await act(async () => first.result.current.unlockPasskey())
-    expect(first.result.current.offerRememberDevice).toBe(false)
-    first.unmount()
-
-    mocks.vaultId.mockReturnValue(null)
-    const second = renderHook(() => useAuth())
-    await waitFor(() => expect(second.result.current.status).toBe('signedOut'))
-    await act(async () => second.result.current.unlockPasskey())
-    expect(second.result.current.offerRememberDevice).toBe(false)
-    expect(localStorage.getItem('linger_device_session_v1')).toBeNull()
-  })
-
-  it('still remembers dismissal on the current page when browser storage is blocked', async () => {
-    mocks.login.mockImplementation(async () => {
-      mocks.vaultId.mockReturnValue('existing-vault')
-      return { userId: 'existing-vault' }
-    })
-    const { result } = renderHook(() => useAuth())
-    await waitFor(() => expect(result.current.status).toBe('signedOut'))
-    await act(async () => result.current.unlockPasskey())
-    expect(result.current.offerRememberDevice).toBe(true)
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Blocked', 'SecurityError') })
-    act(() => result.current.dismissRememberDevice())
-    act(() => result.current.lockVault())
-    await act(async () => result.current.unlockPasskey())
-    expect(result.current.offerRememberDevice).toBe(false)
-  })
-
   it('uses the verified Google email for the passkey, then stores the refresh credential', async () => {
     mocks.start.mockResolvedValue({ email: 'person@example.com' })
     mocks.register.mockImplementation(async () => {
@@ -98,7 +59,7 @@ describe('Google-first registration', () => {
     expect(mocks.refresh).toHaveBeenCalledWith()
     expect(mocks.start).not.toHaveBeenCalled()
     expect(result.current.status).toBe('signedIn')
-    expect(result.current.offerRememberDevice).toBe(true)
+    expect(result.current.offerRememberDevice).toBe(false)
     mocks.start.mockResolvedValue({ signedIn: true, userId: 'existing-vault', email: 'person@example.com', googleSub: 'sub' })
     await act(async () => { result.current.signIn(); await Promise.resolve() })
     expect(mocks.start).toHaveBeenCalledWith({ selectAccount: false, renew: false, loginHint: 'sub' })

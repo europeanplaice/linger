@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getAllCached } from '../lib/diaryCache'
+import { getAllCached } from '../lib/secureCache'
 import { buildIndex, search, findSimilar, sharedTokens, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
 import { findRecurringAbsentTopic, type RecurringTopic } from '../utils/topicExtraction'
 import type { Language } from '../i18n'
@@ -9,7 +9,7 @@ export interface LocalSearchResult {
   snippet: string
 }
 
-export function useTfIdfSearch() {
+export function useTfIdfSearch(owner: string | null = null) {
   const [ready, setReady] = useState(false)
   const [indexVersion, setIndexVersion] = useState(0)
   const indexRef = useRef<TfIdfIndex | null>(null)
@@ -18,6 +18,10 @@ export function useTfIdfSearch() {
   useEffect(() => {
     let cancelled = false
     const generation = ++rebuildGenerationRef.current
+
+    indexRef.current = null
+    setReady(false)
+    if (!owner) return () => { cancelled = true; rebuildGenerationRef.current++ }
 
     getAllCached()
       .then(entries => {
@@ -34,7 +38,7 @@ export function useTfIdfSearch() {
       })
 
     return () => { cancelled = true; rebuildGenerationRef.current++ }
-  }, [])
+  }, [owner])
 
   const rebuildFromCache = useCallback((overrides: Record<string, string> = {}) => {
     const generation = ++rebuildGenerationRef.current

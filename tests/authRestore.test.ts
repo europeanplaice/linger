@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 test('valid session skips login screen and shows diary directly', async ({ page }) => {
   await installMockOAuthCredentials(page)
   await page.route('/auth/session', async route => {
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
   await page.route('/api/drive/entries', async route => {
     await route.fulfill({ json: { files: [] } })
@@ -26,7 +26,30 @@ test('valid session skips login screen and shows diary directly', async ({ page 
   await expect(page.locator('.login-screen')).toHaveCount(0)
 })
 
-test('an opted-in tab restores its vault but requires Google authorization on reload', async ({ page }) => {
+test('asks the user to close older tabs before upgrading legacy draft storage', async ({ page }) => {
+  await installMockOAuthCredentials(page)
+  await page.goto(`${baseUrl}/tests/useDiaryHarness.html`)
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open('linger_diary_cache', 3)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      db.createObjectStore('entries', { keyPath: 'date' })
+      db.createObjectStore('drafts', { keyPath: 'date' })
+      db.createObjectStore('accountDrafts', { keyPath: 'key' })
+    }
+    req.onsuccess = () => { req.result.close(); resolve() }
+    req.onerror = () => reject(req.error)
+  }))
+  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } }))
+  await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
+  await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404, body: '' }))
+  await page.goto(baseUrl)
+  await expect(page.getByRole('alert')).toContainText('close every other Linger tab')
+  await page.getByRole('button', { name: 'I closed the other tabs' }).click()
+  await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+})
+
+test('removes legacy remembered keys and requires a passkey on reload', async ({ page }) => {
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
   let vaultChecks = 0
   await page.route('/auth/passkey/session', route => {
@@ -41,9 +64,9 @@ test('an opted-in tab restores its vault but requires Google authorization on re
     oauth: { accessToken: 'restored-access', idToken: 'restored-id', expiresAt: Date.now() + 1800_000 },
   })))
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Reconnect Google Drive', exact: true })).toBeVisible()
-  expect(vaultChecks).toBeGreaterThan(0)
-  expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).not.toContain('restored-')
+  await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
+  expect(vaultChecks).toBe(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('linger_tab_session_v1'))).toBeNull()
 })
 
 test('reload requires fresh auth while preserving the cached draft', async ({ page }) => {
@@ -57,7 +80,7 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
   })
   await page.evaluate(async ({ email, content, date }) => {
     localStorage.setItem('linger_session_user', email)
-    await window.diaryHarness.seedIdb([{ date, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' }, content: { date, content } }])
+    await window.diaryHarness.seedIdb([{ owner: email, date, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' }, content: { date, content } }])
     await window.diaryHarness.seedDrafts([{ date, content: 'Unsaved offline draft', baseVersion: '1', baseContent: content, savedAt: Date.now() }])
   }, { email, content, date })
 
@@ -82,21 +105,24 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
     await expect(page.locator('.login-screen')).toBeVisible()
     const cachedData = await page.evaluate(async ({ date, email }) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open('linger_diary_cache', 3)
+        const request = indexedDB.open('linger_diary_cache')
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
-      const transaction = db.transaction(['entries', 'accountDrafts'], 'readonly')
-      const [entry, draft] = await Promise.all(['entries', 'accountDrafts'].map(store => new Promise<any>((resolve, reject) => {
-        const request = transaction.objectStore(store).get(store === 'entries' ? date : `${email}\u0000${date}`)
+      const transaction = db.transaction(['entries', 'accountDrafts', 'secureRecords'], 'readonly')
+      const [entry, draft, secure] = await Promise.all(['entries', 'accountDrafts', 'secureRecords'].map(store => new Promise<any>((resolve, reject) => {
+        const request = store === 'secureRecords' ? transaction.objectStore(store).getAll() : transaction.objectStore(store).get(store === 'entries' ? date : `${email}\u0000${date}`)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })))
       db.close()
-      return { entry, draft }
+      return { entry, draft, secure }
     }, { date, email })
-    expect(cachedData.entry?.content?.content).toBe(content)
-    expect(cachedData.draft?.content).toBe('Unsaved offline draft')
+    expect(cachedData.entry).toBeUndefined()
+    expect(cachedData.draft).toBeUndefined()
+    expect(cachedData.secure.length).toBeGreaterThanOrEqual(2)
+    expect(JSON.stringify(cachedData.secure)).not.toContain('Unsaved offline draft')
+    expect(JSON.stringify(cachedData.secure)).not.toContain(content)
   } finally {
     releaseDrive()
   }
@@ -110,7 +136,7 @@ test('keeps editor header typography stable between skeleton and loaded states',
   const entryGate = new Promise<void>(resolve => { releaseEntry = resolve })
 
   await page.route('/auth/session', async route => {
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
   await page.route('/api/drive/entries', async route => {
     await route.fulfill({ json: { files: [] } })
@@ -243,7 +269,7 @@ test('loads the selected entry and shows its content', async ({ page }) => {
   const selectedEntryGate = new Promise<void>(resolve => { releaseSelectedEntry = resolve })
 
   await page.route('/auth/session', async route => {
-    await route.fulfill({ json: { signedIn: true } })
+    await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
 
   await page.route('/api/drive/entries', async route => {

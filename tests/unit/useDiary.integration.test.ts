@@ -3,9 +3,13 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EntryConflictError, useDiary } from '../../src/hooks/useDiary'
 import { TokenExpiredError } from '../../src/api/driveEntries'
-import { clearCache, deleteDraft, getAllCached, getAllDrafts } from '../../src/lib/diaryCache'
+import { clearCache as clearLegacyCache, getAllDrafts as getLegacyDrafts, deleteDraft as deleteLegacyDraft } from '../../src/lib/diaryCache'
+import { clearCache, getAllCached } from '../../src/lib/secureCache'
+import { SyncQueueManager } from '../../src/lib/syncQueue'
+import { deleteDraft, getAllDrafts, putDraft } from '../../src/lib/draftStorage'
 import { setActiveAccount } from '../../src/lib/accountSession'
-import type { DriveChange, DriveFileMeta } from '../../src/types'
+import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
+import type { DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../../src/types'
 
 // Keep the Hook, API client, storage adapter and IDB cache real. Only the HTTP
 // boundary is replaced; browser lifecycle/cross-tab tests remain in Playwright.
@@ -34,11 +38,15 @@ let read: ReturnType<typeof vi.fn<(day: string) => Promise<Response>>>
 let write: ReturnType<typeof vi.fn<(day: string, body: Record<string, unknown>) => Promise<Response>>>
 
 beforeEach(async () => {
-  await clearCache()
-  for (const draft of await getAllDrafts()) await deleteDraft(draft.date, draft.owner)
+  await clearLegacyCache()
+  for (const draft of await getLegacyDrafts()) await deleteLegacyDraft(draft.date, draft.owner)
   localStorage.clear()
   localStorage.setItem('linger_session_user', email)
-  setActiveAccount(`email:${encodeURIComponent(email)}`)
+  unlockVaultWithKey('test-vault', new Uint8Array(32).fill(5))
+  setActiveAccount(`email:${encodeURIComponent(email)}`, false, email)
+  await clearCache()
+  await new SyncQueueManager(email).clear()
+  for (const draft of await getAllDrafts(email)) await deleteDraft(draft.date, email)
   // Node's BroadcastChannel would connect unrelated jsdom tests. Actual tab
   // messaging is covered by tests/multitab.test.ts.
   vi.stubGlobal('BroadcastChannel', undefined)
@@ -64,9 +72,10 @@ afterEach(async () => {
   cleanup()
   // Drain outstanding IDB operations before clearing storage for the next case.
   await getAllCached()
-  await getAllDrafts()
+  await getAllDrafts(email)
   vi.unstubAllGlobals()
   setActiveAccount(null)
+  clearVaultKey()
 })
 
 async function start(initialFiles: DriveFileMeta[] = []) {
@@ -85,6 +94,19 @@ async function start(initialFiles: DriveFileMeta[] = []) {
 }
 
 describe('useDiary HTTP and storage integration', () => {
+  it('does not delete a newer checkpoint with the same text after an older save finishes', async () => {
+    const { result } = await start()
+    const response = deferred<Response>()
+    write.mockReturnValueOnce(response.promise)
+    let pending!: Promise<LoadedDiaryEntry>
+    act(() => { pending = result.current.save(date, 'same text', null) })
+    await waitFor(() => expect(write).toHaveBeenCalledOnce())
+    const previous = (await getAllDrafts(email))[0]
+    await putDraft({ ...previous, savedAt: previous.savedAt + 1, baseVersion: 'newer-base' })
+    await act(async () => { response.resolve(json(meta())); await pending })
+    expect(await getAllDrafts(email)).toMatchObject([{ content: 'same text', baseVersion: 'newer-base' }])
+  })
+
   it('first save posts once without a fileId and persists the returned entry', async () => {
     const { result } = await start()
     write.mockResolvedValue(json(meta()))
@@ -250,6 +272,7 @@ describe('useDiary HTTP and storage integration', () => {
     // Complete requests in reverse order; output order must remain stable.
     for (let i = 0; i < days.length; i++) {
       const index = i < limit ? limit - 1 - i : i
+      await waitFor(() => expect(started).toBeGreaterThan(index))
       await act(async () => {
         const day = operation === 'import' ? write.mock.calls.at(index)![0] : read.mock.calls.at(index)![0]
         gates.at(index)!.resolve(json(operation === 'import' ? meta(day) : entry(day, '1', `needle ${day}`)))

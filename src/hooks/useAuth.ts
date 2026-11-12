@@ -6,7 +6,7 @@ import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
 import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../lib/tabSession'
 import type { RememberDays } from '../lib/tabSession'
-import { rememberDevicePromptDismissal, shouldOfferRememberDevicePrompt } from '../lib/rememberDevicePrompt'
+import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
 import { hasRegisteredPasskey } from '../lib/passkeyRegistrationHistory'
@@ -95,7 +95,8 @@ export function useAuth(): AuthState {
     setOfferRememberDevice(false)
   }, [])
   const offerRememberDeviceChoice = useCallback((remember: RememberDays) => {
-    setOfferRememberDevice(!remember && !rememberDevicePromptDismissed.current && shouldOfferRememberDevicePrompt())
+    void remember
+    setOfferRememberDevice(false)
   }, [])
   const googleRetryInFlight = useRef(false)
   const vaultRevision = useRef(0)
@@ -137,7 +138,7 @@ export function useAuth(): AuthState {
       setGoogleConnection(info.signedIn ? 'idle' : 'required')
       if (!info.signedIn) return
       const account = accountIdentity(info)
-      if (account) { setActiveAccount(account); announceAccount(account) }
+      if (account) { setActiveAccount(account, false, info.email); announceAccount(account) }
       rememberSession(true)
       setEmail(info.email)
       setGoogleSub(info.googleSub)
@@ -278,7 +279,7 @@ export function useAuth(): AuthState {
         setVaultUserId(null)
         setVaultStatus('locked')
       }
-      setActiveAccount(account, !info.signedIn && !connectionUnavailable)
+      setActiveAccount(account, !info.signedIn && !connectionUnavailable, info.email)
       if (account) announceAccount(account)
       if (!connectionUnavailable || info.signedIn) rememberSession(info.signedIn)
       if (!info.signedIn) {
@@ -335,7 +336,7 @@ export function useAuth(): AuthState {
         needsGoogleCredential.current = !refreshed
       }
       if (revision !== authRevision.current) return
-      setActiveAccount(account, getAccountSnapshot().account !== account)
+      setActiveAccount(account, getAccountSnapshot().account !== account, info.email)
       announceAccount(account)
       rememberSession(true)
       saveTabSession()
@@ -465,7 +466,7 @@ export function useAuth(): AuthState {
         offerRememberDeviceChoice(remember)
         if (info.signedIn) {
           const account = accountIdentity(info)
-          if (account) { setActiveAccount(account); announceAccount(account) }
+          if (account) { setActiveAccount(account, false, info.email); announceAccount(account) }
           rememberSession(true)
           setEmail(info.email)
           setGoogleSub(info.googleSub)

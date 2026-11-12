@@ -1,156 +1,29 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../../src/lib/tabSession'
 import { clearVaultKey, getVaultUserId, unlockVaultWithKey } from '../../src/lib/passkeyVault'
-import { clearOAuthCredentials, getAccessToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
-import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession, getDeviceSessionExpiry } from '../../src/lib/tabSession'
 
-describe('optional tab session', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    sessionStorage.clear()
-    localStorage.clear()
-    clearTabSession()
-    clearVaultKey()
-    clearOAuthCredentials()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })))
-  })
-  afterEach(() => { clearTabSession(); clearVaultKey(); clearOAuthCredentials(); vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { clearTabSession(); clearVaultKey(); vi.restoreAllMocks() })
 
-  it('only saves after opt-in and restores after validating the server session', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    setOAuthCredentials({ accessToken: 'access', idToken: 'identity', expiresAt: Date.now() + 60_000 })
-    saveTabSession()
-    expect(localStorage.length).toBe(0)
-    enableTabSession()
-    saveTabSession()
-    expect(localStorage.getItem('linger_device_session_v1')).not.toContain('access')
-    expect(localStorage.getItem('linger_device_session_v1')).not.toContain('identity')
-    sessionStorage.clear() // A new browser session still has the device record.
-    clearVaultKey()
-    clearOAuthCredentials()
-    expect(await restoreTabSession()).toBe('restored')
-    expect(getVaultUserId()).toBe('user')
-    expect(getAccessToken()).toBeNull()
-    expect(fetch).toHaveBeenCalledWith('/auth/passkey/session', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
-  })
-
-  it('supports a shorter one-day opt-in without extending it on restore', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    const expiry = Date.now() + 24 * 60 * 60 * 1000
-    enableTabSession(1)
-    saveTabSession()
-    expect(getDeviceSessionExpiry()).toBe(expiry)
-    vi.advanceTimersByTime(60_000)
-    clearVaultKey()
-    expect(await restoreTabSession()).toBe('restored')
-    expect(getDeviceSessionExpiry()).toBe(expiry)
-    vi.advanceTimersByTime(24 * 60 * 60 * 1000)
-    expect(getDeviceSessionExpiry()).toBeNull()
-  })
-
-  it('removes legacy Google credentials before validating the session', async () => {
-    sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({
-      userId: 'user', key: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))), expiresAt: Date.now() + 60_000,
-      oauth: { accessToken: 'legacy-access', idToken: 'legacy-identity', expiresAt: Date.now() + 60_000 },
-    }))
-    vi.mocked(fetch).mockImplementation(async () => {
-      expect(sessionStorage.getItem('linger_tab_session_v1')).not.toContain('legacy-')
-      return new Response(null, { status: 200 })
-    })
-    expect(await restoreTabSession()).toBe('restored')
-    expect(getVaultUserId()).toBe('user')
-    expect(getAccessToken()).toBeNull()
-  })
-
-  it('rejects revoked sessions and removes their stored credentials', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession()
-    saveTabSession()
-    clearVaultKey()
-    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 401 }))
+describe('retired remembered sessions', () => {
+  it('removes saved keys without unlocking or contacting the server', async () => {
+    localStorage.setItem('linger_device_session_v1', JSON.stringify({ userId: 'old', key: 'secret' }))
+    sessionStorage.setItem('linger_tab_session_v1', JSON.stringify({ userId: 'old', key: 'secret' }))
+    localStorage.setItem('unrelated-draft', 'keep')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
     expect(await restoreTabSession()).toBe('missing')
     expect(getVaultUserId()).toBeNull()
     expect(localStorage.getItem('linger_device_session_v1')).toBeNull()
+    expect(sessionStorage.getItem('linger_tab_session_v1')).toBeNull()
+    expect(localStorage.getItem('unrelated-draft')).toBe('keep')
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it.each([503, 'offline'] as const)('keeps the saved session locked during a temporary failure (%s)', async failure => {
+  it('never persists an unlocked key even if legacy callers request it', () => {
     unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession(1)
-    saveTabSession()
-    clearVaultKey()
-    const expiry = getDeviceSessionExpiry()
-
-    if (failure === 'offline') vi.mocked(fetch).mockRejectedValueOnce(new TypeError('offline'))
-    else vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: failure }))
-    expect(await restoreTabSession()).toBe('unavailable')
-    expect(getVaultUserId()).toBeNull()
-    expect(getDeviceSessionExpiry()).toBe(expiry)
-
-    vi.advanceTimersByTime(60_000)
-    expect(await restoreTabSession()).toBe('restored')
-    expect(getVaultUserId()).toBe('user')
-    expect(getDeviceSessionExpiry()).toBe(expiry)
-  })
-
-  it('does not remove another tab’s replacement when validation fails', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession()
-    saveTabSession()
-    clearVaultKey()
-    const replacement = JSON.stringify({ userId: 'other', key: btoa('x'.repeat(32)), expiresAt: Date.now() + 60_000 })
-    vi.mocked(fetch).mockImplementationOnce(async () => {
-      localStorage.setItem('linger_device_session_v1', replacement)
-      return new Response(null, { status: 401 })
-    })
-    expect(await restoreTabSession()).toBe('missing')
-    expect(localStorage.getItem('linger_device_session_v1')).toBe(replacement)
-  })
-
-  it('expires the saved session', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    setOAuthCredentials({ accessToken: 'access', idToken: 'identity', expiresAt: Date.now() + 60_000 })
-    enableTabSession()
-    saveTabSession()
-    clearVaultKey()
-    clearOAuthCredentials()
-    vi.advanceTimersByTime(61_000)
-    expect(await restoreTabSession()).toBe('restored')
-    expect(getVaultUserId()).toBe('user')
-    expect(getAccessToken()).toBeNull()
-    vi.advanceTimersByTime(7 * 24 * 60 * 60 * 1000)
-    expect(localStorage.getItem('linger_device_session_v1')).toBeNull()
-  })
-
-  it('does not extend the expiry when saving or restoring', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession()
-    saveTabSession()
-    const initial = JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt
-    vi.advanceTimersByTime(24 * 60 * 60 * 1000)
-    clearVaultKey()
-    expect(await restoreTabSession()).toBe('restored')
-    saveTabSession()
-    expect(JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt).toBe(initial)
-  })
-
-  it('does not restore a key removed during validation', async () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession()
-    saveTabSession()
-    clearVaultKey()
-    vi.mocked(fetch).mockImplementation(async () => {
-      localStorage.removeItem('linger_device_session_v1')
-      return new Response(null, { status: 200 })
-    })
-    expect(await restoreTabSession()).toBe('missing')
-    expect(getVaultUserId()).toBeNull()
-  })
-
-  it('does not recreate a device record removed by another tab', () => {
-    unlockVaultWithKey('user', new Uint8Array(32).fill(7))
-    enableTabSession()
-    saveTabSession()
-    localStorage.removeItem('linger_device_session_v1')
+    enableTabSession(7)
     saveTabSession()
     expect(localStorage.getItem('linger_device_session_v1')).toBeNull()
+    expect(sessionStorage.getItem('linger_tab_session_v1')).toBeNull()
+    expect(getVaultUserId()).toBe('user')
   })
 })

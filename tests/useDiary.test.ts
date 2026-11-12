@@ -58,7 +58,7 @@ async function reloadHarness(page: import('@playwright/test').Page) {
 test.describe('useDiary IDB cache — cross-account isolation', () => {
   // Tests use a real page reload to persist IDB between sessions (realistic scenario).
 
-  test('clears IDB when signed-in account differs from stored user', async ({ page }) => {
+  test('isolates encrypted account data and preserves unattributed legacy queue on account change', async ({ page }) => {
     // Session 1: sign in as user@example.com, save entry → IDB populated
     await loadHarness(page)
     await startHarness(page, { files: [{ id: 'file-1', name: 'diary-2026-05-01.md', version: '1' }] })
@@ -71,13 +71,13 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     const firstUser = await page.evaluate(() => localStorage.getItem('linger_session_user'))
     expect(firstUser).toBe('user@example.com')
 
-    // The save also mirrored the entry into localStorage
+    // The save must not mirror the entry in plaintext localStorage.
     const mirrored = await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))
-    expect(mirrored).toContain('secret diary')
+    expect(mirrored).toBeNull()
 
     // Session 2: reload page (IDB preserved), sign in as a different account.
-    // A REMOVE left queued by the previous account must not survive either —
-    // it would replay against the new account's Drive.
+    // A legacy unscoped queue remains available for explicit recovery but is
+    // never replayed against the new account's Drive.
     await reloadHarness(page)
     await page.evaluate(async () => {
       localStorage.setItem('linger_pending_sync_queue', JSON.stringify([
@@ -89,13 +89,14 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     })
     await page.waitForSelector('#harness-ready')
 
-    // IDB was cleared: no dates from user@example.com's session visible
+    // No dates from user@example.com's session are visible to the other account.
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '')
     const stored = await page.evaluate(() => localStorage.getItem('linger_session_user'))
     expect(stored).toBe('other@example.com')
-    // The local entry mirror and offline queue were wiped with the cache
+    // The old queue remains, attributed to the old session for recovery.
     expect(await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))).toBeNull()
-    expect(await page.evaluate(() => localStorage.getItem('linger_pending_sync_queue'))).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('linger_pending_sync_queue'))).not.toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('linger_legacy_queue_owner'))).toBe('user@example.com')
   })
 
   test('does not hydrate IDB when the signed-in account email is unknown', async ({ page }) => {
@@ -583,6 +584,64 @@ test.describe('useDiary search — local-first', () => {
 })
 
 test.describe('useDiary offline drafts', () => {
+  test('reports a blocked upgrade until an older database connection closes', async ({ page, context }) => {
+    await loadHarness(page)
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('linger_diary_cache', 3)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        db.createObjectStore('entries', { keyPath: 'date' })
+        db.createObjectStore('drafts', { keyPath: 'date' })
+        db.createObjectStore('accountDrafts', { keyPath: 'key' })
+      }
+      req.onsuccess = () => { (window as unknown as { heldDb: IDBDatabase }).heldDb = req.result; resolve() }
+      req.onerror = () => reject(req.error)
+    }))
+    const other = await context.newPage()
+    await other.goto(`${baseUrl}/tests/useDiaryHarness.html`)
+    await other.evaluate(async () => {
+      const path = '/src/lib/diaryCache.ts'
+      const cache = await import(/* @vite-ignore */ path)
+      ;(window as unknown as { upgrade: Promise<unknown> }).upgrade = cache.getDiaryDatabase()
+    })
+    await expect.poll(() => other.evaluate(async () => {
+      const path = '/src/lib/diaryCache.ts'
+      return (await import(/* @vite-ignore */ path)).getDatabaseNotice()
+    })).toBe('blocked')
+    await page.evaluate(() => (window as unknown as { heldDb: IDBDatabase }).heldDb.close())
+    await other.evaluate(async () => { await (window as unknown as { upgrade: Promise<unknown> }).upgrade })
+    await expect.poll(() => other.evaluate(async () => {
+      const path = '/src/lib/diaryCache.ts'
+      return (await import(/* @vite-ignore */ path)).getDatabaseNotice()
+    })).toBeNull()
+    await other.close()
+  })
+
+  test('stores offline drafts as ciphertext in browser storage', async ({ page, context }) => {
+    await loadHarness(page)
+    await startHarness(page)
+    await context.setOffline(true)
+    await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'private browser draft sentinel', null))
+    await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toMatchObject([{ content: 'private browser draft sentinel' }])
+    const stored = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('linger_diary_cache')
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      })
+      const readStore = (name: string) => new Promise<unknown[]>((resolve, reject) => {
+        const req = db.transaction(name).objectStore(name).getAll()
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      })
+      const records = await Promise.all([readStore('secureRecords'), readStore('accountDrafts')])
+      db.close()
+      return JSON.stringify(records)
+    })
+    expect(stored).not.toContain('private browser draft sentinel')
+    expect(stored).not.toContain('2026-05-01')
+    expect(stored).not.toContain('user@example.com')
+  })
   test('persists a draft when a save fails offline and replays it on reconnect', async ({ page, context }) => {
     await loadHarness(page)
     await startHarness(page)

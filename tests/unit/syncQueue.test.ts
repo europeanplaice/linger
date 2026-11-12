@@ -1,12 +1,18 @@
+import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setActiveAccount } from '../../src/lib/accountSession';
+import { unlockVaultWithKey } from '../../src/lib/passkeyVault';
 import { SyncQueueManager } from '../../src/lib/syncQueue';
 
 describe('SyncQueueManager', () => {
   let queueManager: SyncQueueManager;
 
+  const setAccount = (email: string) => { setActiveAccount(`email:${email}`, false, email); unlockVaultWithKey(email, new Uint8Array(32).fill(email.startsWith('a') ? 1 : 2)); };
   beforeEach(() => {
     localStorage.clear();
-    queueManager = new SyncQueueManager();
+    const email = `${crypto.randomUUID()}@example.com`;
+    setAccount(email);
+    queueManager = new SyncQueueManager(email);
   });
 
   it('retains independent operations from multiple tab instances', async () => {
@@ -35,42 +41,52 @@ describe('SyncQueueManager', () => {
     expect((await queueManager.getPending()).map(item => item.id)).toEqual(['b']);
   });
 
-  it('partitions queues by account and clears only the owning account', async () => {
+  it('partitions queues by account and prevents reading another account', async () => {
+    setAccount('a@example.com');
     const a = new SyncQueueManager('a@example.com');
-    const b = new SyncQueueManager('b@example.com');
     await a.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
+    setAccount('b@example.com');
+    const b = new SyncQueueManager('b@example.com');
     await b.enqueue({ id: 'b', type: 'REMOVE', date: '2026-05-01', timestamp: 2 });
-    await a.clear();
-    expect(await a.getPending()).toEqual([]);
-    expect((await b.getPending()).map(item => item.id)).toEqual(['b']);
+    await expect(a.getPending()).rejects.toThrow();
+    await b.clear();
+    setAccount('a@example.com');
+    expect((await a.getPending()).map(item => item.id)).toEqual(['a']);
   });
 
   it('migrates a legacy queue for its owner without importing it into another account', async () => {
+    setAccount('a@example.com');
+    await new SyncQueueManager('a@example.com').clear();
     localStorage.setItem('linger_session_user', 'a@example.com');
     localStorage.setItem('linger_pending_sync_queue', JSON.stringify([{ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 }]));
+    setAccount('b@example.com');
     expect(await new SyncQueueManager('b@example.com').getPending()).toEqual([]);
+    setAccount('a@example.com');
     const a = new SyncQueueManager('a@example.com');
+    expect(await a.getPending()).toEqual([]);
+    await a.recoverLegacy();
     expect((await a.getPending()).map(item => item.id)).toEqual(['a']);
     expect(localStorage.getItem('linger_pending_sync_queue')).toBeNull();
   });
 
-  it('retains an operation in memory when storage writes exceed quota', async () => {
-    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+  it('reports a storage failure instead of pretending the operation was saved', async () => {
+    const spy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
     try {
-      await queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 });
-      expect((await queueManager.getPending()).map(item => item.id)).toEqual(['a']);
+      await expect(queueManager.enqueue({ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 })).rejects.toThrow();
+      expect(await queueManager.getPending()).toEqual([]);
     } finally { spy.mockRestore(); }
   });
 
-  it('keeps all legacy operations available when migration cannot write storage', async () => {
-    localStorage.setItem('linger_pending_sync_queue', JSON.stringify([
-      { id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 },
-      { id: 'b', type: 'REMOVE', date: '2026-05-02', timestamp: 2 },
-    ]));
-    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+  it('keeps legacy operations when migration cannot write encrypted storage', async () => {
+    const owner = 'legacy@example.com';
+    setAccount(owner);
+    localStorage.setItem('linger_session_user', owner);
+    const raw = JSON.stringify([{ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 }]);
+    localStorage.setItem('linger_pending_sync_queue', raw);
+    const spy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
     try {
-      expect((await new SyncQueueManager().getPending()).map(item => item.id)).toEqual(['a', 'b']);
-      expect(localStorage.getItem('linger_pending_sync_queue')).not.toBeNull();
+      await expect(new SyncQueueManager(owner).recoverLegacy()).rejects.toThrow();
+      expect(localStorage.getItem('linger_pending_sync_queue')).toBe(raw);
     } finally { spy.mockRestore(); }
   });
 

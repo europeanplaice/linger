@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { getAllCached, putCached, deleteCached, clearCache, getDraft, getAllDrafts, putDraft, deleteDraft, markDraftConflicted } from '../../src/lib/diaryCache'
+import { getAllCached, putCached, deleteCached, clearCache, getDraft, getAllDrafts, putDraft, deleteDraft, markDraftConflicted, getDiaryDatabase } from '../../src/lib/diaryCache'
 import type { CachedEntry, DraftEntry } from '../../src/lib/diaryCache'
 
 const meta = (v: string, id = 'f1') => ({
@@ -18,6 +18,8 @@ const entry: CachedEntry = {
 
 beforeEach(async () => {
   await clearCache()
+  await deleteDraft('2026-05-01')
+  await deleteDraft('2026-05-02')
   await Promise.all(['alice@example.com', 'bob@example.com'].map(owner => deleteDraft('2026-05-01', owner)))
 })
 
@@ -129,12 +131,13 @@ describe('diaryCache drafts', () => {
     expect(current?.conflicted).toBeUndefined()
   })
 
-  it('clearCache wipes entries and unscoped legacy drafts', async () => {
+  it('clearCache wipes entries but preserves unscoped legacy drafts for recovery', async () => {
     await putCached(entry)
     await putDraft(draft)
     await clearCache()
     expect(await getAllCached()).toEqual([])
-    expect(await getAllDrafts()).toEqual([])
+    expect(await getAllDrafts()).toEqual([draft])
+    await deleteDraft(draft.date)
   })
 
   it('clearCache preserves account-scoped recovery drafts for later verified sign-in', async () => {
@@ -143,5 +146,23 @@ describe('diaryCache drafts', () => {
     await clearCache()
     expect(await getAllCached()).toEqual([])
     expect(await getAllDrafts('alice@example.com')).toMatchObject([{ content: 'offline edit' }])
+  })
+
+  it('preserves an unattributed older-format draft on cache clear', async () => {
+    const db = await getDiaryDatabase()
+    const older = { ...draft, date: '2026-07-09', content: 'unattributed legacy text' }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('drafts', 'readwrite')
+      tx.objectStore('drafts').put(older)
+      tx.oncomplete = () => resolve()
+      tx.onabort = () => reject(tx.error)
+    })
+    await clearCache()
+    const retained = await new Promise<unknown>((resolve, reject) => {
+      const request = db.transaction('drafts').objectStore('drafts').get(older.date)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    expect(retained).toEqual(older)
   })
 })

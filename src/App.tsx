@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Sus
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
-import { clearCache, getAllDrafts, getDraft } from './lib/diaryCache'
+import { clearCache, hasLegacyCache, recoverLegacyCache } from './lib/secureCache'
+import { getAllDrafts, getDraft } from './lib/draftStorage'
 import { announceAccount, getAccountSnapshot } from './lib/accountSession'
 import { LocalStorageAdapter } from './lib/storageAdapter'
 import { SyncQueueManager } from './lib/syncQueue'
@@ -37,7 +38,7 @@ import { recollectionHint } from './utils/recollectionHint'
 import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
-import { useMilestones } from './hooks/useMilestones'
+import { hasPendingMilestones, useMilestones } from './hooks/useMilestones'
 import { useTfIdfSearch } from './hooks/useTfIdfSearch'
 import type { LoadedDiaryEntry } from './types'
 import { useI18n } from './i18n'
@@ -169,8 +170,34 @@ export default function App() {
   const { mode: fontMode, toggleFont } = useFont()
   const { fontSize, setFontSize } = useFontSize()
   const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
-  const { milestones, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired)
-  const tfIdf = useTfIdfSearch()
+  const { milestones, recoveryReady: milestonesRecoveryReady, storageError: milestonesError, syncError: milestonesSyncError, legacyAvailable: legacyMilestones, recoverLegacy: recoverLegacyMilestones, waitForLocalChanges: waitForMilestoneChanges, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired, email)
+  const [legacyMirror, setLegacyMirror] = useState(false)
+  const [legacyCache, setLegacyCache] = useState(false)
+  const [legacyQueue, setLegacyQueue] = useState(false)
+  const [legacyRecoveryError, setLegacyRecoveryError] = useState(false)
+  useEffect(() => {
+    let active = true
+    if (status !== 'signedIn') { setLegacyCache(false); setLegacyMirror(false); setLegacyQueue(false); setLegacyRecoveryError(false); return }
+    try {
+      setLegacyMirror(Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')))
+      setLegacyQueue(localStorage.getItem('linger_pending_sync_queue') !== null)
+    } catch { setLegacyRecoveryError(true) }
+    if (email) void hasLegacyCache().then(available => { if (active) setLegacyCache(available) }).catch(() => { if (active) setLegacyRecoveryError(true) })
+    return () => { active = false }
+  }, [status, email])
+  const recoverOldCache = useCallback(async () => {
+    try { await recoverLegacyCache(); setLegacyCache(false); setLegacyRecoveryError(false) }
+    catch { setLegacyRecoveryError(true) }
+  }, [])
+  const recoverLegacyMirror = useCallback(async () => {
+    try { await new LocalStorageAdapter().recoverLegacy(); setLegacyMirror(false); setLegacyRecoveryError(false) }
+    catch { setLegacyRecoveryError(true) }
+  }, [])
+  const recoverLegacyQueue = useCallback(async () => {
+    try { await new SyncQueueManager(email ?? undefined).recoverLegacy(); setLegacyQueue(false); setLegacyRecoveryError(false); window.dispatchEvent(new Event('online')) }
+    catch { setLegacyRecoveryError(true) }
+  }, [email])
+  const tfIdf = useTfIdfSearch(status === 'signedIn' ? email : null)
   const getRecurringTopic = useCallback(
     (forDate: string) => tfIdf.getRecurringTopic(forDate, language),
     // indexVersion is included so a new identity is produced whenever the TF-IDF
@@ -511,20 +538,22 @@ export default function App() {
 
   const beforeDiaryFolderSelect = useCallback(async () => {
     if (editorDirtyRef.current || tokenExpired) return false
-    if (localStorage.getItem('linger_milestones_pending') === 'true') return false
-    const [drafts, pending] = await Promise.all([
+    if (localStorage.getItem('linger_pending_sync_queue') !== null) return false
+    try { await waitForMilestoneChanges() } catch { return false }
+    const [drafts, pending, pendingMilestones] = await Promise.all([
       getAllDrafts(email ?? undefined),
       new SyncQueueManager(email ?? undefined).getPending(),
+      hasPendingMilestones(),
     ])
-    return !editorDirtyRef.current && drafts.length === 0 && pending.length === 0
-  }, [email, tokenExpired])
+    return !editorDirtyRef.current && !pendingMilestones && drafts.length === 0 && pending.length === 0
+  }, [email, tokenExpired, waitForMilestoneChanges])
 
   const handleDiaryFolderSelected = useCallback(async () => {
+    await Promise.all([clearCache(), new LocalStorageAdapter().clearAll()])
     // Stop this tab and notify other tabs before rebuilding folder-scoped caches.
     announceAccount(null)
     setSettingsOpen(false)
     handleSignOut()
-    await Promise.all([clearCache(), new LocalStorageAdapter().clearAll()])
   }, [handleSignOut])
 
   useEffect(() => {
@@ -751,6 +780,14 @@ export default function App() {
         <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
         <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
+        {diary.queueError && <div className="sidebar-status error" role="alert">{t.app.queueStorageError}</div>}
+        {milestonesError && <div className="sidebar-status error" role="alert">{t.app.milestonesStorageError}</div>}
+        {milestonesSyncError && <div className="sidebar-status error" role="status">{t.app.milestonesSyncError}</div>}
+        {legacyRecoveryError && <div className="sidebar-status error" role="alert">{t.app.legacyRecoveryError}</div>}
+        {legacyCache && <div className="sidebar-status" role="status">{t.app.legacyCache} <button type="button" onClick={() => { void recoverOldCache() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyMirror && <div className="sidebar-status" role="status">{t.app.legacyMirror} <button type="button" onClick={() => { void recoverLegacyMirror() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyQueue && <div className="sidebar-status" role="status">{t.app.legacyQueue} <button type="button" onClick={() => { void recoverLegacyQueue() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyMilestones && <div className="sidebar-status" role="status">{t.app.legacyMilestones} {!milestonesRecoveryReady && t.app.milestonesRecoveryNeedsDrive} <button type="button" disabled={!milestonesRecoveryReady} onClick={recoverLegacyMilestones}>{t.app.recoverMilestones}</button></div>}
         {diary.deletionCancelled && <div className="sidebar-status error" role="status">{t.app.deletionCancelled}</div>}
         {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
           <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>

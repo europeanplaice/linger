@@ -857,6 +857,17 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
     env(safe-area-inset-left);
 }
 
+.database-notice {
+  position: fixed;
+  z-index: 10000;
+  inset: 0 0 auto;
+  padding: 0.8rem 1rem;
+  color: #3d2100;
+  background: #fff1c9;
+  border-bottom: 1px solid #a87927;
+  line-height: 1.5;
+}
+
 .update-banner {
   position: fixed;
   bottom: calc(1rem + env(safe-area-inset-bottom));

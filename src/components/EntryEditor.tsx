@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { EntryConflictError } from '../hooks/useDiary'
 import { TokenExpiredError } from '../api/driveEntries'
-import { getDraft, putDraft, deleteDraft } from '../lib/diaryCache'
+import { DRAFT_STORAGE_ERROR_EVENT, getDraft, putDraft, deleteDraft, nextDraftCheckpointTime } from '../lib/draftStorage'
+import { DraftKeyMismatchError } from '../lib/encryptedLocalStore'
 import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
 import { getS3EntryStatus, retryS3EntrySync } from '../api/s3Settings'
@@ -240,6 +241,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
   const [loadFailed, setLoadFailed] = useState(false)
+  const [draftReadFailed, setDraftReadFailed] = useState(false)
+  const [draftKeyMismatch, setDraftKeyMismatch] = useState(false)
+  const [draftWriteFailed, setDraftWriteFailed] = useState(false)
+  useEffect(() => {
+    const warn = () => setDraftWriteFailed(true)
+    window.addEventListener(DRAFT_STORAGE_ERROR_EVENT, warn)
+    return () => window.removeEventListener(DRAFT_STORAGE_ERROR_EVENT, warn)
+  }, [])
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteInput, setDeleteInput] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -539,7 +548,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     let cancelled = false
     // If we already know this date has no entry (list is loaded and date absent),
     // skip the skeleton — show the empty editor immediately.
-    setLoading(!dateKnownAbsentRef.current)
+    // Even a date missing from Drive may have an encrypted local draft. Do not
+    // let typing begin until its asynchronous lookup has completed.
+    setLoading(!dateKnownAbsentRef.current || !!draftOwner)
     setRefreshing(false)
     setText('')
     setSavedTextValue('')
@@ -547,6 +558,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
     setStatus('')
     setLoadFailed(false)
+    setDraftReadFailed(false)
+    setDraftKeyMismatch(false)
+    setDraftWriteFailed(false)
     setHasConflict(false)
     setConflictRemote(null)
     setPendingOfflineSave(false)
@@ -561,6 +575,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
     fileIdRef.current = null
     void (async () => {
+      if (isSignedIn && !draftOwner) {
+        if (!cancelled) { setDraftReadFailed(true); setLoadFailed(true); setLoading(false) }
+        return
+      }
       let entry: LoadedDiaryEntry | null = null
       let loadError: unknown = null
       try {
@@ -574,14 +592,20 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setLoading(false)
         return
       }
-      const draft = draftOwner ? await getDraft(date, draftOwner).catch(() => undefined) : undefined
+      let draft: DraftEntry | undefined
+      try {
+        draft = draftOwner ? await getDraft(date, draftOwner) : undefined
+      } catch (error) {
+        if (!cancelled) { setDraftReadFailed(true); setDraftKeyMismatch(error instanceof DraftKeyMismatchError); setLoadFailed(true); setLoading(false) }
+        return
+      }
       if (cancelled) return
       if (loadError === null) {
         if (draft && draft.content !== (entry?.entry.content ?? '')) {
           applyDraft(draft, entry?.meta.id ?? null)
         } else {
           // No draft, or the draft already made it to Drive — drop it.
-          if (draft && draftOwner) deleteDraft(date, draftOwner, draft.content).catch(() => {})
+          if (draft && draftOwner) deleteDraft(date, draftOwner, draft.content, draft.savedAt).catch(() => {})
           applyLoadedEntry(entry)
           if (entry?.meta.version) {
             // Defence in depth alongside dropping dateKnownAbsent from this effect's
@@ -661,10 +685,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           content,
           baseVersion: baseVersionRef.current,
           baseContent: savedTextRef.current,
-          savedAt: Date.now(),
+          savedAt: nextDraftCheckpointTime(),
           conflicted: existing?.conflicted,
         })
-      }).catch(() => {})
+      }).then(() => {
+        if (currentDateRef.current === date && textRef.current === content) setDraftWriteFailed(false)
+      }).catch(() => {
+        if (currentDateRef.current === date) setDraftWriteFailed(true)
+      })
     }, 350)
     return () => window.clearTimeout(timer)
   }, [date, draftOwner, isDirty, loading, hasConflict, text])
@@ -813,6 +841,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [pendingNavDate, autoSave, save, onPendingNavigate])
 
   const loadRemote = () => {
+    const discardedDraft = textRef.current
     const remoteText = conflictRemote?.entry.content ?? ''
     setText(remoteText)
     setSavedTextValue(remoteText)
@@ -821,7 +850,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setHasConflict(false)
     setConflictRemote(null)
     setPendingOfflineSave(false)
-    if (draftOwner) deleteDraft(date, draftOwner).catch(() => {})
+    if (draftOwner) deleteDraft(date, draftOwner, discardedDraft).catch(() => setDraftWriteFailed(true))
     setStatus(conflictRemote ? t.entry.loadedLatest : t.entry.remoteDeleted)
   }
 
@@ -864,19 +893,26 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setStatus('')
     try {
       const entry = await getContentRef.current(date, { forceNetwork: !silent })
+      const draft = draftOwner ? await getDraft(date, draftOwner) : undefined
       if (currentDateRef.current !== capturedDate) return
       if (silent && textRef.current !== savedTextRef.current) return
-      applyLoadedEntry(entry)
+      if (draft && draft.content !== (entry?.entry.content ?? '')) applyDraft(draft, entry?.meta.id ?? null)
+      else applyLoadedEntry(entry)
       resetS3ForVersion(capturedDate, entry?.meta.version ?? null)
       setLoadFailed(false)
+      setDraftReadFailed(false)
+      setDraftKeyMismatch(false)
       setHasConflict(false)
       setConflictRemote(null)
-    } catch {
-      if (currentDateRef.current === capturedDate && !silent) setStatus(t.entry.failedToRefresh)
+    } catch (error) {
+      if (currentDateRef.current === capturedDate && !silent) {
+        if (error instanceof DraftKeyMismatchError) { setDraftReadFailed(true); setDraftKeyMismatch(true); setLoadFailed(true) }
+        setStatus(t.entry.failedToRefresh)
+      }
     } finally {
       if (currentDateRef.current === capturedDate && !silent) setRefreshing(false)
     }
-  }, [date, applyLoadedEntry, resetS3ForVersion])
+  }, [date, draftOwner, applyDraft, applyLoadedEntry, resetS3ForVersion])
 
   useEffect(() => {
     if (refreshSignal <= 0) return
@@ -908,7 +944,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const previous = text
     setText(savedTextRef.current)
     setStatus('')
-    if (draftOwner) deleteDraft(date, draftOwner).catch(() => {})
+    if (draftOwner) deleteDraft(date, draftOwner, previous).catch(() => setDraftWriteFailed(true))
     if (pendingOfflineSaveRef.current) {
       setPendingOfflineSave(false)
       // A restored draft's base may lag the latest cached entry — reload it.
@@ -1646,7 +1682,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
               >
                 <strong>{t.entry.failedToLoad}</strong>
-                <p>{t.entry.failedToLoadHint}</p>
+                <p>{draftKeyMismatch ? t.entry.draftKeyMismatch : draftReadFailed ? t.entry.draftReadFailed : t.entry.failedToLoadHint}</p>
                 <button onClick={() => loadFreshEntry()} disabled={refreshing}>
                   {refreshing ? t.entry.refreshingEntry : t.entry.refreshEntry}
                 </button>
@@ -1678,6 +1714,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       </AnimatePresence>
       </div>
       <div className="editor-footer" ref={footerRef}>
+      {draftWriteFailed && <p role="alert">{t.entry.draftWriteFailed}</p>}
       {!loading && !loadFailed && !isNewEmptyEntry && (
         <div className="editor-charcount" aria-hidden="true">
           {t.entry.charCount(charCount)}

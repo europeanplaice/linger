@@ -85,7 +85,7 @@ interface Window {
     setEmail: (e: string | null) => void
     setSelectedDate: (date: string | undefined) => void
     seedLocalStorageUser: (u: string | null) => void
-    seedIdb: (entries: { date: string; meta: unknown; content?: unknown; snippet?: string }[]) => Promise<void>
+    seedIdb: (entries: { owner?: string; date: string; meta: unknown; content?: unknown; snippet?: string }[]) => Promise<void>
     seedDrafts: (drafts: { date: string; content: string; baseVersion: string | null; baseContent: string | null; savedAt: number; conflicted?: boolean }[]) => Promise<void>
     getDrafts: () => Promise<{ date: string; content: string; baseVersion: string | null; baseContent: string | null; savedAt: number; conflicted?: boolean }[]>
   }

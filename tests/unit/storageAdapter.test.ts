@@ -1,4 +1,7 @@
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
+import { setActiveAccount } from '../../src/lib/accountSession';
+import { unlockVaultWithKey } from '../../src/lib/passkeyVault';
 import { LocalStorageAdapter } from '../../src/lib/storageAdapter';
 
 describe('LocalStorageAdapter', () => {
@@ -6,6 +9,10 @@ describe('LocalStorageAdapter', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    const email = `${crypto.randomUUID()}@example.com`;
+    setActiveAccount(`email:${email}`, false, email);
+    unlockVaultWithKey(email, new Uint8Array(32).fill(7));
+    localStorage.setItem('linger_session_user', email);
     adapter = new LocalStorageAdapter();
   });
 
@@ -42,6 +49,7 @@ describe('LocalStorageAdapter', () => {
   it('reads a legacy plain-string record as content', async () => {
     localStorage.setItem('linger_local_entry_2026-01-01', 'Plain legacy content');
 
+    await adapter.recoverLegacy();
     const loaded = await adapter.getEntry('2026-01-01');
     expect(loaded?.entry.content).toBe('Plain legacy content');
     expect(loaded?.meta.version).toBe('1');
@@ -65,6 +73,7 @@ describe('LocalStorageAdapter', () => {
     localStorage.setItem('linger_local_entry_2026-01-01', 'Orphan');
     localStorage.setItem('linger_theme', 'dark');
 
+    await adapter.recoverLegacy();
     await adapter.clearAll();
 
     expect(await adapter.listEntries()).toHaveLength(0);

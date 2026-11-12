@@ -6,7 +6,7 @@ const { mockGetAllCached } = vi.hoisted(() => ({
   mockGetAllCached: vi.fn<() => Promise<CachedEntry[]>>(),
 }))
 
-vi.mock('../../src/lib/diaryCache', () => ({
+vi.mock('../../src/lib/secureCache', () => ({
   getAllCached: mockGetAllCached,
 }))
 
@@ -29,7 +29,7 @@ describe('useTfIdfSearch', () => {
   it('keeps a newer entry update when initial cache loading finishes last', async () => {
     const initial = deferred<CachedEntry[]>()
     mockGetAllCached.mockReturnValueOnce(initial.promise).mockResolvedValueOnce([])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await act(async () => { result.current.updateEntry('2024-01-01', 'volcano eruption') })
     expect(result.current.ready).toBe(true)
     expect(result.current.searchLocal('volcano').map(hit => hit.date)).toEqual(['2024-01-01'])
@@ -40,7 +40,7 @@ describe('useTfIdfSearch', () => {
 
   it('starts with ready=false and becomes true after cache loads', async () => {
     mockGetAllCached.mockResolvedValueOnce([makeEntry('2024-01-01', 'hello world')])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     expect(result.current.ready).toBe(false)
     await waitFor(() => expect(result.current.ready).toBe(true))
   })
@@ -48,7 +48,7 @@ describe('useTfIdfSearch', () => {
   it('searchLocal returns empty array before ready', () => {
     let resolve!: (v: CachedEntry[]) => void
     mockGetAllCached.mockReturnValueOnce(new Promise(r => { resolve = r }))
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     expect(result.current.searchLocal('hello')).toEqual([])
     act(() => resolve([]))
   })
@@ -58,7 +58,7 @@ describe('useTfIdfSearch', () => {
       makeEntry('2024-01-01', '今日は疲れた'),
       makeEntry('2024-01-02', '楽しい一日だった'),
     ])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await waitFor(() => expect(result.current.ready).toBe(true))
 
     const hits = result.current.searchLocal('疲れ')
@@ -73,7 +73,7 @@ describe('useTfIdfSearch', () => {
       makeEntry('2024-01-02', '残業が続いて仕事が大変。疲れが取れない。'),
       makeEntry('2024-01-03', '楽しい休日。映画を見た。'),
     ])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await waitFor(() => expect(result.current.ready).toBe(true))
 
     const similar = result.current.getSimilar('2024-01-01', 2)
@@ -88,7 +88,7 @@ describe('useTfIdfSearch', () => {
       makeEntry('2024-01-01', 'weather was nice today'),
       makeEntry('2024-01-02', 'went shopping downtown'),
     ])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await waitFor(() => expect(result.current.ready).toBe(true))
 
     // Neither entry mentions "volcano"
@@ -110,7 +110,7 @@ describe('useTfIdfSearch', () => {
       { date: '2024-01-01', meta: { id: 'id1', name: 'diary-2024-01-01.txt' } },
       makeEntry('2024-01-02', 'hello world today'),
     ])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await waitFor(() => expect(result.current.ready).toBe(true))
 
     const hits = result.current.searchLocal('hello')
@@ -122,7 +122,7 @@ describe('useTfIdfSearch', () => {
     mockGetAllCached.mockResolvedValue([
       makeEntry('2024-01-01', 'hello world'),
     ])
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await waitFor(() => expect(result.current.ready).toBe(true))
     const versionAfterInit = result.current.indexVersion
 
@@ -136,7 +136,7 @@ describe('useTfIdfSearch', () => {
 
   it('handles IndexedDB error gracefully — ready stays false, methods return empty', async () => {
     mockGetAllCached.mockRejectedValueOnce(new Error('IDB unavailable'))
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     await new Promise(r => setTimeout(r, 20))
     expect(result.current.ready).toBe(false)
     expect(result.current.searchLocal('anything')).toEqual([])
@@ -146,7 +146,7 @@ describe('useTfIdfSearch', () => {
   it('getSimilar returns empty before index is ready', () => {
     let resolve!: (v: CachedEntry[]) => void
     mockGetAllCached.mockReturnValueOnce(new Promise(r => { resolve = r }))
-    const { result } = renderHook(() => useTfIdfSearch())
+    const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
     expect(result.current.getSimilar('2024-01-01')).toEqual([])
     act(() => resolve([]))
   })
@@ -155,7 +155,7 @@ describe('useTfIdfSearch', () => {
     it('returns null before the index is ready', () => {
       let resolve!: (v: CachedEntry[]) => void
       mockGetAllCached.mockReturnValueOnce(new Promise(r => { resolve = r }))
-      const { result } = renderHook(() => useTfIdfSearch())
+      const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
       expect(result.current.getRecurringTopic('2024-06-12', 'ja')).toBeNull()
       act(() => resolve([]))
     })
@@ -168,7 +168,7 @@ describe('useTfIdfSearch', () => {
         makeEntry('2024-05-01', '仕事のことばかり考えていた'),
         makeEntry('2024-06-01', '友達とご飯を食べた'),
       ])
-      const { result } = renderHook(() => useTfIdfSearch())
+      const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
       await waitFor(() => expect(result.current.ready).toBe(true))
 
       const topic = result.current.getRecurringTopic('2024-06-12', 'ja', 14)
@@ -184,7 +184,7 @@ describe('useTfIdfSearch', () => {
         makeEntry('2024-05-01', '仕事のことばかり考えていた'),
         makeEntry('2024-06-10', '仕事が終わって一息ついた'),
       ])
-      const { result } = renderHook(() => useTfIdfSearch())
+      const { result } = renderHook(() => useTfIdfSearch('user@example.com'))
       await waitFor(() => expect(result.current.ready).toBe(true))
 
       expect(result.current.getRecurringTopic('2024-06-12', 'ja', 14)).toBeNull()

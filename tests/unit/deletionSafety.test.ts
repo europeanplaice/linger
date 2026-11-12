@@ -3,8 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { useDiary, EntryConflictError } from '../../src/hooks/useDiary'
 import * as api from '../../src/api/driveEntries'
-import { clearCache, getAllCached } from '../../src/lib/diaryCache'
+import { clearCache, getAllCached } from '../../src/lib/secureCache'
 import { SyncQueueManager } from '../../src/lib/syncQueue'
+import { setActiveAccount } from '../../src/lib/accountSession'
+import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
+import { deleteDraft, getDraft, putDraft } from '../../src/lib/draftStorage'
 
 vi.mock('../../src/api/driveEntries', async original => ({
   ...await original<typeof import('../../src/api/driveEntries')>(),
@@ -22,12 +25,15 @@ beforeEach(async () => {
   vi.clearAllMocks()
   localStorage.clear()
   localStorage.setItem('linger_session_user', owner)
+  unlockVaultWithKey('deletion-test-vault', new Uint8Array(32).fill(19))
+  setActiveAccount('email:a@example.com', false, owner)
   await clearCache()
+  await new SyncQueueManager(owner).clear()
   vi.mocked(api.listEntries).mockResolvedValue([meta])
   vi.mocked(api.getEntryByDate).mockResolvedValue(loaded)
   vi.mocked(api.deleteEntry).mockResolvedValue(undefined)
 })
-afterEach(async () => { cleanup(); await clearCache() })
+afterEach(async () => { cleanup(); await clearCache(); setActiveAccount(null); clearVaultKey() })
 
 async function diary() {
   const hook = renderHook(() => useDiary('signedIn', owner, vi.fn()))
@@ -55,7 +61,7 @@ it('cancels an old queued delete when the server reports a newer entry', async (
   vi.mocked(api.deleteEntry).mockRejectedValueOnce(new api.SaveConflictError(loaded))
   const hook = await diary()
   await waitFor(() => expect(hook.result.current.deletionCancelled).toBe(true))
-  expect(await queue.getPending()).toEqual([])
+  await waitFor(async () => expect(await queue.getPending()).toEqual([]))
   expect(hook.result.current.dates).toContain(date)
   expect((await getAllCached()).some(entry => entry.date === date)).toBe(true)
 })
@@ -67,6 +73,31 @@ it('cancels legacy queued deletes that cannot identify the intended version', as
   await waitFor(() => expect(hook.result.current.deletionCancelled).toBe(true))
   expect(api.deleteEntry).not.toHaveBeenCalled()
   expect(await queue.getPending()).toEqual([])
+})
+
+it('moves legacy queued saves into a reviewable draft instead of discarding the text', async () => {
+  const queue = new SyncQueueManager(owner)
+  const oldDraft = await getDraft(date, owner)
+  if (oldDraft) await deleteDraft(date, owner, oldDraft.content, oldDraft.savedAt)
+  await queue.enqueue({ id: 'legacy-save', type: 'SAVE', date, content: 'unsynced legacy text', baseVersion: '3', timestamp: 1 })
+  await diary()
+  await waitFor(async () => expect(await queue.getPending()).toEqual([]))
+  expect(await getDraft(date, owner)).toMatchObject({ content: 'unsynced legacy text', baseVersion: '3', conflicted: true })
+  const restored = await getDraft(date, owner)
+  if (restored) await deleteDraft(date, owner, restored.content, restored.savedAt)
+})
+
+it('preserves and reports a queued save that conflicts with an existing draft', async () => {
+  await putDraft({ owner, date, content: 'newer draft', baseVersion: '7', baseContent: null, savedAt: 200 })
+  const queue = new SyncQueueManager(owner)
+  await queue.enqueue({ id: 'conflicting-save', type: 'SAVE', date, content: 'older queued text', timestamp: 1 })
+  const hook = await diary()
+  await waitFor(() => expect(hook.result.current.queueError).toBe(true))
+  expect(await queue.getPending()).toMatchObject([{ content: 'older queued text' }])
+  expect(await getDraft(date, owner)).toMatchObject({ content: 'newer draft' })
+  const draft = await getDraft(date, owner)
+  if (draft) await deleteDraft(date, owner, draft.content, draft.savedAt)
+  await queue.clear()
 })
 
 it('surfaces a deletion conflict without removing the entry or queuing a retry', async () => {

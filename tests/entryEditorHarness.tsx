@@ -6,9 +6,13 @@ import { EntryConflictError } from '../src/hooks/useDiary'
 import { TokenExpiredError } from '../src/api/driveEntries'
 import type { Milestone, LoadedDiaryEntry } from '../src/types'
 import { I18nProvider } from '../src/i18n'
+import { getAccountSnapshot, setActiveAccount } from '../src/lib/accountSession'
+import { getVaultUserId, unlockVaultWithKey } from '../src/lib/passkeyVault'
+import { confirmLegacyUpgrade, getDatabaseNotice, subscribeDatabaseNotice } from '../src/lib/diaryCache'
 import '../src/styles.css'
 
 const theme = new URLSearchParams(location.search).get('theme')
+subscribeDatabaseNotice(() => { if (getDatabaseNotice() === 'confirm-upgrade') queueMicrotask(confirmLegacyUpgrade) })
 if (theme) document.documentElement.setAttribute('data-theme', theme)
 
 type SaveCall = { date: string; content: string; baseVersion: string | null; force?: boolean }
@@ -80,6 +84,10 @@ window.open = (url?: string | URL, target?: string) => {
 }
 
 function doRender() {
+  if (currentToken) {
+    if (getVaultUserId() !== 'editor-harness-vault') unlockVaultWithKey('editor-harness-vault', new Uint8Array(32).fill(23))
+    if (getAccountSnapshot().verifiedEmail !== 'test@example.com') setActiveAccount('email:test@example.com', false, 'test@example.com')
+  }
   root.render(
     <I18nProvider>
       <App

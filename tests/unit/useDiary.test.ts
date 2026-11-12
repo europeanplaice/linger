@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useDiary } from '../../src/hooks/useDiary'
 import * as driveEntries from '../../src/api/driveEntries'
-import * as diaryCache from '../../src/lib/diaryCache'
+import * as diaryCache from '../../src/lib/secureCache'
+import * as draftStorage from '../../src/lib/draftStorage'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../../src/types'
 
 vi.mock('../../src/api/driveEntries', () => ({
@@ -18,7 +19,7 @@ vi.mock('../../src/api/driveEntries', () => ({
   DriveHttpError: class DriveHttpError extends Error { status: number; constructor(s: number, b: string) { super(b); this.status = s } },
 }))
 
-vi.mock('../../src/lib/diaryCache', () => ({
+vi.mock('../../src/lib/secureCache', () => ({
   getAllCached: vi.fn().mockResolvedValue([]),
   putCached: vi.fn().mockResolvedValue(undefined),
   deleteCached: vi.fn().mockResolvedValue(undefined),
@@ -27,6 +28,16 @@ vi.mock('../../src/lib/diaryCache', () => ({
   getDraft: vi.fn().mockResolvedValue(undefined),
   putDraft: vi.fn().mockResolvedValue(undefined),
   deleteDraft: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('../../src/lib/draftStorage', () => ({
+  nextDraftCheckpointTime: () => Date.now(),
+  reportDraftStorageError: vi.fn(),
+  getAllDrafts: vi.fn().mockResolvedValue([]),
+  getDraft: vi.fn().mockResolvedValue(undefined),
+  putDraft: vi.fn().mockResolvedValue(undefined),
+  deleteDraft: vi.fn().mockResolvedValue(undefined),
+  markDraftConflicted: vi.fn().mockResolvedValue(false),
 }))
 
 vi.mock('../../src/utils/tabSync', () => ({
@@ -78,7 +89,7 @@ describe('useDiary initial load parallelization', () => {
     await act(async () => hook.rerender({ googleSub: 'account-b' }))
     await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
     await expect(hook.result.current.retryPendingSave()).resolves.toBeNull()
-    expect(diaryCache.getAllDrafts).toHaveBeenCalledWith('same@example.com')
+    expect(draftStorage.getAllDrafts).toHaveBeenCalledWith('same@example.com')
     expect(driveEntries.saveEntry).toHaveBeenCalledOnce()
   })
 

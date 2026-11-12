@@ -5,6 +5,9 @@ import { useDiary } from '../../src/hooks/useDiary'
 import * as api from '../../src/api/driveEntries'
 import { clearCache, deleteDraft, getAllCached, getAllDrafts } from '../../src/lib/diaryCache'
 import * as diaryCache from '../../src/lib/diaryCache'
+import { deleteDraft as deleteSecureDraft, getAllDrafts as getSecureDrafts } from '../../src/lib/draftStorage'
+import { setActiveAccount } from '../../src/lib/accountSession'
+import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
 import { onRequest as middleware } from '../../functions/api/_middleware'
 import { onRequestPost as logout } from '../../functions/auth/logout'
 import { sessionStorageId } from '../../functions/_shared/authStore'
@@ -42,10 +45,16 @@ beforeEach(async () => {
   localStorage.clear()
   await clearCache()
   await Promise.all((await getAllDrafts()).map(draft => deleteDraft(draft.date, draft.owner)))
+  unlockVaultWithKey('privacy-test-vault', new Uint8Array(32).fill(6))
+  setActiveAccount('email:a@example.com', false, 'a@example.com')
+  await Promise.all((await getSecureDrafts('a@example.com')).map(draft => deleteSecureDraft(draft.date, 'a@example.com')))
 })
 afterEach(async () => {
   cleanup(); vi.restoreAllMocks(); await clearCache()
   await Promise.all((await getAllDrafts()).map(draft => deleteDraft(draft.date, draft.owner)))
+  await Promise.all((await getSecureDrafts('a@example.com')).map(draft => deleteSecureDraft(draft.date, 'a@example.com')))
+  setActiveAccount(null)
+  clearVaultKey()
   vi.unstubAllGlobals()
 })
 
@@ -159,11 +168,12 @@ it.each(['success', 'network failure'] as const)('retains an account-scoped draf
   vi.mocked(api.saveEntry).mockReturnValueOnce(outcome === 'success' ? write.promise : write.promise.then(() => { throw new TypeError('offline') }))
   let pending!: Promise<LoadedDiaryEntry>
   await act(async () => { pending = hook.result.current.save(secret.entry.date, secret.entry.content, null) })
+  await waitFor(() => expect(api.saveEntry).toHaveBeenCalledOnce())
   const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   await act(async () => hook.rerender({ status: 'signedOut', email: 'a@example.com' }))
   await act(async () => { write.resolve(secret.meta); await rejected })
   expect(await getAllCached()).toEqual([])
-  expect(await getAllDrafts('a@example.com')).toEqual([expect.objectContaining({
+  expect(await getSecureDrafts('a@example.com')).toEqual([expect.objectContaining({
     owner: 'a@example.com', date: secret.entry.date, content: secret.entry.content,
   })])
   expect(localStorage.getItem(`linger_local_entry_${secret.entry.date}`)).toBeNull()
@@ -181,6 +191,7 @@ it('does not dispatch a queued write after the account changes', async () => {
     second = hook.result.current.save(secret.entry.date, 'second', null)
   })
   const rejected = Promise.all([first, second].map(pending => expect(pending).rejects.toMatchObject({ name: 'AbortError' })))
+  await waitFor(() => expect(api.saveEntry).toHaveBeenCalledOnce())
   await act(async () => hook.rerender({ status: 'signedIn', email: 'b@example.com' }))
   await act(async () => { write.resolve(secret.meta); await rejected })
   expect(api.saveEntry).toHaveBeenCalledOnce()
@@ -236,24 +247,20 @@ it('clears a pending expired-session save before a different account signs in', 
   expect(api.saveEntry).toHaveBeenCalledOnce()
 })
 
-it('does not replay account A drafts for account B while clearing the shared cache', async () => {
+it('does not replay account A drafts for account B when accounts change', async () => {
   const hook = diary()
   await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
   await diaryCache.putDraft({ owner: 'a@example.com', date: secret.entry.date, content: secret.entry.content, baseContent: null, baseVersion: null, savedAt: 1 })
-  const clearing = deferred<void>()
-  const clear = vi.spyOn(diaryCache, 'clearCache').mockImplementationOnce(() => clearing.promise)
+  setActiveAccount('email:b@example.com', false, 'b@example.com')
+  unlockVaultWithKey('privacy-test-vault-b', new Uint8Array(32).fill(7))
   await act(async () => hook.rerender({ status: 'signedIn', email: 'b@example.com' }))
-  expect(clear).toHaveBeenCalledOnce()
-  await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(false))
-  await act(async () => { await Promise.resolve(); window.dispatchEvent(new Event('online')) })
+  await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
+  await act(async () => { window.dispatchEvent(new Event('online')); await Promise.resolve() })
   expect(api.saveEntry).not.toHaveBeenCalled()
   expect(await getAllDrafts('a@example.com')).toHaveLength(1)
   expect(await getAllDrafts('b@example.com')).toEqual([])
-  // Complete the pending cache wipe before allowing account B to load.
-  await clearCache()
-  await act(async () => { clearing.resolve() })
-  await waitFor(() => expect(hook.result.current.freshListLoaded).toBe(true))
-  expect(api.saveEntry).not.toHaveBeenCalled()
+  setActiveAccount('email:a@example.com', false, 'a@example.com')
+  unlockVaultWithKey('privacy-test-vault', new Uint8Array(32).fill(6))
 })
 
 it('rejects session data recreated by a stale writer', async () => {

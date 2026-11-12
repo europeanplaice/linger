@@ -1,6 +1,55 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
 
+test('warns when an encrypted recovery draft cannot be written', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.name === 'secureRecords') throw new DOMException('Storage full', 'QuotaExceededError')
+      return original.apply(this, args)
+    }
+  })
+  await loadHarness(page)
+  await renderEditor(page, { token: 'test', autoSave: false })
+  await page.locator('textarea.editor-textarea').fill('unsaved private text')
+  await expect(page.getByRole('alert')).toContainText('Could not update the local recovery draft')
+  await expect(page.locator('textarea.editor-textarea')).toHaveValue('unsaved private text')
+})
+
+test('does not treat drafts encrypted by a lost passkey account as absent', async ({ page }) => {
+  await loadHarness(page)
+  await page.evaluate(async () => {
+    const vaultPath = '/src/lib/passkeyVault.ts'
+    const accountPath = '/src/lib/accountSession.ts'
+    const draftsPath = '/src/lib/draftStorage.ts'
+    const vault = await import(/* @vite-ignore */ vaultPath)
+    const account = await import(/* @vite-ignore */ accountPath)
+    const drafts = await import(/* @vite-ignore */ draftsPath)
+    vault.unlockVaultWithKey('old-vault', new Uint8Array(32).fill(55))
+    account.setActiveAccount('email:test@example.com', false, 'test@example.com')
+    await drafts.putDraft({ owner: 'test@example.com', date: '2026-05-01', content: 'old private draft', baseVersion: null, baseContent: null, savedAt: Date.now() })
+    window.editorHarness.render({ date: '2026-05-01', initialContent: '', token: 'tok', autoSave: false })
+  })
+  await expect(page.getByRole('alert')).toContainText('different Linger passkey account')
+  await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
+  const stored = await page.evaluate(async () => {
+    const req = indexedDB.open('linger_diary_cache')
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    const rows = await new Promise<unknown[]>((resolve, reject) => {
+      const all = db.transaction('secureRecords').objectStore('secureRecords').getAll()
+      all.onsuccess = () => resolve(all.result)
+      all.onerror = () => reject(all.error)
+    })
+    db.close()
+    return JSON.stringify(rows)
+  })
+  expect(stored).not.toContain('old private draft')
+  expect(JSON.parse(stored)).toHaveLength(1)
+})
+
 async function loadHarness(page: import('@playwright/test').Page) {
   await page.goto(`${baseUrl}/tests/entryEditorHarness.html`)
 }
@@ -2468,22 +2517,10 @@ async function seedDraft(page: import('@playwright/test').Page, draft: TestDraft
 }
 
 async function getDrafts(page: import('@playwright/test').Page): Promise<TestDraft[]> {
-  return page.evaluate(() => new Promise<TestDraft[]>((resolve, reject) => {
-    const req = indexedDB.open('linger_diary_cache', 3)
-    req.onupgradeneeded = () => {
-      const db = req.result
-      if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'date' })
-      if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'date' })
-      if (!db.objectStoreNames.contains('accountDrafts')) db.createObjectStore('accountDrafts', { keyPath: 'key' })
-    }
-    req.onsuccess = () => {
-      const db = req.result
-      const all = db.transaction('accountDrafts', 'readonly').objectStore('accountDrafts').getAll()
-      all.onsuccess = () => { db.close(); resolve(all.result as TestDraft[]) }
-      all.onerror = () => { db.close(); reject(all.error) }
-    }
-    req.onerror = () => reject(req.error)
-  }))
+  return page.evaluate(async () => {
+    const path = '/src/lib/draftStorage.ts'
+    return (await import(/* @vite-ignore */ path)).getAllDrafts('test@example.com') as Promise<TestDraft[]>
+  })
 }
 
 test.describe('EntryEditor — offline drafts', () => {

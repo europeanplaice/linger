@@ -105,13 +105,11 @@
     to your browser and passkey provider so you can identify the credential. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
-    By default, reloading requires passkey unlock, after which the saved refresh token can restore
-    Google access. If you choose to skip passkey on this device, the unlocked metadata key is stored
-    in browser local storage for up to seven days, including across restarts. Someone with access to this browser
-    or malicious scripts running on this site could access it. Do not use this option on a shared device.
-    You can remove the saved key in settings or by signing out. New session records expire 30 days after
+    Reloading requires passkey unlock, after which the saved refresh token can restore
+    Google access. Earlier versions offered a device session that saved the unlocked key in browser
+    storage; Linger removes that saved key when this version starts. New session records expire 30 days after
     creation or renewal. Sign-out invalidates the session. Metadata keys are used only in request
-    memory, including on the backend when needed; the optional device session saves the key in browser storage.
+    memory, including on the backend when needed.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.
@@ -214,14 +212,19 @@
 
   <h2>7. Browser Storage, Exports, and Sharing</h2>
   <p>
-    Linger uses browser <code>localStorage</code> and IndexedDB for preferences and for local copies
-    of entries, cached content, unsaved drafts, and pending offline saves or deletions. Milestones
-    and a few account and interface hints may also be stored there. In local or offline use, an entry
-    may remain in browser storage until it can be synced. This browser data is not separately
-    encrypted by Linger and may be accessible to someone who can use your browser profile or device.
-    Linger clears shared diary caches and pending changes when you sign out or switch accounts. Owned
-    unsynced drafts remain in this browser and are restored only after the matching account signs in;
-    display preferences can also remain. You can remove local data by clearing this site's data in your browser.
+    Linger uses browser <code>localStorage</code> and IndexedDB for preferences and local data.
+    New account-scoped diary caches, local mirrors, drafts, milestones, and pending sync operations
+    are encrypted using keys derived from the unlocked passkey-protected account key. Account-owned
+    legacy drafts and caches migrate when possible. Older unattributed cached entries, milestones, diary mirrors,
+    and shared sync queues require you to choose whether to import them; unimported, malformed,
+    or conflicting legacy data may remain unencrypted for recovery. Older browser backups and
+    filesystem snapshots are not erased. The local key marker contains an email hash, which is not
+    anonymous, and encrypted record counts and activity may be visible. Some interface and account
+    hints, including recently surfaced diary dates, remain unencrypted. A person or script able to
+    use the unlocked app may also access its data. Drafts are written shortly after typing pauses,
+    so the latest edits may be missing after an abrupt shutdown. Encrypted pending changes may remain
+    on this browser after sign-out and can be opened after the matching account is unlocked. You can
+    remove local data by clearing this site's browser data.
   </p>
   <p>
     To help prevent accidental repeat passkey registration, this browser also stores a hash of
@@ -271,10 +274,9 @@
     for deleting backups when you no longer want them. Turning off backup alone does not delete them.
   </p>
   <p>
-    Sign out to invalidate your Linger session and clear locally cached entries. The encrypted
-    Google refresh credential remains available for the next passkey login. Account-scoped
-    unsynced drafts remain in this browser so they can be restored after the same account is
-    verified again; clear this site's browser data to remove them. To revoke Linger's Google
+    Sign out to invalidate your Linger session. The encrypted Google refresh credential remains
+    available for the next passkey login. Encrypted local records, including unsynced drafts and
+    changes, may remain in this browser; clear this site's browser data to remove them. To revoke Linger's Google
     authorization, visit
     <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.
     Revoking access does not delete files already stored in Drive or S3. For questions about personal
@@ -285,8 +287,10 @@
     You can add another compatible passkey in Settings and remove a lost passkey after signing in
     with another registered passkey. Removing it also invalidates sessions authenticated with it.
     Recovery files containing the metadata master key are no longer issued or accepted. If every passkey is
-    lost, old encrypted account metadata cannot be decrypted. Your plaintext diary files remain in
+    lost, old encrypted account metadata and locally encrypted data cannot be decrypted. Your plaintext diary files remain in
     Google Drive: authorize the same Google account and create a new Linger passkey to reconnect.
+    If this browser still holds data encrypted under the old key, use another browser to reconnect
+    without deleting it. Clearing this site's data removes those local records, including unsynced changes.
     A verified Google security event can invalidate all Linger sessions and remove all saved refresh
     credentials because the service does not retain a readable Google-account lookup index.
   </p>

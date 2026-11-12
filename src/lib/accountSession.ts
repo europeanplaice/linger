@@ -6,8 +6,8 @@ export const AUTH_EVENT_KEY = 'linger_auth_event'
 const INVALIDATED_EVENT = 'linger-account-invalidated'
 
 interface AuthEvent { id: string; account: string | null; persisted?: boolean }
-interface AccountSnapshot { account: string | null; clearSharedData: boolean }
-let current: AccountSnapshot = { account: null, clearSharedData: true }
+interface AccountSnapshot { account: string | null; clearSharedData: boolean; verifiedEmail: string | null }
+let current: AccountSnapshot = { account: null, clearSharedData: true, verifiedEmail: null }
 let lastAnnouncedId: string | undefined
 
 export function accountIdentity(info: { googleSub?: string | null; email?: string | null }): string | null {
@@ -17,8 +17,10 @@ export function accountIdentity(info: { googleSub?: string | null; email?: strin
 
 export function getAccountSnapshot(): AccountSnapshot { return current }
 
-export function setActiveAccount(account: string | null, clearSharedData = false): void {
-  current = { account, clearSharedData }
+export function setActiveAccount(account: string | null, clearSharedData = false, verifiedEmail: string | null = null): void {
+  const email = account ? verifiedEmail : null
+  if (current.account === account && current.clearSharedData === clearSharedData && current.verifiedEmail === email) return
+  current = { account, clearSharedData, verifiedEmail: email }
 }
 
 export function invalidateAccount(): void {

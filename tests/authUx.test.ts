@@ -66,7 +66,7 @@ test('new setup explains each step and defers persistence until after authentica
   await expect(page.getByRole('checkbox')).toHaveCount(0)
 })
 
-test('offers optional device persistence inside the editor after registration', async ({ page }) => {
+test('requires a passkey again after registration and reload', async ({ page }) => {
   const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
   await page.setViewportSize({ width: 390, height: 844 })
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
@@ -92,25 +92,12 @@ test('offers optional device persistence inside the editor after registration', 
   await page.getByRole('button', { name: 'Get started with a Google account' }).click()
   await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
   await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
-  const prompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
-  await expect(prompt).toBeVisible()
-  await expect(prompt.getByRole('checkbox')).not.toBeChecked()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-  const bounds = (await page.locator('#main-content').boundingBox())!
-  expect(bounds.width).toBeGreaterThan(350)
-  await page.screenshot({ path: '/tmp/linger-auth-remember-mobile.png' })
-  await prompt.getByRole('checkbox').check()
-  await prompt.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(prompt).toHaveCount(0)
-  const remaining = await page.evaluate(() => JSON.parse(localStorage.getItem('linger_device_session_v1')!).expiresAt - Date.now())
-  expect(remaining).toBeGreaterThan(23 * 3600000)
-  expect(remaining).toBeLessThanOrEqual(24 * 3600000)
-  // Requiring a new passkey after a reload must not renew the saved session or
-  // repeat a prompt the user has already answered on this browser.
-  await page.evaluate(() => localStorage.removeItem('linger_device_session_v1'))
+  await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
   await page.reload()
+  await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-  await expect(prompt).toHaveCount(0)
   expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
 })
