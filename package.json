@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite --host",
-    "workers:dev": "wrangler pages dev --proxy 5173 --port 8788 --persist-to .wrangler/local-state",
+    "workers:dev": "wrangler pages dev --proxy 5173 --ip 127.0.0.1 --port 8788 --persist-to .wrangler/local-state",
     "build": "tsc -b && tsc -p tsconfig.functions.json --noEmit && npm run build:workflows && vite build",
     "build:workflows": "tsc -p tsconfig.workflows.json --noEmit",
     "ci:local": "bash scripts/ci-local.sh",
