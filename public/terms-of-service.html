@@ -32,7 +32,7 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Terms of Service</h1>
-  <p class="meta">Effective Date: November 1, 2026</p>
+  <p class="meta">Last updated: November 12, 2026</p>
 
   <h2>1. Acceptance of Terms</h2>
   <p>
@@ -55,6 +55,11 @@
     See the <a href="/privacy">Privacy Policy</a> for details about data
     processing and service providers.
   </p>
+  <p>
+    S3 backup covers diary entries, not milestones or other app settings. It is not end-to-end
+    encrypted: entry contents pass through Linger's backend, and diary files remain readable in
+    Google Drive and the configured S3 bucket.
+  </p>
 
   <h2>3. Accounts and Authorization</h2>
   <p>
@@ -62,6 +67,14 @@
     sign-in. You are responsible for keeping your Google account credentials secure and for activity
     carried out through your account. You may revoke Linger's access through
     <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account → Apps &amp; services</a>.
+  </p>
+  <p>
+    Linger also uses a compatible passkey to protect account metadata and the saved Google refresh
+    credential. You are responsible for access to your passkeys and devices. If you lose every
+    registered passkey, you can create a new Linger account with the same Google account to reconnect
+    to accessible Drive files, but old encrypted metadata cannot be recovered and local-only drafts
+    or preferences may not be restored. Choosing to keep a device unlocked stores a key in that browser
+    for up to seven days; use this option only on a device you trust.
   </p>
 
   <h2>4. Your Content and Optional Backup</h2>
@@ -97,8 +110,10 @@
 
   <h2>7. Intellectual Property</h2>
   <p>
-    The Service's code, design, and branding are the property of its developer. These Terms do not
-    grant you ownership of them. You may use the Service while complying with these Terms.
+    The Service's code is available under the
+    <a href="https://github.com/europeanplaice/linger/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>.
+    The applicable license governs use of the code. These Terms do not transfer ownership of the
+    Service's design or branding.
   </p>
 
   <h2>8. Availability and Disclaimer of Warranties</h2>

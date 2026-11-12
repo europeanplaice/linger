@@ -1,7 +1,9 @@
 # Bring your own S3 bucket for linger
 
-Advanced option: connect linger to an S3 bucket in your own AWS account instead
-of (or alongside) linger's default storage. Requires an AWS account and basic
+Advanced option: back up linger diary entries to an S3 bucket in your own AWS
+account. Google Drive remains the primary store; S3 does not replace it. The
+backup covers diary entries, not milestones or other app settings. It requires
+an AWS account and basic
 familiarity with Terraform and IAM — this is not exposed as a one-click option
 because AWS, unlike Google, has no consumer-facing OAuth consent screen that
 lets an app request access to "your" S3 bucket. You set up the trust
@@ -12,10 +14,9 @@ relationship yourself, once, in your own account.
 Creates, in **your own AWS account**:
 
 - An IAM OIDC identity provider trusting Google (`accounts.google.com`)
-- An IAM role that only *your* linger session can assume — scoped to both
-  linger's OAuth client ID (`aud`) and your personal Google account ID
-  (`sub`), so no other linger user can use it even though they share the same
-  `aud`
+- An IAM role whose trust policy checks both linger's OAuth client ID (`aud`)
+  and your Google account ID (`sub`). Other users of the same linger client
+  cannot assume it using their own Google identities.
 - An S3 bucket (versioned, encrypted, fully private) that role can read/write
 
 linger never receives long-lived AWS credentials for this bucket — it
@@ -35,7 +36,11 @@ at request time via `sts:AssumeRoleWithWebIdentity`.
 
 ## Steps
 
-1. Copy the example vars and fill them in:
+1. Obtain this repository and work in its `self-hosted/aws-s3` directory.
+   In linger's S3 settings, enter a globally unique bucket name and AWS region,
+   then download `terraform.tfvars` into this directory. Check the values,
+   including your Google account ID and linger's client ID. Alternatively, copy
+   and edit the example file:
 
    ```bash
    cp terraform.tfvars.example terraform.tfvars
@@ -49,25 +54,28 @@ at request time via `sts:AssumeRoleWithWebIdentity`.
    terraform apply
    ```
 
-3. Copy the `role_arn` output and paste it into linger's Settings under your
-   S3 connection, along with the bucket name and region. Use the "Test
-   connection" button there to confirm the trust policy and bucket
-   permissions actually work before enabling the backup.
+3. Paste the `role_arn` output into linger's S3 settings. Enter the `bucket_name`
+   output and the region used in `terraform.tfvars`, then use "Test connection".
+   Enable backup and save the settings. Keep linger open and authorized while
+   existing entries are being backed up; closing or reloading pauses that work.
 
 ## Rotating access
 
-If you ever want to revoke linger's access, delete the IAM role
-(`terraform destroy`, or just delete `aws_iam_role.linger_s3` in the AWS
-console) — linger immediately loses the ability to assume it. Your bucket and
-its contents are untouched.
+To stop future role assumptions, remove the IAM role using an appropriate AWS
+or Terraform change. Already-issued temporary credentials may remain usable until
+they expire; use AWS role-session revocation or permissions controls if immediate
+revocation is needed. Turning backup off does not delete bucket contents.
+The bucket has `prevent_destroy`, so `terraform destroy` will refuse to destroy
+this configuration while that protection remains in place.
 
 ## Notes
 
 - If linger rotates its Google OAuth client (a blue/green swap on linger's
   side), `linger_google_client_id` here goes stale and this role stops
   trusting linger until you update the variable and re-apply.
-- The bucket has versioning enabled and is fully private (no public access,
-  no bucket policy needed) — only the IAM role created here can reach it.
+- The bucket has versioning and public-access blocking enabled. The created IAM
+  role has access; other principals in your AWS account may also have access
+  depending on their permissions and account policies.
 - Past versions of an entry (including deleted entries, which are just a
   delete marker on top of the version stack) are kept forever — nothing here
   ever expires them automatically. If you want to permanently purge old

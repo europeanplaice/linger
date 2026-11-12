@@ -33,7 +33,7 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: November 2, 2026</p>
+  <p class="meta">Last updated: November 12, 2026</p>
 
   <h2>1. Overview</h2>
   <p>
@@ -58,7 +58,7 @@
   <h2>2. Information Linger Processes</h2>
   <ul>
     <li><strong>Google account information:</strong> your email address and a stable Google account identifier, used to sign you in and keep sessions associated with the right account.</li>
-    <li><strong>Diary and app files:</strong> entry text and dates, milestone labels and dates, and (if configured) S3 backup settings and sync status. These files are stored in the Linger folder in your Google Drive, normally <code>linger_diary/</code>. Google Drive may also keep file revisions.</li>
+    <li><strong>Diary and app files:</strong> entry text and dates, milestone labels and dates, and (if configured) S3 backup settings and sync status. These files are stored in the Linger folder in your Google Drive, normally <code>linger_diary/</code>. Google Drive may also keep file revisions. Sync status and progress are also processed as operational metadata.</li>
     <li><strong>Authentication and sync information:</strong> OAuth tokens, session identifiers, Drive file identifiers, and, when S3 backup is configured, the AWS role and bucket settings and entry sync progress or error status.</li>
     <li><strong>Browser data:</strong> preferences, holiday-calendar selection, milestones, cached diary entries, offline drafts, and pending changes that help the app work across reloads and during network interruptions.</li>
     <li><strong>Technical information:</strong> website and API request information, service error diagnostics, and the aggregate traffic and performance metrics described below.</li>
@@ -76,6 +76,10 @@
     Google provides sign-in and stores your diary files, milestones, and any S3 configuration files.
     Your entries are plain-text files. Google controls its own storage, revision history, and deletion
     practices. See <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a>.
+  </p>
+  <p>
+    Linger's use and transfer of information received from Google Workspace APIs is subject to the
+    <a href="https://developers.google.com/workspace/workspace-api-user-data-developer-policy" target="_blank" rel="noopener">Google Workspace API User Data and Developer Policy</a>, including its Limited Use requirements.
   </p>
 
   <h2>4. Cloudflare Hosting, Sessions, and Sync Metadata</h2>
@@ -119,10 +123,12 @@
     contain a verifier until they are consumed or removed by scheduled cleanup.
   </p>
   <p>
-    Cloudflare's coordination services store operational metadata such as entry dates and versions,
-    S3 sync status, and backfill progress. New cached Drive identifiers and create reservations are
-    encrypted with the user metadata key so writes and backups can be coordinated
-    and retried. This metadata does not include diary entry text. Cloudflare may also process request
+    Cloudflare's coordination services store operational metadata for coordinating writes and backups.
+    New cached Drive identifiers, create reservations, and S3 sync details such as entry dates, versions,
+    status, and errors are encrypted with the user metadata key. Job counts, timestamps, and state remain
+    visible; keyed lookups also reveal repeated access and the number of entries. Older records may remain
+    unencrypted until migrated, and dates may appear in request paths or provider diagnostics. This metadata
+    does not include diary entry text. Cloudflare may also process request
     logs, error diagnostics, and workflow state under the retention rules for the services and account
     plan in use. The application avoids deliberately logging sensitive values, but provider-side
     diagnostics and account settings require separate operational review; a fault or misconfiguration
@@ -192,7 +198,8 @@
     bucket, and region. Linger stores those settings in your Google Drive and uses your Google
     sign-in identity to request temporary AWS credentials from AWS Security Token Service. When
     backup is enabled, Linger backfills existing Drive entries and mirrors later saves and deletions
-    to the configured bucket. Diary text and entry dates are sent to that bucket; AWS also receives
+    to the configured bucket. The backup covers diary entries, not milestones or other app settings.
+    Diary text and entry dates are sent to that bucket; AWS also receives
     the identity token used to assume the role and the requests needed to write the objects. Linger
     does not ask you for long-term AWS access keys. Backup work advances while the app is open
     and authorized; credentials are not saved in durable background jobs.
