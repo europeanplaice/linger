@@ -10,6 +10,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:5173',
     storageState: 'tests/storageState.en.json',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
     { name: 'chromium',      use: { ...devices['Desktop Chrome'] } },
@@ -28,6 +30,7 @@ export default defineConfig({
       command: 'npm run dev',
       url: 'http://127.0.0.1:5173',
       reuseExistingServer: !process.env.CI,
+      stdout: process.env.CI ? 'pipe' : 'ignore',
     },
     {
       // Vite proxies API and auth requests here during browser tests.
@@ -35,6 +38,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:8788',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+      stdout: process.env.CI ? 'pipe' : 'ignore',
     },
   ],
 })
