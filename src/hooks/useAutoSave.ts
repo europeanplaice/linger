@@ -44,16 +44,25 @@ export function useAutoSave({ enabled, isDirty, text, save, canSave }: AutoSaveO
     if (dirtyStreakStartRef.current === null) dirtyStreakStartRef.current = Date.now()
     const elapsed = Date.now() - dirtyStreakStartRef.current
     const wait = Math.max(0, Math.min(AUTO_SAVE_MS, AUTO_SAVE_MAX_WAIT_MS - elapsed))
-    const id = window.setTimeout(() => {
-      if (!canSaveRef.current()) return
+    let cancelled = false
+    let id: number
+    const attempt = async () => {
+      if (!canSaveRef.current()) {
+        if (!cancelled) id = window.setTimeout(attempt, 5000)
+        return
+      }
       // Open a fresh max-wait window from this save. Without this, once elapsed
       // passes AUTO_SAVE_MAX_WAIT_MS an uninterrupted typing session that keeps
       // overlapping in-flight saves would re-fire a save on nearly every
       // keystroke instead of at most once per window.
       dirtyStreakStartRef.current = Date.now()
-      void saveRef.current(false)
-    }, wait)
-    return () => window.clearTimeout(id)
+      await saveRef.current(false)
+      // A failed save or edits made during an in-flight save remain dirty.
+      // Keep trying even when no further keystrokes trigger this effect.
+      if (!cancelled) id = window.setTimeout(attempt, 5000)
+    }
+    id = window.setTimeout(attempt, wait)
+    return () => { cancelled = true; window.clearTimeout(id) }
   }, [enabled, isDirty, text, saveRef, canSaveRef])
 
   // Flush when the tab is hidden or torn down. On mobile visibilitychange/pagehide

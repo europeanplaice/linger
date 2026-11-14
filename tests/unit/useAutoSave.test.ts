@@ -6,6 +6,21 @@ describe('useAutoSave', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
+  it('retries without further typing after a failure or an overlapping save', async () => {
+    const save = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    let allowed = false
+    const { unmount } = renderHook(() => useAutoSave({ enabled: true, isDirty: true, text: 'draft', save, canSave: () => allowed }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    expect(save).not.toHaveBeenCalled()
+    allowed = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(save).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(save).toHaveBeenCalledTimes(2)
+    allowed = false
+    unmount()
+  })
+
   it('saves the latest text after ten seconds of uninterrupted typing without saving on every subsequent keystroke', () => {
     const save = vi.fn(async () => true)
     const canSave = () => true

@@ -787,10 +787,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setStatus(t.entry.offlineSavePending)
         return false
       }
-      if (!explicit) {
-        console.error('Auto-save failed:', e)
-        return false
-      }
       if (e instanceof EntryConflictError) {
         setHasConflict(true)
         setConflictRemote(e.remote)
@@ -798,7 +794,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         haptics.warning()
       } else {
         setStatus(t.entry.saveFailed)
-        haptics.error()
+        if (explicit) haptics.error()
       }
       return false
     } finally {
