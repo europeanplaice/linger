@@ -193,10 +193,11 @@ interface SyncBadgeProps {
   label: string
   onClick?: () => void
   busy?: boolean
+  direction?: 'read' | 'write'
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, busy, direction, children }: SyncBadgeProps) {
   const Badge = onClick ? 'button' : 'div'
   return (
     <Badge
@@ -209,7 +210,12 @@ function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeP
     >
       <span className="editor-meta-badge-icon-wrapper">
         {busy ? <SpinnerIcon /> : children}
-        <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
+        <span className={`editor-meta-badge-status editor-meta-badge-status--${status}${direction ? ` editor-meta-badge-status--${direction}` : ''}`}>
+          {direction && (
+            <svg aria-hidden="true" viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
+              <path d={direction === 'read' ? 'M5 2v6M2.5 5.5L5 8l2.5-2.5' : 'M5 8V2M2.5 4.5L5 2l2.5 2.5'} fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
           {status === 'synced' && (
             <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
               <path d="M2.5 5L4.5 7L7.5 3" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -266,6 +272,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // A 'disabled' result from the poll is folded into null below (pollS3Status), so
   // this state itself never actually holds 'disabled' — narrow the type to match.
   const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
+  const [s3PollDirection, setS3PollDirection] = useState<'read' | 'write'>('read')
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
   // `${date}|${version}` of the last save-scoped poll that already triggered an
@@ -324,7 +331,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     : s3Status === 'failed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeFailed)
     : s3Status === 'unconfirmed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnconfirmed)
     : s3Status === 'unverified' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnverified)
-    : t.entry.s3BadgePending // covers 'pending' and 'backfilling'
+    : s3Status === 'backfilling' || s3PollDirection === 'write' ? t.entry.s3BadgePending : t.entry.s3BadgeChecking
   const activeMilestones = useMemo(
     () => (milestones ?? []).filter(a => a.showBadge !== false),
     [milestones],
@@ -389,6 +396,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     // and kick an account-wide resync (see onS3StaleEntryDetected below) every time.
     const staleDetect = opts.staleDetect ?? true
     const token = ++s3PollTokenRef.current
+    setS3PollDirection(since || !staleDetect ? 'write' : 'read')
     // True once any attempt in this polling run got a real reply from the server
     // (even 'pending') rather than a synthesized one from the .catch below — see
     // the exhausted branch's unconfirmed/unverified split.
@@ -457,6 +465,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         const autoRetryKey = `${forDate}|${version}`
         if (s3AutoRetryKeyRef.current !== autoRetryKey) {
           s3AutoRetryKeyRef.current = autoRetryKey
+          setS3PollDirection('write')
           setS3Status('pending')
           await retryS3EntrySync(forDate).catch(e => console.error('Failed to auto-retry S3 sync:', e))
           if (s3PollTokenRef.current !== token) return
@@ -1567,6 +1576,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   label={s3BadgeLabel}
                   onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
                   busy={s3Retrying}
+                  direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
                 >
                   <S3BadgeIcon />
                 </SyncBadge>

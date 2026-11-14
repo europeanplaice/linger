@@ -3908,6 +3908,21 @@ dialog.milestone-form-dialog::backdrop {
   opacity: 0;
 }
 
+.editor-meta-badge-status--read {
+  background: #2563eb;
+}
+
+.editor-meta-badge-status--read::after {
+  border-color: #2563eb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-meta-badge-status--pending::after,
+  .editor-meta-badge-status--backfilling::after {
+    animation: none;
+  }
+}
+
 .editor-meta-badge-status--unconfirmed,
 .editor-meta-badge-status--unverified {
   background: #9ca3af;

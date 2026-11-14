@@ -1633,9 +1633,10 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await routeS3Status(page, 'pending')
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    const badge = page.getByTitle('Syncing to AWS…')
+    const badge = page.getByTitle('Checking AWS backup status…')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
+    await expect(badge.locator('.editor-meta-badge-status')).toHaveClass(/editor-meta-badge-status--read/)
   })
 
   test('falls back to a retryable "couldn\'t check" badge instead of spinning forever if every status poll fails at the network level', async ({ page }) => {
@@ -1728,7 +1729,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.evaluate(() => window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2'))
     await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
 
-    await expect(page.getByTitle('Syncing to AWS…')).toBeVisible()
+    await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
     await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
   })
 
@@ -1862,6 +1863,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.getByTitle('Syncing to AWS…')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
+    await expect(badge.locator('.editor-meta-badge-status')).toHaveClass(/editor-meta-badge-status--write/)
     await expect(page.locator('.editor-meta-badge--unconfirmed')).toHaveCount(0)
   })
 
