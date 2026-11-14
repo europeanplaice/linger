@@ -397,6 +397,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const staleDetect = opts.staleDetect ?? true
     const token = ++s3PollTokenRef.current
     setS3PollDirection(since || !staleDetect ? 'write' : 'read')
+    // Show the check immediately; a disabled response removes the badge.
+    setS3Status('pending')
     // True once any attempt in this polling run got a real reply from the server
     // (even 'pending') rather than a synthesized one from the .catch below — see
     // the exhausted branch's unconfirmed/unverified split.
@@ -1561,28 +1563,32 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               </motion.span>
             )}
           </AnimatePresence>
-          <AnimatePresence initial={false}>
-            {!isDirty && !loading && !loadFailed && s3Status && (
-              <motion.span
-                key="s3"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
-              >
-                <SyncBadge
-                  status={s3Status}
-                  title={s3BadgeLabel}
-                  label={s3BadgeLabel}
-                  onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
-                  busy={s3Retrying}
-                  direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
-                >
-                  <S3BadgeIcon />
-                </SyncBadge>
-              </motion.span>
-            )}
-          </AnimatePresence>
+          {!isDirty && !loading && !loadFailed && baseVersion !== null && (
+            <span className="editor-meta-s3-slot">
+              <AnimatePresence initial={false}>
+                {s3Status && (
+                  <motion.span
+                    key="s3"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <SyncBadge
+                      status={s3Status}
+                      title={s3BadgeLabel}
+                      label={s3BadgeLabel}
+                      onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
+                      busy={s3Retrying}
+                      direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
+                    >
+                      <S3BadgeIcon />
+                    </SyncBadge>
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </span>
+          )}
         </div>
       </div>
       {shareMsgVisible && (

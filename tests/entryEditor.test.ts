@@ -1639,6 +1639,29 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await expect(badge.locator('.editor-meta-badge-status')).toHaveClass(/editor-meta-badge-status--read/)
   })
 
+  test('keeps the sync badges in place while the S3 status loads', async ({ page }) => {
+    let releaseStatus!: () => void
+    const statusReady = new Promise<void>(resolve => { releaseStatus = resolve })
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await statusReady
+      await route.fulfill({ json: { status: 'synced' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const drive = page.getByTitle('Saved to Google Drive')
+    await expect(drive).toBeVisible()
+    await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
+    const before = await drive.boundingBox()
+    const syncBefore = await page.locator('.editor-meta-sync').boundingBox()
+    releaseStatus()
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    const after = await drive.boundingBox()
+    const syncAfter = await page.locator('.editor-meta-sync').boundingBox()
+    expect(after).toEqual(before)
+    expect(syncAfter).toEqual(syncBefore)
+  })
+
   test('falls back to a retryable "couldn\'t check" badge instead of spinning forever if every status poll fails at the network level', async ({ page }) => {
     // Regression test: a network failure on a poll attempt is caught and treated the
     // same as a genuine server 'pending' (see pollS3Status's .catch in EntryEditor.tsx)

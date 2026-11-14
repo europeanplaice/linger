@@ -3821,6 +3821,13 @@ dialog.milestone-form-dialog::backdrop {
   flex-shrink: 0;
 }
 
+.editor-meta-s3-slot {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
 .editor-meta-badge {
   position: relative;
   display: inline-flex;
@@ -5246,6 +5253,13 @@ dialog.history-dialog::backdrop {
 @media (max-width: 640px), (pointer: coarse) {
   .editor-meta-sync {
     gap: 0;
+  }
+
+  .editor-meta-s3-slot {
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
   }
 
   button.editor-meta-badge {
