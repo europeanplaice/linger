@@ -5208,7 +5208,11 @@ dialog.history-dialog::backdrop {
 
 /* Keep compact icons inside separate touch targets, without overlapping hit areas. */
 @media (max-width: 640px), (pointer: coarse) {
-  .editor-meta-badge {
+  .editor-meta-sync {
+    gap: 0;
+  }
+
+  button.editor-meta-badge {
     width: 44px;
     height: 44px;
   }
