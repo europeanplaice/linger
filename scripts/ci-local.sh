@@ -13,8 +13,8 @@ else
   RESET=''
 fi
 
-STEPS=("build" "lint" "audit" "test:unit" "test:deployment" "test:privacy" "test:workers" "test")
-LABELS=("Build" "Lint" "Audit" "Unit tests" "Deployment checker tests" "Privacy compliance tests" "Workflows Worker tests" "E2E tests")
+STEPS=("build" "lint" "audit" "test:unit" "test:deployment" "test:ci" "test:privacy" "test:workers" "test")
+LABELS=("Build" "Lint" "Audit" "Unit tests" "Deployment checker tests" "CI configuration tests" "Privacy compliance tests" "Workflows Worker tests" "E2E tests")
 RESULTS=()
 
 run_step() {

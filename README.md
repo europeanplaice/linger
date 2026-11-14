@@ -73,6 +73,12 @@ npm test -- tests/searchBar.test.ts tests/useDiary.test.ts --project=chromium
 
 GitHub Actions validates pull requests to `main` and `staging`. Pushes to those branches deploy production (`linger`) and staging (`linger-staging`); the workflow applies D1 migrations, deploys the Workflows Worker, then deploys Pages and checks the public endpoints.
 
+The E2E job resolves its official Playwright container from the exact version in
+`package-lock.json` and verifies the registry manifest's SHA256 before using it.
+Dependency updates automatically select the matching container; no image version
+or digest needs to be updated by hand. An unavailable image fails the preparation
+job before browser tests start. Run `npm run test:ci` to check the resolver locally.
+
 To deploy your own fork, configure a Google Cloud OAuth web client with the Drive API enabled and your `/auth/callback` URL registered. Provision Cloudflare Pages, D1, KV, and the `s3-workflows` Worker; configure the bindings in the Wrangler files and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `SESSION_DOMAIN` for both Pages and the Worker. Apply the auth migrations as described in [D1-MIGRATION.md](D1-MIGRATION.md), add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets, and update the project names and domains in the deployment workflow for your fork.
 
 ## Stack

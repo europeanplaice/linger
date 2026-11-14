@@ -17,6 +17,7 @@
     "ci:local": "bash scripts/ci-local.sh",
     "test": "playwright test",
     "test:unit": "vitest run",
+    "test:ci": "node --test scripts/resolve-playwright-image.test.mjs",
     "test:deployment": "node --test scripts/check-deployment.test.mjs scripts/verify-pages-deployment.test.mjs",
     "test:privacy": "vitest run --config tests/privacy/vitest.config.ts && vitest run --config workers/s3-workflows/vitest.privacy.config.ts",
     "test:workers": "vitest run --config workers/s3-workflows/vitest.config.ts",
