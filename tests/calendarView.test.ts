@@ -6,6 +6,35 @@ test.beforeEach(async ({ page }) => {
 })
 
 test.describe('CalendarView', () => {
+  test('swipes between months without selecting a day or reacting to vertical gestures', async ({ page }) => {
+    const month = page.getByLabel('Select month')
+    const year = page.getByLabel('Select year')
+    const swipe = async (start: [number, number], end: [number, number]) => {
+      await page.locator('.calendar-grid .cal-day:not(.cal-day-empty)').first().evaluate((el, { start, end }) => {
+        for (const [type, point] of [['touchstart', start], ['touchmove', end], ['touchend', end]] as const) {
+          const event = new Event(type, { bubbles: true })
+          const touch = { clientX: point[0], clientY: point[1] }
+          Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [touch] })
+          Object.defineProperty(event, 'changedTouches', { value: [touch] })
+          el.dispatchEvent(event)
+        }
+      }, { start, end })
+    }
+
+    await month.selectOption('11')
+    await swipe([320, 200], [200, 200])
+    await expect(month).toHaveValue('0')
+    await expect(year).toHaveValue('2027')
+    await expect(page.locator('.calendar-grid')).toHaveCount(1)
+    await swipe([200, 200], [320, 200])
+    await expect(month).toHaveValue('11')
+    await expect(year).toHaveValue('2026')
+    await expect(page.locator('.calendar-grid')).toHaveCount(1)
+    await swipe([200, 200], [210, 320])
+    await expect(month).toHaveValue('11')
+    expect(await page.evaluate(() => window.calendarHarness.selectedDates())).toEqual([])
+  })
+
   test('uses regular month navigation and can jump to today', async ({ page }) => {
     const monthSelect = page.getByLabel('Select month')
 

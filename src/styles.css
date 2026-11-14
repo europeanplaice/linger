@@ -1163,6 +1163,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .calendar-grid-wrap {
   position: relative;
   overflow: hidden;
+  touch-action: pan-y pinch-zoom;
 }
 .calendar-nav {
   display: flex;
