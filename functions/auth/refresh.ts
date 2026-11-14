@@ -42,9 +42,16 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (!response.ok) return jsonResponse({ error: 'Google authorization unavailable' }, response.status === 400 || response.status === 401 ? 401 : 503)
     const result = await response.json() as { access_token?: unknown; id_token?: unknown; expires_in?: unknown; refresh_token?: unknown }
     if (typeof result.access_token !== 'string' || typeof result.id_token !== 'string' || typeof result.expires_in !== 'number' || !Number.isFinite(result.expires_in) || result.expires_in <= 0) throw new Error('Invalid token response')
-    const claims = await verifyGoogleIdToken(result.id_token, env.GOOGLE_CLIENT_ID)
+    // Both checks use the account already bound to the session, so they can
+    // run concurrently without trusting either unverified token's claims.
+    const [idCheck, accessCheck] = await Promise.allSettled([
+      verifyGoogleIdToken(result.id_token, env.GOOGLE_CLIENT_ID),
+      verifyGoogleAccessToken(result.access_token, env.GOOGLE_CLIENT_ID, session.google_sub),
+    ])
+    if (idCheck.status === 'rejected') throw idCheck.reason
+    const claims = idCheck.value
     if (claims.sub !== session.google_sub) return jsonResponse({ error: 'Google account mismatch' }, 401)
-    await verifyGoogleAccessToken(result.access_token, env.GOOGLE_CLIENT_ID, claims.sub)
+    if (accessCheck.status === 'rejected') throw accessCheck.reason
     const active = await getSession(id, env, key)
     if (!active || active.user_id !== session.user_id || active.google_sub !== session.google_sub) return jsonResponse({ error: 'Session expired' }, 401)
     const nextToken = typeof result.refresh_token === 'string' && result.refresh_token ? result.refresh_token : token

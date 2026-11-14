@@ -157,6 +157,18 @@ test.describe('EntryEditor — date header', () => {
     await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
   })
 
+  test('opens a known empty date without waiting for Drive and restores its local draft', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await seedDraft(page, { date: '2026-05-02', content: 'local draft', baseVersion: null, baseContent: '', savedAt: Date.now() })
+    await page.evaluate(() => {
+      window.editorHarness.render({ date: '2026-05-02', token: 'tok', getContentDelayMs: 5000, knownDates: ['2026-05-01'], diaryListLoaded: true })
+    })
+
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('local draft', { timeout: 2000 })
+    expect(await page.evaluate(() => window.editorHarness.getContentCalls())).toEqual([])
+  })
+
   test('shows a load error state without the writing placeholder', async ({ page }) => {
     await loadHarness(page)
     await page.evaluate(() => {

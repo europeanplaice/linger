@@ -9,7 +9,7 @@ import { SyncQueueManager } from '../lib/syncQueue'
 import { broadcastMessage } from '../utils/tabSync'
 import { getAccountSnapshot } from '../lib/accountSession'
 import type { AuthStatus } from './useAuth'
-import { shiftDate } from '../utils/date'
+import { shiftDate, todayYmd } from '../utils/date'
 import { useLatestRef } from './useEvent'
 
 interface EntryCache {
@@ -465,45 +465,14 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         }
         scope.releaseCache()
         // Always sync with Drive to pick up remote changes and evict stale content.
-        // Fire getEntryByDate for today in parallel so the editor can render
-        // without waiting for the full file list to complete.
-        const today = new Date().toISOString().split('T')[0]
-        const [prefetchedToday, freshCache] = await Promise.all([
-          getEntryByDate(today, undefined, undefined, scope.controller.signal).catch(() => null),
-          loadEntryList(true, canUsePersistentCache),
-        ])
+        // Share the normal in-flight read with the editor, and publish its
+        // result as soon as it arrives rather than waiting for the full list.
+        const today = todayYmd()
+        void getContent(today).catch(() => {})
+        const freshCache = await loadEntryList(true, canUsePersistentCache)
         if (!scope.active) return
         scope.ready = true
         setFreshListLoaded(true)
-
-        // Merge pre-fetched today content into the reconciled cache.
-        // This runs inside the updater to avoid a race with concurrent
-        // React state batching — we always read from the latest prev.
-        if (prefetchedToday && prefetchedToday !== 'not-modified') {
-          updateCache(prev => {
-            const existing = prev.get(today)
-            if (existing &&
-                existing.meta.id === prefetchedToday.meta.id &&
-                existing.meta.version === prefetchedToday.meta.version &&
-                !existing.content) {
-              const next = new Map(prev)
-              next.set(today, {
-                ...existing,
-                content: prefetchedToday.entry,
-                snippet: existing.snippet ?? prefetchedToday.entry.content.slice(0, 500),
-              })
-              if (email !== null) putCached({
-                owner: email,
-                date: today,
-                meta: prefetchedToday.meta,
-                content: prefetchedToday.entry,
-                snippet: prefetchedToday.entry.content.slice(0, 500),
-              }).catch(() => {})
-              return next
-            }
-            return prev
-          })
-        }
 
         // Prefetch the 3 most recent entries that aren't already in memory,
         // excluding today (already pre-fetched above).

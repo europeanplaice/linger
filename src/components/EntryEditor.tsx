@@ -582,7 +582,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       let entry: LoadedDiaryEntry | null = null
       let loadError: unknown = null
       try {
-        entry = await getContentRef.current(date)
+        // A fresh list already establishes absence. Still read the local draft
+        // below before enabling editing, but avoid a redundant Drive lookup.
+        entry = dateKnownAbsentRef.current ? null : await getContentRef.current(date)
       } catch (e) {
         loadError = e
       }

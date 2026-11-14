@@ -10,6 +10,7 @@ import { deleteDraft, getAllDrafts, putDraft } from '../../src/lib/draftStorage'
 import { setActiveAccount } from '../../src/lib/accountSession'
 import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
 import type { DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../../src/types'
+import { todayYmd } from '../../src/utils/date'
 
 // Keep the Hook, API client, storage adapter and IDB cache real. Only the HTTP
 // boundary is replaced; browser lifecycle/cross-tab tests remain in Playwright.
@@ -94,6 +95,29 @@ async function start(initialFiles: DriveFileMeta[] = []) {
 }
 
 describe('useDiary HTTP and storage integration', () => {
+  it('shares today’s read with the editor and makes it available before the list finishes', async () => {
+    const today = todayYmd()
+    const list = deferred<Response>()
+    const reading = deferred<Response>()
+    const originalFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((input, init) => String(input) === '/api/drive/entries' ? list.promise : originalFetch(input, init))
+    read.mockReturnValue(reading.promise)
+    const { result } = renderHook(() => useDiary('signedIn', email, vi.fn()))
+    await waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith(today))
+    let opened!: Promise<LoadedDiaryEntry | null>
+    act(() => { opened = result.current.getContent(today) })
+    await act(async () => {
+      reading.resolve(json(entry(today)))
+      expect(await opened).toEqual(entry(today))
+    })
+    expect(result.current.freshListLoaded).toBe(false)
+    expect(await result.current.getContent(today)).toEqual(entry(today))
+    expect(read).toHaveBeenCalledTimes(1)
+    await act(async () => { list.resolve(json({ files: [meta(today)] })) })
+    await waitFor(() => expect(result.current.freshListLoaded).toBe(true))
+    expect(await result.current.getContent(today)).toEqual(entry(today))
+  })
+
   it('does not delete a newer checkpoint with the same text after an older save finishes', async () => {
     const { result } = await start()
     const response = deferred<Response>()
