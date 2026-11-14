@@ -18,6 +18,7 @@ import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_sh
 import { DiaryWriter } from './diaryWriter'
 import type { S3Config } from './runtime'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
+import type { S3BackupRequest } from '../../../functions/_shared/s3Workflow'
 
 export { S3BackfillWorkflow, S3MirrorWorkflow, S3SyncIndex, DiaryWriter }
 
@@ -32,6 +33,16 @@ async function migrateSyncMetadata(env: WorkflowEnv, input: DiaryWriterAuth): Pr
 }
 
 export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
+  async getDiaryEntryMeta(input: DiaryWriterAuth & { date: string }) {
+    await authorizedSession(this.env, input)
+    return this.env.DIARY_WRITER.getByName(input.accountKey).getEntryMeta(input)
+  }
+
+  async backup(input: S3BackupRequest): Promise<Response> {
+    await authorizedSession(this.env, input)
+    return indexFor(this.env, input.accountKey).backup(input)
+  }
+
   async scheduled(): Promise<void> {
     await cleanupAuth(this.env)
   }

@@ -3,7 +3,7 @@ import {
   S3_BUCKET_RE, S3_SETTINGS_NEGATIVE_CACHE_MS, S3_SETTINGS_FILE_NAME, S3_SYNC_STATUS_FILE_NAME,
   isValidS3Settings, getS3Settings, loadS3SettingsRecord, mirrorEntrySave, mirrorEntryDelete, backfillAllEntries,
   writeBackfillProgress, finishBackfill, resyncSingleEntry, isBackfillRunActive,
-  getAssumedCredentials,
+  getAssumedCredentials, reconcileS3Entry,
 } from '../../functions/_shared/s3Settings'
 import type { S3SettingsRecord, S3Config, S3SyncStatus } from '../../functions/_shared/s3Settings'
 import * as drive from '../../functions/_shared/drive'
@@ -28,7 +28,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   getEntryContent: vi.fn(),
   getDiaryFileMeta: vi.fn(),
   getEntryMeta: vi.fn(),
-  findEntryMeta: vi.fn(),
+  findCurrentEntryMeta: vi.fn(),
 }))
 
 vi.mock('../../functions/_shared/session', async (importOriginal) => ({
@@ -48,6 +48,7 @@ const baseSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/l
 
 const CONFIG_FILE_ID = 'settings-file'
 const STATUS_FILE_ID = 'status-file'
+let persistedStatus: S3SyncStatus = {}
 
 function makeSession(overrides: Partial<SessionData> = {}): SessionData {
   return { access_token: 'at', expires_at: Date.now() + 100_000, ...overrides }
@@ -75,6 +76,7 @@ function mockS3Files(config: unknown | null, status: unknown | null = null): voi
 // backfillAllEntries/resyncSingleEntry/writeBackfillProgress/finishBackfill directly
 // rather than through a route handler.
 function makeRecord(config: Partial<S3Config> = {}, status: S3SyncStatus = {}, opts: { statusFileId?: string | null } = {}): S3SettingsRecord {
+  persistedStatus = status
   return {
     config: { ...baseSettings, ...config },
     status,
@@ -88,14 +90,17 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
   vi.mocked(drive.findJsonFile).mockResolvedValue(null)
+  persistedStatus = {}
+  vi.mocked(drive.listEntries).mockResolvedValue([])
+  vi.mocked(drive.readJsonFile).mockImplementation(async () => persistedStatus)
   // Echoes back a fresh id per file (create) or the existing one (update) — no
   // `version` field by default, which keeps withFreshS3Status's optimistic-concurrency
   // check out of the way for tests that aren't specifically exercising it (see the
   // dedicated 'withFreshS3Status concurrency' describe block below).
-  vi.mocked(drive.writeJsonFile).mockImplementation(async (_t, _f, fileName, _body, existingFileId) => ({
-    id: existingFileId ?? (fileName === S3_SETTINGS_FILE_NAME ? CONFIG_FILE_ID : STATUS_FILE_ID),
-    name: fileName,
-  }))
+  vi.mocked(drive.writeJsonFile).mockImplementation(async (_t, _f, fileName, body, existingFileId) => {
+    if (fileName === S3_SYNC_STATUS_FILE_NAME) persistedStatus = body as S3SyncStatus
+    return { id: existingFileId ?? (fileName === S3_SETTINGS_FILE_NAME ? CONFIG_FILE_ID : STATUS_FILE_ID), name: fileName }
+  })
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
   vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT })
   vi.mocked(s3.putObjectIfNewer).mockResolvedValue(undefined)
@@ -105,7 +110,7 @@ beforeEach(() => {
   // Default: a cached fileId still points to a live (non-trashed) file, with no `version`
   // (see writeJsonFile's mock above for why).
   vi.mocked(drive.getEntryMeta).mockResolvedValue({ id: CONFIG_FILE_ID, name: S3_SETTINGS_FILE_NAME, trashed: false } as any)
-  vi.mocked(drive.findEntryMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt', version: '5' } as any)
+  vi.mocked(drive.findCurrentEntryMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt', version: '5' } as any)
   vi.mocked(drive.getEntryContent).mockResolvedValue({ date: '2026-01-01', content: 'hello' })
 })
 
@@ -274,22 +279,39 @@ describe('getAssumedCredentials request scope', () => {
   })
 })
 
-describe('mirrorEntrySave', () => {
-  it('assumes request-scoped credentials without a persistent cache key', async () => {
-    mockS3Files(baseSettings, null)
-    const sess = makeSession({ google_sub: '112233' })
-
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
-
-    expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledWith('id-token', baseSettings.roleArn, baseSettings.region)
+describe('save/delete backup delegation', () => {
+  it('uses the same account coordinator for saves and delayed deletes, without stale content', async () => {
+    const backup = vi.fn(async () => new Response('{}'))
+    const env = { S3_WORKFLOW_SERVICE: { backup } } as any
+    const sess = makeSession({ user_id: 'account', vault_key: 'request-key', id_token: 'id-token' })
+    await mirrorEntrySave('tok', 'sid', sess, env, '2026-01-01', 'stale text', 'old-file', '100')
+    await mirrorEntryDelete('tok', 'sid', sess, env, '2026-01-01')
+    expect(backup).toHaveBeenCalledTimes(2)
+    expect(backup.mock.calls[0]).toEqual(backup.mock.calls[1])
+    expect(backup).toHaveBeenCalledWith(expect.objectContaining({
+      accountKey: 'account', vaultKey: 'request-key', accessToken: 'tok',
+      operation: { kind: 'reconcile', date: '2026-01-01' },
+    }))
+    expect(s3.putObjectIfNewer).not.toHaveBeenCalled()
+    expect(s3.deleteObject).not.toHaveBeenCalled()
+  })
+  it('does not perform uncoordinated S3 writes if the coordinator is missing', async () => {
+    mockS3Files(baseSettings)
+    await mirrorEntrySave('tok', 'sid', makeSession({ user_id: 'account' }), {} as any, '2026-01-01', 'text', 'file', '1')
+    expect(s3.putObjectIfNewer).not.toHaveBeenCalled()
   })
 })
 
-describe('mirrorEntrySave (mirroring behavior)', () => {
+const reconcileSavedEntry: typeof mirrorEntrySave = async (token, sid, session, env, date) => {
+  const record = await loadS3SettingsRecord(token, sid, session, env)
+  if (record?.config.enabled) await resyncSingleEntry(token, sid, session, env, record, date)
+}
+
+describe('common entry reconciliation status', () => {
   it('does nothing (and never touches Drive) when negatively cached', async () => {
     const sess = makeSession({ s3_settings_negative_cache_at: Date.now() })
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(drive.findJsonFile).not.toHaveBeenCalled()
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
@@ -298,14 +320,14 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
   it('is a no-op when no settings file exists', async () => {
     mockS3Files(null, null)
     const sess = makeSession()
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
   it('is a no-op when settings exist but are disabled', async () => {
     mockS3Files({ ...baseSettings, enabled: false }, null)
     const sess = makeSession()
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
   })
 
@@ -313,11 +335,11 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     mockS3Files(baseSettings, null)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
       { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
-      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5',
+      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5', undefined, { fileId: 'file-1' },
     )
   })
 
@@ -325,7 +347,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     mockS3Files(baseSettings, { lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z' })
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith('tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME, {}, STATUS_FILE_ID)
   })
@@ -334,7 +356,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     mockS3Files(baseSettings, null)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
@@ -344,7 +366,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await expect(mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')).resolves.toBeUndefined()
+    await expect(reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')).resolves.toBeUndefined()
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
@@ -358,7 +380,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
@@ -371,7 +393,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '5')
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
@@ -388,7 +410,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
@@ -401,7 +423,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     mockS3Files(baseSettings, { lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-02', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
@@ -410,7 +432,7 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     mockS3Files(baseSettings, { lastSyncError: 'old failure', lastSyncErrorAt: '2026-01-01T00:00:00.000Z', lastSyncErrorDate: '2026-01-01' })
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '6')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '6')
 
     expect(drive.writeJsonFile).toHaveBeenCalledWith('tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME, {}, STATUS_FILE_ID)
   })
@@ -420,67 +442,13 @@ describe('mirrorEntrySave (mirroring behavior)', () => {
     vi.mocked(session.getValidIdToken).mockResolvedValue(null)
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await reconcileSavedEntry('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
 
     expect(s3.assumeRoleWithWebIdentity).not.toHaveBeenCalled()
     expect(drive.writeJsonFile).toHaveBeenCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
       expect.objectContaining({ lastSyncError: expect.stringContaining('sign out') }),
       undefined,
-    )
-  })
-})
-
-describe('mirrorEntrySave ghost-object compensation', () => {
-  // A slower save's mirror can complete after a faster concurrent delete's mirror
-  // already removed the object (both fire as independent context.waitUntil tasks
-  // with no ordering guarantee) — that would resurrect a deleted entry in the S3
-  // backup. mirrorEntrySave re-checks Drive after writing and self-heals.
-  it('deletes the just-written mirror when Drive no longer has the entry', async () => {
-    mockS3Files(baseSettings, null)
-    vi.mocked(drive.getDiaryFileMeta).mockRejectedValue(new DriveError(404, 'not_found'))
-    const sess = makeSession()
-
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
-
-    expect(s3.putObjectIfNewer).toHaveBeenCalled()
-    expect(s3.deleteObject).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
-      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
-    )
-  })
-
-  it('keeps the mirror when Drive still has the entry (happy path)', async () => {
-    mockS3Files(baseSettings, null)
-    vi.mocked(drive.getDiaryFileMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-01-01.txt' } as any)
-    const sess = makeSession()
-
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
-
-    expect(s3.deleteObject).not.toHaveBeenCalled()
-  })
-
-  it('does not delete the mirror when the existence re-check itself fails ambiguously', async () => {
-    mockS3Files(baseSettings, null)
-    vi.mocked(drive.getDiaryFileMeta).mockRejectedValue(new Error('network blip'))
-    const sess = makeSession()
-
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
-
-    expect(s3.deleteObject).not.toHaveBeenCalled()
-  })
-})
-
-describe('mirrorEntryDelete', () => {
-  it('deletes the mirrored object when settings are enabled', async () => {
-    mockS3Files(baseSettings, null)
-    const sess = makeSession()
-
-    await mirrorEntryDelete('tok', 'sid', sess, {} as any, '2026-01-01')
-
-    expect(s3.deleteObject).toHaveBeenCalledWith(
-      { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
-      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt',
     )
   })
 })
@@ -496,7 +464,7 @@ describe('resyncSingleEntry', () => {
     expect(result).toEqual({ ok: true })
     expect(s3.putObjectIfNewer).toHaveBeenCalledWith(
       { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT },
-      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5',
+      'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '5', undefined, { fileId: 'file-1' },
     )
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     // Was the only failed date and the run had already finished — fully cleared,
@@ -536,7 +504,7 @@ describe('resyncSingleEntry', () => {
   })
 
   it('treats an entry no longer in Drive as nothing to back up, not a failure', async () => {
-    vi.mocked(drive.findEntryMeta).mockResolvedValue(null)
+    vi.mocked(drive.findCurrentEntryMeta).mockResolvedValue(null)
     const record = makeRecord({}, {
       backfillProgress: { total: 1, done: 1, failed: ['2026-01-01'], finishedAt: '2026-01-01T00:00:00.000Z' },
     })
@@ -559,6 +527,43 @@ describe('resyncSingleEntry', () => {
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     expect((written as any).backfillProgress).toEqual(activeProgress)
     expect((written as any).lastSyncError).toContain('AccessDenied')
+  })
+})
+
+describe('reconciliation against current Drive state', () => {
+  const creds = { accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: MOCK_CREDS_EXPIRES_AT }
+  const run = () => reconcileS3Entry('tok', 'sid', makeSession(), {} as any, baseSettings, creds, '2026-01-01')
+
+  it('mirrors a recreated file using its identity even when its version is lower', async () => {
+    vi.mocked(drive.findCurrentEntryMeta).mockResolvedValue({ id: 'new-file', name: 'diary-2026-01-01.txt', version: '1' })
+    await run()
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1', undefined, { fileId: 'new-file' })
+    expect(s3.deleteObject).not.toHaveBeenCalled()
+  })
+  it('repairs an entry recreated while its old backup is being deleted', async () => {
+    vi.mocked(drive.findCurrentEntryMeta).mockResolvedValueOnce(null).mockResolvedValue({ id: 'recreated', name: 'diary-2026-01-01.txt', version: '1' })
+    await run()
+    expect(s3.deleteObject).toHaveBeenCalledOnce()
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'hello', '1', undefined, { fileId: 'recreated' })
+  })
+  it('removes an entry deleted during upload', async () => {
+    vi.mocked(drive.findCurrentEntryMeta).mockResolvedValueOnce({ id: 'old', name: 'diary-2026-01-01.txt', version: '5' }).mockResolvedValue(null)
+    await run()
+    expect(s3.putObjectIfNewer).toHaveBeenCalledOnce()
+    expect(s3.deleteObject).toHaveBeenCalledOnce()
+  })
+  it('does not authorize deletion when Drive cannot confirm absence', async () => {
+    vi.mocked(drive.findCurrentEntryMeta).mockRejectedValueOnce(new DriveError(503, 'unavailable'))
+    await expect(run()).rejects.toThrow()
+    expect(s3.deleteObject).not.toHaveBeenCalled()
+  })
+  it('retries with fresh content if Drive changes during upload', async () => {
+    const old = { id: 'file', name: 'diary-2026-01-01.txt', version: '1' }
+    const updated = { ...old, version: '2' }
+    vi.mocked(drive.findCurrentEntryMeta).mockResolvedValueOnce(old).mockResolvedValue(updated)
+    vi.mocked(drive.getEntryContent).mockResolvedValueOnce({ date: '', content: 'old' }).mockResolvedValue({ date: '', content: 'new' })
+    await run()
+    expect(s3.putObjectIfNewer).toHaveBeenLastCalledWith(creds, 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'new', '2', undefined, { fileId: 'file' })
   })
 })
 
@@ -596,17 +601,12 @@ describe('withFreshS3Status re-reads fresh before merging', () => {
     expect((written as any).lastSyncErrorDate).toBeUndefined()
   })
 
-  it('falls back to the in-memory snapshot when the fresh re-read fails', async () => {
-    const staleRecord = makeRecord({}, { lastSyncError: 'in-memory error' })
+  it('does not overwrite progress with a stale snapshot when its fresh read fails', async () => {
+    const record = makeRecord({}, { lastSyncError: 'old' })
     vi.mocked(drive.readJsonFile).mockRejectedValue(new Error('Drive is down'))
-
-    await writeBackfillProgress('tok', staleRecord, { total: 1, done: 1, failed: [], remaining: [] })
-
-    const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
-    expect((written as any).lastSyncError).toBe('in-memory error')
-    expect((written as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [], updatedAt: expect.any(String) })
+    await expect(writeBackfillProgress('tok', record, { total: 1, done: 1, failed: [], remaining: [] })).rejects.toThrow('Drive is down')
+    expect(drive.writeJsonFile).not.toHaveBeenCalled()
   })
-
   it('mirrorEntrySave failure recording also merges onto a freshly re-read status file', async () => {
     // First status read (loadS3SettingsRecord, at the start of mirrorEntrySave) sees no
     // error; a second, later read (the fresh re-read inside recordMirrorFailure) sees
@@ -624,7 +624,7 @@ describe('withFreshS3Status re-reads fresh before merging', () => {
     vi.mocked(s3.putObjectIfNewer).mockRejectedValue(new s3.S3Error(403, 'AccessDenied'))
     const sess = makeSession()
 
-    await mirrorEntrySave('tok', 'sid', sess, {} as any, '2026-01-01', 'hello', 'file-1', '5')
+    await resyncSingleEntry('tok', 'sid', sess, {} as any, (await loadS3SettingsRecord('tok', 'sid', sess, {} as any))!, '2026-01-01')
 
     const [, , , written] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     // This write's own date (2026-01-01) wins for lastSyncErrorDate/lastSyncError, but
@@ -634,68 +634,18 @@ describe('withFreshS3Status re-reads fresh before merging', () => {
   })
 })
 
-describe('withFreshS3Status concurrency (optimistic-concurrency retry)', () => {
-  it('retries onto a fresh copy when a concurrent write lands in between, instead of clobbering it', async () => {
-    // Simulates two concurrent status writers: this one reads version 1, but by the
-    // time it writes, a concurrent writer has already landed (Drive is now at
-    // version 2) — the write still succeeds (last-write-wins at the Drive layer) but
-    // lands as version 3, one past what this call expected (2), revealing the
-    // conflict. A correct implementation re-reads (now sees the concurrent writer's
-    // change) and retries instead of trusting its first, now-stale write.
-    let readCount = 0
-    vi.mocked(drive.readJsonFile).mockImplementation(async () => {
-      readCount += 1
-      // First read: nothing recorded yet. Second read (the retry): the concurrent
-      // writer's update is now visible.
-      return readCount === 1 ? {} : { lastSyncError: 'concurrent writer error', lastSyncErrorDate: '2026-05-05' }
-    })
-    vi.mocked(drive.getEntryMeta).mockImplementation(async () => ({
-      id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: readCount === 1 ? '1' : '2',
-    } as any))
-    vi.mocked(drive.writeJsonFile)
-      .mockResolvedValueOnce({ id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: '3' } as any) // landed 2 past base(1) — conflict
-      .mockResolvedValueOnce({ id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: '3' } as any) // retry: base(2)+1 — clean
-
-    const record = makeRecord()
-    await writeBackfillProgress('tok', record, { total: 1, done: 1, failed: [], remaining: [] })
-
-    expect(drive.writeJsonFile).toHaveBeenCalledTimes(2)
-    const [, , , finalWrite] = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
-    // The retry's write preserved the concurrent writer's error field instead of
-    // clobbering it with the stale first-read base.
-    expect((finalWrite as any).lastSyncError).toBe('concurrent writer error')
-    expect((finalWrite as any).backfillProgress).toEqual({ total: 1, done: 1, failed: [], remaining: [], updatedAt: expect.any(String) })
+describe('checkpoint durability', () => {
+  it('keeps the last checkpoint if persisting a new one fails', async () => {
+    const record = makeRecord({}, { backfillProgress: { total: 2, done: 0, failed: [], remaining: ['a', 'b'] } })
+    vi.mocked(drive.writeJsonFile).mockRejectedValueOnce(new Error('write failed'))
+    await expect(writeBackfillProgress('tok', record, { total: 2, done: 1, failed: [], remaining: ['b'] })).rejects.toThrow('write failed')
+    expect(record.status.backfillProgress?.remaining).toEqual(['a', 'b'])
   })
-
-  it('gives up after repeated concurrent writes without throwing', async () => {
-    let version = 1
-    vi.mocked(drive.readJsonFile).mockResolvedValue({})
-    vi.mocked(drive.getEntryMeta).mockImplementation(async () => ({
-      id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: String(version),
-    } as any))
-    // Every write "loses" — it always lands two versions past base, i.e. perpetual conflict.
-    vi.mocked(drive.writeJsonFile).mockImplementation(async () => {
-      version += 2
-      return { id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: String(version) } as any
-    })
-
-    const record = makeRecord()
-    await expect(writeBackfillProgress('tok', record, { total: 1, done: 1, failed: [], remaining: [] })).resolves.toBeUndefined()
-
-    // Bounded retries (3 attempts), not an infinite loop.
-    expect(drive.writeJsonFile).toHaveBeenCalledTimes(3)
-  })
-
-  it('does not check for conflicts on the very first write to a brand-new status file', async () => {
+  it('creates a missing progress file and remembers its id', async () => {
     const record = makeRecord({}, {}, { statusFileId: null })
-    vi.mocked(drive.writeJsonFile).mockResolvedValue({ id: STATUS_FILE_ID, name: S3_SYNC_STATUS_FILE_NAME, version: '1' } as any)
-
-    await writeBackfillProgress('tok', record, { total: 1, done: 1, failed: [], remaining: [] })
-
-    // No prior file to read/compare a version against.
+    await writeBackfillProgress('tok', record, { total: 1, done: 0, failed: [], remaining: ['a'] })
+    expect(record.statusFileId).toBe(STATUS_FILE_ID)
     expect(drive.readJsonFile).not.toHaveBeenCalled()
-    expect(drive.getEntryMeta).not.toHaveBeenCalled()
-    expect(drive.writeJsonFile).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -729,6 +679,37 @@ describe('isBackfillRunActive', () => {
 })
 
 describe('backfillAllEntries', () => {
+  beforeEach(() => {
+    vi.mocked(drive.findCurrentEntryMeta).mockImplementation(async (...args) => {
+      const files = await drive.listEntries(args[0], args[1], args[2], args[3])
+      return files.find(file => file.name === `diary-${args[4]}.txt`) ?? null
+    })
+  })
+
+  it('retains unprocessed dates in the persisted checkpoint while a chunk is interrupted', async () => {
+    const dates = ['2026-01-01', '2026-01-02', '2026-01-03']
+    vi.mocked(drive.listEntries).mockResolvedValue(dates.map((date, i) => ({ id: `f${i}`, name: `diary-${date}.txt`, version: '1' })))
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const blocked = new Promise<void>(resolve => { entered = resolve })
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now += 3000)
+    vi.mocked(drive.getEntryContent).mockImplementation(async (_token, id) => {
+      if (id === 'f1') { entered(); await gate }
+      return { date: '', content: 'text' }
+    })
+    const run = backfillAllEntries('tok', 'sid', makeSession(), {} as any, makeRecord(), undefined, 'Backfill', 2)
+    try {
+      await blocked
+      expect(persistedStatus.backfillProgress).toMatchObject({ done: 1, remaining: [dates[1], dates[2]] })
+    } finally {
+      release()
+      await run
+      clock.mockRestore()
+    }
+  })
+
   it('mirrors every existing entry once, reusing a single set of assumed credentials', async () => {
     vi.mocked(drive.listEntries).mockResolvedValue([
       { id: 'f1', name: 'diary-2026-01-01.txt', version: '1' },
@@ -741,8 +722,8 @@ describe('backfillAllEntries', () => {
     await backfillAllEntries('tok', 'sid', sess, {} as any, makeRecord())
 
     expect(s3.assumeRoleWithWebIdentity).toHaveBeenCalledOnce()
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'day one', '1')
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'day two', '2')
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'day one', '1', undefined, { fileId: 'f1' })
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'day two', '2', undefined, { fileId: 'f2' })
   })
 
   it('skips files that are not diary entries', async () => {
@@ -784,7 +765,7 @@ describe('backfillAllEntries', () => {
     await backfillAllEntries('tok', 'sid', sess, {} as any, makeRecord())
 
     // Both entries were attempted despite the first one failing.
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'day two', '2')
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', 'day two', '2', undefined, { fileId: 'f2' })
     expect(drive.writeJsonFile).toHaveBeenLastCalledWith(
       'tok', 'folder-1', S3_SYNC_STATUS_FILE_NAME,
       expect.objectContaining({
@@ -806,7 +787,7 @@ describe('backfillAllEntries', () => {
     await backfillAllEntries('tok', 'sid', sess, {} as any, makeRecord(), ['2026-01-01'])
 
     expect(drive.getEntryContent).toHaveBeenCalledOnce()
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'day one', '1')
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-01.txt', 'day one', '1', undefined, { fileId: 'f1' })
     expect(s3.putObjectIfNewer).not.toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-02.txt', expect.anything(), expect.anything())
   })
 
@@ -894,7 +875,7 @@ describe('backfillAllEntries', () => {
     // Stale progress claims total=5 but only 2 entries exist now
     await backfillAllEntries('tok', 'sid', sess, {} as any, makeRecord({}, { backfillProgress: { total: 5, done: 3, failed: [] } }), undefined, 'Resync')
 
-    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.find(
+    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.slice().reverse().find(
       ([, , name, body]) => name === S3_SYNC_STATUS_FILE_NAME && (body as any).backfillProgress,
     )
     expect(progressWrite).toBeDefined()
@@ -921,10 +902,10 @@ describe('backfillAllEntries', () => {
 
     // Only one entry processed (the failed one)
     expect(s3.putObjectIfNewer).toHaveBeenCalledTimes(1)
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3')
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3', undefined, { fileId: 'f3' })
 
     // Progress should carry over: done=3 (baseDone=2 + 1 processed)
-    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.find(
+    const progressWrite = vi.mocked(drive.writeJsonFile).mock.calls.slice().reverse().find(
       ([, , name, body]) => name === S3_SYNC_STATUS_FILE_NAME && (body as any).backfillProgress,
     )
     expect(progressWrite).toBeDefined()
@@ -969,7 +950,7 @@ describe('backfillAllEntries', () => {
     )
 
     // 2026-01-03 must still be mirrored despite 02's disappearance shifting Drive's listing.
-    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3')
+    expect(s3.putObjectIfNewer).toHaveBeenCalledWith(expect.anything(), 'my-bucket', 'us-east-1', 'diary-2026-01-03.txt', 'day', '3', undefined, { fileId: 'f3' })
     // The deleted date is not recorded as a failure — there's nothing to back up for it.
     const lastWrite = vi.mocked(drive.writeJsonFile).mock.calls.at(-1)!
     const updated = lastWrite[3] as any

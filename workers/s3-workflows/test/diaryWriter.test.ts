@@ -87,6 +87,14 @@ async function account() {
 }
 
 describe('account-scoped diary mutations', () => {
+  it('resolves backup metadata through the writer ID while Drive filename search still lags', async () => {
+    const { auth, service, input } = await account()
+    const saved = await (await service.mutateDiaryEntry(input('new diary'))).json() as DriveFileMeta
+    vi.mocked(drive.findEntryMeta).mockClear()
+    expect(await service.getDiaryEntryMeta({ ...auth, date })).toEqual(saved)
+    expect(drive.findEntryMeta).not.toHaveBeenCalled()
+  })
+
   it('rebinds to a renamed visible folder, clears folder caches and keeps that folder on later discovery', async () => {
     const { auth, service, writer } = await account()
     const renamed = { id: 'renamed-folder', name: 'My old journal' }

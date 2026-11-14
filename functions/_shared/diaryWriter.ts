@@ -1,5 +1,6 @@
 import type { Data, Env } from './session'
 import { jsonResponse } from './session'
+import type { DriveFileMeta } from './drive'
 
 export interface DiaryWriterAuth {
   vaultKey?: string // request-scoped; never persisted
@@ -24,6 +25,7 @@ export interface DiaryFolderSelection extends DiaryWriterAuth {
 }
 
 export interface DiaryWriterService {
+  getDiaryEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
   selectDiaryFolder(input: DiaryFolderSelection): Promise<string>
   mutateDiaryEntry(input: DiaryMutationInput): Promise<Response>

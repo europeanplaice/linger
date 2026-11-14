@@ -62,7 +62,6 @@ function renderSettings() {
         s3LastSyncErrorAt={null}
         s3BackfillActive={false}
         onS3StartBackfill={noop}
-        onS3ClearSyncError={noop}
       />
     </I18nProvider>,
   )

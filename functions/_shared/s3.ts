@@ -142,7 +142,7 @@ export function isAtLeast(existing: string, incoming: string): boolean {
   }
 }
 
-interface HeadObjectResult {
+export interface HeadObjectResult {
   fileId: string | null
   etag: string
   version: string | null
@@ -151,7 +151,7 @@ interface HeadObjectResult {
 // Shared by headObjectVersion (below) and putObjectIfNewer's update path, which
 // also needs the etag so its If-Match PUT can be atomic. Same miss/error
 // semantics as headObjectVersion: only a 404 means "no object".
-async function headObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<HeadObjectResult | null> {
+export async function headObject(creds: AssumedCredentials, bucket: string, region: string, key: string): Promise<HeadObjectResult | null> {
   const client = s3Client(creds, region)
   const head = await client.fetch(objectUrl(bucket, region, key), { method: 'HEAD', signal: AbortSignal.timeout(S3_FETCH_TIMEOUT_MS) })
   if (head.status === 404) return null

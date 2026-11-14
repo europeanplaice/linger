@@ -1,7 +1,8 @@
 import type { Env, SessionData } from './session'
+import { forwardS3Backup } from './s3BackupRequest'
 import { getValidIdToken, saveSession } from './session'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getDiaryFileMeta, getEntryMeta, findEntryMeta, DriveError } from './drive'
-import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError, type AssumedCredentials } from './s3'
+import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, listEntries, getEntryContent, getEntryMeta, findCurrentEntryMeta, DriveError } from './drive'
+import { assumeRoleWithWebIdentity, putObjectIfNewer, deleteObject, describeError, S3Error, type AssumedCredentials } from './s3'
 
 export const S3_SETTINGS_FILE_NAME = 's3_settings.json'
 // Sync status (lastSyncError*/backfillProgress) lives in its own file, separate from
@@ -289,63 +290,22 @@ export function entryKey(date: string): string {
   return `diary-${date}.txt`
 }
 
-// How many times a sync-status write retries onto a fresh copy after detecting a
-// concurrent writer, before giving up (best-effort, same as every other failure mode
-// in this file — a lost status update is cosmetic, self-healing on the next mirror).
-const S3_STATUS_WRITE_MAX_ATTEMPTS = 3
-
-// Every background sync-status writer (mirrorEntrySave/mirrorEntryDelete/
-// resyncSingleEntry/backfillAllEntries, via recordMirrorFailure/recordMirrorSuccess/
-// clearBackfillFailedDate/writeBackfillProgress/finishBackfill) funnels through here
-// to update S3_SYNC_STATUS_FILE_NAME. Splitting status into its own file already
-// keeps this from colliding with the user's own config saves; this closes the
-// remaining race *among concurrent status writers themselves* (e.g. two devices
-// mirroring different dates at once, or a backfill chunk racing a single-entry
-// retry) with a real optimistic-concurrency check instead of the old "re-read
-// right before writing" heuristic, which only narrowed the window rather than
-// closing it: Drive's `version` is a monotonic per-file counter, so if our write
-// doesn't land as exactly fresh+1, some other write slipped in between our read and
-// ours — we re-read onto its result and retry the mutate, rather than silently
-// clobbering it. `record.statusFileId` starts null until the first status write
-// ever happens for this account, at which point it's created and cached.
+// All status mutations run in the account coordinator. Re-read to preserve
+// unrelated fields and fail closed on a failed read/write: a lost checkpoint
+// must never be treated as a successful advance.
 async function withFreshS3Status(
   token: string, record: S3SettingsRecord, mutate: (current: S3SyncStatus) => S3SyncStatus,
 ): Promise<void> {
-  for (let attempt = 0; attempt < S3_STATUS_WRITE_MAX_ATTEMPTS; attempt++) {
-    let base: S3SyncStatus = record.status
-    let baseVersion: string | undefined
-    if (record.statusFileId) {
-      try {
-        const [content, meta] = await Promise.all([
-          readJsonFile<unknown>(token, record.statusFileId),
-          getEntryMeta(token, record.statusFileId),
-        ])
-        if (isValidS3SyncStatus(content)) base = content
-        baseVersion = meta.version
-      } catch (e) {
-        console.error('s3Settings.ts: fresh re-read before sync-status update failed, using in-memory snapshot')
-      }
-    }
-
-    const updated = mutate(base)
-    try {
-      const meta = await writeJsonFile(token, record.folderId, S3_SYNC_STATUS_FILE_NAME, updated, record.statusFileId ?? undefined)
-      record.statusFileId = meta.id
-      record.status = updated
-      // No prior version to compare against (brand-new file, or the fresh re-read
-      // above failed) — nothing to detect a conflict against, so trust the write.
-      // Otherwise: landing exactly one version past what we read means nothing raced
-      // us. Anything else means a concurrent writer's update landed in between ours
-      // — retry onto its result instead of leaving it silently overwritten.
-      if (baseVersion === undefined || meta.version === undefined || Number(meta.version) === Number(baseVersion) + 1) {
-        return
-      }
-    } catch (e) {
-      console.error('s3Settings.ts: failed to write sync-status update')
-      return
-    }
+  let base = record.status
+  if (record.statusFileId) {
+    const value = await readJsonFile<unknown>(token, record.statusFileId)
+    if (!isValidS3SyncStatus(value)) throw new Error('Invalid S3 sync status')
+    base = value
   }
-  console.error('s3Settings.ts: gave up on sync-status update after repeated concurrent writes')
+  const updated = mutate(base)
+  const meta = await writeJsonFile(token, record.folderId, S3_SYNC_STATUS_FILE_NAME, updated, record.statusFileId ?? undefined)
+  record.statusFileId = meta.id
+  record.status = updated
 }
 
 // `date` is the specific date this failure occurred for, when there is one
@@ -365,7 +325,7 @@ async function recordMirrorFailure(token: string, record: S3SettingsRecord, mess
   })
 }
 
-// Only clears an error recorded for a *different* date — a success for date A
+// Only clears an error recorded for the same date — a success for date A
 // must never launder away date B's still-unresolved failure. A dateless error
 // (a run-level failure, or settings predating lastSyncErrorDate) is cleared by
 // any success, same as before this field existed.
@@ -381,89 +341,53 @@ async function recordMirrorSuccess(token: string, record: S3SettingsRecord, date
   })
 }
 
-// True unless Drive gives a definitive "this file is gone" (404). Any other failure
-// (network blip, transient Drive error) is treated as "still exists" — an ambiguous
-// re-check must never trigger a compensating delete of a legitimate mirror.
-async function entryStillExistsInDrive(
-  token: string, sessionId: string, session: SessionData, env: Env, fileId: string, date: string,
-): Promise<boolean> {
-  try {
-    await getDiaryFileMeta(token, sessionId, session, env, fileId, date)
-    return true
-  } catch (e) {
-    if (e instanceof DriveError && e.status === 404) return false
-    console.error('s3Settings.ts: post-mirror existence re-check failed, leaving mirror as-is')
-    return true
-  }
-}
-
-// Best-effort mirror to the user's own S3 bucket — never throws. A failure here
-// must not turn a successful Drive save (the source of truth) into an error
-// response, so every failure mode is caught and recorded on the settings record
-// instead of propagated. Callers should invoke this via context.waitUntil so it
-// doesn't block the response.
+// Hints supplied by a completed save/delete may already be stale by the time
+// its background task runs. Only pass the date; the coordinator reads Drive's
+// current identity, content and version immediately before touching S3.
 export async function mirrorEntrySave(
-  accessToken: string,
-  sessionId: string,
-  session: SessionData,
-  env: Env,
-  date: string,
-  content: string,
-  fileId: string,
-  driveVersion?: string,
+  accessToken: string, sessionId: string, session: SessionData, env: Env,
+  date: string, _content: string, _fileId: string, _driveVersion?: string,
 ): Promise<void> {
-  let record: S3SettingsRecord | null = null
-  try {
-    record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
-    if (!record || !record.config.enabled) return
-
-    const idToken = await getValidIdToken(sessionId, session, env)
-    if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
-
-    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
-    await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, driveVersion)
-
-    // mirrorEntrySave and mirrorEntryDelete are independent context.waitUntil tasks
-    // with no ordering guarantee, so a slower save can land after a faster concurrent
-    // delete's mirror already removed this date — resurrecting a deleted entry in the
-    // backup. By the time any mirror runs, Drive has already settled to its final state
-    // (saveEntry/deleteEntry are awaited before either mirror is even scheduled), so
-    // re-checking here and compensating catches every realistic ordering — unlike
-    // checking before the put, which only narrows the window.
-    const stillExists = await entryStillExistsInDrive(accessToken, sessionId, session, env, fileId, date)
-    if (!stillExists) {
-      await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
-    }
-
-    await recordMirrorSuccess(accessToken, record, date)
-  } catch (e) {
-    console.error('s3Settings.ts: mirrorEntrySave failed')
-    if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
-  }
+  await mirrorCurrentEntry(accessToken, sessionId, session, env, date)
 }
 
 export async function mirrorEntryDelete(
-  accessToken: string,
-  sessionId: string,
-  session: SessionData,
-  env: Env,
-  date: string,
+  accessToken: string, sessionId: string, session: SessionData, env: Env, date: string,
 ): Promise<void> {
-  let record: S3SettingsRecord | null = null
-  try {
-    record = await loadS3SettingsRecord(accessToken, sessionId, session, env)
-    if (!record || !record.config.enabled) return
+  await mirrorCurrentEntry(accessToken, sessionId, session, env, date)
+}
 
-    const idToken = await getValidIdToken(sessionId, session, env)
-    if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
+async function mirrorCurrentEntry(accessToken: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<void> {
+  const response = await forwardS3Backup({ env, data: { accessToken, sessionId, session } }, { kind: 'reconcile', date })
+  if (!response.ok) console.error('S3 reconciliation deferred; retry from the open application')
+}
 
-    const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
-    await deleteObject(creds, record.config.bucket, record.config.region, entryKey(date))
-    await recordMirrorSuccess(accessToken, record, date)
-  } catch (e) {
-    console.error('s3Settings.ts: mirrorEntryDelete failed')
-    if (record) await recordMirrorFailure(accessToken, record, describeError(e), date)
+// The caller holds the account's S3 queue. Drive can still change during remote
+// I/O, so reconcile again after every mutation until identity and version agree.
+// An ambiguous Drive failure never authorizes deleting a backup.
+export async function reconcileS3Entry(
+  token: string, sessionId: string, session: SessionData, env: Env,
+  config: S3Config, creds: AssumedCredentials, date: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const meta = await findCurrentEntryMeta(token, sessionId, session, env, date)
+    if (!meta) {
+      await deleteObject(creds, config.bucket, config.region, entryKey(date))
+      if (await findCurrentEntryMeta(token, sessionId, session, env, date)) continue
+      return
+    }
+    if (!meta.version) throw new Error('Drive version unavailable')
+    let content: string
+    try { content = (await getEntryContent(token, meta.id, date)).content }
+    catch (error) {
+      if (error instanceof DriveError && error.status === 404) continue
+      throw error
+    }
+    await putObjectIfNewer(creds, config.bucket, config.region, entryKey(date), content, meta.version, undefined, { fileId: meta.id })
+    const current = await findCurrentEntryMeta(token, sessionId, session, env, date)
+    if (current?.id === meta.id && current.version === meta.version) return
   }
+  throw new S3Error(409, 'Drive entry changed during S3 reconciliation')
 }
 
 // Additively removes `date` from backfillProgress.failed on a successful
@@ -516,14 +440,7 @@ export async function resyncSingleEntry(
     if (!idToken) throw new Error('No Google ID token in this session — sign out and sign in again')
 
     const creds = await getAssumedCredentials(idToken, sessionId, session, env, record.config)
-    const meta = await findEntryMeta(accessToken, sessionId, session, env, date)
-    // No longer exists in Drive (deleted since it was recorded as failed) — nothing
-    // to back up, not a failure, same as backfillAllEntries's own handling of a date
-    // that disappeared mid-run.
-    if (meta) {
-      const { content } = await getEntryContent(accessToken, meta.id, date)
-      await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, meta.version)
-    }
+    await reconcileS3Entry(accessToken, sessionId, session, env, record.config, creds, date)
     await clearBackfillFailedDate(accessToken, record, date)
     await recordMirrorSuccess(accessToken, record, date)
     return { ok: true }
@@ -640,32 +557,25 @@ export async function backfillAllEntries(
 
     const failed: string[] = [...existingFailed]
     let done = baseDone
-    let lastProgressWriteAt = 0
+    // Persist the entire scope before any remote work; interruption before the
+    // first entry is just as resumable as interruption in the middle of a chunk.
+    await writeBackfillProgress(accessToken, record, { total: totalAll, done, failed: [...failed], remaining: [...scope] })
+    let lastProgressWriteAt = Date.now()
     for (const [i, date] of chunkTargets.entries()) {
-      const meta = driveByDate.get(date)
-      if (meta) {
-        try {
-          const { content } = await getEntryContent(accessToken, meta.id, date)
-          await putObjectIfNewer(creds, record.config.bucket, record.config.region, entryKey(date), content, meta.version)
-          // A previously-failed entry that now succeeded — remove from the failed list.
-          const failedIdx = failed.indexOf(date)
-          if (failedIdx !== -1) failed.splice(failedIdx, 1)
-        } catch (e) {
-          console.error('s3Settings.ts: backfill failed')
-          if (!failed.includes(date)) failed.push(date)
-        }
-      } else {
-        // No longer exists in Drive (deleted mid-run, or gone before this run even
-        // started) — nothing to back up. Not a failure, just no longer outstanding.
+      try {
+        await reconcileS3Entry(accessToken, sessionId, session, env, record.config, creds, date)
         const failedIdx = failed.indexOf(date)
         if (failedIdx !== -1) failed.splice(failedIdx, 1)
+      } catch (e) {
+        console.error('s3Settings.ts: backfill failed')
+        if (!failed.includes(date)) failed.push(date)
       }
       done += 1
       const now = Date.now()
       const isLastInChunk = i === chunkTargets.length - 1
       if (now - lastProgressWriteAt >= BACKFILL_PROGRESS_WRITE_INTERVAL_MS || isLastInChunk) {
         lastProgressWriteAt = now
-        await writeBackfillProgress(accessToken, record, { total: totalAll, done, failed: [...failed], remaining: [...newRemaining] })
+        await writeBackfillProgress(accessToken, record, { total: totalAll, done, failed: [...failed], remaining: scope.slice(i + 1) })
       }
     }
     // Only finalise once this run's whole scope has been attempted across all chunks.

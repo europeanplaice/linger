@@ -85,6 +85,17 @@ export interface MirrorResult {
   error?: string
 }
 
+// Executed only while the authenticated browser request is alive. Neither the
+// credentials nor the vault key may be placed in Workflow inputs or DO storage.
+export type S3BackupOperation =
+  | { kind: 'settings'; config: S3Config }
+  | { kind: 'start'; dates?: string[] }
+  | { kind: 'retry' }
+  | { kind: 'continue' }
+  | { kind: 'reconcile'; date: string }
+
+export type S3BackupRequest = S3WorkflowAuth & { operation: S3BackupOperation }
+
 export interface WorkflowUsage {
   date: string
   steps: number
@@ -94,6 +105,7 @@ export interface WorkflowUsage {
 
 /** RPC surface exposed by the dedicated Workflow Worker. */
 export interface S3WorkflowService extends DiaryWriterService {
+  backup(input: S3BackupRequest): Promise<Response>
   saveSettings(input: S3WorkflowAuth & { config: S3Config }): Promise<{ meta: DriveFileMeta; needsBackfill: boolean }>
   startBackfill(input: StartBackfillInput): Promise<StartBackfillResult>
   resetAllData(input: S3WorkflowAuth): Promise<void>

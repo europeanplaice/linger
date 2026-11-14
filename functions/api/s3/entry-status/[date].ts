@@ -1,6 +1,7 @@
 import type { Env, Data, SessionData } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
-import { headObjectVersion, isAtLeast, describeError } from '../../../_shared/s3'
+import { headObject, isAtLeast, describeError } from '../../../_shared/s3'
+import { findCurrentEntryMeta } from '../../../_shared/drive'
 import { getS3Settings, entryKey, getAssumedCredentials, type S3Settings } from '../../../_shared/s3Settings'
 
 // A single save schedules up to 7 status polls (S3_POLL_DELAYS_MS in
@@ -70,8 +71,15 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
     if (idToken) {
       try {
         const creds = await getAssumedCredentials(idToken, sessionId, session, context.env, settings)
-        const existingVersion = await headObjectVersion(creds, settings.bucket, settings.region, entryKey(date))
-        if (existingVersion && isAtLeast(existingVersion, version)) return jsonResponse({ status: 'synced' })
+        const [existing, current] = await Promise.all([
+          headObject(creds, settings.bucket, settings.region, entryKey(date)),
+          findCurrentEntryMeta(accessToken, sessionId, session, context.env, date),
+        ])
+        // Drive versions are comparable only for the same file. A recreated
+        // date must never inherit the old file's successful backup badge.
+        if (current && existing?.fileId === current.id && existing.version && isAtLeast(existing.version, version)) {
+          return jsonResponse({ status: 'synced' })
+        }
       } catch (e) {
         console.error('s3/entry-status.ts: S3/STS operation failed')
         stsError = e

@@ -1,86 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { onRequestPost } from '../../functions/api/s3/entry-resync/[date]'
-import * as drive from '../../functions/_shared/drive'
-import * as s3Settings from '../../functions/_shared/s3Settings'
 
-vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../functions/_shared/drive')>()),
-  ensureFolder: vi.fn().mockResolvedValue('folder-1'),
-  findJsonFile: vi.fn().mockResolvedValue('settings-file'),
-  readJsonFile: vi.fn(),
-}))
-
-vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
-  resyncSingleEntry: vi.fn().mockResolvedValue({ ok: true }),
-}))
-
-const validSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
-
-function makeContext(overrides: Record<string, unknown> = {}) {
-  return {
-    request: new Request('http://localhost/api/s3/entry-resync/2026-05-01', { method: 'POST' }),
-    params: { date: '2026-05-01' },
-    data: { accessToken: 'tok', sessionId: 'sid', session: {} },
-    env: {},
-    waitUntil: vi.fn(),
-    ...overrides,
-  }
-}
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  vi.mocked(drive.ensureFolder).mockResolvedValue('folder-1')
-  vi.mocked(drive.findJsonFile).mockResolvedValue('settings-file')
-  vi.mocked(drive.readJsonFile).mockResolvedValue(validSettings)
-})
-
-describe('POST /api/s3/entry-resync/[date]', () => {
-  it('rejects an invalid date', async () => {
-    const res = await onRequestPost(makeContext({ params: { date: 'not-a-date' } }) as any)
+describe('entry resync route', () => {
+  it('rejects malformed dates before calling the coordinator', async () => {
+    const backup = vi.fn()
+    const res = await onRequestPost({ params: { date: 'invalid' }, env: { S3_WORKFLOW_SERVICE: { backup } } } as any)
     expect(res.status).toBe(400)
+    expect(backup).not.toHaveBeenCalled()
   })
-
-  it('rejects when S3 backup is not configured', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValue(null)
-
-    const res = await onRequestPost(makeContext() as any)
-
-    expect(res.status).toBe(400)
-    expect(s3Settings.resyncSingleEntry).not.toHaveBeenCalled()
-  })
-
-  it('rejects when S3 backup is disabled', async () => {
-    vi.mocked(drive.readJsonFile).mockResolvedValue({ ...validSettings, enabled: false })
-
-    const res = await onRequestPost(makeContext() as any)
-
-    expect(res.status).toBe(400)
-    expect(s3Settings.resyncSingleEntry).not.toHaveBeenCalled()
-  })
-
-  it('awaits a single-entry resync directly rather than firing it via waitUntil', async () => {
-    const ctx = makeContext()
-
-    const res = await onRequestPost(ctx as any)
-    const body = await res.json() as any
-
-    expect(body.ok).toBe(true)
-    expect(ctx.waitUntil).not.toHaveBeenCalled()
-    // Not backfillAllEntries: a single-date retry must never be able to touch the
-    // total/done/remaining/finishedAt bookkeeping of a chunked run that might be
-    // active at the same time — see resyncSingleEntry's own comment.
-    expect(s3Settings.resyncSingleEntry).toHaveBeenCalledWith(
-      'tok', 'sid', expect.anything(), {},
-      expect.objectContaining({ config: validSettings, folderId: 'folder-1', configFileId: 'settings-file' }),
-      '2026-05-01',
-    )
-  })
-
-  it('reports a failed mirror instead of claiming the retry succeeded', async () => {
-    vi.mocked(s3Settings.resyncSingleEntry).mockResolvedValueOnce({ ok: false, error: 'S3 unavailable' })
-    const res = await onRequestPost(makeContext() as any)
+  it('returns the reconciler failure rather than claiming success', async () => {
+    const backup = vi.fn(async () => new Response('{"ok":false}', { status: 502 }))
+    const res = await onRequestPost({ params: { date: '2026-01-01' }, data: { session: { user_id: 'account' } }, env: { S3_WORKFLOW_SERVICE: { backup } } } as any)
     expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ ok: false, error: 'S3 unavailable' })
+    expect(backup).toHaveBeenCalledWith(expect.objectContaining({ operation: { kind: 'reconcile', date: '2026-01-01' } }))
   })
 })

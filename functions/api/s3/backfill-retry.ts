@@ -1,42 +1,5 @@
 import type { Env, Data } from '../../_shared/session'
-import { jsonResponse } from '../../_shared/session'
-import { loadS3SettingsRecord, backfillAllEntries, isBackfillRunActive } from '../../_shared/s3Settings'
+import { forwardS3Backup } from '../../_shared/s3BackupRequest'
 
-// Re-runs the initial backfill for just the dates it failed on last time (see
-// backfillAllEntries's `onlyDates` param) — triggered by the "Retry" button
-// SettingsModal shows next to the failed-entries list.
-export const onRequestPost: PagesFunction<Env, string, Data> = async (context) => {
-  const { accessToken, sessionId, session } = context.data
-  if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
-
-  try {
-    const record = await loadS3SettingsRecord(accessToken, sessionId, session, context.env)
-    if (!record) return jsonResponse({ error: 'S3 backup is not configured' }, 400)
-    if (!record.config.enabled) return jsonResponse({ error: 'S3 backup is not enabled' }, 400)
-
-    const failed = record.status.backfillProgress?.failed ?? []
-    if (failed.length === 0) return jsonResponse({ error: 'No failed entries to retry' }, 400)
-
-    // A second chunked run (e.g. a whole-account Resync from another tab, or the
-    // initial backfill) already actively driving backfillProgress must not be allowed
-    // to run concurrently with this one — both share the same total/done/remaining/
-    // finishedAt bookkeeping, and if this run's failed-list scope happens to fit
-    // within one chunk it would reach the terminal finishBackfill and falsely stamp
-    // the other, still-running run as finished, truncating it. SettingsModal already
-    // client-gates its own Retry button while busy; this closes the multi-tab/stale-
-    // UI race that client-side gating alone can't. isBackfillRunActive (rather than
-    // just checking finishedAt) treats a run with no recent progress write as
-    // abandoned instead of active, so an orphaned run (e.g. the isolate driving it
-    // died, or nothing ever came back to poll backfill-continue.ts for it) can't
-    // permanently 409 every future retry.
-    if (isBackfillRunActive(record.status.backfillProgress)) {
-      return jsonResponse({ error: 'A backfill is already running' }, 409)
-    }
-
-    context.waitUntil(backfillAllEntries(accessToken, sessionId, session, context.env, record, failed, 'Retry', 20))
-    return jsonResponse({ ok: true, retrying: failed.length })
-  } catch (e) {
-    console.error('s3/backfill-retry.ts: POST failed')
-    return jsonResponse({ error: 'Internal server error' }, 500)
-  }
-}
+export const onRequestPost: PagesFunction<Env, string, Data> = context =>
+  forwardS3Backup(context, { kind: 'retry' })

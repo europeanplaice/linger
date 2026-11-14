@@ -8,6 +8,8 @@ import { getValidAccessToken } from '../../../functions/_shared/session'
 import { isValidS3Settings } from '../../../functions/_shared/s3Settings'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
 import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functions/_shared/vaultCrypto'
+import { executeS3Backup } from '../../../functions/_shared/s3Backup'
+import type { S3BackupRequest } from '../../../functions/_shared/s3Workflow'
 
 interface JobReservation {
   job: BackfillJob
@@ -80,6 +82,16 @@ export class S3SyncIndex extends DurableObject<WorkflowEnv> {
     const run = this.tail.catch(() => {}).then(operation)
     this.tail = run.then(() => {}, () => {})
     return run
+  }
+
+  async backup(input: S3BackupRequest): Promise<Response> {
+    return this.serialize(async () => {
+      // Revalidate after waiting: another device may have revoked this session.
+      const session = await authorizedSession(this.env, input)
+      if (!input.accessToken || !input.expiresAt || input.expiresAt <= Date.now()) throw new Error('Request-scoped Google credentials are required')
+      const token = await getValidAccessToken(input.sessionId, session, this.env)
+      return executeS3Backup(token, input.sessionId, session, this.env, input.operation)
+    })
   }
 
   async reconcileEntry(input: MirrorEntryCoreInput): Promise<void> {

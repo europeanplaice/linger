@@ -160,13 +160,12 @@ interface SettingsModalProps {
   s3LastSyncErrorAt: string | null
   s3BackfillActive: boolean
   onS3StartBackfill: () => void
-  onS3ClearSyncError: () => void
   // Called after an entry is recreated in Drive from the S3 backup, so the
   // calendar/list refreshes and the restored entry becomes visible.
   onEntryRestored?: () => void
 }
 
-export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, passkeyControls, folderRecoveryDisabled = false, beforeDiaryFolderSelect, onDiaryFolderSelected, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onS3ClearSyncError, onEntryRestored }: SettingsModalProps) {
+export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeModeChange, accentColor, onAccentChange, fontMode, onFontToggle, fontSize, onFontSizeChange, holidayCountry, onHolidayCountryChange, dates, onExport, onImport, onClose, onSignOut, passkeyControls, folderRecoveryDisabled = false, beforeDiaryFolderSelect, onDiaryFolderSelected, email, googleSub, googleClientId, milestones = [], onMilestoneAdd, onMilestoneUpdate, onMilestoneRemove, onMilestoneToggleBadge, s3BackfillProgress, s3LastSyncError, s3LastSyncErrorAt, s3BackfillActive, onS3StartBackfill, onEntryRestored }: SettingsModalProps) {
   const { t, locale, language, setLanguage } = useI18n()
   const reducedMotion = useReducedMotion()
   const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null)
@@ -367,22 +366,18 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     setS3TestState('idle')
     try {
       const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
-      const isFirstTimeEnable = s3Enabled && !s3InitiallyEnabled
       await saveS3Settings(settings)
       setS3SaveState('saved')
       setS3InitiallyEnabled(s3Enabled)
-      // Saving rewrites the whole settings file without sync-status fields, so the
-      // stored error is cleared server-side too — mirror that locally right away.
-      onS3ClearSyncError()
-      if (isFirstTimeEnable) {
-        onS3StartBackfill()
-      }
+      // Refresh server-owned progress after every save, including target changes
+      // while backup is already enabled. Unresolved errors remain visible.
+      onS3StartBackfill()
       setTimeout(() => setS3SaveState('idle'), 2000)
     } catch (e) {
       console.error('Failed to save S3 settings:', e)
       setS3SaveState('error')
     }
-  }, [s3Enabled, s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region, onS3ClearSyncError, onS3StartBackfill])
+  }, [s3Enabled, s3RoleArn, s3Bucket, s3Region, onS3StartBackfill])
 
   const handleS3RetryBackfill = useCallback(async () => {
     setS3Retrying(true)

@@ -1494,6 +1494,36 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await render(page)
 
     await expect(page.getByText(/Backup sync failing: Access Denied/)).toBeVisible()
+
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect(page.getByText('Settings saved.')).toBeVisible()
+    await expect(page.getByText(/Backup sync failing: Access Denied/)).toBeVisible()
+  })
+
+  test('starts browser continuation when changing the target of an already-enabled backup', async ({ page }) => {
+    await loadHarness(page)
+    const config = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/x', bucket: 'old-bucket', region: 'us-east-1' }
+    let changed = false
+    let continued = 0
+    await page.route('**/api/s3/settings', async route => {
+      if (route.request().method() === 'PUT') {
+        changed = true
+        await route.fulfill({ json: {} })
+      } else {
+        await route.fulfill({ json: changed && !continued
+          ? { ...config, bucket: 'new-bucket', backfillProgress: { total: 1, done: 0, failed: [], remaining: ['2026-01-01'] } }
+          : config })
+      }
+    })
+    await page.route('**/api/s3/backfill-continue', async route => {
+      continued++
+      await route.fulfill({ json: { ok: true } })
+    })
+    await render(page)
+    await expect(enabledCheckbox(page)).toBeChecked()
+    await bucketField(page).fill('new-bucket')
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect.poll(() => continued).toBe(1)
   })
 
   test('editing a connection field after a successful Test clears the stale result', async ({ page }) => {

@@ -373,6 +373,16 @@ export async function getChanges(token: string, pageToken: string): Promise<Chan
   return { changes, newStartPageToken }
 }
 
+// The writer's direct-ID mapping includes first saves before Drive's filename
+// listing catches up, and is validated live before being trusted.
+export async function findCurrentEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<DriveFileMeta | null> {
+  if (!session.user_id) throw new DriveError(401, 'Account identity missing')
+  const input = { accessToken: token, sessionId, accountKey: session.user_id, vaultKey: session.vault_key, expiresAt: session.expires_at ?? 0, idToken: session.id_token, date }
+  if (env.S3_WORKFLOW_SERVICE) return env.S3_WORKFLOW_SERVICE.getDiaryEntryMeta(input)
+  if (env.DIARY_WRITER) return env.DIARY_WRITER.getByName(session.user_id).getEntryMeta(input)
+  throw new DriveError(503, 'Diary writer unavailable')
+}
+
 export async function findEntryMeta(token: string, sessionId: string, session: SessionData, env: Env, date: string, folderOptions?: EnsureFolderOptions): Promise<DriveFileMeta | null> {
   // `date` is validated as YYYY-MM-DD by the calling endpoint, so it is safe to
   // interpolate directly. Accept both the legacy `.md` and current `.txt` names.

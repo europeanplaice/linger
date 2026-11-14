@@ -12,10 +12,6 @@ export interface UseS3BackfillResult {
   // resync kicks off a server-side backfill — starts polling immediately instead of
   // waiting for the next scheduled settings load to notice the new progress record.
   startBackfill: () => void
-  // Called right after a plain settings save — saving rewrites the whole settings
-  // file without sync-status fields, so the stored error is cleared server-side too;
-  // this mirrors that locally right away instead of waiting for the next poll.
-  clearSyncError: () => void
 }
 
 // Drives S3 backfill progress from the open page. Each bounded chunk receives the
@@ -25,6 +21,7 @@ export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, 
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null)
   const [lastSyncError, setLastSyncError] = useState<string | null>(null)
   const [lastSyncErrorAt, setLastSyncErrorAt] = useState<string | null>(null)
+  const [backupEnabled, setBackupEnabled] = useState(false)
   // Set right after a backfill-starting action, before the server has had a chance to
   // write the first backfillProgress record — keeps polling started even though
   // backfillProgress is still null at that point. Cleared once any poll response arrives.
@@ -35,6 +32,7 @@ export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, 
     let cancelled = false
     loadS3Settings().then(settings => {
       if (cancelled || !settings) return
+      setBackupEnabled(settings.enabled)
       setLastSyncError(settings.lastSyncError ?? null)
       setLastSyncErrorAt(settings.lastSyncErrorAt ?? null)
       setBackfillProgress(settings.backfillProgress ?? null)
@@ -50,12 +48,7 @@ export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, 
     setExpectingBackfill(true)
   }, [])
 
-  const clearSyncError = useCallback(() => {
-    setLastSyncError(null)
-    setLastSyncErrorAt(null)
-  }, [])
-
-  const backfillActive = isSignedIn && !tokenExpired && (expectingBackfill || (backfillProgress !== null && !backfillProgress.finishedAt))
+  const backfillActive = isSignedIn && !tokenExpired && (expectingBackfill || (backupEnabled && backfillProgress !== null && !backfillProgress.finishedAt))
   useEffect(() => {
     if (!backfillActive) return
     let cancelled = false
@@ -65,13 +58,14 @@ export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, 
       polling = true
       try {
         const settings = await loadS3Settings()
-        if (cancelled || !settings) return
-        setLastSyncError(settings.lastSyncError ?? null)
-        setLastSyncErrorAt(settings.lastSyncErrorAt ?? null)
-        if (settings.backfillProgress) {
-          setBackfillProgress(settings.backfillProgress)
-          setExpectingBackfill(false)
-          if (!settings.backfillProgress.finishedAt) await continueS3Backfill()
+        if (cancelled) return
+        setBackupEnabled(settings?.enabled ?? false)
+        setLastSyncError(settings?.lastSyncError ?? null)
+        setLastSyncErrorAt(settings?.lastSyncErrorAt ?? null)
+        setBackfillProgress(settings?.backfillProgress ?? null)
+        setExpectingBackfill(false)
+        if (settings?.enabled && settings.backfillProgress && !settings.backfillProgress.finishedAt) {
+          await continueS3Backfill()
         }
       } catch (e) {
         if (!cancelled && e instanceof TokenExpiredError) onTokenExpired?.()
@@ -85,5 +79,5 @@ export function useS3Backfill(isSignedIn: boolean, onTokenExpired?: () => void, 
     return () => { cancelled = true; clearInterval(id) }
   }, [backfillActive, onTokenExpired])
 
-  return { backfillProgress, lastSyncError, lastSyncErrorAt, backfillActive, startBackfill, clearSyncError }
+  return { backfillProgress, lastSyncError, lastSyncErrorAt, backfillActive, startBackfill }
 }

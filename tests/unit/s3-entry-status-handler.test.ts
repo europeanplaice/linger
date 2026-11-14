@@ -3,6 +3,12 @@ import { onRequestGet, __clearEntryStatusSettingsCacheForTests } from '../../fun
 import * as s3Settings from '../../functions/_shared/s3Settings'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
+import * as drive from '../../functions/_shared/drive'
+
+vi.mock('../../functions/_shared/drive', async original => ({
+  ...await original<typeof import('../../functions/_shared/drive')>(),
+  findCurrentEntryMeta: vi.fn(async () => ({ id: 'file-1', name: 'diary-2026-05-01.txt', version: '5' })),
+}))
 
 vi.mock('../../functions/_shared/s3Settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3Settings')>()),
@@ -17,7 +23,7 @@ vi.mock('../../functions/_shared/session', async (importOriginal) => ({
 vi.mock('../../functions/_shared/s3', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../functions/_shared/s3')>()),
   assumeRoleWithWebIdentity: vi.fn().mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: Date.now() + 3600 * 1000 }),
-  headObjectVersion: vi.fn().mockResolvedValue(null),
+  headObject: vi.fn().mockResolvedValue(null),
 }))
 
 const enabledSettings = { enabled: true, roleArn: 'arn:aws:iam::123456789012:role/linger-s3', bucket: 'my-bucket', region: 'us-east-1' }
@@ -52,7 +58,8 @@ beforeEach(() => {
   vi.mocked(s3Settings.getS3Settings).mockResolvedValue(enabledSettings)
   vi.mocked(session.getValidIdToken).mockResolvedValue('id-token')
   vi.mocked(s3.assumeRoleWithWebIdentity).mockResolvedValue({ accessKeyId: 'ak', secretAccessKey: 'sk', sessionToken: 'st', expiresAt: Date.now() + 3600 * 1000 })
-  vi.mocked(s3.headObjectVersion).mockResolvedValue(null)
+  vi.mocked(s3.headObject).mockResolvedValue(null)
+  vi.mocked(drive.findCurrentEntryMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-05-01.txt', version: '5' })
 })
 
 describe('GET /api/s3/entry-status/[date]', () => {
@@ -86,7 +93,7 @@ describe('GET /api/s3/entry-status/[date]', () => {
   })
 
   it('reports synced when the bucket object version is at least the requested one', async () => {
-    vi.mocked(s3.headObjectVersion).mockResolvedValue('5')
+    vi.mocked(s3.headObject).mockResolvedValue({ fileId: 'file-1', version: '5', etag: '"etag"' })
 
     const res = await onRequestGet(makeContext() as any)
 
@@ -101,7 +108,7 @@ describe('GET /api/s3/entry-status/[date]', () => {
   })
 
   it('reports pending when the object is behind and the save is still within the grace window', async () => {
-    vi.mocked(s3.headObjectVersion).mockResolvedValue('3')
+    vi.mocked(s3.headObject).mockResolvedValue({ fileId: 'file-1', version: '3', etag: '"etag"' })
     const dateSpy = withinGraceWindow()
 
     try {
@@ -113,7 +120,8 @@ describe('GET /api/s3/entry-status/[date]', () => {
   })
 
   it('reports unconfirmed once the grace window elapses with the object still missing and nothing else working on it', async () => {
-    vi.mocked(s3.headObjectVersion).mockResolvedValue(null)
+    vi.mocked(s3.headObject).mockResolvedValue(null)
+  vi.mocked(drive.findCurrentEntryMeta).mockResolvedValue({ id: 'file-1', name: 'diary-2026-05-01.txt', version: '5' })
     const dateSpy = pastGraceWindow()
 
     try {
@@ -415,14 +423,14 @@ describe('GET /api/s3/entry-status/[date] — settings lookup caching', () => {
   // each of which used to call getS3Settings — and thus loadS3SettingsRecord's Drive
   // reads — independently. Caching the settings lookup briefly (module-scope, keyed
   // by session, read-only-path-only) cuts that down without affecting the actual
-  // "has it landed" signal, which is always the live headObjectVersion check below.
+  // "has it landed" signal, which is always the live headObject check below.
   it('reuses a cached settings lookup across polls for the same session within the TTL', async () => {
     await (await onRequestGet(makeContext() as any)).json()
     await (await onRequestGet(makeContext() as any)).json()
 
     expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(1)
     // The live "has it landed" check is never cached — every poll still checks S3 directly.
-    expect(s3.headObjectVersion).toHaveBeenCalledTimes(2)
+    expect(s3.headObject).toHaveBeenCalledTimes(2)
   })
 
   it('re-fetches settings once the cache entry has expired', async () => {
@@ -447,5 +455,19 @@ describe('GET /api/s3/entry-status/[date] — settings lookup caching', () => {
 
     expect(await res2.json()).toEqual({ status: 'disabled' })
     expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+describe('entry status file identity', () => {
+  it('does not trust an old file version after the date was recreated', async () => {
+    vi.mocked(s3.headObject).mockResolvedValue({ fileId: 'old-file', version: '100', etag: 'etag' })
+    const res = await onRequestGet(makeContext() as any)
+    expect(await res.json()).toEqual({ status: 'unconfirmed' })
+  })
+  it('requires identity metadata before declaring legacy objects synced', async () => {
+    vi.mocked(s3.headObject).mockResolvedValue({ fileId: null, version: '100', etag: 'etag' })
+    const res = await onRequestGet(makeContext() as any)
+    expect(await res.json()).toEqual({ status: 'unconfirmed' })
   })
 })

@@ -86,6 +86,28 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     return this.serialize(async () => this.folder(auth, await this.session(auth)))
   }
 
+  async getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('Invalid date')
+    return this.serialize(async () => {
+      const session = await this.session(input)
+      await this.folder(input, session)
+      if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
+      const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
+      const key = `file:v2:${dateKey}`
+      const known = await this.readMetadata<string>(key, input)
+      if (known) {
+        try { return await getDiaryFileMeta(input.accessToken, input.sessionId, session, this.env, known, input.date, { withinCoordinator: true }) }
+        catch (error) {
+          if (!(error instanceof DriveError && error.status === 404)) throw error
+          await this.ctx.storage.delete(key)
+        }
+      }
+      const meta = await findEntryMeta(input.accessToken, input.sessionId, session, this.env, input.date, { withinCoordinator: true })
+      if (meta) await this.writeMetadata(key, input, meta.id)
+      return meta
+    })
+  }
+
   async selectFolder(input: DiaryWriterAuth & { folderId: string; allowEmpty?: boolean }): Promise<string> {
     // A rebind must not race a write already executing or waiting in this
     // account queue. Later writes queue behind the completed rebind and use its
