@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
-import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
+import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
 import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -86,7 +86,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     return this.serialize(async () => this.folder(auth, await this.session(auth)))
   }
 
-  async selectFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string> {
+  async selectFolder(input: DiaryWriterAuth & { folderId: string; allowEmpty?: boolean }): Promise<string> {
     // A rebind must not race a write already executing or waiting in this
     // account queue. Later writes queue behind the completed rebind and use its
     // new pointer.
@@ -97,13 +97,14 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       if (!candidates.some(folder => folder.id === input.folderId)) {
         throw new DriveError(400, 'Selected folder is not available to this Google account')
       }
-      const meta = await getEntryMeta(input.accessToken, input.folderId)
-      if (meta.id !== input.folderId || meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) {
-        throw new DriveError(400, 'Selected item is not an available Drive folder')
-      }
+      // Recheck permissions and contents inside the writer queue, even when
+      // the client already inspected this folder.
+      const inspection = await inspectDriveFolder(input.accessToken, input.folderId)
+      if (!inspection.canAddChildren) throw new Error('FOLDER_READ_ONLY')
 
       const currentFolder = await this.readMetadata<string>('folder', input)
       if (currentFolder === input.folderId) return currentFolder
+      if (inspection.entryCount === 0 && input.allowEmpty !== true) throw new Error('FOLDER_EMPTY')
 
       // Clear old-folder S3 status only after the request has passed all
       // checks and the writer queue is clear. resetAllData refuses to proceed
@@ -128,6 +129,16 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       await this.writeMetadata('folder', input, input.folderId)
       await saveSession(input.sessionId, session, this.env)
       return input.folderId
+    }).catch(error => {
+      // Custom Error properties do not survive every service/DO RPC boundary.
+      // Keep expected Drive failures recognizable by the Pages handler.
+      if (error instanceof DriveError) {
+        if (error.status === 401) throw new Error('FOLDER_AUTH_EXPIRED')
+        if (error.status === 403) throw new Error('FOLDER_PERMISSION_DENIED')
+        if (error.status === 404) throw new Error('FOLDER_UNAVAILABLE')
+        if (error.status === 429) throw new Error('FOLDER_RATE_LIMITED')
+      }
+      throw error
     })
   }
 

@@ -1,16 +1,35 @@
 import type { Data, Env } from '../../_shared/session'
-import { DriveError, listDriveFolders } from '../../_shared/drive'
+import { DriveError, inspectDriveFolder, listDriveFolders } from '../../_shared/drive'
 import { jsonResponse } from '../../_shared/session'
+
+function folderError(error: unknown): Response {
+  const message = error instanceof Error ? error.message : ''
+  if (message.includes('FOLDER_READ_ONLY')) return jsonResponse({ error: 'Folder is read-only', code: 'read_only' }, 403)
+  if (message.includes('FOLDER_EMPTY')) return jsonResponse({ error: 'Confirm using a folder with no visible diary entries', code: 'empty_folder' }, 422)
+  if (message.includes('FOLDER_AUTH_EXPIRED')) return jsonResponse({ error: 'Sign in again' }, 401)
+  if (message.includes('FOLDER_PERMISSION_DENIED')) return jsonResponse({ error: 'Access denied', code: 'permission_denied' }, 403)
+  if (message.includes('FOLDER_RATE_LIMITED')) return jsonResponse({ error: 'Too many Drive requests', code: 'rate_limited' }, 429)
+  const status = error instanceof DriveError ? error.status
+    : message.includes('in progress') || message.includes('backfill is already running') || message.includes('writer is busy') ? 409
+      : message.includes('not available') || message.includes('FOLDER_UNAVAILABLE') ? 400 : 500
+  const code = status === 409 ? 'busy' : status === 403 ? 'permission_denied'
+    : status === 400 || status === 404 ? 'unavailable' : status === 429 ? 'rate_limited' : 'failed'
+  return jsonResponse({ error: 'Could not access the diary folder', code }, status)
+}
 
 export const onRequestGet: PagesFunction<Env, string, Data> = async context => {
   const { accessToken, session } = context.data
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
   try {
+    const folderId = new URL(context.request.url).searchParams.get('folderId')
+    if (folderId !== null) {
+      if (!folderId || folderId.length > 256) return jsonResponse({ error: 'Invalid folder', code: 'unavailable' }, 400)
+      return jsonResponse(await inspectDriveFolder(accessToken, folderId))
+    }
     return jsonResponse({ folders: await listDriveFolders(accessToken), selectedFolderId: session.folder_id ?? null })
   } catch (error) {
     console.error('folders.ts: Failed to list Drive folders')
-    const status = error instanceof DriveError ? error.status : 500
-    return jsonResponse({ error: 'Could not list Google Drive folders' }, status)
+    return folderError(error)
   }
 }
 
@@ -43,6 +62,9 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async context => 
     return jsonResponse({ error: 'A Drive folder must be selected' }, 400)
   }
   const folderId = body.folderId
+  if ('allowEmpty' in body && typeof body.allowEmpty !== 'boolean') {
+    return jsonResponse({ error: 'Invalid empty folder confirmation' }, 400)
+  }
 
   try {
     const accountKey = session.user_id
@@ -52,14 +74,11 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async context => 
       sessionId, accountKey, vaultKey: session.vault_key,
       accessToken, expiresAt: session.expires_at ?? 0, idToken,
       folderId,
+      allowEmpty: 'allowEmpty' in body && body.allowEmpty === true,
     })
     return jsonResponse({ selectedFolderId })
   } catch (error) {
     console.error('folders.ts: Failed to select Drive folder')
-    const status = error instanceof DriveError ? error.status
-      : error instanceof Error && (error.message.includes('backfill is already running') || error.message.includes('in progress')) ? 409
-        : error instanceof Error && error.message.includes('not available') ? 400
-          : 500
-    return jsonResponse({ error: status === 409 ? 'Folder selection is blocked while diary or backup work is in progress' : 'Could not select the Google Drive folder' }, status)
+    return folderError(error)
   }
 }

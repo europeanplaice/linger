@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { listDiaryFolders, selectDiaryFolder, type DiaryFolderCandidate } from '../api/diaryFolders'
+import { listDiaryFolders, inspectDiaryFolder, selectDiaryFolder, DiaryFolderError, type DiaryFolderCandidate, type DiaryFolderInspection } from '../api/diaryFolders'
+import { TokenExpiredError } from '../api/driveEntries'
 import { useI18n } from '../i18n'
 import { accountRequest } from '../lib/accountSession'
 
@@ -12,7 +13,7 @@ interface DiaryFolderSettingsProps {
 const COPY = {
   en: {
     title: 'Reconnect existing diary folder',
-    description: 'Choose the existing Google Drive folder that contains your diary. Selecting it reconnects this passkey to that folder.',
+    description: 'Choose the existing Google Drive folder that contains your diary. The selected folder will be used by your Linger account on all devices.',
     label: 'Google Drive folder',
     loading: 'Loading folders…',
     refresh: 'Refresh folders',
@@ -25,10 +26,28 @@ const COPY = {
     success: 'Diary folder connected. Sign in again to reload your diary.',
     signIn: 'You will need to sign in again after selecting a folder.',
     current: 'currently connected',
+    choose: 'Choose a folder',
+    impact: 'Existing files stay in their folders. Switching does not move or merge diaries. Backup settings will be loaded from the selected folder.',
+    inspect: 'Checking diary files and write access…',
+    inspectError: 'Could not check this folder. Refresh the folders and try again.',
+    open: 'Open in Google Drive',
+    count: 'Visible diary files',
+    range: 'Diary dates',
+    modified: 'Folder updated',
+    writable: 'New diary entries can be saved here.',
+    readOnly: 'You cannot save new diary entries in this folder. Choose a folder you can write to.',
+    noEntries: 'No diary files visible to Linger were found. Check the folder in Drive before continuing.',
+    allowEmpty: 'Use this folder for new diary entries',
+    busy: 'A diary save or backup is in progress. Wait for it to finish, then try again.',
+    permission: 'Linger cannot access this folder. Check its Google Drive permissions, then refresh.',
+    unavailable: 'This folder is no longer available. Check whether it was deleted or moved to the trash, then refresh.',
+    expired: 'Your session has expired. Sign in again before choosing a folder.',
+    rateLimited: 'Google Drive is receiving too many requests. Wait a moment and try again.',
+    emptyChanged: 'No diary files were found. Refresh and confirm using this folder for new entries.',
   },
   ja: {
     title: '既存の日記フォルダに接続',
-    description: '日記が入っている既存の Google Drive フォルダを選択してください。このパスキーをそのフォルダに再接続します。',
+    description: '日記が入っている既存の Google Drive フォルダを選択してください。この Linger アカウントの接続先が、他の端末でもこのフォルダに変わります。',
     label: 'Google Drive フォルダ',
     loading: 'フォルダを読み込み中…',
     refresh: 'フォルダを再読み込み',
@@ -41,6 +60,24 @@ const COPY = {
     success: '日記フォルダに接続しました。日記を読み込むには、もう一度ログインしてください。',
     signIn: 'フォルダ選択後に、もう一度ログインする必要があります。',
     current: '現在接続中',
+    choose: 'フォルダを選択',
+    impact: '既存のファイルは元の場所に残ります。日記の移動・統合は行いません。バックアップ設定は選択先のフォルダから読み込みます。',
+    inspect: '日記ファイルと書き込み権限を確認中…',
+    inspectError: 'フォルダを確認できませんでした。フォルダを再読み込みしてお試しください。',
+    open: 'Google Drive で開く',
+    count: '読み取れる日記ファイル数',
+    range: '日記の日付範囲',
+    modified: 'フォルダの更新日時',
+    writable: 'このフォルダに新しい日記を保存できます。',
+    readOnly: 'このフォルダには新しい日記を保存できません。書き込み可能なフォルダを選択してください。',
+    noEntries: 'Linger から読み取れる日記ファイルが見つかりません。接続前に Drive で内容を確認してください。',
+    allowEmpty: 'このフォルダを新しい日記の保存先として使う',
+    busy: '日記の保存またはバックアップが進行中です。完了してからもう一度お試しください。',
+    permission: 'フォルダにアクセスできません。Google Drive のアクセス権を確認して再読み込みしてください。',
+    unavailable: 'フォルダが見つかりません。削除やゴミ箱への移動を確認して再読み込みしてください。',
+    expired: '認証の有効期限が切れました。もう一度ログインしてからフォルダを選択してください。',
+    rateLimited: 'Google Drive へのアクセスが集中しています。少し待ってからお試しください。',
+    emptyChanged: '日記ファイルが見つかりません。再読み込みして、新しい日記の保存先として使うことを確認してください。',
   },
 } as const
 
@@ -51,6 +88,9 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
   const [folders, setFolders] = useState<DiaryFolderCandidate[]>([])
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  const [inspection, setInspection] = useState<DiaryFolderInspection | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [allowEmpty, setAllowEmpty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -59,11 +99,27 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
   const refreshAbort = useRef<AbortController | null>(null)
   const selectAbort = useRef<AbortController | null>(null)
 
+  const errorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof TokenExpiredError) return copy.expired
+    if (!(error instanceof DiaryFolderError)) return fallback
+    switch (error.code) {
+      case 'busy': return copy.busy
+      case 'read_only': return copy.readOnly
+      case 'permission_denied': return copy.permission
+      case 'unavailable': return copy.unavailable
+      case 'rate_limited': return copy.rateLimited
+      case 'empty_folder': return copy.emptyChanged
+      default: return fallback
+    }
+  }
+
   const refresh = async () => {
     refreshAbort.current?.abort()
     const controller = new AbortController()
     refreshAbort.current = controller
     setLoading(true)
+    setSelectedFolderId('')
+    setInspection(null)
     setError(null)
     setStatus(null)
     try {
@@ -73,9 +129,9 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
       setCurrentFolderId(result.selectedFolderId)
       setSelectedFolderId(result.selectedFolderId && result.folders.some(folder => folder.id === result.selectedFolderId)
         ? result.selectedFolderId
-        : result.folders[0]?.id ?? '')
-    } catch {
-      if (mounted.current && !controller.signal.aborted) setError(copy.loadError)
+        : '')
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setError(errorMessage(error, copy.loadError))
     } finally {
       if (mounted.current && !controller.signal.aborted) setLoading(false)
     }
@@ -91,8 +147,27 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
     }
   }, []) // initial fetch only
 
+  useEffect(() => {
+    const controller = new AbortController()
+    setInspection(null)
+    setAllowEmpty(false)
+    setChecking(Boolean(selectedFolderId))
+    if (selectedFolderId) {
+      void inspectDiaryFolder(selectedFolderId, controller.signal).then(result => {
+        if (!controller.signal.aborted) setInspection(result)
+      }).catch(error => {
+        if (!controller.signal.aborted) setError(errorMessage(error, copy.inspectError))
+      }).finally(() => {
+        if (!controller.signal.aborted) setChecking(false)
+      })
+    }
+    return () => controller.abort()
+  }, [selectedFolderId]) // Check only when the candidate changes.
+
+  const candidate = inspection?.id === selectedFolderId ? inspection : null
+
   const chooseFolder = async () => {
-    if (!selectedFolderId || disabled || saving) return
+    if (!selectedFolderId || disabled || saving || loading || checking || !candidate?.canAddChildren || (candidate.entryCount === 0 && !allowEmpty)) return
     const account = accountRequest()
     selectAbort.current?.abort()
     const controller = new AbortController()
@@ -108,13 +183,13 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
       if (!mounted.current || controller.signal.aborted) return
       // Keep the same account across the safety check and selection request.
       account.assertCurrent()
-      const result = await selectDiaryFolder(selectedFolderId, controller.signal)
+      const result = await selectDiaryFolder(selectedFolderId, controller.signal, allowEmpty)
       if (!mounted.current || controller.signal.aborted) return
       setCurrentFolderId(result.selectedFolderId)
       setStatus(copy.success)
       await onSelected?.()
-    } catch {
-      if (mounted.current && !controller.signal.aborted) setError(copy.selectError)
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) setError(errorMessage(error, copy.selectError))
     } finally {
       if (mounted.current && !controller.signal.aborted) setSaving(false)
     }
@@ -123,29 +198,52 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
   return <section className="settings-section" aria-labelledby="diary-folder-settings-title">
     <h4 className="settings-section-title" id="diary-folder-settings-title">{copy.title}</h4>
     <p className="settings-section-description">{copy.description}</p>
-    <p className="settings-section-description">{copy.signIn}</p>
-    {folders.length > 0 && <div className="settings-item">
+    <p className="settings-section-description" id={`${selectId}-impact`}>{copy.impact} {copy.signIn}</p>
+    {folders.length > 0 && <div className="settings-item settings-folder-choice">
       <div className="settings-item-copytext">
         <label className="settings-item-description" htmlFor={selectId}>{copy.label}</label>
         <select
           id={selectId}
           className="settings-text-input"
+          aria-describedby={`${selectId}-impact ${selectId}-details`}
           value={selectedFolderId}
           disabled={disabled || loading || saving}
           onChange={event => { setSelectedFolderId(event.target.value); setStatus(null); setError(null) }}
         >
+          <option value="" disabled>{copy.choose}</option>
           {folders.map(folder => <option key={folder.id} value={folder.id}>
-            {folder.name}{folder.id === currentFolderId ? ` · ${copy.current}` : ''}
+            {folder.name} (…{folder.id.slice(-8)}){folder.id === currentFolderId ? ` · ${copy.current}` : ''}
           </option>)}
         </select>
       </div>
-      <button className="settings-copy-btn" type="button" disabled={disabled || loading || saving || !selectedFolderId || selectedFolderId === currentFolderId} onClick={() => void chooseFolder()}>
-        {saving ? copy.selecting : copy.select}
-      </button>
+
     </div>}
+    <div id={`${selectId}-details`} aria-busy={checking}>
+      {checking && <p className="settings-section-description">{copy.inspect}</p>}
+      {selectedFolderId && <p className="settings-section-description">
+        <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(selectedFolderId)}`} target="_blank" rel="noopener noreferrer">{copy.open}</a>
+      </p>}
+      {candidate && <>
+        <p className="settings-section-description">{copy.count}: {candidate.entryCount}
+          {candidate.firstEntryDate && candidate.lastEntryDate && <><br />{copy.range}: {candidate.firstEntryDate} – {candidate.lastEntryDate}</>}
+          {candidate.modifiedTime && !Number.isNaN(Date.parse(candidate.modifiedTime)) && <><br />{copy.modified}: {new Date(candidate.modifiedTime).toLocaleString(language === 'ja' ? 'ja-JP' : 'en-US')}</>}
+        </p>
+        <p className="settings-section-description">{candidate.canAddChildren ? copy.writable : copy.readOnly}</p>
+        {candidate.entryCount === 0 && <>
+          <p className="settings-section-description">{copy.noEntries}</p>
+          {candidate.canAddChildren && selectedFolderId !== currentFolderId && <label className="settings-folder-confirm">
+            <input type="checkbox" checked={allowEmpty} disabled={disabled || saving} onChange={event => setAllowEmpty(event.target.checked)} />
+            <span>{copy.allowEmpty}</span>
+          </label>}
+        </>}
+      </>}
+    </div>
     {loading && <p className="settings-section-description" role="status">{copy.loading}</p>}
     {!loading && folders.length === 0 && <p className="settings-section-description">{copy.empty}</p>}
     <div className="passkey-gate-actions">
+      {folders.length > 0 && <button className="settings-copy-btn" type="button" disabled={disabled || loading || saving || checking || !candidate?.canAddChildren || (candidate.entryCount === 0 && !allowEmpty) || selectedFolderId === currentFolderId} onClick={() => void chooseFolder()}>
+        {saving ? copy.selecting : copy.select}
+      </button>}
       <button className="settings-copy-btn" type="button" disabled={disabled || loading || saving} onClick={() => void refresh()}>{copy.refresh}</button>
     </div>
     {error && <p className="settings-section-description" role="alert">{error}</p>}

@@ -47,7 +47,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
   }
 
-  async selectDiaryFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string> {
+  async selectDiaryFolder(input: DiaryWriterAuth & { folderId: string; allowEmpty?: boolean }): Promise<string> {
     await authorizedSession(this.env, input)
     await migrateSyncMetadata(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).selectFolder(input)

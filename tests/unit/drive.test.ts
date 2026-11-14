@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { encodeVaultBytes } from '../../functions/_shared/vaultCrypto'
 import {
-  ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
+  inspectDriveFolder, ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
 } from '../../functions/_shared/drive'
@@ -726,5 +726,47 @@ describe('getChanges', () => {
     expect(result.changes.map(c => c.fileId)).toEqual(['f1', 'f2'])
     expect(result.newStartPageToken).toBe('tok-final')
     expect(urls[1]).toContain('pageToken=page-2')
+  })
+})
+
+
+describe('diary folder inspection', () => {
+  it('counts current and legacy diary files across pages without reading contents or writing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ id: 'folder', name: 'Journal', mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren: true } }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'a', name: 'diary-2026-11-01.txt' }, { id: 'b', name: 'notes.txt' }], nextPageToken: 'next' }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'c', name: 'diary-2025-01-01.md' }, { id: 'd', name: 's3_settings.json' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await inspectDriveFolder('token', 'folder')).toEqual({
+      id: 'folder', name: 'Journal', canAddChildren: true, entryCount: 2,
+      firstEntryDate: '2025-01-01', lastEntryDate: '2026-11-01', modifiedTime: undefined,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(init.method).toBeUndefined()
+      expect(url).not.toContain('alt=media')
+    }
+    const listUrl = new URL(fetchMock.mock.calls[1][0])
+    expect(listUrl.searchParams.get('q')).toBe("'folder' in parents and trashed=false and mimeType='text/plain'")
+    expect(fetchMock.mock.calls[2][0]).toContain('pageToken=next')
+  })
+
+  it.each([false, undefined])('does not assume write access when canAddChildren is %s', async canAddChildren => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(driveJsonResponse({ id: 'folder', name: 'Journal', mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren } }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [] })))
+    expect(await inspectDriveFolder('token', 'folder')).toMatchObject({
+      canAddChildren: false, entryCount: 0, firstEntryDate: null, lastEntryDate: null,
+    })
+  })
+
+  it.each([
+    { id: 'folder', mimeType: 'text/plain' },
+    { id: 'folder', mimeType: 'application/vnd.google-apps.folder', trashed: true },
+    { id: 'other', mimeType: 'application/vnd.google-apps.folder' },
+  ])('rejects an unavailable folder before listing its contents', async meta => {
+    mockFetch(driveJsonResponse(meta))
+    await expect(inspectDriveFolder('token', 'folder')).rejects.toThrow('FOLDER_UNAVAILABLE')
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

@@ -12,6 +12,7 @@ export interface DriveFileMeta {
   mimeType?: string
   parents?: string[]
   trashed?: boolean
+  capabilities?: { canAddChildren?: boolean }
 }
 
 export interface DiaryEntry {
@@ -29,6 +30,33 @@ export interface DriveFolderCandidate {
   id: string
   name: string
   modifiedTime?: string
+}
+
+export interface DriveFolderInspection extends DriveFolderCandidate {
+  canAddChildren: boolean
+  entryCount: number
+  firstEntryDate: string | null
+  lastEntryDate: string | null
+}
+
+/** Read metadata only; inspecting a candidate never creates or changes files. */
+export async function inspectDriveFolder(token: string, folderId: string): Promise<DriveFolderInspection> {
+  const meta = await getEntryMeta(token, folderId)
+  if (meta.id !== folderId || meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) {
+    throw new DriveError(400, 'FOLDER_UNAVAILABLE')
+  }
+  const escapedId = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const q = encodeURIComponent(`'${escapedId}' in parents and trashed=false and mimeType='text/plain'`)
+  const files = await listAllFiles(token, `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=${FILES_PAGE_SIZE}`)
+  const dates = files.flatMap(file => {
+    const match = /^diary-(\d{4}-\d{2}-\d{2})\.(md|txt)$/.exec(file.name)
+    return match ? [match[1]] : []
+  }).sort()
+  return {
+    id: meta.id, name: meta.name, modifiedTime: meta.modifiedTime,
+    canAddChildren: meta.capabilities?.canAddChildren === true,
+    entryCount: dates.length, firstEntryDate: dates[0] ?? null, lastEntryDate: dates.at(-1) ?? null,
+  }
 }
 
 export class DriveError extends Error {
@@ -365,9 +393,9 @@ export async function findEntryMeta(token: string, sessionId: string, session: S
 }
 
 export async function getEntryMeta(token: string, fileId: string): Promise<DriveFileMeta> {
-  const fields = encodeURIComponent('id,name,modifiedTime,version,mimeType,parents,trashed')
+  const fields = encodeURIComponent('id,name,modifiedTime,version,mimeType,parents,trashed,capabilities(canAddChildren)')
   return driveWithRetry(
-    () => fetch(`${BASE}/files/${fileId}?fields=${fields}`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+    () => fetch(`${BASE}/files/${encodeURIComponent(fileId)}?fields=${fields}`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<DriveFileMeta>,
   )
 }

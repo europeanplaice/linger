@@ -13,7 +13,7 @@ import { createTestSession, testSession, vaultKey } from './auth'
 vi.mock('../../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(), findEntryMeta: vi.fn(), getDiaryFileMeta: vi.fn(),
-  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
+  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), inspectDriveFolder: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
 }))
 vi.mock('../../../functions/_shared/s3Settings', async original => ({
   ...await original<typeof import('../../../functions/_shared/s3Settings')>(),
@@ -40,6 +40,11 @@ beforeEach(() => {
   // must protect a second first-save even before Drive's listing catches up.
   vi.mocked(drive.findEntryMeta).mockResolvedValue(null)
   vi.mocked(drive.getEntryMeta).mockImplementation(async (_token, id) => ({ id, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder' }))
+  vi.mocked(drive.inspectDriveFolder).mockImplementation(async (token, id) => {
+    const meta = await drive.getEntryMeta(token, id)
+    if (meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) throw new drive.DriveError(400, 'Selected item is not an available Drive folder')
+    return { id, name: meta.name, canAddChildren: true, entryCount: 1, firstEntryDate: date, lastEntryDate: date }
+  })
   vi.mocked(drive.listDriveFolders).mockResolvedValue([])
   vi.mocked(drive.getDiaryFileMeta).mockImplementation(async (_token, _id, session, _env, id) => {
     const record = files.get(id)
@@ -140,6 +145,30 @@ describe('account-scoped diary mutations', () => {
       .mockResolvedValueOnce({ id: 'bad-folder', name: 'Diary', mimeType: 'application/vnd.google-apps.folder', trashed: true })
     await expect(service.selectDiaryFolder({ ...auth, folderId: 'bad-folder' })).rejects.toThrow('available Drive folder')
     await expect(service.selectDiaryFolder({ ...auth, folderId: 'bad-folder' })).rejects.toThrow('available Drive folder')
+  })
+
+
+  it('requires empty-folder confirmation and preserves the current pointer and backup index on rejection', async () => {
+    const { auth, service } = await account()
+    const previous = await service.ensureDiaryFolder(auth)
+    const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
+    await index.updateProtectedEntry(auth, date, 'pending', '7', new Date().toISOString())
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'empty', name: 'Empty' }])
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'empty', name: 'Empty', canAddChildren: true, entryCount: 0, firstEntryDate: null, lastEntryDate: null })
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'empty' })).rejects.toThrow('FOLDER_EMPTY')
+    expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe(previous)
+    expect(await index.getProtectedEntry(auth, date)).not.toBeNull()
+    expect(await service.selectDiaryFolder({ ...auth, folderId: 'empty', allowEmpty: true })).toBe('empty')
+    expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe('empty')
+  })
+
+  it('rechecks write permissions before changing any folder or backup state', async () => {
+    const { auth, service } = await account()
+    const previous = await service.ensureDiaryFolder(auth)
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'readonly', name: 'Read only' }])
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'readonly', name: 'Read only', canAddChildren: false, entryCount: 1, firstEntryDate: date, lastEntryDate: date })
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'readonly', allowEmpty: true })).rejects.toThrow('FOLDER_READ_ONLY')
+    expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe(previous)
   })
 
   it('rejects a folder selection with credentials for a different account', async () => {

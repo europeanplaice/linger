@@ -18,9 +18,14 @@ export interface DiaryMutationInput extends DiaryWriterAuth {
   baseVersion?: string
 }
 
+export interface DiaryFolderSelection extends DiaryWriterAuth {
+  folderId: string
+  allowEmpty?: boolean
+}
+
 export interface DiaryWriterService {
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
-  selectDiaryFolder(input: DiaryWriterAuth & { folderId: string }): Promise<string>
+  selectDiaryFolder(input: DiaryFolderSelection): Promise<string>
   mutateDiaryEntry(input: DiaryMutationInput): Promise<Response>
 }
 

@@ -5,6 +5,7 @@ import * as drive from '../../functions/_shared/drive'
 vi.mock('../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../functions/_shared/drive')>(),
   listDriveFolders: vi.fn(),
+  inspectDriveFolder: vi.fn(),
 }))
 
 function context(request: Request, selectDiaryFolder = vi.fn().mockResolvedValue('chosen-folder')) {
@@ -45,7 +46,7 @@ describe('Drive diary folder recovery route', () => {
     expect(selectDiaryFolder).toHaveBeenCalledWith({
       sessionId: 'session-a', accountKey: 'passkey-user-a', vaultKey: 'request-vault-key',
       accessToken: 'validated-access-token', expiresAt: 1234, idToken: 'validated-id-token',
-      folderId: 'renamed-folder',
+      folderId: 'renamed-folder', allowEmpty: false,
     })
     expect(drive.listDriveFolders).not.toHaveBeenCalled()
   })
@@ -64,4 +65,43 @@ describe('Drive diary folder recovery route', () => {
     }), selectDiaryFolder)
     expect((await onRequestPost(busy as never)).status).toBe(409)
   })
+  it('inspects a candidate without selecting or creating a folder', async () => {
+    const inspection = { id: 'candidate', name: 'Diary', canAddChildren: true, entryCount: 3, firstEntryDate: '2026-01-01', lastEntryDate: '2026-11-01' }
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue(inspection)
+    const ctx = context(new Request('https://example.test/api/drive/folders?folderId=candidate'))
+    const response = await onRequestGet(ctx as never)
+    expect(await response.json()).toEqual(inspection)
+    expect(drive.inspectDriveFolder).toHaveBeenCalledWith('validated-access-token', 'candidate')
+    expect(ctx.selectDiaryFolder).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['FOLDER_READ_ONLY', 403, 'read_only'],
+    ['FOLDER_EMPTY', 422, 'empty_folder'],
+    ['FOLDER_UNAVAILABLE', 400, 'unavailable'],
+    ['FOLDER_PERMISSION_DENIED', 403, 'permission_denied'],
+    ['FOLDER_RATE_LIMITED', 429, 'rate_limited'],
+    ['Diary writer is busy', 409, 'busy'],
+  ])('preserves actionable errors across RPC: %s', async (message, status, code) => {
+    const ctx = context(new Request('https://example.test/api/drive/folders', {
+      method: 'POST', body: JSON.stringify({ folderId: 'candidate' }),
+    }), vi.fn().mockRejectedValue(new Error(message)))
+    const response = await onRequestPost(ctx as never)
+    expect(response.status).toBe(status)
+    expect(await response.json()).toMatchObject({ code })
+  })
+
+  it('forwards only a boolean empty-folder confirmation', async () => {
+    const ctx = context(new Request('https://example.test/api/drive/folders', {
+      method: 'POST', body: JSON.stringify({ folderId: 'candidate', allowEmpty: true }),
+    }))
+    expect((await onRequestPost(ctx as never)).status).toBe(200)
+    expect(ctx.selectDiaryFolder).toHaveBeenCalledWith(expect.objectContaining({ allowEmpty: true }))
+    const invalid = context(new Request('https://example.test/api/drive/folders', {
+      method: 'POST', body: JSON.stringify({ folderId: 'candidate', allowEmpty: 'true' }),
+    }))
+    expect((await onRequestPost(invalid as never)).status).toBe(400)
+    expect(invalid.selectDiaryFolder).not.toHaveBeenCalled()
+  })
+
 })

@@ -3217,6 +3217,26 @@ dialog.settings-dialog::backdrop {
   padding-inline: 1.35rem;
   margin-bottom: 0.8rem;
 }
+.settings-folder-choice {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-folder-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-block-size: 3rem;
+  margin-inline: 1.35rem;
+  margin-block-end: 0.8rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.settings-folder-confirm input {
+  flex-shrink: 0;
+  inline-size: 1rem;
+  block-size: 1rem;
+  accent-color: var(--text);
+}
 
 /* Title row for sections needing an inline badge (e.g. milestone count) */
 .settings-section-title-row {
