@@ -52,7 +52,10 @@ const meta = (date: string, version = '1', id = `file-${date}`): DriveFileMeta =
 
 const entryObj = (date: string, content?: string): DiaryEntry => ({ date, content: content ?? `Entry for ${date}` })
 
-const todayStr = (): string => new Date().toISOString().split('T')[0]
+const todayStr = (): string => {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -142,8 +145,8 @@ describe('useDiary initial load parallelization', () => {
     expect(result.current.dates).toContain(today)
     expect(result.current.dates).toContain('2026-08-19')
 
-    // getEntryByDate was called for today (parallel pre-fetch)
-    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today, undefined, undefined, expect.any(AbortSignal))
+    // A fast list can supply the file ID before the shared read starts.
+    expect(driveEntries.getEntryByDate).toHaveBeenCalledWith(today, undefined, todayMeta.id, expect.any(AbortSignal))
   })
 
   it('does not re-fetch today via background prefetch (already pre-fetched)', async () => {

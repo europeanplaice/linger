@@ -8,6 +8,7 @@ import { clearVaultKey, unlockVaultWithKey } from '../src/lib/passkeyVault'
 import type { CachedEntry } from '../src/lib/diaryCache'
 import type { LoadedDiaryEntry } from '../src/types'
 import type { ImportResult } from '../src/hooks/useDiary'
+import { todayYmd } from '../src/utils/date'
 
 subscribeDatabaseNotice(() => { if (getDatabaseNotice() === 'confirm-upgrade') queueMicrotask(confirmLegacyUpgrade) })
 
@@ -16,13 +17,23 @@ type QueuedResponse = { status: number; body: unknown; delayMs?: number }
 
 const fetchCalls: FetchCall[] = []
 const queue: QueuedResponse[] = []
+let startupToday: QueuedResponse | undefined
+let startupList: QueuedResponse | undefined
 const evictedCalls: string[][] = []
 let currentEmail: string | null = 'user@example.com'
 let _setSelectedDate: ((date: string | undefined) => void) | null = null
 
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   fetchCalls.push({ url: String(input), method: String(init?.method ?? 'GET'), body: typeof init?.body === 'string' ? init.body : undefined })
-  const resp = queue.shift()
+  const url = String(input)
+  let resp: QueuedResponse | undefined
+  if (url === '/api/drive/entries' && startupList) {
+    resp = startupList
+    startupList = undefined
+  } else if (url.startsWith(`/api/drive/entry/${todayYmd()}`) && startupToday) {
+    resp = startupToday
+    startupToday = undefined
+  } else resp = queue.shift()
   if (!resp) throw new Error(`Unexpected fetch: ${String(input)}`)
   if (resp.delayMs) {
     await new Promise(r => setTimeout(r, resp.delayMs))
@@ -87,6 +98,12 @@ window.diaryHarness = {
   calls: () => [...fetchCalls],
   clearCalls: () => fetchCalls.splice(0),
   start: () => {
+    // The initial list and today read can arrive in either order, or today's
+    // read can be served by cache. Keep their fixtures separate from the FIFO.
+    if (queue[0]?.status === 404 && queue[1]?.status === 200) {
+      startupToday = queue.shift()
+      startupList = queue.shift()
+    }
     if (currentEmail) {
       unlockVaultWithKey(`harness:${currentEmail}`, new Uint8Array(32).fill(17))
       setActiveAccount(`email:${encodeURIComponent(currentEmail)}`, false, currentEmail)
@@ -150,6 +167,8 @@ window.diaryHarness = {
   progressCalls: () => [...progressCalls],
   resetFolderState: () => {
     queue.splice(0)
+    startupToday = undefined
+    startupList = undefined
     fetchCalls.splice(0)
     progressCalls = []
   },
