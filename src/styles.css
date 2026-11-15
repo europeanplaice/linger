@@ -5444,6 +5444,16 @@ dialog.history-dialog::backdrop {
     gap: 0.4rem;
     overflow-x: auto;
     overscroll-behavior-x: contain;
+    scroll-padding-inline: 1rem;
+    --milestone-fade-start: 0px;
+    --milestone-fade-end: 0px;
+    mask-image: linear-gradient(to right, transparent, black var(--milestone-fade-start), black calc(100% - var(--milestone-fade-end)), transparent);
+  }
+  .editor-meta-milestones.has-more-start {
+    --milestone-fade-start: 1rem;
+  }
+  .editor-meta-milestones.has-more-end {
+    --milestone-fade-end: 1rem;
   }
   .editor-meta-milestone {
     flex: 0 0 auto;

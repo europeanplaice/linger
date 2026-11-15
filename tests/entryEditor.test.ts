@@ -1436,6 +1436,32 @@ test.describe('EntryEditor — date switch cancellation', () => {
 })
 
 test.describe('EntryEditor — editor meta info', () => {
+  test('shows mobile milestone fades only where more content can be scrolled', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-01-01',
+      milestones: [
+        { id: 'one', label: 'A memorable first milestone', date: '2026-01-01' },
+        { id: 'two', label: 'A memorable second milestone', date: '2026-01-02' },
+        { id: 'three', label: 'A memorable third milestone', date: '2026-01-03' },
+      ],
+    })
+
+    const scroller = page.locator('.editor-meta-milestones')
+    await expect(scroller).toHaveClass(/has-more-end/)
+    await expect(scroller).not.toHaveClass(/has-more-start/)
+    await scroller.evaluate(element => { element.scrollLeft = (element.scrollWidth - element.clientWidth) / 2 })
+    await expect(scroller).toHaveClass(/has-more-start/)
+    await expect(scroller).toHaveClass(/has-more-end/)
+    await scroller.evaluate(element => { element.scrollLeft = element.scrollWidth })
+    await expect(scroller).toHaveClass(/has-more-start/)
+    await expect(scroller).not.toHaveClass(/has-more-end/)
+
+    await renderEditor(page, { date: '2026-01-01', milestones: [{ id: 'short', label: 'A', date: '2026-01-01' }] })
+    await expect(scroller).not.toHaveClass(/has-more-start|has-more-end/)
+  })
+
   test('shows enabled milestones regardless of distance from the selected date', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {

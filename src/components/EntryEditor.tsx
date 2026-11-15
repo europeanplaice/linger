@@ -341,6 +341,26 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     () => milestonesNearEntry(date, activeMilestones).slice(0, MAX_MILESTONE_BADGES),
     [date, activeMilestones],
   )
+  const milestoneScrollRef = useRef<HTMLDivElement>(null)
+  const [milestoneScrollEdges, setMilestoneScrollEdges] = useState({ start: false, end: false })
+  useEffect(() => {
+    const element = milestoneScrollRef.current
+    if (!element) return
+    const update = () => {
+      const start = element.scrollLeft > 1
+      const end = element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+      setMilestoneScrollEdges(previous => previous.start === start && previous.end === end ? previous : { start, end })
+    }
+    update()
+    element.addEventListener('scroll', update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    for (const child of element.children) observer.observe(child)
+    return () => {
+      element.removeEventListener('scroll', update)
+      observer.disconnect()
+    }
+  }, [milestoneBadges, language])
   const atMilestoneLimit = milestones.length >= MAX_MILESTONES
   const daysDiff = (() => {
     const today = todayYmd()
@@ -1528,7 +1548,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </span>
         )}
         {milestoneBadges.length > 0 && (
-          <div className="editor-meta-milestones">
+          <div
+            ref={milestoneScrollRef}
+            className={`editor-meta-milestones${milestoneScrollEdges.start ? ' has-more-start' : ''}${milestoneScrollEdges.end ? ' has-more-end' : ''}`}
+          >
             {milestoneBadges.map(({ id, label, date: milestoneDate, distance, emoji, nthYear }) => (
               <button
                 key={id}
