@@ -47,7 +47,7 @@ function request(path: string, body?: unknown, headers: HeadersInit = {}): Reque
   return new Request(`${origin}${path}`, {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json', ...headers },
-    body: path.endsWith('/options') && (path.includes('/register/') || path.includes('/login/'))
+    body: (path.endsWith('/options') && path.includes('/register/')) || path.endsWith('/login/verify')
       ? JSON.stringify({ ...(body as object ?? {}), 'cf-turnstile-response': path.includes('/register/') ? 'register:example.com' : 'login:example.com' })
       : body === undefined ? undefined : JSON.stringify(body),
   })
@@ -87,12 +87,12 @@ describe('passkey handlers', () => {
     webauthn.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 2 } })
   })
 
-  it('requires a valid Turnstile result for registration and login before issuing a challenge', async () => {
+  it('requires a valid Turnstile result before completing login or starting registration', async () => {
     const { env, db } = await createPasskeyTestEnv()
-    const bare = () => new Request(`${origin}/auth/passkey/login/options`, {
-      method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}',
+    const bare = (token?: string) => new Request(`${origin}/auth/passkey/login/verify`, {
+      method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ response: assertionResponse, 'cf-turnstile-response': token }),
     })
-    expect((await loginOptions(bare(), env)).status).toBe(403)
+    expect((await loginVerify(bare(), env)).status).toBe(403)
     const fetchMock = vi.mocked(fetch)
     for (const result of [
       { success: false, action: 'login', hostname: 'example.com' },
@@ -100,7 +100,7 @@ describe('passkey handlers', () => {
       { success: true, action: 'login', hostname: 'attacker.example' },
     ]) {
       fetchMock.mockResolvedValueOnce(Response.json(result))
-      expect((await loginOptions(request('/auth/passkey/login/options'), env)).status).toBe(403)
+      expect((await loginVerify(bare('login:example.com'), env)).status).toBe(403)
     }
     fetchMock.mockRejectedValueOnce(new Error('network failure'))
     expect((await registrationOptions(request('/auth/passkey/register/options'), env)).status).toBe(403)
@@ -111,13 +111,13 @@ describe('passkey handlers', () => {
   it('accepts the staging hostname only for the staging deployment', async () => {
     const staging = 'https://staging.linger.europeanplaice.com'
     const { env, db } = await createPasskeyTestEnv({}, { domain: staging })
-    const stagingRequest = () => new Request(`${staging}/auth/passkey/login/options`, {
+    const stagingRequest = () => new Request(`${staging}/auth/passkey/register/options`, {
       method: 'POST', headers: { Origin: staging, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 'cf-turnstile-response': 'login:staging.linger.europeanplaice.com' }),
+      body: JSON.stringify({ 'cf-turnstile-response': 'register:staging.linger.europeanplaice.com' }),
     })
-    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true, action: 'login', hostname: 'linger.europeanplaice.com' }))
-    expect((await loginOptions(stagingRequest(), env)).status).toBe(403)
-    expect((await loginOptions(stagingRequest(), env)).status).toBe(200)
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true, action: 'register', hostname: 'linger.europeanplaice.com' }))
+    expect((await registrationOptions(stagingRequest(), env)).status).toBe(403)
+    expect((await registrationOptions(stagingRequest(), env)).status).toBe(200)
     db.close()
   })
 

@@ -1,20 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '../../src/i18n'
 import { PasskeyGate } from '../../src/components/PasskeyGate'
 import { LoginScreen } from '../../src/components/LoginScreen'
 import { clearVaultKey } from '../../src/lib/passkeyVault'
 import { clearTabSession } from '../../src/lib/tabSession'
 
+const turnstile = vi.hoisted(() => ({ automatic: true, callback: undefined as ((token: string) => void) | undefined }))
 vi.mock('../../src/components/Turnstile', async () => {
-  const { useEffect } = await import('react')
+  const { useEffect, useRef } = await import('react')
   return { Turnstile: ({ onToken, resetKey }: { onToken: (token: string) => void; resetKey: number }) => {
-    useEffect(() => { onToken('test-token') }, [onToken, resetKey])
+    const callback = useRef(onToken)
+    callback.current = onToken
+    useEffect(() => {
+      turnstile.callback = value => callback.current(value)
+      if (turnstile.automatic) turnstile.callback('test-token')
+      return () => { turnstile.callback = undefined }
+    }, [resetKey])
     return null
   } }
 })
 
-afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers() })
+afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers(); turnstile.automatic = true; turnstile.callback = undefined })
 
 function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
   const actions = { onSetup: vi.fn(), onBeginSetup: vi.fn(), onCancelSetup: vi.fn(), onUnlock: vi.fn() }
@@ -23,6 +30,16 @@ function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
 }
 
 describe('authentication guidance', () => {
+  it('starts passkey sign-in before Turnstile finishes', async () => {
+    turnstile.automatic = false
+    const actions = gate()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
+    expect(actions.onUnlock).toHaveBeenCalledOnce()
+    const pending = actions.onUnlock.mock.calls[0][2] as Promise<string>
+    expect(pending).toBeInstanceOf(Promise)
+    act(() => turnstile.callback?.('later-token'))
+    await expect(pending).resolves.toBe('later-token')
+  })
   it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()

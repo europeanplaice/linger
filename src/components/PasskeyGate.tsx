@@ -13,7 +13,7 @@ interface Props {
   setupEmail: string | null
   onBeginSetup: (recovery?: boolean) => void
   onCancelSetup: () => void
-  onUnlock: (remember: RememberDays, preferImmediate?: boolean, token?: string) => void
+  onUnlock: (remember: RememberDays, preferImmediate?: boolean, token?: string | Promise<string>) => void
   phase?: PasskeyPhase | null
   onClearError?: () => void
   savedSessionConnection?: SavedSessionConnection
@@ -28,6 +28,22 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
   const currentView = savedSessionConnection !== 'idle' ? 'saved-session' : error === 'already_registered' || (view === 'welcome' && error) ? 'options' : view
   const [recoveryConfirmed, setRecoveryConfirmed] = useState(false)
   const [token, setToken] = useState('')
+  const [verificationFailed, setVerificationFailed] = useState(false)
+  const pendingToken = useRef<{ resolve: (token: string) => void; reject: (error: Error) => void } | null>(null)
+  const receiveToken = (value: string) => {
+    if (value) setVerificationFailed(false)
+    if (value && pendingToken.current) {
+      pendingToken.current.resolve(value)
+      pendingToken.current = null
+      setToken('')
+    } else setToken(value)
+  }
+  const failToken = () => {
+    pendingToken.current?.reject(new Error('Verification unavailable'))
+    pendingToken.current = null
+  }
+  const verificationError = () => { setVerificationFailed(true); failToken() }
+  useEffect(() => () => { pendingToken.current?.reject(new Error('Verification cancelled')); pendingToken.current = null }, [])
   const [resetKey, setResetKey] = useState(0)
   const pendingReset = useRef(false)
   const sawBusy = useRef(false)
@@ -35,6 +51,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
     if (!pendingReset.current) return
     if (busy) sawBusy.current = true
     else if (sawBusy.current) {
+      failToken()
       pendingReset.current = false
       sawBusy.current = false
       setResetKey(value => value + 1)
@@ -60,8 +77,12 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
     if (busy) return
     if (!preferImmediate) setView('options')
     onClearError?.()
-    if (!token) return
-    onUnlock(0, preferImmediate, token)
+    let verification: string | Promise<string> = token
+    if (!verification) {
+      verification = new Promise<string>((resolve, reject) => { pendingToken.current = { resolve, reject } })
+      void verification.catch(() => {})
+    }
+    onUnlock(0, preferImmediate, verification)
     setToken('')
     pendingReset.current = true
   }
@@ -95,9 +116,9 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
           </>}
           {error && !(options && error === 'cancelled') && <p className={`session-expired-msg${error === 'cancelled' ? ' neutral' : ''}`} role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
           <p className="passkey-progress" role="status">{busy ? progress : ''}</p>
-          {!staticPreview && (!setup || setupEmail) && <Turnstile key={setup ? 'register' : 'login'} action={setup ? 'register' : 'login'} onToken={setToken} resetKey={resetKey} language={language} />}
+          {!staticPreview && (!setup || setupEmail) && <Turnstile key={setup ? 'register' : 'login'} action={setup ? 'register' : 'login'} onToken={receiveToken} onFailure={verificationError} resetKey={resetKey} language={language} />}
           <div className="passkey-gate-actions passkey-gate-navigation">
-            <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || ((!setup || !!setupEmail) && !token) || (recovery && !!setupEmail && !recoveryConfirmed)}
+            <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || ((!setup || !!setupEmail) && verificationFailed) || (setup && !!setupEmail && !token) || (recovery && !!setupEmail && !recoveryConfirmed)}
               aria-describedby={setup && setupEmail ? 'passkey-verify-help' : setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
               aria-busy={busy}
               onClick={() => setup ? (setupEmail ? (onSetup(0, recovery, token), setToken(''), pendingReset.current = true) : connectGoogle()) : unlock(!options)}>
@@ -112,7 +133,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
             <summary>{t.login.passkeyRecoveryTitle}</summary>
             <h2>{t.login.passkeyOtherDeviceTitle}</h2>
             <p>{t.login.passkeyOtherDeviceHelp}</p>
-            <button type="button" className="btn-use-another-account" disabled={staticPreview || busy || !token} onClick={() => unlock(false)}>{t.login.passkeyOtherDeviceAction}</button>
+            <button type="button" className="btn-use-another-account" disabled={staticPreview || busy || verificationFailed} onClick={() => unlock(false)}>{t.login.passkeyOtherDeviceAction}</button>
             <h2>{t.login.passkeyLostTitle}</h2>
             <p>{t.login.passkeyRecoveryAccountHelp}</p>
             <button type="button" className="btn-use-another-account" disabled={staticPreview || busy} onClick={() => changeView('recovery')}>{t.login.passkeyRecoveryStart}</button>

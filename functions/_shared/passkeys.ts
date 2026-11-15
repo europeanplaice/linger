@@ -234,9 +234,8 @@ async function validateUnlockedProfile(request: Request, env: PasskeyEnv, userId
   } catch { return false }
 }
 
-async function verifyTurnstile(request: Request, env: Env, action: 'login' | 'register'): Promise<boolean> {
-  const body = await readJson(request.clone() as unknown as Request)
-  const token = body?.['cf-turnstile-response']
+async function verifyTurnstile(request: Request, env: Env, action: 'login' | 'register', providedToken?: unknown): Promise<boolean> {
+  const token = action === 'login' ? providedToken : (await readJson(request.clone() as unknown as Request))?.['cf-turnstile-response']
   if (!env.TURNSTILE_SECRET || typeof token !== 'string' || !token.length || token.length > 2048) return false
   try {
     const hostname = new URL(env.SESSION_DOMAIN).hostname
@@ -336,9 +335,6 @@ export async function loginOptions(request: Request, env: Env): Promise<Response
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
-  const currentUser = await authenticatedUser(request, env)
-  const management = currentUser && await validateUnlockedProfile(request, env, currentUser)
-  if (!management && !await verifyTurnstile(request, env, 'login')) return jsonResponse({ error: 'Verification failed' }, 403)
   try {
     const { rpID } = relyingParty(request, env)
     const options = await generateAuthenticationOptions({
@@ -357,6 +353,7 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
   const body = await readJson(request)
   const managementAction = body?.managementAction === 'add' || body?.managementAction === 'delete'
   if (!body || !validWebAuthnResponse(body.response, !managementAction)) return withClearedChallengeCookie(jsonResponse({ error: 'Invalid passkey response' }, 400), env)
+  if (!managementAction && !await verifyTurnstile(request, env, 'login', body['cf-turnstile-response'])) return withClearedChallengeCookie(jsonResponse({ error: 'Verification failed' }, 403), env)
   const challenge = await consumeChallenge(request, env, 'login')
   if (!challenge) return withClearedChallengeCookie(jsonResponse({ error: 'Challenge expired' }, 400), env)
   const response = body.response as AuthenticationResponseJSON

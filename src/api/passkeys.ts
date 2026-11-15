@@ -220,15 +220,17 @@ export async function registerPasskey(signal?: AbortSignal, email?: string, onPh
   } finally { prfOutput.fill(0) }
 }
 
-export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = false, turnstileToken?: string): Promise<{ userId: string }> {
+export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = false, turnstileToken?: string | Promise<string>): Promise<{ userId: string }> {
   requireWebAuthn()
   const immediate = preferImmediate && await supportsImmediateSignIn()
   throwIfAborted(signal)
-  const envelope = await post<OptionsEnvelope>('login/options', { 'cf-turnstile-response': turnstileToken }, undefined, signal)
+  const envelope = await post<OptionsEnvelope>('login/options', undefined, undefined, signal)
   throwIfAborted(signal)
   const { prfOutput, serialized } = await getCredential(envelope, signal, immediate)
   try {
-    const verified = await post<VerifyEnvelope & { credentialId?: string; wrapper?: WrappedMasterKeyPayload }>('login/verify', { response: serialized }, undefined, signal)
+    const token = await turnstileToken
+    throwIfAborted(signal)
+    const verified = await post<VerifyEnvelope & { credentialId?: string; wrapper?: WrappedMasterKeyPayload }>('login/verify', { response: serialized, 'cf-turnstile-response': token }, undefined, signal)
     throwIfAborted(signal)
     if (!verified.userId || !verified.credentialId || !verified.wrapper) throw new Error('Passkey sign-in returned an incomplete vault record')
     await unlockWrappedMasterKey(prfOutput, verified.userId, parseWrappedMasterKey(verified.wrapper, verified.credentialId), () => !signal?.aborted)

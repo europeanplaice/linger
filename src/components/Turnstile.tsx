@@ -23,11 +23,13 @@ function loadTurnstile(): Promise<TurnstileApi> {
   return loading!
 }
 
-export function Turnstile({ action, onToken, resetKey, language }: { action: 'login' | 'register'; onToken: (token: string) => void; resetKey: number; language: string }) {
+export function Turnstile({ action, onToken, onFailure, resetKey, language }: { action: 'login' | 'register'; onToken: (token: string) => void; onFailure?: () => void; resetKey: number; language: string }) {
   const element = useRef<HTMLDivElement>(null)
   const widget = useRef<string | null>(null)
   const callback = useRef(onToken)
   callback.current = onToken
+  const failure = useRef(onFailure)
+  failure.current = onFailure
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     let active = true
@@ -39,9 +41,9 @@ export function Turnstile({ action, onToken, resetKey, language }: { action: 'lo
         sitekey: '0x4AAAAAAGBh2FPKQPWYBSp1', action,
         callback: (token: string) => callback.current(token),
         'expired-callback': () => callback.current(''),
-        'error-callback': () => { callback.current(''); setFailed(true) },
+        'error-callback': () => { callback.current(''); failure.current?.(); setFailed(true) },
       })
-    }).catch(() => { if (active) setFailed(true) })
+    }).catch(() => { if (active) { failure.current?.(); setFailed(true) } })
     return () => { active = false; if (widget.current && api) api.remove(widget.current); widget.current = null; callback.current('') }
   }, [action])
   useEffect(() => { if (resetKey && widget.current) window.turnstile?.reset(widget.current) }, [resetKey])
