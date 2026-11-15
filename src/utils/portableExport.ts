@@ -78,7 +78,7 @@ export function exportPortableHtml(entries: DiaryExportEntry[]): string {
       <h1>📖 Linger Diary Backup</h1>
       <p style="color: var(--text-muted)">Portable Standalone Viewer</p>
     </header>
-    <input type="text" id="search" class="search-box" placeholder="Search entries..." oninput="filterEntries()" />
+    <input type="text" id="search" class="search-box" placeholder="Search entries..." />
     <div id="entries-container"></div>
   </div>
   <script id="export-data" type="application/json">${safeJson}</script>
@@ -86,26 +86,27 @@ export function exportPortableHtml(entries: DiaryExportEntry[]): string {
     const data = JSON.parse(document.getElementById('export-data').textContent || '[]');
     function render(list) {
       const container = document.getElementById('entries-container');
-      container.innerHTML = list.map(e => \`
-        <div class="entry-card">
-          <div class="entry-date">\${escapeHtml(e.date)}</div>
-          <div class="entry-content">\${escapeHtml(e.content)}</div>
-        </div>
-      \`).join('');
-    }
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+      const fragment = document.createDocumentFragment();
+      for (const entry of list) {
+        const card = document.createElement('div');
+        card.className = 'entry-card';
+        const date = document.createElement('div');
+        date.className = 'entry-date';
+        date.textContent = String(entry.date);
+        const content = document.createElement('div');
+        content.className = 'entry-content';
+        content.textContent = String(entry.content);
+        card.append(date, content);
+        fragment.append(card);
+      }
+      container.replaceChildren(fragment);
     }
     function filterEntries() {
       const q = document.getElementById('search').value.toLowerCase();
       const filtered = data.filter(e => e.date.includes(q) || e.content.toLowerCase().includes(q));
       render(filtered);
     }
+    document.getElementById('search').addEventListener('input', filterEntries);
     render(data);
   </script>
 </body>

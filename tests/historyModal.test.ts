@@ -188,6 +188,33 @@ test.describe('HistoryModal — preview', () => {
     await expect(preview.locator('img')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => window.__historyXss)).toBe(false)
   })
+
+  for (const [kind, saved, current] of [
+    ['removed', '<img src=x onerror="window.__historyXss = true"> first line', ''],
+    ['added', '', '<svg onload="window.__historyXss = true"> first line'],
+  ] as const) {
+    test(`renders malicious ${kind} diff text safely and preserves newlines`, async ({ page }) => {
+      await loadHarness(page)
+      const payload = `${saved || current}\nsecond line`
+      await page.evaluate(({ removed, added }) => {
+        window.__historyXss = false
+        window.historyHarness.list({ status: 200, body: { revisions: [] } })
+        window.historyHarness.render({
+          savedText: removed,
+          text: added,
+          isDirty: true,
+          autoSave: false,
+        })
+      }, { removed: saved ? payload : '', added: current ? payload : '' })
+
+      const preview = page.locator('.history-preview-diff')
+      const changed = saved ? preview.locator('.diff-remove-word') : preview.locator('.diff-add-word')
+      await expect(changed).toHaveText(payload, { useInnerText: true })
+      await expect(preview.locator('img, svg')).toHaveCount(0)
+      await expect(changed.locator('br')).toHaveCount(1)
+      await expect.poll(() => page.evaluate(() => window.__historyXss)).toBe(false)
+    })
+  }
 })
 
 test.describe('HistoryModal — restore button', () => {

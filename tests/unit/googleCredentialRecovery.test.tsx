@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuth } from '../../src/hooks/useAuth'
-import { clearPendingGoogleCredential, hasPendingGoogleCredential, refreshGoogleCredentials } from '../../src/api/auth'
+import { clearPendingGoogleCredential, hasPendingGoogleCredential, refreshGoogleCredentials, startSignIn } from '../../src/api/auth'
 import { getAccessToken, clearOAuthCredentials } from '../../src/lib/oauthCredentials'
 import { AUTH_EVENT_KEY, setActiveAccount, getAccountSnapshot } from '../../src/lib/accountSession'
 import { restoreTabSession } from '../../src/lib/tabSession'
@@ -205,6 +205,78 @@ describe('Google credential recovery', () => {
     expect(hasPendingGoogleCredential()).toBe(false)
     await act(async () => vi.advanceTimersByTimeAsync(60_000))
     expect(JSON.parse(refresh.mock.calls[2][0].body)).toEqual({})
+  })
+
+  it('expires a pending setup credential when its timer was delayed in the background', async () => {
+    refresh.mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    const { result } = await setup()
+    expect(result.current.status).toBe('signedIn')
+    expect(hasPendingGoogleCredential()).toBe(true)
+
+    // Simulate a suspended page: wall clock moves, while the timeout callback
+    // has not run. Reads must enforce expiry independently of the timer.
+    vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+    expect(hasPendingGoogleCredential()).toBe(false)
+  })
+
+  it('clears a refresh credential when Google setup fails after returning it', async () => {
+    const popup = { closed: false, close: vi.fn() } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    const pending = startSignIn({ setup: true })
+    window.dispatchEvent(new MessageEvent('message', { origin: window.location.origin, source: popup, data: {
+      type: 'linger-oauth-complete', credential: {
+        accessToken: 'initial-access', idToken: 'initial-id', expiresAt: Date.now() + 120_000,
+        refreshToken: 'pending-refresh',
+      },
+    } }))
+
+    await expect(pending).rejects.toThrow('verified email')
+    expect(hasPendingGoogleCredential()).toBe(false)
+  })
+
+  it('clears a pending refresh credential bound to a different account', async () => {
+    refresh.mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    await setup()
+    expect(hasPendingGoogleCredential()).toBe(true)
+    mocks.userId = 'different-vault-user'
+
+    await expect(refreshGoogleCredentials(true)).resolves.toBe(false)
+    expect(hasPendingGoogleCredential()).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a stale sign-in failure clear a newer pending credential', async () => {
+    let rejectSession!: (error: Error) => void
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url === '/auth/session') return new Promise<Response>((_, reject) => { rejectSession = reject })
+      if (url === '/auth/refresh') return refresh()
+      throw new Error(`Unexpected URL: ${url}`)
+    }))
+    const firstPopup = { closed: false, close: vi.fn() } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(firstPopup)
+    const first = startSignIn().catch(error => error)
+    window.dispatchEvent(new MessageEvent('message', { origin: window.location.origin, source: firstPopup, data: {
+      type: 'linger-oauth-complete', credential: {
+        accessToken: 'first-access', idToken: 'first-id', expiresAt: Date.now() + 120_000,
+        refreshToken: 'first-refresh',
+      },
+    } }))
+
+    const secondPopup = { closed: false, close: vi.fn() } as unknown as Window
+    vi.mocked(window.open).mockReturnValue(secondPopup)
+    const second = startSignIn({ setup: true })
+    window.dispatchEvent(new MessageEvent('message', { origin: window.location.origin, source: secondPopup, data: {
+      type: 'linger-oauth-complete', credential: {
+        accessToken: 'second-access', idToken: 'second-id', expiresAt: Date.now() + 120_000,
+        refreshToken: 'second-refresh', email: 'person@example.com',
+      },
+    } }))
+    await expect(second).resolves.toMatchObject({ signedIn: false })
+    expect(hasPendingGoogleCredential()).toBe(true)
+
+    rejectSession(new Error('stale session failure'))
+    await expect(first).resolves.toMatchObject({ message: expect.stringContaining('superseded') })
+    expect(hasPendingGoogleCredential()).toBe(true)
   })
 
   it('recovers on reconnect after an outage spans access token expiry', async () => {

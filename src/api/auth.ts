@@ -6,7 +6,34 @@ import { rememberPasskeyRegistration } from '../lib/passkeyRegistrationHistory'
 
 let signInGeneration = 0
 let cancelPendingSignIn: ((error: Error) => void) | null = null
-let pendingRefreshToken: { token: string; userId: string | null } | null = null
+const PENDING_REFRESH_TTL_MS = 5 * 60_000
+let pendingRefreshToken: { token: string; userId: string | null; expiresAt: number } | null = null
+let pendingRefreshTimer: number | null = null
+
+export function clearPendingGoogleCredential(): void {
+  pendingRefreshToken = null
+  if (pendingRefreshTimer !== null) window.clearTimeout(pendingRefreshTimer)
+  pendingRefreshTimer = null
+}
+
+function setPendingGoogleCredential(token: string | null, userId: string | null): void {
+  clearPendingGoogleCredential()
+  if (!token) return
+  const pending = { token, userId, expiresAt: Date.now() + PENDING_REFRESH_TTL_MS }
+  pendingRefreshToken = pending
+  pendingRefreshTimer = window.setTimeout(() => {
+    if (pendingRefreshToken === pending) clearPendingGoogleCredential()
+  }, PENDING_REFRESH_TTL_MS)
+}
+
+function getPendingGoogleCredential() {
+  const pending = pendingRefreshToken
+  if (pending && Date.now() >= pending.expiresAt) {
+    clearPendingGoogleCredential()
+    return null
+  }
+  return pending
+}
 
 function updatePasskeyAccountName(userId: string | null, email: string | null): void {
   if (!userId || !email || typeof PublicKeyCredential === 'undefined') return
@@ -27,7 +54,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
   clearOAuthCredentials()
-  pendingRefreshToken = null
+  clearPendingGoogleCredential()
   return new Promise((resolve, reject) => {
     const channelId = crypto.randomUUID()
     let channel: BroadcastChannel | null = null
@@ -59,7 +86,10 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
       if (!popup.closed) popup.close()
       if (cancelPendingSignIn === cancel) cancelPendingSignIn = null
       if (error) {
-        if (generation === signInGeneration) clearOAuthCredentials()
+        if (generation === signInGeneration) {
+          clearOAuthCredentials()
+          clearPendingGoogleCredential()
+        }
         reject(error)
       }
       else if (info) resolve(info)
@@ -81,9 +111,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
       receivedCredential = true
       try { setOAuthCredentials({ accessToken: credential.accessToken, idToken: credential.idToken, expiresAt: credential.expiresAt }) }
       catch (error) { finish(error instanceof Error ? error : new Error('Google sign-in failed')); return }
-      pendingRefreshToken = typeof credential.refreshToken === 'string'
-        ? { token: credential.refreshToken, userId: options.setup ? null : getVaultUserId() }
-        : null
+      setPendingGoogleCredential(typeof credential.refreshToken === 'string' ? credential.refreshToken : null, options.setup ? null : getVaultUserId())
       if (options.setup) {
         if (typeof credential.email !== 'string' || !credential.email) { finish(new Error('Google did not return a verified email')); return }
         try { channel?.postMessage({ type: 'linger-oauth-ack', channelId }) } catch { /* Optional acknowledgement. */ }
@@ -121,12 +149,15 @@ export async function refreshGoogleCredentials(storePending = false): Promise<bo
   if (!userId) return false
   const headers = new Headers({ 'Content-Type': 'application/json' })
   setVaultKeyHeader(headers)
-  if (storePending && !pendingRefreshToken) return false
+  const pending = getPendingGoogleCredential()
+  if (storePending && !pending) return false
   // Retry an interrupted save before falling back to the stored credential.
   // Bind Google-first setup's credential on its first authenticated save.
-  const pending = pendingRefreshToken
   if (pending && pending.userId === null) pending.userId = userId
-  if (pending && pending.userId !== userId) return false
+  if (pending && pending.userId !== userId) {
+    if (pendingRefreshToken === pending) clearPendingGoogleCredential()
+    return false
+  }
   const response = await fetch('/auth/refresh', {
     method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', headers,
     body: JSON.stringify(pending ? { refreshToken: pending.token } : {}),
@@ -136,19 +167,18 @@ export async function refreshGoogleCredentials(storePending = false): Promise<bo
     if (response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500) {
       throw new Error('Google authorization temporarily unavailable')
     }
-    if (generation === signInGeneration && pendingRefreshToken === pending) pendingRefreshToken = null
+    if (generation === signInGeneration && pendingRefreshToken === pending) clearPendingGoogleCredential()
     return false
   }
   const credentials = await response.json() as { accessToken: string; idToken: string; expiresAt: number }
   if (generation !== signInGeneration || userId !== getVaultUserId()) return false
+  if (pending && getPendingGoogleCredential() !== pending) return false
   setOAuthCredentials(credentials)
-  if (pendingRefreshToken === pending) pendingRefreshToken = null
+  if (pendingRefreshToken === pending) clearPendingGoogleCredential()
   return true
 }
 
-export function clearPendingGoogleCredential(): void { pendingRefreshToken = null }
-
-export function hasPendingGoogleCredential(): boolean { return pendingRefreshToken !== null }
+export function hasPendingGoogleCredential(): boolean { return getPendingGoogleCredential() !== null }
 
 export interface SessionInfo {
   signedIn: boolean
@@ -177,6 +207,7 @@ export async function checkSession({ failOnUnavailable = false }: { failOnUnavai
     }
     if (unlockedUserId && data.userId && unlockedUserId !== data.userId) {
       if (requestVaultUserId === unlockedUserId) {
+        clearPendingGoogleCredential()
         clearVaultKey()
         clearOAuthCredentials()
       }
@@ -203,7 +234,7 @@ export async function revokeSession(): Promise<void> {
   signInGeneration++
   cancelPendingSignIn?.(new Error('Google sign-in was cancelled by logout'))
   cancelPendingSignIn = null
-  pendingRefreshToken = null
+  clearPendingGoogleCredential()
   clearOAuthCredentials()
   const { init } = accountRequest({ method: 'POST' })
   const headers = new Headers(init.headers)
