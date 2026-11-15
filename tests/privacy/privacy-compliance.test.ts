@@ -12,6 +12,7 @@ import { describeError, S3Error } from '../../functions/_shared/s3'
 import { unlockVaultWithKey, clearVaultKey } from '../../src/lib/passkeyVault'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { revokeSession, startSignIn } from '../../src/api/auth'
+import { openVaultValue, sealVaultValue } from '../../functions/_shared/vaultCrypto'
 
 const accessToken = 'sentinel-google-access-token'
 const refreshToken = 'sentinel-google-refresh-token'
@@ -230,6 +231,19 @@ describe('browser credential lifetime', () => {
     }))
     expect((fetchSpy.mock.calls[0][1]?.headers as Headers).get('Authorization')).toBe(`Bearer ${accessToken}`)
     fetchSpy.mockRestore()
+  })
+
+  it('documents that the API receives a vault key capable of opening stored metadata', async () => {
+    const userId = '11111111-1111-4111-8111-111111111111'
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+    await apiFetch('/api/drive/entries')
+    const headers = fetchSpy.mock.calls[0][1]?.headers as Headers
+    const key = headers.get('X-Linger-Vault-Key')
+    expect(headers.get('X-Linger-Vault-User')).toBe(userId)
+    expect(key).toBeTruthy()
+    const envelope = await sealVaultValue(key!, userId, 'account-metadata', { folder_id: diaryText })
+    expect(envelope).not.toContain(diaryText)
+    await expect(openVaultValue(key!, userId, 'account-metadata', envelope)).resolves.toEqual({ folder_id: diaryText })
   })
 
   it('keeps diary search terms out of the request URL and forbids API response caching', async () => {
