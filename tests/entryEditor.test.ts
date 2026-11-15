@@ -890,6 +890,43 @@ test.describe('EntryEditor — unsaved navigation save', () => {
     await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
   })
 
+  test('saves edits made during a manual navigation save before leaving', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.evaluate(() => {
+      window.editorHarness.blockSave()
+      window.editorHarness.setPendingNavDate('2026-05-02')
+    })
+    await page.locator('.unsaved-nav-banner').getByRole('button', { name: 'Save' }).click()
+    await page.fill('textarea.editor-textarea', 'later edit')
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([])
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([{ date: '2026-05-02' }])
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'first edit', baseVersion: '1' },
+      { date: '2026-05-01', content: 'later edit', baseVersion: '2' },
+    ])
+  })
+
+  test('does not apply an old save result to a newly displayed date', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2026-05-02', 'second day', '5')
+      window.editorHarness.blockSave()
+    })
+    await page.fill('textarea.editor-textarea', 'first day edit')
+    await page.locator('textarea.editor-textarea').blur()
+    await page.evaluate(() => window.editorHarness.setDate('2026-05-02'))
+    await expect(page.locator('textarea.editor-textarea')).toHaveCount(1)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls().length)).toBe(1)
+    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
+  })
+
   test('auto-save mode persists and continues navigation without showing the banner', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
@@ -913,6 +950,25 @@ test.describe('EntryEditor — unsaved navigation save', () => {
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls.at(-1)).toMatchObject({ date: '2026-05-01', content: 'changed content', baseVersion: '1' })
     expect(await page.evaluate(() => window.editorHarness.cancelNavigationCalls())).toEqual([])
+  })
+
+  test('waits for an in-flight auto-save and saves later edits before navigating', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
+    await page.evaluate(() => window.editorHarness.blockSave())
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.locator('textarea.editor-textarea').blur()
+    await page.fill('textarea.editor-textarea', 'later edit')
+    await page.evaluate(() => window.editorHarness.setPendingNavDate('2026-05-02'))
+
+    await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([])
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([{ date: '2026-05-02' }])
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'first edit', baseVersion: '1' },
+      { date: '2026-05-01', content: 'later edit', baseVersion: '2' },
+    ])
   })
 
   test('auto-save mode falls back to the banner when the save fails', async ({ page }) => {
@@ -1633,9 +1689,33 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await routeS3Status(page, 'pending')
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
-    const badge = page.getByTitle('Syncing to AWS…')
+    const badge = page.getByTitle('Checking AWS backup status…')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
+    await expect(badge.locator('.editor-meta-badge-status')).toHaveClass(/editor-meta-badge-status--read/)
+  })
+
+  test('keeps the sync badges in place while the S3 status loads', async ({ page }) => {
+    let releaseStatus!: () => void
+    const statusReady = new Promise<void>(resolve => { releaseStatus = resolve })
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await statusReady
+      await route.fulfill({ json: { status: 'synced' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
+
+    const drive = page.getByTitle('Saved to Google Drive')
+    await expect(drive).toBeVisible()
+    await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
+    const before = await drive.boundingBox()
+    const syncBefore = await page.locator('.editor-meta-sync').boundingBox()
+    releaseStatus()
+    await expect(page.getByTitle('Backed up to AWS')).toBeVisible()
+    const after = await drive.boundingBox()
+    const syncAfter = await page.locator('.editor-meta-sync').boundingBox()
+    expect(after).toEqual(before)
+    expect(syncAfter).toEqual(syncBefore)
   })
 
   test('falls back to a retryable "couldn\'t check" badge instead of spinning forever if every status poll fails at the network level', async ({ page }) => {
@@ -1728,7 +1808,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.evaluate(() => window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2'))
     await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
 
-    await expect(page.getByTitle('Syncing to AWS…')).toBeVisible()
+    await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
     await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
   })
 
@@ -1862,6 +1942,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const badge = page.getByTitle('Syncing to AWS…')
     await expect(badge).toBeVisible()
     await expect(badge).toHaveClass(/editor-meta-badge--pending/)
+    await expect(badge.locator('.editor-meta-badge-status')).toHaveClass(/editor-meta-badge-status--write/)
     await expect(page.locator('.editor-meta-badge--unconfirmed')).toHaveCount(0)
   })
 

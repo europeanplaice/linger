@@ -68,4 +68,37 @@ test.describe('ExportButton', () => {
     await page.locator('.import-confirm-start').click()
     await expect.poll(() => page.evaluate(() => window.importButtonHarness.importCalls())).toEqual([entries])
   })
+
+  test('standalone viewer renders attack strings as text while searching', async ({ page, context }) => {
+    const content = '日本語 & "quotes"\n</script><script>window.__exportXss = true</script>' +
+      '<img src=x onerror="window.__exportXss = true"><svg onload="window.__exportXss = true"></svg>'
+    await page.goto(`${baseUrl}/tests/exportButtonHarness.html`)
+    await page.evaluate(entries => window.exportButtonHarness.render(entries), [
+      { date: '2026-05-01', content },
+      { date: '2026-05-02', content: 'ordinary entry' },
+    ])
+    await page.locator('.btn-export-modern').click()
+    const downloadPromise = page.waitForEvent('download')
+    await page.locator('.export-confirm-start').click()
+    const zip = await JSZip.loadAsync(await readDownload(await downloadPromise))
+    const html = await zip.file('index.html')!.async('string')
+
+    // A fresh document exercises the downloaded file without the app's CSP.
+    const viewer = await context.newPage()
+    await viewer.setContent(html)
+    await expect(viewer.locator('.entry-card')).toHaveCount(2)
+    expect(await viewer.locator('.entry-content').first().textContent()).toBe(content)
+    await expect(viewer.locator('#entries-container img, #entries-container svg')).toHaveCount(0)
+    expect(await viewer.evaluate(() => Reflect.get(window, '__exportXss'))).toBeUndefined()
+
+    await viewer.locator('#search').fill('ONERROR')
+    await expect(viewer.locator('.entry-card')).toHaveCount(1)
+    expect(await viewer.locator('.entry-content').textContent()).toBe(content)
+    await viewer.locator('#search').fill('no matching entries')
+    await expect(viewer.locator('.entry-card')).toHaveCount(0)
+    await viewer.locator('#search').fill('')
+    await expect(viewer.locator('.entry-card')).toHaveCount(2)
+    expect(await viewer.evaluate(() => Reflect.get(window, '__exportXss'))).toBeUndefined()
+    await viewer.close()
+  })
 })

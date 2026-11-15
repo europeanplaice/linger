@@ -224,6 +224,7 @@ export default function App() {
   }, [])
   const [autoSave, setAutoSave] = useState(() => localStorage.getItem('linger_autosave') === 'true')
   const [pendingDate, setPendingDate] = useState<string | null>(null)
+  const pendingRelatedFromRef = useRef<string | null>(null)
   const [accountSwitch, setAccountSwitch] = useState<AccountSwitchAvailability>('checking')
   const reauthAccountSubRef = useRef<string | null>(null)
   const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
@@ -399,8 +400,16 @@ export default function App() {
         return
       }
 
-      const hashDate = dateFromHash()
+      const hashDate = dateFromHash() ?? todayYmd()
       if (hashDate) {
+        if (hashDate !== selectedDateRef.current && editorDirtyRef.current) {
+          // Restore the visible entry's URL while the user decides whether to leave.
+          history.pushState(null, '', '#' + selectedDateRef.current)
+          pendingRelatedFromRef.current = null
+          setPendingDate(hashDate)
+          setSidebarOpen(false)
+          return
+        }
         setSelectedDate(hashDate)
         selectedDateRef.current = hashDate
       }
@@ -445,6 +454,7 @@ export default function App() {
   }, [])
 
   const selectDate = useCallback((d: string) => {
+    pendingRelatedFromRef.current = null
     if (d !== selectedDateRef.current && editorDirtyRef.current) {
       setPendingDate(d)
       return
@@ -453,20 +463,30 @@ export default function App() {
   }, [doNavigateToDate])
 
   const handleSelectRelated = useCallback((targetDate: string) => {
+    if (targetDate !== selectedDateRef.current && editorDirtyRef.current) {
+      pendingRelatedFromRef.current = selectedDateRef.current
+      setPendingDate(targetDate)
+      return
+    }
     setPreviousDate(selectedDateRef.current)
     doNavigateToDate(targetDate, true)
   }, [doNavigateToDate])
 
   const handleGoBack = useCallback(() => {
-    if (previousDate) doNavigateToDate(previousDate)
-  }, [previousDate, doNavigateToDate])
+    if (previousDate) selectDate(previousDate)
+  }, [previousDate, selectDate])
 
 
   const handlePendingNavigate = useCallback(() => {
-    if (pendingDate) doNavigateToDate(pendingDate)
+    if (!pendingDate) return
+    const relatedFrom = pendingRelatedFromRef.current
+    pendingRelatedFromRef.current = null
+    if (relatedFrom) setPreviousDate(relatedFrom)
+    doNavigateToDate(pendingDate, !!relatedFrom)
   }, [pendingDate, doNavigateToDate])
 
   const handleCancelNavigation = useCallback(() => {
+    pendingRelatedFromRef.current = null
     setPendingDate(null)
   }, [])
 
@@ -710,7 +730,7 @@ export default function App() {
 
   const passkeyGate = vaultStatus !== 'unlocked' ? (
     <PasskeyGate phase={vaultPhase} busy={vaultBusy} error={vaultError} setupEmail={setupEmail} onBeginSetup={beginSetup} onCancelSetup={cancelSetup}
-      onSetup={(remember, recovery) => { void setupPasskey(remember, recovery) }} onUnlock={(remember, preferImmediate) => { void unlockPasskey(remember, preferImmediate) }}
+      onSetup={(remember, recovery, token) => { void setupPasskey(remember, recovery, token) }} onUnlock={(remember, preferImmediate, token) => { void unlockPasskey(remember, preferImmediate, token) }}
       onClearError={clearVaultError} savedSessionConnection={savedSessionConnection} onRetrySavedSession={retrySavedSession} />
   ) : undefined
 

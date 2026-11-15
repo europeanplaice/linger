@@ -5,6 +5,7 @@ import { ChevronDown } from 'lucide-react'
 import { todayYmd, ymd, daysInMonth as daysInMonthUtil, parseYmd } from '../utils/date'
 import { useI18n } from '../i18n'
 import { useHolidays } from '../hooks/useHolidays'
+import { useSwipeNav } from '../hooks/useSwipeNav'
 import type { HolidayCountry } from '../utils/holidays'
 import type { Milestone } from '../types'
 
@@ -223,6 +224,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
   const todayRef = useRef(todayStr)
   todayRef.current = todayStr
   const directionRef = useRef(0)
+  const gridWrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const tick = () => {
@@ -313,6 +315,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
     if (month === 11) { setYear(y => y + 1); setMonth(0) }
     else setMonth(m => m + 1)
   }
+  useSwipeNav(gridWrapRef, { onSwipeLeft: next, onSwipeRight: prev })
   const goToToday = () => {
     if (todayParsed) {
       setDirectionFor(todayParsed.y, todayParsed.m - 1)
@@ -349,7 +352,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
       <div className="calendar-today-row">
         <button type="button" className="today-btn" onClick={goToToday}>{t.common.today}</button>
       </div>
-      <div className="calendar-grid-wrap">
+      <div className="calendar-grid-wrap" ref={gridWrapRef}>
         <AnimatePresence mode="popLayout" custom={directionRef.current} initial={false}>
           <motion.div
             key={`${year}-${month}`}

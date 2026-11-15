@@ -193,10 +193,11 @@ interface SyncBadgeProps {
   label: string
   onClick?: () => void
   busy?: boolean
+  direction?: 'read' | 'write'
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, busy, direction, children }: SyncBadgeProps) {
   const Badge = onClick ? 'button' : 'div'
   return (
     <Badge
@@ -209,7 +210,12 @@ function SyncBadge({ status, title, label, onClick, busy, children }: SyncBadgeP
     >
       <span className="editor-meta-badge-icon-wrapper">
         {busy ? <SpinnerIcon /> : children}
-        <span className={`editor-meta-badge-status editor-meta-badge-status--${status}`}>
+        <span className={`editor-meta-badge-status editor-meta-badge-status--${status}${direction ? ` editor-meta-badge-status--${direction}` : ''}`}>
+          {direction && (
+            <svg aria-hidden="true" viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
+              <path d={direction === 'read' ? 'M5 2v6M2.5 5.5L5 8l2.5-2.5' : 'M5 8V2M2.5 4.5L5 2l2.5 2.5'} fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
           {status === 'synced' && (
             <svg viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
               <path d="M2.5 5L4.5 7L7.5 3" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -266,6 +272,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   // A 'disabled' result from the poll is folded into null below (pollS3Status), so
   // this state itself never actually holds 'disabled' — narrow the type to match.
   const [s3Status, setS3Status] = useState<Exclude<S3EntrySyncStatus, 'disabled'> | null>(null)
+  const [s3PollDirection, setS3PollDirection] = useState<'read' | 'write'>('read')
   const s3DisabledRef = useRef(false)
   const s3PollTokenRef = useRef(0)
   // `${date}|${version}` of the last save-scoped poll that already triggered an
@@ -324,7 +331,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     : s3Status === 'failed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeFailed)
     : s3Status === 'unconfirmed' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnconfirmed)
     : s3Status === 'unverified' ? (s3Retrying ? t.entry.s3BadgeRetrying : t.entry.s3BadgeUnverified)
-    : t.entry.s3BadgePending // covers 'pending' and 'backfilling'
+    : s3Status === 'backfilling' || s3PollDirection === 'write' ? t.entry.s3BadgePending : t.entry.s3BadgeChecking
   const activeMilestones = useMemo(
     () => (milestones ?? []).filter(a => a.showBadge !== false),
     [milestones],
@@ -389,6 +396,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     // and kick an account-wide resync (see onS3StaleEntryDetected below) every time.
     const staleDetect = opts.staleDetect ?? true
     const token = ++s3PollTokenRef.current
+    setS3PollDirection(since || !staleDetect ? 'write' : 'read')
+    // Show the check immediately; a disabled response removes the badge.
+    setS3Status('pending')
     // True once any attempt in this polling run got a real reply from the server
     // (even 'pending') rather than a synthesized one from the .catch below — see
     // the exhausted branch's unconfirmed/unverified split.
@@ -457,6 +467,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         const autoRetryKey = `${forDate}|${version}`
         if (s3AutoRetryKeyRef.current !== autoRetryKey) {
           s3AutoRetryKeyRef.current = autoRetryKey
+          setS3PollDirection('write')
           setS3Status('pending')
           await retryS3EntrySync(forDate).catch(e => console.error('Failed to auto-retry S3 sync:', e))
           if (s3PollTokenRef.current !== token) return
@@ -645,6 +656,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     prevDateRef.current = date
   }
   const currentDateRef = useRef(date)
+  const dateGenerationRef = useRef(0)
+  if (currentDateRef.current !== date) dateGenerationRef.current += 1
   currentDateRef.current = date
 
   // Manual retry for the 'unconfirmed'/'failed' terminal states — nothing
@@ -746,10 +759,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   const pendingNavDateRef = useLatestRef(pendingNavDate)
   const onCancelNavigationRef = useLatestRef(onCancelNavigation)
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null)
 
-  const save = useCallback(async (explicit = true): Promise<boolean> => {
-    if (savingRef.current) return false
-    if (loadFailedRef.current) return false
+  const save = useCallback((explicit = true): Promise<boolean> => {
+    if (saveInFlightRef.current) return saveInFlightRef.current
+    if (savingRef.current || loadFailedRef.current) return Promise.resolve(false)
+    savingRef.current = true
     setSaving(true)
     if (explicit) startSave()
     if (explicit) {
@@ -757,52 +772,61 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setHasConflict(false)
       setConflictRemote(null)
     }
-    let success = false
-    try {
-      const currentText = textRef.current
-      const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
-      const newVersion = saved.meta.version ?? null
-      const newId = saved.meta.id
-      setSavedTextValue(currentText)
-      setBaseVersionValue(newVersion)
-      fileIdRef.current = newId
-      setPendingOfflineSave(false)
-      setStatus(savedStatus)
-      // Captured only once the Drive save itself has resolved — the mirror is
-      // scheduled server-side after that response, so starting the clock any
-      // earlier would burn part of the poll/grace budget on the Drive round
-      // trip instead of the mirror's own latency. Anchored to Drive's own
-      // modifiedTime (a server-side timestamp) rather than the local clock —
-      // a skewed browser clock would otherwise throw off the server's
-      // PENDING_GRACE_MS/freshSaveError comparisons against `since`.
-      const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
-      lastSaveAtRef.current = { date, at: attemptStartedAt }
-      pollS3Status(date, newVersion, attemptStartedAt)
-      success = true
-      if (explicit) haptics.success()
-      return true
-    } catch (e) {
-      // Offline: the fetch never reached Drive. Keep the edits dirty and let the
-      // reconnect effect retry rather than reporting a hard failure.
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        setPendingOfflineSave(true)
-        setStatus(t.entry.offlineSavePending)
+    const run = async (): Promise<boolean> => {
+      let success = false
+      const dateGeneration = dateGenerationRef.current
+      try {
+        const currentText = textRef.current
+        const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
+        if (dateGenerationRef.current !== dateGeneration) return true
+        const newVersion = saved.meta.version ?? null
+        const newId = saved.meta.id
+        setSavedTextValue(currentText)
+        setBaseVersionValue(newVersion)
+        fileIdRef.current = newId
+        setPendingOfflineSave(false)
+        setStatus(savedStatus)
+        // Captured only once the Drive save itself has resolved — the mirror is
+        // scheduled server-side after that response, so starting the clock any
+        // earlier would burn part of the poll/grace budget on the Drive round
+        // trip instead of the mirror's own latency. Anchored to Drive's own
+        // modifiedTime (a server-side timestamp) rather than the local clock —
+        // a skewed browser clock would otherwise throw off the server's
+        // PENDING_GRACE_MS/freshSaveError comparisons against `since`.
+        const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
+        lastSaveAtRef.current = { date, at: attemptStartedAt }
+        pollS3Status(date, newVersion, attemptStartedAt)
+        success = true
+        if (explicit) haptics.success()
+        return true
+      } catch (e) {
+        if (dateGenerationRef.current !== dateGeneration) return false
+        // Offline: the fetch never reached Drive. Keep the edits dirty and let the
+        // reconnect effect retry rather than reporting a hard failure.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setPendingOfflineSave(true)
+          setStatus(t.entry.offlineSavePending)
+          return false
+        }
+        if (e instanceof EntryConflictError) {
+          setHasConflict(true)
+          setConflictRemote(e.remote)
+          setStatus(t.entry.changedElsewhere)
+          haptics.warning()
+        } else {
+          setStatus(t.entry.saveFailed)
+          if (explicit) haptics.error()
+        }
         return false
+      } finally {
+        savingRef.current = false
+        setSaving(false)
+        if (explicit) completeSave(success)
       }
-      if (e instanceof EntryConflictError) {
-        setHasConflict(true)
-        setConflictRemote(e.remote)
-        setStatus(t.entry.changedElsewhere)
-        haptics.warning()
-      } else {
-        setStatus(t.entry.saveFailed)
-        if (explicit) haptics.error()
-      }
-      return false
-    } finally {
-      setSaving(false)
-      if (explicit) completeSave(success)
     }
+    const pending = run().finally(() => { saveInFlightRef.current = null })
+    saveInFlightRef.current = pending
+    return pending
   }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status])
 
   const handleExplicitSave = useCallback(async () => {
@@ -813,13 +837,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [save])
 
   const handleSaveAndNavigate = useCallback(async () => {
-    const ok = await save(true)
-    if (ok) {
-      onPendingNavigate()
-    } else {
-      onCancelNavigation()
-    }
-  }, [save, onPendingNavigate, onCancelNavigation])
+    const target = pendingNavDateRef.current
+    let ok: boolean
+    do {
+      ok = await save(true)
+    } while (ok && pendingNavDateRef.current === target && textRef.current !== savedTextRef.current)
+    if (pendingNavDateRef.current !== target) return
+    if (ok) onPendingNavigate()
+    else onCancelNavigation()
+  }, [save, onPendingNavigate, onCancelNavigation, pendingNavDateRef])
 
   // In auto-save mode a pending day switch shouldn't surface the "save before
   // leaving?" banner — just persist the edits and navigate. If the save fails
@@ -829,8 +855,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     let active = true
     setAutoNavSaving(true)
     void (async () => {
-      // Nothing unsaved (e.g. already flushed) — just navigate.
-      const ok = textRef.current === savedTextRef.current ? true : await save(false)
+      // A blur may already have started a save. Wait for it, and also persist
+      // any edits made while that request was in flight before leaving.
+      let ok = true
+      while (active && (saveInFlightRef.current || textRef.current !== savedTextRef.current)) {
+        ok = await save(false)
+        if (!ok) break
+      }
       if (!active) return
       setAutoNavSaving(false)
       if (ok) onPendingNavigate()
@@ -1552,27 +1583,32 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               </motion.span>
             )}
           </AnimatePresence>
-          <AnimatePresence initial={false}>
-            {!isDirty && !loading && !loadFailed && s3Status && (
-              <motion.span
-                key="s3"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
-              >
-                <SyncBadge
-                  status={s3Status}
-                  title={s3BadgeLabel}
-                  label={s3BadgeLabel}
-                  onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
-                  busy={s3Retrying}
-                >
-                  <S3BadgeIcon />
-                </SyncBadge>
-              </motion.span>
-            )}
-          </AnimatePresence>
+          {!isDirty && !loading && !loadFailed && baseVersion !== null && (
+            <span className="editor-meta-s3-slot">
+              <AnimatePresence initial={false}>
+                {s3Status && (
+                  <motion.span
+                    key="s3"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <SyncBadge
+                      status={s3Status}
+                      title={s3BadgeLabel}
+                      label={s3BadgeLabel}
+                      onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
+                      busy={s3Retrying}
+                      direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
+                    >
+                      <S3BadgeIcon />
+                    </SyncBadge>
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </span>
+          )}
         </div>
       </div>
       {shareMsgVisible && (

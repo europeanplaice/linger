@@ -3,7 +3,6 @@ import type { DriveRevisionMeta, LoadedDiaryEntry, DiaryEntry } from '../types'
 import { listRevisions, getRevisionContent } from '../api/driveRevisions'
 import { TokenExpiredError } from '../api/driveEntries'
 import { EntryConflictError } from './useDiary'
-import { escapeHtml } from '../utils/escapeHtml'
 
 const UNSAVED_ID = '__unsaved__'
 
@@ -46,7 +45,7 @@ export interface RevisionsState {
   previewContent: string | null
   previewLoading: boolean
   previewError: string | null
-  diffHtml: string | null
+  diffSegments: DiffSegment[] | null
   restoring: boolean
   restoreError: string | null
   selectRevision: (id: string) => void
@@ -79,18 +78,14 @@ const DEFAULT_MESSAGES = {
   restoreFailed: '復元に失敗しました。',
 }
 
-function escapeDiffHtml(value: string): string {
-  return escapeHtml(value).replace(/\n/g, '<br>')
-}
+export interface DiffSegment { value: string; kind: 'add' | 'remove' | 'plain' }
 
-async function buildDiffHtml(previous: string, current: string): Promise<string> {
+async function buildDiffSegments(previous: string, current: string): Promise<DiffSegment[]> {
   const Diff = await import('diff')
-  return Diff.diffWords(previous, current).map(part => {
-    const escaped = escapeDiffHtml(part.value)
-    if (part.added) return `<span class="diff-add-word">${escaped}</span>`
-    if (part.removed) return `<span class="diff-remove-word">${escaped}</span>`
-    return escaped
-  }).join('')
+  return Diff.diffWords(previous, current).map(part => ({
+    value: part.value,
+    kind: part.added ? 'add' : part.removed ? 'remove' : 'plain',
+  }))
 }
 
 export function useRevisions({ fileId, date, baseVersion, text, savedText, isDirty, autoSave, onSave, onRestored, onExpired, messages = DEFAULT_MESSAGES }: Params): RevisionsState {
@@ -103,7 +98,7 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
   const [previewContent, setPreviewContent] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const [diffHtml, setDiffHtml] = useState<string | null>(null)
+  const [diffSegments, setDiffSegments] = useState<DiffSegment[] | null>(null)
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
 
@@ -149,12 +144,12 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
       setPreviewLoading(false)
       setPreviewError(null)
       setPreviewContent(text)
-      buildDiffHtml(savedText, text)
-        .then(html => {
-          if (!cancelled) setDiffHtml(html)
+      buildDiffSegments(savedText, text)
+        .then(segments => {
+          if (!cancelled) setDiffSegments(segments)
         })
         .catch(() => {
-          if (!cancelled) setDiffHtml(null)
+          if (!cancelled) setDiffSegments(null)
         })
       return () => { cancelled = true }
     }
@@ -176,7 +171,7 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
     // Skip the loading state when content was prefetched — switching is instant.
     setPreviewLoading(!cache.has(selectedId))
     setPreviewError(null)
-    setDiffHtml(null)
+    setDiffSegments(null)
 
     const currentPromise = loadContent(selectedId)
     const prevId = idx < revisions.length - 1 ? revisions[idx + 1].id : null
@@ -191,16 +186,16 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
         try {
           const prev = await prevPromise
           if (!prev) {
-            setDiffHtml(null)
+            setDiffSegments(null)
             return
           }
           if (controller.signal.aborted) return
 
-          const html = await buildDiffHtml(prev.content, currentContent)
+          const segments = await buildDiffSegments(prev.content, currentContent)
           if (controller.signal.aborted) return
-          setDiffHtml(html)
+          setDiffSegments(segments)
         } catch {
-          setDiffHtml(null)
+          setDiffSegments(null)
         }
       }
     }).catch(e => {
@@ -246,7 +241,7 @@ export function useRevisions({ fileId, date, baseVersion, text, savedText, isDir
     previewContent,
     previewLoading,
     previewError,
-    diffHtml,
+    diffSegments,
     restoring,
     restoreError,
     selectRevision,

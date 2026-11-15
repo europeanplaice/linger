@@ -191,13 +191,13 @@ async function getCredential(envelope: OptionsEnvelope, signal?: AbortSignal, im
   catch (error) { prf.prfOutput?.fill(0); throw error }
 }
 
-export async function registerPasskey(signal?: AbortSignal, email?: string, onPhase?: (phase: PasskeyPhase) => void, recovery = false): Promise<{ userId: string }> {
+export async function registerPasskey(signal?: AbortSignal, email?: string, onPhase?: (phase: PasskeyPhase) => void, recovery = false, turnstileToken?: string): Promise<{ userId: string }> {
   requireWebAuthn()
   if (!recovery && email && await hasRegisteredPasskey(email)) {
     throw new AuthFlowError('already_registered', 'A Linger passkey was already registered in this browser for this email')
   }
   throwIfAborted(signal)
-  const envelope = await post<OptionsEnvelope>('register/options', undefined, undefined, signal)
+  const envelope = await post<OptionsEnvelope>('register/options', { 'cf-turnstile-response': turnstileToken }, undefined, signal)
   if (email) envelope.options.user = { ...(envelope.options.user as JsonObject), name: email, displayName: email }
   throwIfAborted(signal)
   if (!envelope.userId) throw new Error('Passkey registration did not include an internal account identifier')
@@ -220,11 +220,11 @@ export async function registerPasskey(signal?: AbortSignal, email?: string, onPh
   } finally { prfOutput.fill(0) }
 }
 
-export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = false): Promise<{ userId: string }> {
+export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = false, turnstileToken?: string): Promise<{ userId: string }> {
   requireWebAuthn()
   const immediate = preferImmediate && await supportsImmediateSignIn()
   throwIfAborted(signal)
-  const envelope = await post<OptionsEnvelope>('login/options', undefined, undefined, signal)
+  const envelope = await post<OptionsEnvelope>('login/options', { 'cf-turnstile-response': turnstileToken }, undefined, signal)
   throwIfAborted(signal)
   const { prfOutput, serialized } = await getCredential(envelope, signal, immediate)
   try {
@@ -238,7 +238,7 @@ export async function loginWithPasskey(signal?: AbortSignal, preferImmediate = f
 
 async function verifyManagementAction(userId: string, action: 'add' | 'delete', signal?: AbortSignal): Promise<void> {
   requireWebAuthn()
-  const envelope = await post<OptionsEnvelope>('login/options', undefined, undefined, signal)
+  const envelope = await post<OptionsEnvelope>('login/options', undefined, userId, signal)
   const options = requestOptions(envelope)
   // This assertion proves presence only; no PRF output is needed for the key.
   delete options.extensions

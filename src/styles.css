@@ -1163,6 +1163,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .calendar-grid-wrap {
   position: relative;
   overflow: hidden;
+  touch-action: pan-y pinch-zoom;
 }
 .calendar-nav {
   display: flex;
@@ -3820,6 +3821,13 @@ dialog.milestone-form-dialog::backdrop {
   flex-shrink: 0;
 }
 
+.editor-meta-s3-slot {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
 .editor-meta-badge {
   position: relative;
   display: inline-flex;
@@ -3905,6 +3913,21 @@ dialog.milestone-form-dialog::backdrop {
   border: 1.5px solid #f59e0b;
   animation: badge-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
   opacity: 0;
+}
+
+.editor-meta-badge-status--read {
+  background: #2563eb;
+}
+
+.editor-meta-badge-status--read::after {
+  border-color: #2563eb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-meta-badge-status--pending::after,
+  .editor-meta-badge-status--backfilling::after {
+    animation: none;
+  }
 }
 
 .editor-meta-badge-status--unconfirmed,
@@ -5230,6 +5253,13 @@ dialog.history-dialog::backdrop {
 @media (max-width: 640px), (pointer: coarse) {
   .editor-meta-sync {
     gap: 0;
+  }
+
+  .editor-meta-s3-slot {
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
   }
 
   button.editor-meta-badge {

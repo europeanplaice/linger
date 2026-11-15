@@ -25,7 +25,7 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
   const {
     revisions, showUnsavedEntry, listLoading, listError,
     selectedId, previewContent, previewLoading, previewError,
-    diffHtml, restoring, restoreError,
+    diffSegments, restoring, restoreError,
     selectRevision, restore,
   } = useRevisions({
     fileId,
@@ -186,17 +186,24 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
               {previewError}
             </motion.div>
           )}
-          {!previewLoading && !previewError && diffHtml && (
+          {!previewLoading && !previewError && diffSegments && (
             <motion.div
               key={`history-preview-diff-${selectedId ?? 'none'}`}
               className="history-preview-diff"
-              dangerouslySetInnerHTML={{ __html: diffHtml }}
               initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(4px)' }}
               animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
               transition={{ duration: 0.24, ease: 'easeOut' }}
-            />
+            >
+              {diffSegments.map((segment, index) => {
+                const content = segment.value.split('\n').flatMap((line, lineIndex) =>
+                  lineIndex === 0 ? [line] : [<br key={`br-${lineIndex}`} />, line],
+                )
+                if (segment.kind === 'plain') return <span key={index}>{content}</span>
+                return <span key={index} className={segment.kind === 'add' ? 'diff-add-word' : 'diff-remove-word'}>{content}</span>
+              })}
+            </motion.div>
           )}
-          {!previewLoading && !previewError && !diffHtml && (
+          {!previewLoading && !previewError && !diffSegments && (
             <motion.div
               key={`history-preview-text-${selectedId ?? 'none'}`}
               className="history-preview-diff"
