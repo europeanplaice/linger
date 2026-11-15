@@ -1,12 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { I18nProvider } from '../../src/i18n'
 import { PasskeyGate } from '../../src/components/PasskeyGate'
 import { LoginScreen } from '../../src/components/LoginScreen'
 import { clearVaultKey } from '../../src/lib/passkeyVault'
 import { clearTabSession } from '../../src/lib/tabSession'
 
-afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers() })
+const turnstile = vi.hoisted(() => ({ automatic: true, callback: undefined as ((token: string) => void) | undefined }))
+vi.mock('../../src/components/Turnstile', async () => {
+  const { useEffect, useRef } = await import('react')
+  return { Turnstile: ({ onToken, resetKey }: { onToken: (token: string) => void; resetKey: number }) => {
+    const callback = useRef(onToken)
+    callback.current = onToken
+    useEffect(() => {
+      turnstile.callback = value => callback.current(value)
+      if (turnstile.automatic) turnstile.callback('test-token')
+      return () => { turnstile.callback = undefined }
+    }, [resetKey])
+    return null
+  } }
+})
+
+afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers(); turnstile.automatic = true; turnstile.callback = undefined })
 
 function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
   const actions = { onSetup: vi.fn(), onBeginSetup: vi.fn(), onCancelSetup: vi.fn(), onUnlock: vi.fn() }
@@ -15,13 +30,23 @@ function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
 }
 
 describe('authentication guidance', () => {
+  it('starts passkey sign-in before Turnstile finishes', async () => {
+    turnstile.automatic = false
+    const actions = gate()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
+    expect(actions.onUnlock).toHaveBeenCalledOnce()
+    const pending = actions.onUnlock.mock.calls[0][2] as Promise<string>
+    expect(pending).toBeInstanceOf(Promise)
+    act(() => turnstile.callback?.('later-token'))
+    await expect(pending).resolves.toBe('later-token')
+  })
   it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
     expect(screen.getByText('Having trouble with your passkey?')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenCalledWith(0, true)
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, true, 'test-token')
     expect(actions.onBeginSetup).not.toHaveBeenCalled()
     expect(actions.onSetup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Get started with a Google account' }))
@@ -44,7 +69,7 @@ describe('authentication guidance', () => {
     expect(actions.onSetup).not.toHaveBeenCalled()
     expect(screen.queryByRole('alert')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false)
+    expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false, 'test-token')
     renderGate(null, true)
     expect(screen.getByRole('heading', { name: 'Choose how to continue' })).toBeTruthy()
   })
@@ -69,7 +94,7 @@ describe('authentication guidance', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByText('Create a passkey').getAttribute('aria-current')).toBe('step')
     fireEvent.click(screen.getByRole('button', { name: 'Create my first Linger passkey' }))
-    expect(actions.onSetup).toHaveBeenCalledWith(0, false)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, false, 'test-token')
   })
 
   it('offers sign-in instead of registration for an email already used in this browser', () => {
@@ -77,7 +102,7 @@ describe('authentication guidance', () => {
     expect(screen.getByRole('alert').textContent).toContain('already been used')
     expect(screen.queryByRole('button', { name: 'Create my first Linger passkey' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenCalledWith(0, false)
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, false, 'test-token')
     expect(actions.onSetup).not.toHaveBeenCalled()
   })
 
@@ -92,7 +117,7 @@ describe('authentication guidance', () => {
     expect(actions.onSetup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
     fireEvent.click(create)
-    expect(actions.onSetup).toHaveBeenCalledWith(0, true)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, true, 'test-token')
   })
 
   it('announces Google connection progress separately from passkey verification', () => {

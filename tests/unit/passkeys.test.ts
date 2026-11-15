@@ -63,12 +63,30 @@ async function cancellableLogin() {
   })
   const get = vi.fn().mockResolvedValue(credential)
   vi.stubGlobal('navigator', { credentials: { get } })
-  const fetchMock = vi.fn(async () => Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
+  const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
   vi.stubGlobal('fetch', fetchMock)
   const controller = new AbortController()
   const copy = vi.spyOn(vault, 'copyPrfOutput')
   return { userId, credentialId, wrapper, credential, get, fetchMock, controller, copy }
 }
+
+it('opens the passkey prompt while Turnstile is still pending and verifies only after a token arrives', async () => {
+  const { userId, credentialId, wrapper, get, fetchMock } = await cancellableLogin()
+  const token = deferred<string>()
+  const prompted = deferred<void>()
+  const existingGet = get.getMockImplementation()!
+  get.mockImplementationOnce((...args) => { prompted.resolve(); return existingGet(...args) })
+  fetchMock.mockResolvedValueOnce(Response.json({ options: { challenge: 'AQ' }, prfInput: 'Ag' }))
+    .mockResolvedValueOnce(Response.json({ userId, credentialId, wrapper }))
+  const login = loginWithPasskey(undefined, false, token.promise)
+  await prompted.promise
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  token.resolve('verified-token')
+  await expect(login).resolves.toEqual({ userId })
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+  expect(body['cf-turnstile-response']).toBe('verified-token')
+})
 
 it.each([false, true])('ignores a late WebAuthn result without verifying or unlocking it (immediate: %s)', async immediate => {
   const { credential, get, fetchMock, controller, copy } = await cancellableLogin()

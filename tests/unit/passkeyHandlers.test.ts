@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
+import { createPasskeyTestEnv as createBasePasskeyTestEnv } from '../helpers/passkeyAuth'
 import { deferred } from '../helpers/deferred'
 
 const webauthn = vi.hoisted(() => ({
@@ -15,6 +15,11 @@ import { addOptions, addVerify, deleteCredential, listCredentials, loginOptions,
 import { createPasskeySession, sessionStorageId } from '../../functions/_shared/authStore'
 
 const origin = 'https://example.com'
+async function createPasskeyTestEnv(...args: Parameters<typeof createBasePasskeyTestEnv>) {
+  const result = await createBasePasskeyTestEnv(...args)
+  result.env.TURNSTILE_SECRET = 'test-secret'
+  return result
+}
 const challenge = 'test-challenge-value'
 const credentialId = 'credential-id-for-test'
 const wrappedMasterKey = btoa(String.fromCharCode(...new Uint8Array(60)))
@@ -42,7 +47,9 @@ function request(path: string, body?: unknown, headers: HeadersInit = {}): Reque
   return new Request(`${origin}${path}`, {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json', ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: (path.endsWith('/options') && path.includes('/register/')) || path.endsWith('/login/verify')
+      ? JSON.stringify({ ...(body as object ?? {}), 'cf-turnstile-response': path.includes('/register/') ? 'register:example.com' : 'login:example.com' })
+      : body === undefined ? undefined : JSON.stringify(body),
   })
 }
 
@@ -62,11 +69,15 @@ function seedCredential(db: Awaited<ReturnType<typeof createPasskeyTestEnv>>['db
     .run(id, userId, new Uint8Array([1, 2, 3]), counter, prfSalt, wrappedMasterKey, Date.now())
 }
 
-afterEach(() => { vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('passkey handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const [action, hostname] = (init.body as URLSearchParams).get('response')!.split(':')
+      return Response.json({ success: true, action, hostname })
+    }))
     webauthn.generateRegistrationOptions.mockResolvedValue({ challenge, rp: { id: 'example.com' } })
     webauthn.generateAuthenticationOptions.mockResolvedValue({ challenge, allowCredentials: [] })
     webauthn.verifyRegistrationResponse.mockResolvedValue({
@@ -74,6 +85,40 @@ describe('passkey handlers', () => {
       registrationInfo: { credential: { id: credentialId, publicKey: new Uint8Array([1, 2, 3]), counter: 0 } },
     })
     webauthn.verifyAuthenticationResponse.mockResolvedValue({ verified: true, authenticationInfo: { newCounter: 2 } })
+  })
+
+  it('requires a valid Turnstile result before completing login or starting registration', async () => {
+    const { env, db } = await createPasskeyTestEnv()
+    const bare = (token?: string) => new Request(`${origin}/auth/passkey/login/verify`, {
+      method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ response: assertionResponse, 'cf-turnstile-response': token }),
+    })
+    expect((await loginVerify(bare(), env)).status).toBe(403)
+    const fetchMock = vi.mocked(fetch)
+    for (const result of [
+      { success: false, action: 'login', hostname: 'example.com' },
+      { success: true, action: 'register', hostname: 'example.com' },
+      { success: true, action: 'login', hostname: 'attacker.example' },
+    ]) {
+      fetchMock.mockResolvedValueOnce(Response.json(result))
+      expect((await loginVerify(bare('login:example.com'), env)).status).toBe(403)
+    }
+    fetchMock.mockRejectedValueOnce(new Error('network failure'))
+    expect((await registrationOptions(request('/auth/passkey/register/options'), env)).status).toBe(403)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_challenges').get()).toEqual({ count: 0 })
+    db.close()
+  })
+
+  it('accepts the staging hostname only for the staging deployment', async () => {
+    const staging = 'https://staging.linger.europeanplaice.com'
+    const { env, db } = await createPasskeyTestEnv({}, { domain: staging })
+    const stagingRequest = () => new Request(`${staging}/auth/passkey/register/options`, {
+      method: 'POST', headers: { Origin: staging, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'cf-turnstile-response': 'register:staging.linger.europeanplaice.com' }),
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ success: true, action: 'register', hostname: 'linger.europeanplaice.com' }))
+    expect((await registrationOptions(stagingRequest(), env)).status).toBe(403)
+    expect((await registrationOptions(stagingRequest(), env)).status).toBe(200)
+    db.close()
   })
 
   it('stores credential names encrypted and binds each name to its credential', async () => {
@@ -138,6 +183,7 @@ describe('passkey handlers', () => {
     const proxiedRequest = new Request('http://localhost:8788/auth/passkey/register/options', {
       method: 'POST',
       headers: { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' },
+      body: JSON.stringify({ 'cf-turnstile-response': 'register:localhost' }),
     })
     expect((await registrationOptions(proxiedRequest, env)).status).toBe(200)
     db.close()
@@ -160,7 +206,7 @@ describe('passkey handlers', () => {
     const proxyRequest = (path: string, body?: unknown, headers: HeadersInit = {}) => new Request(`http://localhost:8788${path}`, {
       method: 'POST',
       headers: { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site', 'Content-Type': 'application/json', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: path.endsWith('/register/options') ? JSON.stringify({ 'cf-turnstile-response': 'register:localhost' }) : body === undefined ? undefined : JSON.stringify(body),
     })
     const optionsResponse = await registrationOptions(proxyRequest('/auth/passkey/register/options', {}), env)
     const options = await optionsResponse.json() as { userId: string; prfSalt: string }

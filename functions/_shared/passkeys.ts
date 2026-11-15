@@ -234,9 +234,27 @@ async function validateUnlockedProfile(request: Request, env: PasskeyEnv, userId
   } catch { return false }
 }
 
+async function verifyTurnstile(request: Request, env: Env, action: 'login' | 'register', providedToken?: unknown): Promise<boolean> {
+  const token = action === 'login' ? providedToken : (await readJson(request.clone() as unknown as Request))?.['cf-turnstile-response']
+  if (!env.TURNSTILE_SECRET || typeof token !== 'string' || !token.length || token.length > 2048) return false
+  try {
+    const hostname = new URL(env.SESSION_DOMAIN).hostname
+    const payload = new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token })
+    const ip = request.headers.get('CF-Connecting-IP')
+    if (ip) payload.set('remoteip', ip)
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST', body: payload, signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) return false
+    const result = await response.json() as { success?: boolean; action?: string; hostname?: string }
+    return result.success === true && result.action === action && result.hostname === hostname
+  } catch { return false }
+}
+
 export async function registrationOptions(request: Request, env: Env): Promise<Response> {
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
+  if (!await verifyTurnstile(request, env, 'register')) return jsonResponse({ error: 'Verification failed' }, 403)
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
   try {
     const { rpID } = relyingParty(request, env)
@@ -335,6 +353,7 @@ export async function loginVerify(request: Request, env: Env): Promise<Response>
   const body = await readJson(request)
   const managementAction = body?.managementAction === 'add' || body?.managementAction === 'delete'
   if (!body || !validWebAuthnResponse(body.response, !managementAction)) return withClearedChallengeCookie(jsonResponse({ error: 'Invalid passkey response' }, 400), env)
+  if (!managementAction && !await verifyTurnstile(request, env, 'login', body['cf-turnstile-response'])) return withClearedChallengeCookie(jsonResponse({ error: 'Verification failed' }, 403), env)
   const challenge = await consumeChallenge(request, env, 'login')
   if (!challenge) return withClearedChallengeCookie(jsonResponse({ error: 'Challenge expired' }, 400), env)
   const response = body.response as AuthenticationResponseJSON

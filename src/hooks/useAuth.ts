@@ -47,11 +47,11 @@ export interface AuthState {
   retrySavedSession: () => void
   offerRememberDevice: boolean
   dismissRememberDevice: () => void
-  setupPasskey: (remember?: RememberDays, recovery?: boolean) => Promise<void>
+  setupPasskey: (remember?: RememberDays, recovery?: boolean, token?: string) => Promise<void>
   setupEmail: string | null
   beginSetup: (recovery?: boolean) => void
   cancelSetup: () => void
-  unlockPasskey: (remember?: RememberDays, preferImmediate?: boolean) => Promise<void>
+  unlockPasskey: (remember?: RememberDays, preferImmediate?: boolean, token?: string | Promise<string>) => Promise<void>
   addPasskey: () => Promise<void>
   lockVault: () => void
   clearVaultError: () => void
@@ -395,7 +395,7 @@ export function useAuth(): AuthState {
     setVaultError(null)
   }, [])
 
-  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false, recovery = false) => {
+  const runVaultAction = useCallback(async (action: 'setup' | 'unlock' | 'add', remember: RememberDays = 0, preferImmediate = false, recovery = false, token?: string | Promise<string>) => {
     if (action !== 'add') {
       // Explicit authentication supersedes startup restoration. A delayed
       // response must not invalidate the account unlocked by this operation.
@@ -414,11 +414,11 @@ export function useAuth(): AuthState {
     try {
       if (action === 'setup') {
         if (!setupEmail) throw new Error('Connect Google before creating a passkey')
-        const result = await registerPasskey(controller.signal, setupEmail, onPhase, recovery)
+        const result = await registerPasskey(controller.signal, setupEmail, onPhase, recovery, typeof token === 'string' ? token : undefined)
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'unlock') {
-        const result = await loginWithPasskey(controller.signal, preferImmediate)
+        const result = await loginWithPasskey(controller.signal, preferImmediate, token)
         if (revision !== vaultRevision.current) { if (getVaultUserId() === result.userId) clearVaultKey(); return }
         setVaultUserId(result.userId)
       } else if (action === 'add') {
@@ -492,8 +492,8 @@ export function useAuth(): AuthState {
     }
   }, [email, setupEmail, retryGoogleConnection, offerRememberDeviceChoice])
 
-  const setupPasskey = useCallback((remember: RememberDays = 0, recovery = false) => runVaultAction('setup', remember, false, recovery), [runVaultAction])
-  const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false) => runVaultAction('unlock', remember, preferImmediate), [runVaultAction])
+  const setupPasskey = useCallback((remember: RememberDays = 0, recovery = false, token?: string) => runVaultAction('setup', remember, false, recovery, token), [runVaultAction])
+  const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false, token?: string | Promise<string>) => runVaultAction('unlock', remember, preferImmediate, false, token), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
     setOfferRememberDevice(false)

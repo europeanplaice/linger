@@ -81,6 +81,10 @@ job before browser tests start. Run `npm run test:ci` to check the resolver loca
 
 To deploy your own fork, configure a Google Cloud OAuth web client with the Drive API enabled and your `/auth/callback` URL registered. Provision Cloudflare Pages, D1, KV, and the `s3-workflows` Worker; configure the bindings in the Wrangler files and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `SESSION_DOMAIN` for both Pages and the Worker. Apply the auth migrations as described in [D1-MIGRATION.md](D1-MIGRATION.md), add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets, and update the project names and domains in the deployment workflow for your fork.
 
+Passkey sign-in and registration also require the Turnstile widget secret as the Pages secret `TURNSTILE_SECRET` in each deployed environment. The site key is configured in `src/components/Turnstile.tsx`; use a widget registered for the frontend hostname in `SESSION_DOMAIN`. For local Pages development, add the secret to the ignored `.dev.vars` file and register the local hostname on the widget. Requests fail closed if the secret or verification is unavailable.
+
+For staging, set `TURNSTILE_SECRET` on the separate `linger-staging` Pages project and ensure `SESSION_DOMAIN` is `https://staging.linger.europeanplaice.com`. The widget must authorize that hostname (or its parent `linger.europeanplaice.com`). The backend checks the exact hostname for the active environment.
+
 ## Stack
 
 React, TypeScript, and Vite on Cloudflare Pages and Workers. Google Drive stores diary files; D1 stores passkey credentials and encrypted account metadata. Durable Objects coordinate diary writes. Optional S3 backup uses authorized requests while the app is open. Passkey unlock protects Cloudflare metadata; diary files in Drive and S3 stay plaintext. See [passkey privacy and rollout](PASSKEY-PRIVACY.md) for key handling, recovery, and migration requirements.
