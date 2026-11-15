@@ -6,6 +6,14 @@ import { LoginScreen } from '../../src/components/LoginScreen'
 import { clearVaultKey } from '../../src/lib/passkeyVault'
 import { clearTabSession } from '../../src/lib/tabSession'
 
+vi.mock('../../src/components/Turnstile', async () => {
+  const { useEffect } = await import('react')
+  return { Turnstile: ({ onToken, resetKey }: { onToken: (token: string) => void; resetKey: number }) => {
+    useEffect(() => { onToken('test-token') }, [onToken, resetKey])
+    return null
+  } }
+})
+
 afterEach(() => { clearTabSession(); clearVaultKey(); vi.useRealTimers() })
 
 function gate(props: Partial<Parameters<typeof PasskeyGate>[0]> = {}) {
@@ -21,7 +29,7 @@ describe('authentication guidance', () => {
     expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
     expect(screen.getByText('Having trouble with your passkey?')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenCalledWith(0, true)
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, true, 'test-token')
     expect(actions.onBeginSetup).not.toHaveBeenCalled()
     expect(actions.onSetup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Get started with a Google account' }))
@@ -44,7 +52,7 @@ describe('authentication guidance', () => {
     expect(actions.onSetup).not.toHaveBeenCalled()
     expect(screen.queryByRole('alert')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false)
+    expect(actions.onUnlock).toHaveBeenLastCalledWith(0, false, 'test-token')
     renderGate(null, true)
     expect(screen.getByRole('heading', { name: 'Choose how to continue' })).toBeTruthy()
   })
@@ -69,7 +77,7 @@ describe('authentication guidance', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.getByText('Create a passkey').getAttribute('aria-current')).toBe('step')
     fireEvent.click(screen.getByRole('button', { name: 'Create my first Linger passkey' }))
-    expect(actions.onSetup).toHaveBeenCalledWith(0, false)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, false, 'test-token')
   })
 
   it('offers sign-in instead of registration for an email already used in this browser', () => {
@@ -77,7 +85,7 @@ describe('authentication guidance', () => {
     expect(screen.getByRole('alert').textContent).toContain('already been used')
     expect(screen.queryByRole('button', { name: 'Create my first Linger passkey' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
-    expect(actions.onUnlock).toHaveBeenCalledWith(0, false)
+    expect(actions.onUnlock).toHaveBeenCalledWith(0, false, 'test-token')
     expect(actions.onSetup).not.toHaveBeenCalled()
   })
 
@@ -92,7 +100,7 @@ describe('authentication guidance', () => {
     expect(actions.onSetup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('checkbox', { name: /I understand/ }))
     fireEvent.click(create)
-    expect(actions.onSetup).toHaveBeenCalledWith(0, true)
+    expect(actions.onSetup).toHaveBeenCalledWith(0, true, 'test-token')
   })
 
   it('announces Google connection progress separately from passkey verification', () => {

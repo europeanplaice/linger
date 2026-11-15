@@ -18,6 +18,7 @@ export interface Env {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   SESSION_DOMAIN: string
+  TURNSTILE_SECRET?: string
   CF_PAGES_COMMIT_SHA?: string
   S3_WORKFLOW_SERVICE?: S3WorkflowService
   S3_SYNC_INDEX?: { getByName(name: string): { backup(input: S3BackupRequest): Promise<Response> } }

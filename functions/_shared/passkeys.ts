@@ -234,9 +234,28 @@ async function validateUnlockedProfile(request: Request, env: PasskeyEnv, userId
   } catch { return false }
 }
 
+async function verifyTurnstile(request: Request, env: Env, action: 'login' | 'register'): Promise<boolean> {
+  const body = await readJson(request.clone() as unknown as Request)
+  const token = body?.['cf-turnstile-response']
+  if (!env.TURNSTILE_SECRET || typeof token !== 'string' || !token.length || token.length > 2048) return false
+  try {
+    const hostname = new URL(env.SESSION_DOMAIN).hostname
+    const payload = new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token })
+    const ip = request.headers.get('CF-Connecting-IP')
+    if (ip) payload.set('remoteip', ip)
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST', body: payload, signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) return false
+    const result = await response.json() as { success?: boolean; action?: string; hostname?: string }
+    return result.success === true && result.action === action && result.hostname === hostname
+  } catch { return false }
+}
+
 export async function registrationOptions(request: Request, env: Env): Promise<Response> {
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
+  if (!await verifyTurnstile(request, env, 'register')) return jsonResponse({ error: 'Verification failed' }, 403)
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
   try {
     const { rpID } = relyingParty(request, env)
@@ -317,6 +336,9 @@ export async function loginOptions(request: Request, env: Env): Promise<Response
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
+  const currentUser = await authenticatedUser(request, env)
+  const management = currentUser && await validateUnlockedProfile(request, env, currentUser)
+  if (!management && !await verifyTurnstile(request, env, 'login')) return jsonResponse({ error: 'Verification failed' }, 403)
   try {
     const { rpID } = relyingParty(request, env)
     const options = await generateAuthenticationOptions({
