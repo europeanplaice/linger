@@ -890,6 +890,43 @@ test.describe('EntryEditor — unsaved navigation save', () => {
     await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
   })
 
+  test('saves edits made during a manual navigation save before leaving', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.evaluate(() => {
+      window.editorHarness.blockSave()
+      window.editorHarness.setPendingNavDate('2026-05-02')
+    })
+    await page.locator('.unsaved-nav-banner').getByRole('button', { name: 'Save' }).click()
+    await page.fill('textarea.editor-textarea', 'later edit')
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([])
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([{ date: '2026-05-02' }])
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'first edit', baseVersion: '1' },
+      { date: '2026-05-01', content: 'later edit', baseVersion: '2' },
+    ])
+  })
+
+  test('does not apply an old save result to a newly displayed date', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2026-05-02', 'second day', '5')
+      window.editorHarness.blockSave()
+    })
+    await page.fill('textarea.editor-textarea', 'first day edit')
+    await page.locator('textarea.editor-textarea').blur()
+    await page.evaluate(() => window.editorHarness.setDate('2026-05-02'))
+    await expect(page.locator('textarea.editor-textarea')).toHaveCount(1)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls().length)).toBe(1)
+    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
+  })
+
   test('auto-save mode persists and continues navigation without showing the banner', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, {
@@ -913,6 +950,25 @@ test.describe('EntryEditor — unsaved navigation save', () => {
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls.at(-1)).toMatchObject({ date: '2026-05-01', content: 'changed content', baseVersion: '1' })
     expect(await page.evaluate(() => window.editorHarness.cancelNavigationCalls())).toEqual([])
+  })
+
+  test('waits for an in-flight auto-save and saves later edits before navigating', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
+    await page.evaluate(() => window.editorHarness.blockSave())
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.locator('textarea.editor-textarea').blur()
+    await page.fill('textarea.editor-textarea', 'later edit')
+    await page.evaluate(() => window.editorHarness.setPendingNavDate('2026-05-02'))
+
+    await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
+    expect(await page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([])
+    await page.evaluate(() => window.editorHarness.unblockSave())
+    await expect.poll(() => page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([{ date: '2026-05-02' }])
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: 'first edit', baseVersion: '1' },
+      { date: '2026-05-01', content: 'later edit', baseVersion: '2' },
+    ])
   })
 
   test('auto-save mode falls back to the banner when the save fails', async ({ page }) => {

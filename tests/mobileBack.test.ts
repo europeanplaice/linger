@@ -119,3 +119,26 @@ test('mobile date selection confirms before leaving unsaved edits', async ({ pag
   await expect(page.locator('.editor-textarea')).toHaveCount(1)
   await expect(editor).toHaveValue('')
 })
+
+test('browser back protects unsaved edits and restores the current URL on cancel', async ({ page }) => {
+  await page.goto(`${baseUrl}/#2026-05-01`)
+  const editor = page.locator('.editor-textarea')
+  await expect(editor).toBeVisible()
+  await page.getByRole('button', { name: 'Next day' }).click()
+  await expect(page).toHaveURL(/#2026-05-02$/)
+  await expect(editor).toHaveCount(1)
+  await expect(editor).toBeEditable()
+  await editor.fill('unsaved on second day')
+
+  await page.goBack()
+  await expect(page.locator('.unsaved-nav-banner')).toBeVisible()
+  await expect(page).toHaveURL(/#2026-05-02$/)
+  await page.locator('.unsaved-nav-banner').getByRole('button', { name: 'Cancel' }).click()
+  await expect(editor).toHaveValue('unsaved on second day')
+
+  await page.goBack()
+  await page.locator('.unsaved-nav-banner').getByRole('button', { name: 'Discard' }).click()
+  await expect(page).toHaveURL(/#2026-05-01$/)
+  await expect(editor).toHaveCount(1)
+  await expect(editor).toHaveValue('')
+})

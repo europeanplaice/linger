@@ -656,6 +656,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     prevDateRef.current = date
   }
   const currentDateRef = useRef(date)
+  const dateGenerationRef = useRef(0)
+  if (currentDateRef.current !== date) dateGenerationRef.current += 1
   currentDateRef.current = date
 
   // Manual retry for the 'unconfirmed'/'failed' terminal states — nothing
@@ -757,10 +759,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   const pendingNavDateRef = useLatestRef(pendingNavDate)
   const onCancelNavigationRef = useLatestRef(onCancelNavigation)
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null)
 
-  const save = useCallback(async (explicit = true): Promise<boolean> => {
-    if (savingRef.current) return false
-    if (loadFailedRef.current) return false
+  const save = useCallback((explicit = true): Promise<boolean> => {
+    if (saveInFlightRef.current) return saveInFlightRef.current
+    if (savingRef.current || loadFailedRef.current) return Promise.resolve(false)
+    savingRef.current = true
     setSaving(true)
     if (explicit) startSave()
     if (explicit) {
@@ -768,52 +772,61 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setHasConflict(false)
       setConflictRemote(null)
     }
-    let success = false
-    try {
-      const currentText = textRef.current
-      const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
-      const newVersion = saved.meta.version ?? null
-      const newId = saved.meta.id
-      setSavedTextValue(currentText)
-      setBaseVersionValue(newVersion)
-      fileIdRef.current = newId
-      setPendingOfflineSave(false)
-      setStatus(savedStatus)
-      // Captured only once the Drive save itself has resolved — the mirror is
-      // scheduled server-side after that response, so starting the clock any
-      // earlier would burn part of the poll/grace budget on the Drive round
-      // trip instead of the mirror's own latency. Anchored to Drive's own
-      // modifiedTime (a server-side timestamp) rather than the local clock —
-      // a skewed browser clock would otherwise throw off the server's
-      // PENDING_GRACE_MS/freshSaveError comparisons against `since`.
-      const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
-      lastSaveAtRef.current = { date, at: attemptStartedAt }
-      pollS3Status(date, newVersion, attemptStartedAt)
-      success = true
-      if (explicit) haptics.success()
-      return true
-    } catch (e) {
-      // Offline: the fetch never reached Drive. Keep the edits dirty and let the
-      // reconnect effect retry rather than reporting a hard failure.
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        setPendingOfflineSave(true)
-        setStatus(t.entry.offlineSavePending)
+    const run = async (): Promise<boolean> => {
+      let success = false
+      const dateGeneration = dateGenerationRef.current
+      try {
+        const currentText = textRef.current
+        const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
+        if (dateGenerationRef.current !== dateGeneration) return true
+        const newVersion = saved.meta.version ?? null
+        const newId = saved.meta.id
+        setSavedTextValue(currentText)
+        setBaseVersionValue(newVersion)
+        fileIdRef.current = newId
+        setPendingOfflineSave(false)
+        setStatus(savedStatus)
+        // Captured only once the Drive save itself has resolved — the mirror is
+        // scheduled server-side after that response, so starting the clock any
+        // earlier would burn part of the poll/grace budget on the Drive round
+        // trip instead of the mirror's own latency. Anchored to Drive's own
+        // modifiedTime (a server-side timestamp) rather than the local clock —
+        // a skewed browser clock would otherwise throw off the server's
+        // PENDING_GRACE_MS/freshSaveError comparisons against `since`.
+        const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
+        lastSaveAtRef.current = { date, at: attemptStartedAt }
+        pollS3Status(date, newVersion, attemptStartedAt)
+        success = true
+        if (explicit) haptics.success()
+        return true
+      } catch (e) {
+        if (dateGenerationRef.current !== dateGeneration) return false
+        // Offline: the fetch never reached Drive. Keep the edits dirty and let the
+        // reconnect effect retry rather than reporting a hard failure.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setPendingOfflineSave(true)
+          setStatus(t.entry.offlineSavePending)
+          return false
+        }
+        if (e instanceof EntryConflictError) {
+          setHasConflict(true)
+          setConflictRemote(e.remote)
+          setStatus(t.entry.changedElsewhere)
+          haptics.warning()
+        } else {
+          setStatus(t.entry.saveFailed)
+          if (explicit) haptics.error()
+        }
         return false
+      } finally {
+        savingRef.current = false
+        setSaving(false)
+        if (explicit) completeSave(success)
       }
-      if (e instanceof EntryConflictError) {
-        setHasConflict(true)
-        setConflictRemote(e.remote)
-        setStatus(t.entry.changedElsewhere)
-        haptics.warning()
-      } else {
-        setStatus(t.entry.saveFailed)
-        if (explicit) haptics.error()
-      }
-      return false
-    } finally {
-      setSaving(false)
-      if (explicit) completeSave(success)
     }
+    const pending = run().finally(() => { saveInFlightRef.current = null })
+    saveInFlightRef.current = pending
+    return pending
   }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status])
 
   const handleExplicitSave = useCallback(async () => {
@@ -824,13 +837,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [save])
 
   const handleSaveAndNavigate = useCallback(async () => {
-    const ok = await save(true)
-    if (ok) {
-      onPendingNavigate()
-    } else {
-      onCancelNavigation()
-    }
-  }, [save, onPendingNavigate, onCancelNavigation])
+    const target = pendingNavDateRef.current
+    let ok: boolean
+    do {
+      ok = await save(true)
+    } while (ok && pendingNavDateRef.current === target && textRef.current !== savedTextRef.current)
+    if (pendingNavDateRef.current !== target) return
+    if (ok) onPendingNavigate()
+    else onCancelNavigation()
+  }, [save, onPendingNavigate, onCancelNavigation, pendingNavDateRef])
 
   // In auto-save mode a pending day switch shouldn't surface the "save before
   // leaving?" banner — just persist the edits and navigate. If the save fails
@@ -840,8 +855,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     let active = true
     setAutoNavSaving(true)
     void (async () => {
-      // Nothing unsaved (e.g. already flushed) — just navigate.
-      const ok = textRef.current === savedTextRef.current ? true : await save(false)
+      // A blur may already have started a save. Wait for it, and also persist
+      // any edits made while that request was in flight before leaving.
+      let ok = true
+      while (active && (saveInFlightRef.current || textRef.current !== savedTextRef.current)) {
+        ok = await save(false)
+        if (!ok) break
+      }
       if (!active) return
       setAutoNavSaving(false)
       if (ok) onPendingNavigate()
