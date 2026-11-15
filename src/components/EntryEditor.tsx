@@ -312,6 +312,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [hasConflict, setHasConflict] = useState(false)
   const [conflictRemote, setConflictRemote] = useState<LoadedDiaryEntry | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [remoteUpdateAvailable, setRemoteUpdateAvailable] = useState(false)
   // Set when a save couldn't reach Drive because the device is offline; the
   // edits stay dirty and are retried automatically once connectivity returns.
   const [pendingOfflineSave, setPendingOfflineSave] = useState(false)
@@ -563,6 +564,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     // let typing begin until its asynchronous lookup has completed.
     setLoading(!dateKnownAbsentRef.current || !!draftOwner)
     setRefreshing(false)
+    setRemoteUpdateAvailable(false)
     setText('')
     setSavedTextValue('')
     setBaseVersionValue(null)
@@ -918,15 +920,25 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   const loadFreshEntry = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const capturedDate = date
+    const capturedText = textRef.current
+    const capturedSavedText = savedTextRef.current
     if (!silent) setRefreshing(true)
     setStatus('')
     try {
       const entry = await getContentRef.current(date, { forceNetwork: !silent })
       const draft = draftOwner ? await getDraft(date, draftOwner) : undefined
       if (currentDateRef.current !== capturedDate) return
-      if (silent && textRef.current !== savedTextRef.current) return
+      if (textRef.current !== capturedText || savedTextRef.current !== capturedSavedText) return
+      if (silent) {
+        if ((entry?.entry.content ?? '') !== savedTextRef.current) {
+          setRemoteUpdateAvailable(true)
+          return
+        }
+        if (textRef.current !== savedTextRef.current) return
+      } else if (textRef.current !== savedTextRef.current && !loadFailedRef.current) return
       if (draft && draft.content !== (entry?.entry.content ?? '')) applyDraft(draft, entry?.meta.id ?? null)
       else applyLoadedEntry(entry)
+      setRemoteUpdateAvailable(false)
       resetS3ForVersion(capturedDate, entry?.meta.version ?? null)
       setLoadFailed(false)
       setDraftReadFailed(false)
@@ -946,7 +958,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   useEffect(() => {
     if (refreshSignal <= 0) return
     if (loadingRef.current || savingRef.current || refreshingRef.current || hasConflictRef.current) return
-    if (textRef.current !== savedTextRef.current) return
     void loadFreshEntry({ silent: true })
   }, [refreshSignal, loadFreshEntry])
 
@@ -1653,7 +1664,21 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      {remoteUpdateAvailable && !hasConflict && (
+        <div className="conflict-panel" role="status">
+          <div>
+            <strong>{t.entry.remoteUpdateTitle}</strong>
+            <p>{t.entry.remoteUpdateHint}</p>
+          </div>
+          <div className="conflict-actions">
+            <button type="button" onClick={() => void loadFreshEntry()} disabled={refreshing || saving || text !== savedText}>
+              {refreshing ? t.entry.refreshingEntry : t.entry.loadLatest}
+            </button>
+          </div>
+        </div>
+      )}
       {hasConflict && (
+        <>
         <div className="conflict-panel">
           <div>
             <strong>{t.entry.conflictTitle}</strong>
@@ -1665,6 +1690,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             <button className="btn-delete" onClick={overwriteRemote} disabled={saving}>{t.entry.overwrite}</button>
           </div>
         </div>
+        <details className="conflict-comparison">
+          <summary>{t.entry.compareVersions}</summary>
+          <div className="conflict-comparison-grid">
+            <div><strong>{t.entry.yourVersion}</strong><pre>{text || t.entry.emptyVersion}</pre></div>
+            <div><strong>{t.entry.otherVersion}</strong><pre>{conflictRemote ? (conflictRemote.entry.content || t.entry.emptyVersion) : t.entry.remoteDeleted}</pre></div>
+          </div>
+        </details>
+        </>
       )}
       {backDate && (
         <button className="editor-back-bar" onClick={onGoBack} onPointerDown={preventFocusSteal}>

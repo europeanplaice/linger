@@ -708,7 +708,7 @@ export default function App() {
 
       diary.refreshEntries()
         .then(() => {
-          if (!cancelled && !editorDirtyRef.current) {
+          if (!cancelled) {
             setEntryRefreshSignal(v => v + 1)
           }
         })

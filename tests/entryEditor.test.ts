@@ -721,6 +721,9 @@ test.describe('EntryEditor — conflict resolution', () => {
     await page.locator('button.btn-save').click()
     await page.waitForSelector('.conflict-panel')
 
+    await page.getByText('Compare versions').click()
+    await expect(page.locator('.conflict-comparison')).toContainText('local edits')
+    await expect(page.locator('.conflict-comparison')).toContainText('remote content')
     await page.getByRole('button', { name: 'Load latest' }).click()
 
     await expect(page.locator('.conflict-panel')).toHaveCount(0)
@@ -1334,6 +1337,33 @@ test.describe('EntryEditor — token expiry', () => {
 })
 
 test.describe('EntryEditor — silent refresh race condition', () => {
+  test('offers remote updates without changing the displayed text', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('original')
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2')
+      window.editorHarness.setRefreshSignal(1)
+    })
+    await expect(page.getByText('A newer version is available.')).toBeVisible()
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('original')
+    await page.getByRole('button', { name: 'Load latest' }).click()
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('updated elsewhere')
+    await expect(page.getByText('A newer version is available.')).toHaveCount(0)
+  })
+
+  test('preserves edits and disables loading a remote update while dirty', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+    await page.locator('textarea.editor-textarea').fill('local edits')
+    await page.evaluate(() => {
+      window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2')
+      window.editorHarness.setRefreshSignal(1)
+    })
+    await expect(page.getByText('A newer version is available.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Load latest' })).toBeDisabled()
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('local edits')
+  })
   test('does not overwrite user typing with in-flight silent refreshSignal fetch', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
@@ -1808,6 +1838,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await page.evaluate(() => window.editorHarness.setContentForDate('2026-05-01', 'updated elsewhere', '2'))
     await page.evaluate(() => window.editorHarness.setRefreshSignal(1))
 
+    await page.getByRole('button', { name: 'Load latest' }).click()
     await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
     await expect(page.getByTitle('Backed up to AWS')).toHaveCount(0)
   })
