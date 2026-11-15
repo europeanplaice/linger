@@ -5599,6 +5599,11 @@ dialog.history-dialog::backdrop {
   .btn-account .account-email { display: block; }
   .btn-recollection .btn-text { display: inline; }
   .editor-actions .btn-more { width: 2.75rem; height: 2.75rem; min-width: 2.75rem; padding: 0; }
+  .editor-actions .more-menu .more-menu-item {
+    min-height: 44px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.95rem;
+  }
 
   @media (max-width: 340px) {
     .btn-day-nav {
