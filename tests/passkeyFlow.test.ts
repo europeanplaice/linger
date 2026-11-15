@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { createPasskeyTestEnv } from './helpers/passkeyAuth'
+import { installMockTurnstile } from './helpers/mockTurnstile'
 import type { Env } from '../functions/_shared/session'
 import { onRequestGet as restoreSession } from '../functions/auth/passkey/session'
 import {
@@ -14,6 +15,16 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
   test.skip(browserName !== 'chromium', 'The virtual authenticator requires CDP')
   const origin = 'http://localhost:5173'
   const { env, db } = await createPasskeyTestEnv({}, { domain: origin })
+  env.TURNSTILE_SECRET = 'test-secret'
+  await installMockTurnstile(page)
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    if (String(input) !== 'https://challenges.cloudflare.com/turnstile/v0/siteverify') return realFetch(input, init)
+    const params = init?.body as URLSearchParams
+    const token = params.get('response')
+    const action = token === 'test-register-token' ? 'register' : 'login'
+    return Response.json({ success: token === 'test-register-token' || token === 'test-login-token', action, hostname: 'localhost' })
+  }
   const handlers: Record<string, (request: Request, environment: Env) => Promise<Response>> = {
     '/register/options': registrationOptions, '/register/verify': registrationVerify,
     '/login/options': loginOptions, '/login/verify': loginVerify,
@@ -171,7 +182,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
       const apiPath = '/src/api/passkeys.ts'
       const vault = await import(/* @vite-ignore */ vaultPath)
       vault.clearVaultKey()
-      await (await import(/* @vite-ignore */ apiPath)).loginWithPasskey()
+      await (await import(/* @vite-ignore */ apiPath)).loginWithPasskey(undefined, false, 'test-login-token')
       const key = vault.getVaultKey(internalId) as Uint8Array
       try { return Array.from(key) } finally { key.fill(0) }
     }, userId)
@@ -230,7 +241,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     // longer accepts that credential after deletion.
     await expect(page.evaluate(async () => {
       const path = '/src/api/passkeys.ts'
-      await (await import(/* @vite-ignore */ path)).loginWithPasskey()
+      await (await import(/* @vite-ignore */ path)).loginWithPasskey(undefined, false, 'test-login-token')
     })).rejects.toThrow()
     expect(loginVerifyStatuses.at(-1)).toBe(401)
     const dump = JSON.stringify(db.prepare('SELECT * FROM passkey_users WHERE id = ?').get(userId))
@@ -267,6 +278,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     expect(forbiddenNetworkValues).toEqual([])
 
   } finally {
+    globalThis.fetch = realFetch
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId }).catch(() => {})
     db.close()
   }

@@ -2,8 +2,10 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { baseUrl } from './baseUrl'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
+import { installMockTurnstile } from './helpers/mockTurnstile'
 
 test.beforeEach(async ({ page }) => {
+  await installMockTurnstile(page)
   await page.addInitScript(() => {
     navigator.credentials.get = async () => { throw new DOMException('No passkey selected', 'NotAllowedError') }
   })
