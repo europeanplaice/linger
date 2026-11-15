@@ -781,15 +781,18 @@ test.describe('EntryEditor — delete confirmation', () => {
       window.editorHarness.setRemoteEntry('updated on another device', '2')
       window.editorHarness.setRefreshSignal(1)
     })
-    await expect(page.locator('textarea.editor-textarea')).toHaveValue('updated on another device')
+    await expect(page.getByText('A newer version is available.')).toHaveCount(1)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('original')
     await page.locator('.delete-modal-input').fill('confirm')
     await page.locator('.delete-modal-actions .btn-delete').click()
     await expect(page.locator('.delete-dialog')).toHaveCount(0)
     expect(await page.evaluate(() => window.editorHarness.deleteCallsWithTarget())).toEqual([
       { date: '2026-05-01', fileId: 'file-1', baseVersion: '1' },
     ])
-    await expect(page.locator('textarea.editor-textarea')).toHaveValue('updated on another device')
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('original')
     await expect(page.locator('.conflict-panel')).toBeVisible()
+    await page.getByText('Compare versions').click()
+    await expect(page.locator('.conflict-comparison')).toContainText('updated on another device')
   })
 
   test('requires confirm before deleting an existing entry', async ({ page }) => {
