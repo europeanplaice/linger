@@ -116,7 +116,11 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
           </>}
           {error && !(options && error === 'cancelled') && <p className={`session-expired-msg${error === 'cancelled' ? ' neutral' : ''}`} role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
           <p className="passkey-progress" role="status">{busy ? progress : ''}</p>
-          {!staticPreview && (!setup || setupEmail) && <Turnstile key={setup ? 'register' : 'login'} action={setup ? 'register' : 'login'} onToken={receiveToken} onFailure={verificationError} resetKey={resetKey} language={language} />}
+          {!staticPreview && (!setup || setupEmail) && (
+            <div className="passkey-gate-turnstile">
+              <Turnstile key={setup ? 'register' : 'login'} action={setup ? 'register' : 'login'} onToken={receiveToken} onFailure={verificationError} resetKey={resetKey} language={language} />
+            </div>
+          )}
           <div className="passkey-gate-actions passkey-gate-navigation">
             <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || ((!setup || !!setupEmail) && verificationFailed) || (setup && !!setupEmail && !token) || (recovery && !!setupEmail && !recoveryConfirmed)}
               aria-describedby={setup && setupEmail ? 'passkey-verify-help' : setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
