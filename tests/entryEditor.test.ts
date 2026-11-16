@@ -549,6 +549,8 @@ test.describe('EntryEditor — auto-save', () => {
 
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(save).toHaveText('Saved')
+    await expect(save).toHaveClass(/sr-only/)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
   })
 
   test('keeps save errors visible while editing and retries the latest content', async ({ page }) => {

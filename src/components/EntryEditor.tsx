@@ -1589,7 +1589,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </AnimatePresence>
         {autoSave && !loading && !loadFailed ? (
-          <span className={`editor-save-status${status === t.entry.saveFailed && isDirty && isOnline ? ' editor-save-status--error' : ''}`} role="status" aria-live="polite">
+          <span className={`editor-save-status${!isDirty && !saving && !hasConflict ? ' sr-only' : ''}${status === t.entry.saveFailed && isDirty && isOnline ? ' editor-save-status--error' : ''}`} role="status" aria-live="polite">
             {hasConflict ? t.entry.changedElsewhere
               : saving ? t.common.savingEllipsis
               : !isOnline && isDirty ? t.entry.saveSyncPending
