@@ -3802,6 +3802,22 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--unsaved-status);
   margin-left: 0.5em;
 }
+.editor-save-status--error {
+  color: var(--warning);
+}
+.editor-save-retry {
+  border: 0;
+  padding: 0.25rem;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.editor-save-retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .editor-meta-sync {
   display: inline-flex;
   align-items: center;

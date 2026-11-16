@@ -240,7 +240,7 @@ test.describe('EntryEditor — date header', () => {
    test('places mobile save action near the bottom-right thumb zone', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
-    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1', autoSave: false })
 
     const saveButton = page.locator('button.btn-save')
     const moreButton = page.locator('button.btn-more')
@@ -336,7 +336,7 @@ test.describe('EntryEditor — date header', () => {
       })
     })
 
-    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1' })
+    await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1', autoSave: false })
     await page.locator('textarea.editor-textarea').fill('modified content')
 
     await page.evaluate(() => {
@@ -478,7 +478,7 @@ test.describe('EntryEditor — auto-save', () => {
     await renderEditor(page, { date: '2026-05-01', initialContent: '' })
 
     await page.fill('textarea.editor-textarea', 'auto-save content')
-    await expect(page.locator('button.btn-save')).toBeDisabled()
+    await expect(page.locator('.editor-save-status')).toHaveText('Waiting to save')
     // Ensure React has registered the auto-save timer after the fill
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
@@ -517,22 +517,15 @@ test.describe('EntryEditor — auto-save', () => {
     expect(saveCalls).toHaveLength(0)
   })
 
-  test('Save button and Ctrl+S stay inactive while auto-save is enabled', async ({ page }) => {
+  test('Ctrl+S saves immediately while auto-save is enabled', async ({ page }) => {
     await page.clock.install({ time: 0 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: true })
 
     await page.fill('textarea.editor-textarea', 'dirty auto-save content')
-    await expect(page.locator('button.btn-save')).toBeDisabled()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Auto-save')
-    await expect(page.locator('button.btn-save .btn-text')).toHaveText('Auto-save')
-    await expect(page.locator('button.btn-save')).not.toHaveAttribute('title', /.+/)
+    await expect(page.getByRole('button', { name: 'Save now' })).toBeVisible()
 
     await page.keyboard.press('Control+S')
-    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
-
-    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
-    await page.clock.fastForward(1501)
     await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
 
     expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
@@ -550,15 +543,27 @@ test.describe('EntryEditor — auto-save', () => {
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
     await page.clock.fastForward(1501)
 
-    const save = page.locator('button.btn-save')
-    await expect(save).toBeDisabled()
-    await expect(save).toHaveAttribute('aria-busy', 'true')
-    await expect(save).toHaveAttribute('aria-label', 'Saving')
-    await expect(save.locator('.btn-text')).toHaveText('Saving…')
+    const save = page.locator('.editor-save-status')
+    await expect(save).toHaveText('Saving…')
     await expect(page.locator('.save-progress-bar')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(save).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(save).toHaveText('Saved')
+  })
+
+  test('keeps save errors visible while editing and retries the latest content', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { initialContent: 'original', version: '1', saveReject: 'error', autoSave: true })
+    await page.fill('textarea.editor-textarea', 'first edit')
+    await page.clock.fastForward(1501)
+    await expect(page.locator('.editor-save-status')).toHaveText('Save failed.')
+    await page.fill('textarea.editor-textarea', 'latest edit')
+    await expect(page.locator('.editor-save-status')).toHaveText('Save failed.')
+    await page.evaluate(() => window.editorHarness.setSaveReject(null))
+    await page.getByRole('button', { name: 'Retry' }).click()
+    await expect(page.locator('.editor-save-status')).toHaveText('Saved')
+    expect((await page.evaluate(() => window.editorHarness.saveCalls())).at(-1)?.content).toBe('latest edit')
   })
 })
 
@@ -603,6 +608,7 @@ test.describe('EntryEditor — offline', () => {
 
     await page.evaluate(() => window.editorHarness.setOnline(false))
     await page.fill('textarea.editor-textarea', 'auto written offline')
+    await expect(page.locator('.editor-save-status')).toHaveText('Waiting to sync')
 
     // Auto-save fires while offline and fails silently (no save recorded)
     await page.waitForTimeout(1700)
@@ -612,6 +618,7 @@ test.describe('EntryEditor — offline', () => {
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'auto written offline', baseVersion: '1' },
     ])
+    await expect(page.locator('.editor-save-status')).toHaveText('Saved')
   })
 })
 
@@ -1296,7 +1303,7 @@ test.describe('EntryEditor — token expiry', () => {
 
     await expect(page.locator('.entry-load-error')).toContainText('Failed to load entry.')
     await expect(page.locator('textarea.editor-textarea')).toHaveCount(0)
-    await expect(page.locator('button.btn-save')).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Save now' })).toHaveCount(0)
 
     await page.keyboard.press('Control+S')
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
@@ -1310,8 +1317,8 @@ test.describe('EntryEditor — token expiry', () => {
     })
     await page.waitForSelector('textarea.editor-textarea')
 
-    const statusCount = await page.evaluate(() => document.querySelectorAll('[role="status"]').length)
-    expect(statusCount).toBe(0)
+    await expect(page.locator('.editor-status-line')).toHaveCount(0)
+    await expect(page.locator('.entry-load-error')).toHaveCount(0)
 
     const calls = await page.evaluate(() => window.editorHarness.getContentCalls())
     expect(calls.length).toBe(1)
@@ -2469,12 +2476,9 @@ test.describe('EntryEditor — unsaved indicator', () => {
 
     await page.fill('textarea.editor-textarea', 'edited content')
 
-    const unsaved = page.locator('.editor-meta-unsaved')
+    const unsaved = page.locator('.editor-save-status')
     await expect(unsaved).toBeVisible()
-    await expect(unsaved).toHaveText('Unsaved')
-
-    const marginLeft = await unsaved.evaluate(el => getComputedStyle(el).marginLeft)
-    expect(parseFloat(marginLeft)).toBeGreaterThan(0)
+    await expect(unsaved).toHaveText('Waiting to save')
     expect(await unsaved.textContent()).not.toContain('·')
   })
 

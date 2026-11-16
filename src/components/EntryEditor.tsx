@@ -1080,12 +1080,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (!autoSave && isDirty) handleExplicitSave()
+        if (isDirty && !loadFailed) {
+          if (autoSave && !hasConflict) void save(false)
+          else if (!autoSave) void handleExplicitSave()
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [autoSave, isDirty, handleExplicitSave])
+  }, [autoSave, isDirty, hasConflict, loadFailed, handleExplicitSave, save])
 
   useEffect(() => {
     if (status !== savedStatus) return
@@ -1256,7 +1259,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     textRef.current = next
     setText(next)
     insertedIdeaTextsRef.current = [...insertedIdeaTextsRef.current, currentIdea.text].slice(-20)
-    if (status && status !== savedStatus) setStatus('')
+    if (status && status !== savedStatus && status !== t.entry.saveFailed && status !== t.entry.offlineSavePending) setStatus('')
     setIdeaOpen(false)
     requestAnimationFrame(() => {
       const el = textareaRef.current
@@ -1430,7 +1433,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               </motion.button>
             )}
           </AnimatePresence>
-          <motion.button
+          {!autoSave && <motion.button
             className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
             onPointerDown={preventFocusSteal}
             onClick={handleExplicitSave}
@@ -1446,7 +1449,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
               <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}</span>
             </span>
-          </motion.button>
+          </motion.button>}
           {!isToday && onGoToToday && (
             <button
               type="button"
@@ -1571,7 +1574,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         )}
         <AnimatePresence initial={false}>
-          {!isOnline && (
+          {!isOnline && (!autoSave || !isDirty) && (
             <motion.span
               key="offline"
               className="editor-meta-offline"
@@ -1585,8 +1588,18 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             </motion.span>
           )}
         </AnimatePresence>
-        <AnimatePresence initial={false}>
-          {isDirty && !loading && (
+        {autoSave && !loading && !loadFailed ? (
+          <span className={`editor-save-status${status === t.entry.saveFailed && isDirty && isOnline ? ' editor-save-status--error' : ''}`} role="status" aria-live="polite">
+            {hasConflict ? t.entry.changedElsewhere
+              : saving ? t.common.savingEllipsis
+              : !isOnline && isDirty ? t.entry.saveSyncPending
+              : status === t.entry.saveFailed && isDirty ? t.entry.saveFailed
+              : isDirty ? t.entry.saveWaiting
+              : baseVersion !== null ? t.common.saved
+              : ''}
+          </span>
+        ) : <AnimatePresence initial={false}>
+          {isDirty && !loading && !autoSave && (
             <motion.span
               key="unsaved"
               className="editor-meta-unsaved"
@@ -1596,7 +1609,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               transition={{ duration: 0.18 }}
             >{t.common.unsaved}</motion.span>
           )}
-        </AnimatePresence>
+        </AnimatePresence>}
+        {autoSave && status === t.entry.saveFailed && isDirty && isOnline && !hasConflict && !saving && (
+          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={() => void save(false)}>{t.entry.saveRetry}</button>
+        )}
+        {autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed && status !== t.entry.saveFailed && (
+          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={() => void save(false)}>{t.entry.saveNow}</button>
+        )}
         <div className="editor-meta-sync">
           <AnimatePresence initial={false}>
             {!isDirty && !loading && !loadFailed && baseVersion !== null && (
@@ -1649,7 +1668,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>
       )}
       <AnimatePresence>
-        {status && status !== savedStatus && !loadFailed && (
+        {status && status !== savedStatus && !loadFailed && !(autoSave && (status === t.entry.saveFailed || (hasConflict && status === t.entry.changedElsewhere))) && (
           <motion.div
             className="editor-status-line"
             role="status"
@@ -1787,9 +1806,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   if (loadFailed) return
                   textRef.current = e.target.value
                   setText(e.target.value)
-                  if (status && status !== savedStatus) setStatus('')
+                  if (status && status !== savedStatus && status !== t.entry.saveFailed && status !== t.entry.offlineSavePending) setStatus('')
                 }}
-                onBlur={flushPendingAutoSave}
+                onBlur={e => {
+                  if (e.relatedTarget instanceof HTMLElement && e.relatedTarget.classList.contains('editor-save-retry')) return
+                  flushPendingAutoSave()
+                }}
                 readOnly={loadFailed}
                 placeholder={isNewEmptyEntry ? t.entry.newPlaceholder : t.entry.placeholder}
                 initial={{ opacity: 0, y: 6 }}

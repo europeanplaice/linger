@@ -308,6 +308,7 @@ window.editorHarness = {
   setSaveModifiedTime: (modifiedTime: string) => {
     currentSaveModifiedTime = modifiedTime
   },
+  setSaveReject: (value: 'conflict' | 'error' | null) => { currentSaveReject = value ?? undefined },
   deleteCalls: () => [...deleteCalls],
   deleteCallsWithTarget: () => [...deleteCallsWithTarget],
   pendingNavigateCalls: () => [...pendingNavigateCalls],
