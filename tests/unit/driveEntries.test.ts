@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import type { DriveFileMeta } from '../../src/types'
 import {
   TokenExpiredError,
@@ -12,13 +12,32 @@ import {
   getChanges,
 } from '../../src/api/driveEntries'
 import { FetchMock, jsonResponse, textResponse } from '../helpers/mockFetch'
+import { clearOAuthCredentials, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 
 const fetchMock = new FetchMock()
 
 test.beforeEach(() => fetchMock.reset())
-test.afterEach(() => fetchMock.restore())
+test.afterEach(() => { fetchMock.restore(); vi.unstubAllGlobals(); clearOAuthCredentials() })
 
 test.describe('driveEntries proxy API', () => {
+  test.each(['read', 'delete'])('retries a stale 401 after credentials are refreshed (%s)', async operation => {
+    const credentials = (token: string) => ({ accessToken: token, idToken: `${token}-id`, expiresAt: Date.now() + 120_000 })
+    setOAuthCredentials(credentials('old'))
+    let finish!: (response: Response) => void
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
+      .mockResolvedValueOnce(operation === 'read' ? jsonResponse({ files: [] }) : new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+
+    const pending = operation === 'read' ? listEntries() : deleteEntry('2026-05-01')
+    setOAuthCredentials(credentials('new'))
+    finish(new Response(null, { status: 401 }))
+    await pending
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(new Headers(fetch.mock.calls[1][1].headers).get('Authorization')).toBe('Bearer new')
+  })
+
   test('listEntries calls /api/drive/entries with credentials', async () => {
     const files: DriveFileMeta[] = [
       { id: 'entry-1', name: 'diary-2026-04-29.json', version: '11' },

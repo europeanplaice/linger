@@ -83,6 +83,18 @@ function waitForRetry(delay: number, signal?: AbortSignal | null): Promise<void>
   })
 }
 
+// A response can arrive after a concurrent credential refresh. Do not let a
+// 401 for the old credentials expire the newly restored session.
+function replaceStaleCredentials(headers: Headers): boolean {
+  const accessToken = getAccessToken()
+  const idToken = getIdToken()
+  if (!accessToken || !idToken) return false
+  if (headers.get('Authorization') === `Bearer ${accessToken}` && headers.get('X-Linger-Google-ID-Token') === idToken) return false
+  headers.set('Authorization', `Bearer ${accessToken}`)
+  headers.set('X-Linger-Google-ID-Token', idToken)
+  return true
+}
+
 export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatuses: number[] = []): Promise<{ data: T; status: number }> {
   assertAuthenticatedApiUrl(url)
   const account = accountRequest(init)
@@ -93,6 +105,7 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
   if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
   setVaultKeyHeader(headers)
   const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
+  let retriedCredentials = false
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
@@ -111,7 +124,10 @@ export async function apiFetch<T>(url: string, init?: RequestInit, acceptedStatu
       return { data, status: res.status }
     }
     if (res.status === 304) return { data: null as T, status: 304 }
-    if (res.status === 401) throw new TokenExpiredError()
+    if (res.status === 401) {
+      if (!retriedCredentials && replaceStaleCredentials(headers)) { retriedCredentials = true; continue }
+      throw new TokenExpiredError()
+    }
     if (res.status === 404) return { data: null as T, status: 404 }
 
     const body = await res.text()
@@ -136,6 +152,7 @@ async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void>
   if (idToken) headers.set('X-Linger-Google-ID-Token', idToken)
   setVaultKeyHeader(headers)
   const requestInit = { ...account.init, headers, redirect: 'error' as RequestRedirect }
+  let retriedCredentials = false
   for (let attempt = 0; ; attempt++) {
     account.assertCurrent()
     if (init?.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
@@ -147,7 +164,10 @@ async function apiFetchNoContent(url: string, init?: RequestInit): Promise<void>
     }
 
     if (res.ok || res.status === 204) return
-    if (res.status === 401) throw new TokenExpiredError()
+    if (res.status === 401) {
+      if (!retriedCredentials && replaceStaleCredentials(headers)) { retriedCredentials = true; continue }
+      throw new TokenExpiredError()
+    }
     if (res.status === 409) {
       const result = await res.json() as SaveConflictResponse
       throw new SaveConflictError(result.conflict ?? null)
