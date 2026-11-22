@@ -1824,9 +1824,10 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1' })
 
     await expect(page.getByTitle('Saved to Google Drive')).toBeVisible()
-    // No S3-specific title (Syncing/Backed up/failed) ever appears — only the
-    // Drive badge renders in .editor-meta-sync when S3 backup is disabled.
+    // No S3-specific title (Syncing/Backed up/failed) or empty S3 slot ever
+    // remains — only the Drive badge renders in .editor-meta-sync when S3 backup is disabled.
     await expect(page.locator('.editor-meta-sync .editor-meta-badge')).toHaveCount(1)
+    await expect(page.locator('.editor-meta-s3-slot')).toHaveCount(0)
   })
 
   test('shows a pending S3 badge while the mirror status is inconclusive', async ({ page }) => {

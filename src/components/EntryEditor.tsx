@@ -1844,32 +1844,29 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               </motion.span>
             )}
           </AnimatePresence>
-          {!isDirty && !loading && !loadFailed && baseVersion !== null && (
-            <span className="editor-meta-s3-slot">
-              <AnimatePresence initial={false}>
-                {s3Status && (
-                  <motion.span
-                    key="s3"
-                    initial={{ opacity: 0, scale: 0.88 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.88 }}
-                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                  >
-                    <SyncBadge
-                      status={s3Status}
-                      title={s3BadgeLabel}
-                      label={s3BadgeLabel}
-                      onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
-                      busy={s3Retrying}
-                      direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
-                    >
-                      <S3BadgeIcon />
-                    </SyncBadge>
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </span>
-          )}
+          <AnimatePresence initial={false}>
+            {!isDirty && !loading && !loadFailed && baseVersion !== null && s3Status && (
+              <motion.span
+                key="s3"
+                className="editor-meta-s3-slot"
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.88 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <SyncBadge
+                  status={s3Status}
+                  title={s3BadgeLabel}
+                  label={s3BadgeLabel}
+                  onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
+                  busy={s3Retrying}
+                  direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
+                >
+                  <S3BadgeIcon />
+                </SyncBadge>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
       </div>
       {shareMsgVisible && (
