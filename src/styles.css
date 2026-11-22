@@ -3802,8 +3802,69 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--unsaved-status);
   margin-left: 0.5em;
 }
+.editor-save-status:not(.sr-only) {
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.2s ease;
+}
+.editor-save-status-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.editor-save-status--saving {
+  color: var(--accent);
+}
+.editor-save-status--saving .editor-save-status-inner {
+  animation: save-status-pulse 1.6s ease-in-out infinite;
+}
 .editor-save-status--error {
   color: var(--warning);
+}
+.editor-save-status--error .editor-save-status-inner {
+  animation: save-error-nudge 0.32s ease-out;
+}
+.editor-save-spinner {
+  width: 0.68rem;
+  height: 0.68rem;
+  border-width: 1.75px;
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-top-color: var(--accent);
+  flex-shrink: 0;
+}
+.editor-save-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.editor-save-dot--waiting {
+  background: var(--unsaved-status);
+  animation: save-dot-breathe 2s ease-in-out infinite;
+}
+.editor-save-dot--offline {
+  background: #f59e0b;
+}
+.editor-save-dot--paused {
+  background: var(--text-muted);
+  opacity: 0.7;
+}
+.editor-save-dot--error,
+.editor-save-dot--conflict {
+  background: var(--warning);
+}
+@keyframes save-dot-breathe {
+  0%, 100% { transform: scale(0.88); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+@keyframes save-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.68; }
+}
+@keyframes save-error-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2.5px); }
+  65% { transform: translateX(2px); }
 }
 .editor-save-retry {
   border: 0;
@@ -3813,6 +3874,10 @@ dialog.milestone-form-dialog::backdrop {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.editor-save-retry:hover {
+  opacity: 0.78;
 }
 .editor-save-retry:focus-visible {
   outline: 2px solid var(--accent);
@@ -3940,9 +4005,33 @@ dialog.milestone-form-dialog::backdrop {
   border-color: #2563eb;
 }
 
+.editor-meta-badge--just-saved .editor-meta-badge-status--synced {
+  animation: saved-check-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.editor-meta-badge--just-saved .editor-meta-badge-status--synced::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid #22c55e;
+  animation: badge-saved-ring 0.65s cubic-bezier(0, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes badge-saved-ring {
+  0% { transform: scale(0.8); opacity: 0.85; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .editor-meta-badge-status--pending::after,
-  .editor-meta-badge-status--backfilling::after {
+  .editor-meta-badge-status--backfilling::after,
+  .editor-meta-badge--just-saved .editor-meta-badge-status--synced,
+  .editor-meta-badge--just-saved .editor-meta-badge-status--synced::after,
+  .editor-save-dot--waiting,
+  .editor-save-status--saving .editor-save-status-inner,
+  .editor-save-status--error .editor-save-status-inner {
     animation: none;
   }
 }

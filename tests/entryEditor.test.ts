@@ -598,12 +598,17 @@ test.describe('EntryEditor — auto-save', () => {
 
     const save = page.locator('.editor-save-status')
     await expect(save).toHaveText('Saving…')
+    await expect(save).toHaveAttribute('data-phase', 'saving')
+    await expect(save.locator('.editor-save-spinner')).toBeVisible()
     await expect(page.locator('.save-progress-bar')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(save).toHaveText('Saved')
+    await expect(save).toHaveAttribute('data-phase', 'saved')
     await expect(save).toHaveClass(/sr-only/)
-    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
+    const driveBadge = page.getByLabel('Saved to Google Drive')
+    await expect(driveBadge).toBeVisible()
+    await expect(driveBadge).toHaveClass(/editor-meta-badge--just-saved/)
   })
 
   test('keeps save errors visible while editing and retries the latest content', async ({ page }) => {

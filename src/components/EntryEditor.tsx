@@ -193,16 +193,17 @@ interface SyncBadgeProps {
   label: string
   onClick?: () => void
   busy?: boolean
+  justSaved?: boolean
   direction?: 'read' | 'write'
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, onClick, busy, direction, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, busy, justSaved, direction, children }: SyncBadgeProps) {
   const Badge = onClick ? 'button' : 'div'
   return (
     <Badge
       type={onClick ? 'button' : undefined}
-      className={`editor-meta-badge editor-meta-badge--${status}`}
+      className={`editor-meta-badge editor-meta-badge--${status}${justSaved ? ' editor-meta-badge--just-saved' : ''}`}
       title={title}
       aria-label={label}
       aria-busy={busy || undefined}
@@ -260,6 +261,18 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [deleting, setDeleting] = useState(false)
   const [discardedText, setDiscardedText] = useState<string | null>(null)
   const discardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Briefly true right after a save completes so the Drive badge plays a single
+  // confirmation pulse rather than popping in flatly (off on plain entry loads).
+  const [justSaved, setJustSaved] = useState(false)
+  const justSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerJustSaved = useCallback(() => {
+    setJustSaved(true)
+    if (justSavedTimerRef.current) clearTimeout(justSavedTimerRef.current)
+    justSavedTimerRef.current = setTimeout(() => {
+      justSavedTimerRef.current = null
+      setJustSaved(false)
+    }, 950)
+  }, [])
   // True while auto-save is silently persisting before an auto-confirmed day switch;
   // suppresses the "unsaved — leave?" banner so it doesn't flash in auto-save mode.
   const [autoNavSaving, setAutoNavSaving] = useState(false)
@@ -628,6 +641,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setIdeaIndex(0)
     insertedIdeaTextsRef.current = []
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
+    if (justSavedTimerRef.current) { clearTimeout(justSavedTimerRef.current); justSavedTimerRef.current = null }
+    setJustSaved(false)
     fileIdRef.current = null
     void (async () => {
       if (isSignedIn && !draftOwner) {
@@ -888,6 +903,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setPendingOfflineSave(false)
         setAutoSavePausedValue(false)
         setStatus(savedStatus)
+        triggerJustSaved()
         // Captured only once the Drive save itself has resolved — the mirror is
         // scheduled server-side after that response, so starting the clock any
         // earlier would burn part of the poll/grace budget on the Drive round
@@ -930,7 +946,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const pending = run().finally(() => { saveInFlightRef.current = null })
     saveInFlightRef.current = pending
     return pending
-  }, [date, savedStatus, t, setAutoSavePausedValue, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status])
+  }, [date, savedStatus, t, setAutoSavePausedValue, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status, triggerJustSaved])
 
   const handleExplicitSave = useCallback(async () => {
     const ok = await save(true)
@@ -1017,6 +1033,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setAutoSavePausedValue(false)
       setPendingOfflineSave(false)
       setStatus(savedStatus)
+      triggerJustSaved()
       // Same rationale as save() above: this is a genuine write, so give the
       // mirror it schedules server-side the same since-scoped pending grace
       // window instead of resetS3ForVersion's default since-less check, and
@@ -1235,6 +1252,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   useEffect(() => () => {
     if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
+    if (justSavedTimerRef.current) clearTimeout(justSavedTimerRef.current)
   }, [])
 
   useKeyboardInset()
@@ -1412,6 +1430,29 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     }
   }
 
+  const autoSavePhase = hasConflict ? 'conflict'
+    : saving ? 'saving'
+    : !isOnline && isDirty ? 'offline'
+    : status === t.entry.saveFailed && isDirty ? 'error'
+    : autoSavePaused && isDirty ? 'paused'
+    : isDirty ? 'waiting'
+    : baseVersion !== null ? 'saved'
+    : 'idle'
+
+  const autoSaveStatusText = autoSavePhase === 'conflict' ? t.entry.changedElsewhere
+    : autoSavePhase === 'saving' ? t.common.savingEllipsis
+    : autoSavePhase === 'offline' ? t.entry.saveSyncPending
+    : autoSavePhase === 'error' ? t.entry.saveFailed
+    : autoSavePhase === 'paused' ? t.entry.autoSavePaused
+    : autoSavePhase === 'waiting' ? t.entry.saveWaiting
+    : autoSavePhase === 'saved' ? t.common.saved
+    : ''
+
+  const autoSaveStatusVisible = autoSavePhase !== 'saved' && autoSavePhase !== 'idle'
+  const autoSaveAction: 'retry' | 'save-now' | null =
+    autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed
+      ? (status === t.entry.saveFailed ? 'retry' : 'save-now')
+      : null
 
   return (
     <>
@@ -1729,15 +1770,28 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </AnimatePresence>
         {autoSave && !loading && !loadFailed ? (
-          <span className={`editor-save-status${!isDirty && !saving && !hasConflict ? ' sr-only' : ''}${status === t.entry.saveFailed && isDirty && isOnline ? ' editor-save-status--error' : ''}`} role="status" aria-live="polite">
-            {hasConflict ? t.entry.changedElsewhere
-              : saving ? t.common.savingEllipsis
-              : !isOnline && isDirty ? t.entry.saveSyncPending
-              : status === t.entry.saveFailed && isDirty ? t.entry.saveFailed
-              : autoSavePaused && isDirty ? t.entry.autoSavePaused
-              : isDirty ? t.entry.saveWaiting
-              : baseVersion !== null ? t.common.saved
-              : ''}
+          <span
+            className={`editor-save-status${!autoSaveStatusVisible ? ' sr-only' : ` editor-save-status--${autoSavePhase}`}${autoSavePhase === 'error' && isOnline ? ' editor-save-status--error' : ''}`}
+            data-phase={autoSavePhase}
+            role="status"
+            aria-live="polite"
+          >
+            {autoSaveStatusVisible ? (
+              <motion.span
+                key={autoSavePhase}
+                className="editor-save-status-inner"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {autoSavePhase === 'saving' ? (
+                  <span className="btn-saving-spinner editor-save-spinner" aria-hidden="true" />
+                ) : (
+                  <span className={`editor-save-dot editor-save-dot--${autoSavePhase}`} aria-hidden="true" />
+                )}
+                {autoSaveStatusText}
+              </motion.span>
+            ) : autoSaveStatusText}
           </span>
         ) : <AnimatePresence initial={false}>
           {isDirty && !loading && !autoSave && (
@@ -1751,26 +1805,39 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             >{t.common.unsaved}</motion.span>
           )}
         </AnimatePresence>}
-        {autoSave && status === t.entry.saveFailed && isDirty && isOnline && !hasConflict && !saving && (
-          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={handleManualAutoSave}>{t.entry.saveRetry}</button>
-        )}
-        {autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed && status !== t.entry.saveFailed && (
-          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={handleManualAutoSave}>{t.entry.saveNow}</button>
-        )}
+        <AnimatePresence initial={false}>
+          {autoSaveAction && (
+            <motion.button
+              key={autoSaveAction}
+              className="editor-save-retry"
+              type="button"
+              onPointerDown={preventFocusSteal}
+              onClick={handleManualAutoSave}
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -4 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
+            >
+              {autoSaveAction === 'retry' ? t.entry.saveRetry : t.entry.saveNow}
+            </motion.button>
+          )}
+        </AnimatePresence>
         <div className="editor-meta-sync">
           <AnimatePresence initial={false}>
             {!isDirty && !loading && !loadFailed && baseVersion !== null && (
               <motion.span
                 key="drive"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
+                initial={{ opacity: 0, scale: 0.85, y: 2 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.88, y: -2 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
               >
                 <SyncBadge
                   status="synced"
                   title={t.entry.driveBadge}
                   label={t.entry.driveBadge}
+                  justSaved={justSaved}
                 >
                   <DriveBadgeIcon />
                 </SyncBadge>
@@ -1783,10 +1850,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                 {s3Status && (
                   <motion.span
                     key="s3"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.3 }}
+                    initial={{ opacity: 0, scale: 0.88 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.88 }}
+                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
                   >
                     <SyncBadge
                       status={s3Status}
