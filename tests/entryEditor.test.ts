@@ -482,8 +482,8 @@ test.describe('EntryEditor — auto-save', () => {
     // Ensure React has registered the auto-save timer after the fill
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
-    // Advance just past the 1500ms auto-save threshold
-    await page.clock.fastForward(1501)
+    // Advance just past the 2500ms auto-save threshold
+    await page.clock.fastForward(2501)
     // Give React time to process the callback
     await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
 
@@ -510,11 +510,64 @@ test.describe('EntryEditor — auto-save', () => {
     await page.fill('textarea.editor-textarea', 'more edits while conflicted')
 
     // Advance well past the auto-save threshold
-    await page.clock.fastForward(2500)
+    await page.clock.fastForward(3500)
 
     // Auto-save should NOT have fired because hasConflict is true
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toHaveLength(0)
+  })
+
+  test('pauses auto-save after clicking Keep local on conflict until the user explicitly saves', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', saveReject: 'conflict', autoSave: true })
+
+    await page.fill('textarea.editor-textarea', 'local edits')
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.clock.fastForward(2501)
+    await page.waitForSelector('.conflict-panel')
+
+    await page.getByRole('button', { name: 'Keep local' }).click()
+    await expect(page.locator('.conflict-panel')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveText('Auto-save paused')
+
+    await page.evaluate(() => window.editorHarness.clearCalls())
+    await page.fill('textarea.editor-textarea', 'more local edits')
+    await page.clock.fastForward(15000)
+
+    // Auto-save stays paused and does not re-trigger the conflict panel.
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+    await expect(page.locator('.conflict-panel')).toHaveCount(0)
+
+    // Explicit save via "Save now" resumes saving (and surfaces conflict or succeeds).
+    await page.evaluate(() => window.editorHarness.setSaveReject(null))
+    await page.getByRole('button', { name: 'Save now' }).click()
+    await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(1)
+    await expect(page.locator('.editor-save-status')).toHaveText('Saved')
+  })
+
+  test('holds auto-save during IME composition and saves once composition ends', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved', version: '1', autoSave: true })
+
+    const textarea = page.locator('textarea.editor-textarea')
+    await textarea.dispatchEvent('compositionstart')
+    await textarea.fill('きょうは')
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.clock.fastForward(10000)
+
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+
+    await textarea.fill('今日は')
+    await textarea.dispatchEvent('compositionend')
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
+    await page.clock.fastForward(2501)
+    await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
+
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
+      { date: '2026-05-01', content: '今日は', baseVersion: '1' },
+    ])
   })
 
   test('Ctrl+S saves immediately while auto-save is enabled', async ({ page }) => {
@@ -541,7 +594,7 @@ test.describe('EntryEditor — auto-save', () => {
     await page.evaluate(() => window.editorHarness.blockSave())
     await page.fill('textarea.editor-textarea', 'dirty auto-save content')
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
-    await page.clock.fastForward(1501)
+    await page.clock.fastForward(2501)
 
     const save = page.locator('.editor-save-status')
     await expect(save).toHaveText('Saving…')
@@ -558,7 +611,7 @@ test.describe('EntryEditor — auto-save', () => {
     await loadHarness(page)
     await renderEditor(page, { initialContent: 'original', version: '1', saveReject: 'error', autoSave: true })
     await page.fill('textarea.editor-textarea', 'first edit')
-    await page.clock.fastForward(1501)
+    await page.clock.fastForward(2501)
     await expect(page.locator('.editor-save-status')).toHaveText('Save failed.')
     await page.fill('textarea.editor-textarea', 'latest edit')
     await expect(page.locator('.editor-save-status')).toHaveText('Save failed.')
@@ -604,7 +657,8 @@ test.describe('EntryEditor — offline', () => {
     await expect(page.locator('button.btn-save')).toBeDisabled()
   })
 
-  test('auto-save while offline is retried once on reconnect', async ({ page }) => {
+  test('auto-save while offline pauses Drive calls without flickering and syncs on reconnect', async ({ page }) => {
+    await page.clock.install({ time: 0 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: true })
 
@@ -612,15 +666,33 @@ test.describe('EntryEditor — offline', () => {
     await page.fill('textarea.editor-textarea', 'auto written offline')
     await expect(page.locator('.editor-save-status')).toHaveText('Waiting to sync')
 
-    // Auto-save fires while offline and fails silently (no save recorded)
-    await page.waitForTimeout(1700)
+    // Even well past the debounce and retry intervals, no offline save runs.
+    await page.clock.fastForward(12_000)
     expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+    await expect(page.locator('.editor-save-status')).toHaveText('Waiting to sync')
 
     await page.evaluate(() => window.editorHarness.setOnline(true))
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'auto written offline', baseVersion: '1' },
     ])
     await expect(page.locator('.editor-save-status')).toHaveText('Saved')
+  })
+
+  test('auto-save mode navigates away offline after flushing the local draft without showing the unsaved banner', async ({ page }) => {
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', token: 'tok', autoSave: true })
+
+    await page.evaluate(() => window.editorHarness.setOnline(false))
+    await page.fill('textarea.editor-textarea', 'offline draft before nav')
+    await page.evaluate(() => window.editorHarness.setPendingNavDate('2026-05-02'))
+
+    await expect(page.locator('.unsaved-nav-banner')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => window.editorHarness.pendingNavigateCalls())).toEqual([{ date: '2026-05-02' }])
+    expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
+    await expect.poll(() => getDrafts(page)).toMatchObject([
+      { owner: 'test@example.com', date: '2026-05-01', content: 'offline draft before nav' },
+    ])
   })
 })
 
@@ -1282,7 +1354,7 @@ test.describe('EntryEditor — save progress', () => {
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)))
 
     // Advance past auto-save threshold
-    await page.clock.fastForward(1501)
+    await page.clock.fastForward(2501)
     await page.waitForFunction(() => window.editorHarness.saveCalls().length > 0)
 
     // Visual save progress should stay quiet during auto-save.
@@ -2667,6 +2739,21 @@ test.describe('EntryEditor — offline drafts', () => {
     await page.waitForLoadState('domcontentloaded')
     await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('typing that must survive reload')
+  })
+
+  test('flushes the local recovery draft immediately on pagehide before the 350ms debounce fires', async ({ page }) => {
+    await page.clock.install({ time: 0 })
+    await loadHarness(page)
+    await clearDraftDb(page)
+    await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
+
+    await page.locator('textarea.editor-textarea').fill('last second keystrokes')
+    // Do NOT advance timers past 350ms — fire pagehide immediately.
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+
+    await expect.poll(() => getDrafts(page)).toMatchObject([
+      { owner: 'test@example.com', date: '2026-05-01', content: 'last second keystrokes' },
+    ])
   })
 
   test('does not restore another account’s draft for the same date', async ({ page }) => {

@@ -56,6 +56,14 @@ function dateFromHash(): string | null {
   return DATE_HASH_RE.test(hash) ? hash : null
 }
 
+function readStoredAutoSave(): boolean {
+  try {
+    return localStorage.getItem('linger_autosave') === 'true'
+  } catch {
+    return false
+  }
+}
+
 function isMobileLayout(): boolean {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
@@ -222,7 +230,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.remove('session-restoring')
   }, [])
-  const [autoSave, setAutoSave] = useState(() => localStorage.getItem('linger_autosave') === 'true')
+  const [autoSave, setAutoSave] = useState(readStoredAutoSave)
   const [pendingDate, setPendingDate] = useState<string | null>(null)
   const pendingRelatedFromRef = useRef<string | null>(null)
   const [accountSwitch, setAccountSwitch] = useState<AccountSwitchAvailability>('checking')
@@ -493,9 +501,22 @@ export default function App() {
   const handleAutoSaveToggle = useCallback(() => {
     setAutoSave(prev => {
       const next = !prev
-      localStorage.setItem('linger_autosave', String(next))
+      try {
+        localStorage.setItem('linger_autosave', String(next))
+      } catch {
+        // Ignore storage write failures; keep the in-memory toggle working.
+      }
       return next
     })
+  }, [])
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'linger_autosave') setAutoSave(e.newValue === 'true')
+      else if (e.key === null) setAutoSave(readStoredAutoSave())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
   const diaryPrefetchRef = useRef(diary.prefetch)
@@ -631,8 +652,9 @@ export default function App() {
     baseVersion: string | null,
     force?: boolean,
     baseContent?: string | null,
+    options?: { keepalive?: boolean },
   ) => {
-    const result = await diary.save(date, content, baseVersion, force, baseContent)
+    const result = await diary.save(date, content, baseVersion, force, baseContent, options)
     tfIdf.updateEntry(date, content)
     return result
   }, [diary.save, tfIdf.updateEntry])

@@ -19,7 +19,7 @@ async function loadHarness(page: import('@playwright/test').Page) {
 
 async function renderModal(
   page: import('@playwright/test').Page,
-  opts: { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean } = {},
+  opts: { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean; showUnsavedInAutoSave?: boolean } = {},
 ) {
   // Content for every revision is provided up front; the modal prefetches all of
   // them on open, so switching versions later is served from cache.
@@ -516,6 +516,21 @@ test.describe('HistoryModal — unsaved entry', () => {
 
     const firstItem = page.locator('.history-revision-item').first()
     await expect(firstItem).not.toContainText('Unsaved')
+    await expect(firstItem).toHaveClass(/selected/)
+  })
+
+  test('shows "Unsaved" entry when autoSave=true and showUnsavedInAutoSave=true', async ({ page }) => {
+    await loadHarness(page)
+    await renderModal(page, {
+      autoSave: true,
+      showUnsavedInAutoSave: true,
+      isDirty: true,
+      text: 'offline unsaved edits',
+      savedText: 'saved content',
+    })
+
+    const firstItem = page.locator('.history-revision-item').first()
+    await expect(firstItem).toContainText('Unsaved')
     await expect(firstItem).toHaveClass(/selected/)
   })
 

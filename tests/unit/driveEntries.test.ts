@@ -121,6 +121,17 @@ test.describe('driveEntries proxy API', () => {
     expect(body.fileId).toBe('entry-1')
   })
 
+  test('saveEntry enables keepalive only when requested and within the browser payload limit', async () => {
+    const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '2' }
+    fetchMock.mock(jsonResponse(meta), jsonResponse(meta))
+
+    await saveEntry('2026-04-29', { date: '2026-04-29', content: 'short note' }, { keepalive: true })
+    expect(fetchMock.calls[0].init?.keepalive).toBe(true)
+
+    await saveEntry('2026-04-29', { date: '2026-04-29', content: 'x'.repeat(65_000) }, { keepalive: true })
+    expect(fetchMock.calls[1].init?.keepalive).toBeUndefined()
+  })
+
   test('saveEntry sends conflict metadata and throws on 409 conflict', async () => {
     const conflict = {
       entry: { date: '2026-04-29', content: 'remote', updated_at: '2026-04-29T00:00:00.000Z' },

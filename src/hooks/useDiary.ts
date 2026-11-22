@@ -38,7 +38,7 @@ export interface DiaryState {
   dates: string[]                                      // sorted desc
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
   getContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
-  save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean }) => Promise<LoadedDiaryEntry>
+  save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean; draftSavedAt?: number; keepalive?: boolean }) => Promise<LoadedDiaryEntry>
   remove: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   search: (query: string) => Promise<SearchResult>
   refreshEntries: () => Promise<void>
@@ -572,7 +572,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     }
   }, [isSignedIn, email, updateCache, getScope])
 
-  const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean; draftSavedAt?: number }): Promise<LoadedDiaryEntry> => {
+  const save = useCallback(async (date: string, content: string, baseVersion: string | null, force = false, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean; draftSavedAt?: number; keepalive?: boolean }): Promise<LoadedDiaryEntry> => {
     const scope = getScope()
     if (!isSignedIn || !scope) throw new Error('Not signed in')
 
@@ -591,10 +591,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
       const entry: DiaryEntry = { date, content }
       try {
-        const checkpointResult = await checkpoint
-        if (!checkpointResult.ok) throw checkpointResult.error ?? new Error('Could not save recovery draft')
+        // On pagehide/tab-hide keepalive flushes, don't block the fetch behind
+        // async IndexedDB/WebCrypto I/O or the browser may unload before the
+        // request is dispatched; the checkpoint still runs concurrently and is
+        // awaited before cleanup below if the page stays alive.
+        if (!options?.keepalive) {
+          const checkpointResult = await checkpoint
+          if (!checkpointResult.ok) throw checkpointResult.error ?? new Error('Could not save recovery draft')
+        }
         const cachedMeta = cacheRef.current.get(date)?.meta ?? null
-        const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force, signal: scope.controller.signal })
+        const meta = await saveEntry(date, entry, { fileId: cachedMeta?.id, baseVersion, baseContent, force, signal: scope.controller.signal, keepalive: options?.keepalive })
         if (!scope.active) throw new DOMException('Diary session changed', 'AbortError')
         updateCache(p => {
           const next = new Map(p)
@@ -604,6 +610,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (email !== null) putCached({ owner: email, date, meta, content: entry, snippet: entry.content.slice(0, 500) }).catch(() => {})
         storageAdapter.saveEntry(date, content).catch(() => {})
         broadcastMessage({ type: 'DIARY_UPDATED', date })
+        if (options?.keepalive) {
+          const checkpointResult = await checkpoint
+          if (!checkpointResult.ok) reportDraftStorageError()
+        }
         await deleteDraft(date, email ?? undefined, content, checkpointTime).catch(reportDraftStorageError)
         return { entry, meta }
       } catch (e) {

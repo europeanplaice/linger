@@ -37,7 +37,12 @@ interface SaveEntryOptions {
   baseContent?: string | null
   force?: boolean
   signal?: AbortSignal
+  keepalive?: boolean
 }
+
+// Browsers cap fetch({ keepalive: true }) bodies at 64 KiB; leave headroom for
+// headers and concurrent keepalive requests.
+const KEEPALIVE_MAX_BYTES = 60_000
 
 interface SaveConflictResponse {
   conflict: LoadedDiaryEntry | null
@@ -218,17 +223,20 @@ export async function getEntryByDate(date: string, cachedVersion?: string, fileI
 
 export async function saveEntry(date: string, entry: DiaryEntry, optionsOrFileId: SaveEntryOptions | string = {}): Promise<DriveFileMeta> {
   const options = typeof optionsOrFileId === 'string' ? { fileId: optionsOrFileId } : optionsOrFileId
+  const body = JSON.stringify({
+    content: entry.content,
+    fileId: options.fileId,
+    baseVersion: options.baseVersion,
+    baseContent: options.baseContent,
+    force: options.force,
+  })
+  const keepalive = Boolean(options.keepalive && new TextEncoder().encode(body).byteLength <= KEEPALIVE_MAX_BYTES)
   const { data, status } = await apiFetch<DriveFileMeta | SaveConflictResponse>(`${BASE}/entry/${encodeURIComponent(date)}`, {
     method: 'POST',
     signal: options.signal,
+    ...(keepalive ? { keepalive: true } : {}),
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      content: entry.content,
-      fileId: options.fileId,
-      baseVersion: options.baseVersion,
-      baseContent: options.baseContent,
-      force: options.force,
-    }),
+    body,
   }, [409])
   if (status === 409) throw new SaveConflictError((data as SaveConflictResponse).conflict ?? null)
   return data as DriveFileMeta

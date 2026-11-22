@@ -57,9 +57,10 @@ interface AppProps {
   savedText: string
   isDirty: boolean
   autoSave: boolean
+  showUnsavedInAutoSave?: boolean
 }
 
-function App({ date, fileId, baseVersion, text, savedText, isDirty, autoSave }: AppProps) {
+function App({ date, fileId, baseVersion, text, savedText, isDirty, autoSave, showUnsavedInAutoSave }: AppProps) {
   const [open, setOpen] = useState(true)
 
   if (!open) return <div id="modal-closed">closed</div>
@@ -73,6 +74,7 @@ function App({ date, fileId, baseVersion, text, savedText, isDirty, autoSave }: 
       savedText={savedText}
       isDirty={isDirty}
       autoSave={autoSave}
+      showUnsavedInAutoSave={showUnsavedInAutoSave}
       onSave={async (d, content, bv, force, baseContent) => {
         saveCalls.push({ date: d, content, baseVersion: bv, force })
         fullSaveCalls.push({ date: d, content, baseVersion: bv, force, baseContent })
@@ -101,7 +103,7 @@ function App({ date, fileId, baseVersion, text, savedText, isDirty, autoSave }: 
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
 
-type RenderOpts = { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean }
+type RenderOpts = { date?: string; fileId?: string; baseVersion?: string | null; text?: string; savedText?: string; isDirty?: boolean; autoSave?: boolean; showUnsavedInAutoSave?: boolean }
 
 window.historyHarness = {
   // Configure the revision list response.
@@ -128,6 +130,7 @@ window.historyHarness = {
           savedText={opts.savedText ?? ''}
           isDirty={opts.isDirty ?? false}
           autoSave={opts.autoSave ?? true}
+          showUnsavedInAutoSave={opts.showUnsavedInAutoSave}
           key={++renderCount}
         />
       </I18nProvider>
