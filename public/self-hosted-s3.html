@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>Bring your own S3 bucket — Linger</title>
+  <script type="module" src="/self-hosted-s3.js"></script>
   <style>
     body {
       font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
@@ -73,8 +74,8 @@
       font-weight: 600;
     }
     [data-lang] { display: none; }
-    html[data-active-lang="en"] [data-lang="en"] { display: block; }
-    html[data-active-lang="ja"] [data-lang="ja"] { display: block; }
+    html[lang="en"] [data-lang="en"] { display: block; }
+    html[lang="ja"] [data-lang="ja"] { display: block; }
   </style>
 </head>
 <body>
@@ -85,7 +86,7 @@
     </nav>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" class="lang-btn" data-set-lang="ja">日本語</button>
-      <button type="button" class="lang-btn" data-set-lang="en">English</button>
+      <button type="button" class="lang-btn active" data-set-lang="en">English</button>
     </div>
   </div>
 
@@ -274,40 +275,5 @@ terraform apply</code></pre>
       Linger 以外の Client ID が登録されている場合は、消えてしまわないよう <code>terraform.tfvars</code> の <code>additional_google_oidc_client_ids</code> に追記してから <code>terraform apply</code> を実行してください。
     </p>
   </main>
-
-  <script>
-    (function () {
-      function setLang(lang) {
-        var normalized = lang === 'ja' ? 'ja' : 'en';
-        document.documentElement.setAttribute('data-active-lang', normalized);
-        document.documentElement.lang = normalized;
-        document.title = normalized === 'ja'
-          ? '自分のAWS S3バケットへのバックアップ設定 — Linger'
-          : 'Bring your own S3 bucket — Linger';
-        var about = document.getElementById('nav-about');
-        var app = document.getElementById('nav-app');
-        if (about) about.textContent = normalized === 'ja' ? '← Lingerについて' : '← About';
-        if (app) app.textContent = normalized === 'ja' ? 'アプリを開く' : 'Open app';
-        var btns = document.querySelectorAll('[data-set-lang]');
-        for (var i = 0; i < btns.length; i++) {
-          btns[i].classList.toggle('active', btns[i].getAttribute('data-set-lang') === normalized);
-        }
-      }
-
-      var params = new URLSearchParams(window.location.search);
-      var queryLang = params.get('lang');
-      var initialLang = queryLang === 'ja' || queryLang === 'en'
-        ? queryLang
-        : ((navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en');
-      setLang(initialLang);
-
-      var buttons = document.querySelectorAll('[data-set-lang]');
-      for (var i = 0; i < buttons.length; i++) {
-        buttons[i].addEventListener('click', function () {
-          setLang(this.getAttribute('data-set-lang'));
-        });
-      }
-    })();
-  </script>
 </body>
 </html>
