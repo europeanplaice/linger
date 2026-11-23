@@ -1076,6 +1076,32 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             {t.settings.s3Help}
           </p>
 
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Bucket}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Bucket}
+              onChange={handleS3FieldChange(setS3Bucket)}
+              placeholder={t.settings.s3BucketPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <p className="settings-s3-field-help">{t.settings.s3BucketHelp}</p>
+
+          <div className="settings-item">
+            <span className="settings-item-label">{t.settings.s3Region}</span>
+            <input
+              type="text"
+              className="settings-text-input"
+              value={s3Region}
+              onChange={handleS3FieldChange(setS3Region)}
+              placeholder={t.settings.s3RegionPlaceholder}
+              spellCheck={false}
+            />
+          </div>
+          <p className="settings-s3-field-help">{t.settings.s3RegionHelp}</p>
+
           <div className="settings-s3-group-title">
             <span className="settings-s3-group-title-label">{t.settings.s3GroupSetup}</span>
             <button
@@ -1180,32 +1206,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {s3InitiallyEnabled ? t.settings.s3StatusActive : t.settings.s3StatusInactive}
             </span>
           </div>
-
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Bucket}</span>
-            <input
-              type="text"
-              className="settings-text-input"
-              value={s3Bucket}
-              onChange={handleS3FieldChange(setS3Bucket)}
-              placeholder={t.settings.s3BucketPlaceholder}
-              spellCheck={false}
-            />
-          </div>
-          <p className="settings-s3-field-help">{t.settings.s3BucketHelp}</p>
-
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Region}</span>
-            <input
-              type="text"
-              className="settings-text-input"
-              value={s3Region}
-              onChange={handleS3FieldChange(setS3Region)}
-              placeholder={t.settings.s3RegionPlaceholder}
-              spellCheck={false}
-            />
-          </div>
-          <p className="settings-s3-field-help">{t.settings.s3RegionHelp}</p>
 
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3RoleArn}</span>

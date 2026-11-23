@@ -86,6 +86,19 @@ test('entry date does not open the calendar on mobile or desktop', async ({ page
   await expect(page.locator('.sidebar')).not.toHaveClass(/open/)
 })
 
+test('date navigation and save controls fit next to the sidebar on a narrow desktop', async ({ page }) => {
+  await page.setViewportSize({ width: 641, height: 844 })
+  await page.goto(`${baseUrl}/#2024-09-30`)
+  await expect(page.locator('.editor-textarea')).toBeVisible()
+  await expect(page.locator('.sidebar')).toBeInViewport({ ratio: 1 })
+
+  const header = page.locator('.editor-header')
+  await expect(header.locator('.entry-date-monthday')).toHaveText('September 30')
+  await expect(header.locator('.btn-save')).toBeInViewport({ ratio: 1 })
+  await expect(header.locator('.btn-more')).toBeInViewport({ ratio: 1 })
+  await expect.poll(() => header.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+})
+
 test('mobile date selection confirms before leaving unsaved edits', async ({ page }) => {
   await page.goto(baseUrl)
   await expect(page.locator('.editor-textarea')).toBeVisible()

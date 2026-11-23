@@ -6,6 +6,8 @@ import { I18nProvider } from '../src/i18n'
 const theme = new URLSearchParams(location.search).get('theme')
 if (theme) document.documentElement.setAttribute('data-theme', theme)
 const withMilestones = new URLSearchParams(location.search).get('milestones') === '1'
+const dates = new Set(['2026-01-05', '2026-03-10', '2026-06-15'])
+if (withMilestones) dates.add('2026-04-10')
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
 const selectedDates: string[] = []
@@ -13,7 +15,7 @@ const selectedDates: string[] = []
 root.render(
   <I18nProvider>
     <CalendarView
-      dates={new Set(['2026-01-05', '2026-03-10', '2026-06-15'])}
+      dates={dates}
       selectedDate="2026-04-14"
       milestones={withMilestones ? [{ id: 'm1', label: 'Birthday', date: '2026-04-10', emoji: '🎂' }] : undefined}
       onSelect={date => {
