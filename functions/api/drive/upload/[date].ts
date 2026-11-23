@@ -61,7 +61,8 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
     }
     return diaryUploadResponse(await service!.uploadDiaryEntry(input))
   } catch {
-    console.warn('Diary upload coordinator request failed', action)
+    if (action === 'prepare') console.warn('Diary upload prepare request failed')
+    else console.warn('Diary upload complete request failed')
     return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
   }
 }

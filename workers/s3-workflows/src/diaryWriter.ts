@@ -281,7 +281,8 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     try {
       return diaryUploadResponse(await this.upload(input))
     } catch {
-      console.warn('Diary upload coordinator failed', input.action === 'prepare' ? 'prepare' : 'complete')
+      if (input.action === 'prepare') console.warn('Diary upload prepare coordinator failed')
+      else console.warn('Diary upload complete coordinator failed')
       return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
     }
   }
