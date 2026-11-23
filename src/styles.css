@@ -1173,9 +1173,13 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 /* ── Calendar ── */
 .calendar { padding: 0.5rem 1rem 0; }
 .calendar-grid-wrap {
+  display: grid;
   position: relative;
   overflow: hidden;
   touch-action: pan-y pinch-zoom;
+}
+.calendar-grid-wrap > .calendar-grid {
+  grid-area: 1 / 1;
 }
 .calendar-nav {
   display: flex;
@@ -1283,6 +1287,14 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+.mypicker-year-label-wrap {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.mypicker-year-label-wrap > .mypicker-year-label {
+  grid-area: 1 / 1;
+}
 .mypicker-year-label {
   font: inherit;
   font-size: 0.85rem;
@@ -1302,6 +1314,14 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .mypicker-year-label:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+.mypicker-grid-wrap {
+  display: grid;
+  overflow: hidden;
+}
+.mypicker-grid-wrap > .mypicker-months,
+.mypicker-grid-wrap > .mypicker-years {
+  grid-area: 1 / 1;
 }
 .mypicker-months,
 .mypicker-years {

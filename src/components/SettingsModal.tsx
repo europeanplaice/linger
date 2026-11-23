@@ -928,7 +928,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                     transition={{ duration: 0.2 }}
                     style={{ overflowY: 'clip', overflowX: 'visible' }}
                   >
-                  <AnimatePresence initial={false} mode="popLayout">
+                  <AnimatePresence initial={false}>
                     {milestones.map(a => {
                       const badgeEnabled = a.showBadge !== false
                       const badgeLimitReached = !badgeEnabled && enabledBadgeCount >= MAX_MILESTONE_BADGES
@@ -938,7 +938,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                           layout
                           initial={{ opacity: 0, y: -6 }}
                           animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -6 }}
+                          exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
                           transition={{ duration: 0.18 }}
                         >
                           <div className="settings-milestone-row">
