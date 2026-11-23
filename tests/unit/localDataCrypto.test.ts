@@ -1,10 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
-import { decryptLocalData, encryptLocalData } from '../../src/lib/localDataCrypto'
+import { clearVaultKey, getVaultLocalDerivationKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
+import { decryptLocalData, encryptLocalData, localDataLookupKey } from '../../src/lib/localDataCrypto'
 
 afterEach(() => { clearVaultKey(); vi.restoreAllMocks() })
 
 describe('local data encryption', () => {
+  it('imports one non-extractable derivation key per unlock and preserves v1 records and lookups', async () => {
+    const importKey = vi.spyOn(crypto.subtle, 'importKey')
+    const masterKey = new Uint8Array(32).fill(7)
+    unlockVaultWithKey('user-a', masterKey)
+    const derivationKey = await getVaultLocalDerivationKey('user-a')
+    expect(derivationKey).toMatchObject({ extractable: false, usages: ['deriveKey'] })
+    expect(getVaultLocalDerivationKey('user-b')).toBeNull()
+
+    // Known values for the pre-existing v1 AES-GCM envelope and HMAC index.
+    const existingDraft = {
+      version: 1 as const,
+      iv: 'AQEBAQEBAQEBAQEB',
+      ciphertext: 'x/Hn6txyRTvtbrJN7iWdGrwEVt1OvLPnWE1u0oWDsneoDZl3mezXJ75qHbd+msuGNnkACA==',
+    }
+    const [draft, lookup] = await Promise.all([
+      decryptLocalData('user-a', 'draft', 'date-a', existingDraft),
+      localDataLookupKey('user-a', 'draft', 'date-a'),
+    ])
+    expect(draft).toEqual({ content: 'previously saved draft' })
+    expect(lookup).toBe('VKvi26fWOtKqOWbRZJhVTp3QJkkwfxdCGuXPXXZDv44')
+    expect(importKey).toHaveBeenCalledTimes(1)
+
+    clearVaultKey()
+    expect(getVaultLocalDerivationKey('user-a')).toBeNull()
+    unlockVaultWithKey('user-a', masterKey)
+    expect(await getVaultLocalDerivationKey('user-a')).not.toBe(derivationKey)
+    expect(importKey).toHaveBeenCalledTimes(2)
+    await expect(localDataLookupKey('user-a', 'draft', 'date-a')).resolves.toBe(lookup)
+  })
+
   it('encrypts and authenticates content and its record identity', async () => {
     unlockVaultWithKey('user-a', new Uint8Array(32).fill(7))
     const value = { content: 'private diary text', baseContent: 'earlier text' }
@@ -49,5 +79,24 @@ describe('local data encryption', () => {
     unlockVaultWithKey('user-a', new Uint8Array(32).fill(7))
     proceed()
     await expect(pending).rejects.toThrow('Passkey vault changed')
+  })
+
+  it('discards key initialization from an earlier unlock', async () => {
+    const importKey = crypto.subtle.importKey.bind(crypto.subtle)
+    let proceed!: () => void
+    const gate = new Promise<void>(resolve => { proceed = resolve })
+    vi.spyOn(crypto.subtle, 'importKey').mockImplementationOnce(async (...args) => {
+      const key = await importKey(...args)
+      await gate
+      return key
+    })
+    const deriveKey = vi.spyOn(crypto.subtle, 'deriveKey')
+    unlockVaultWithKey('user-a', new Uint8Array(32).fill(7))
+    const pending = localDataLookupKey('user-a', 'draft', 'date-a')
+    unlockVaultWithKey('user-a', new Uint8Array(32).fill(8))
+    proceed()
+    await expect(pending).rejects.toThrow('Passkey vault changed')
+    expect(deriveKey).not.toHaveBeenCalled()
+    await expect(localDataLookupKey('user-a', 'draft', 'date-a')).resolves.toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 })

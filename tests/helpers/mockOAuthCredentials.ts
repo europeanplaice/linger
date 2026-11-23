@@ -42,10 +42,11 @@ export async function installMockOAuthCredentials(
     const seedVault = options.seedVaultOnModuleLoad === undefined || options.seedVaultOnModuleLoad === 'all' || vaultModuleLoads === options.seedVaultOnModuleLoad
     const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
     const body = `
-      let current = ${seedVault ? `{ internalUserId: '${userId}', rawKey: new Uint8Array(32).fill(43) }` : 'null'};
+      let current = null;
       let revision = 0;
       const b64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
       export function getVaultKey(id) { return current && (!id || id === current.internalUserId) ? new Uint8Array(current.rawKey) : null; }
+      export function getVaultLocalDerivationKey(id) { return current?.internalUserId === id ? current.localDerivationKey : null; }
       export function getVaultUserId() { return current?.internalUserId ?? null; }
       export const getVaultInternalUserId = getVaultUserId;
       export function getVaultRevision() { return revision; }
@@ -53,9 +54,15 @@ export async function installMockOAuthCredentials(
       export function vaultKeyHeader(id) { const key = getVaultKey(id); if (!key) return null; try { return b64(key); } finally { key.fill(0); } }
       export function setVaultKeyHeader(headers, id) { headers.delete('X-Linger-Vault-Key'); headers.delete('X-Linger-Vault-User'); const value = vaultKeyHeader(id); const user = id ?? current?.internalUserId; if (value && user) { headers.set('X-Linger-Vault-Key', value); headers.set('X-Linger-Vault-User', user); } }
       export function setVaultHeadersForKey(headers, id, key) { headers.set('X-Linger-Vault-Key', b64(key)); headers.set('X-Linger-Vault-User', id); }
-      export function unlockVaultWithKey(id, key) { clearVaultKey(); current = { internalUserId: id, rawKey: new Uint8Array(key) }; }
-      export async function unlockWrappedMasterKey(_prf, id) { revision++; current = { internalUserId: id, rawKey: new Uint8Array(32).fill(43) }; }
-      export async function createWrappedMasterKey(_prf, id, credentialId) { revision++; const rawKey = new Uint8Array(32).fill(43); current = { internalUserId: id, rawKey: new Uint8Array(rawKey) }; return { version: 1, credentialId, hkdfSalt: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', iv: 'AAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }; }
+      export function unlockVaultWithKey(id, key) {
+        clearVaultKey();
+        const rawKey = new Uint8Array(key);
+        const localDerivationKey = crypto.subtle.importKey('raw', rawKey, 'HKDF', false, ['deriveKey']);
+        current = { internalUserId: id, rawKey, localDerivationKey };
+      }
+      ${seedVault ? `unlockVaultWithKey('${userId}', new Uint8Array(32).fill(43));` : ''}
+      export async function unlockWrappedMasterKey(_prf, id) { unlockVaultWithKey(id, new Uint8Array(32).fill(43)); }
+      export async function createWrappedMasterKey(_prf, id, credentialId) { unlockVaultWithKey(id, new Uint8Array(32).fill(43)); return { version: 1, credentialId, hkdfSalt: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', iv: 'AAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }; }
       export async function wrapExistingMasterKey(_prf, id, credentialId) { return { version: 1, credentialId, hkdfSalt: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', iv: 'AAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }; }
       export function serializeWrappedMasterKey() { return { wrappedMasterKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', prfSalt: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' }; }
       export function parseWrappedMasterKey(payload, credentialId) { return { version: 1, credentialId, hkdfSalt: payload.prfSalt, iv: payload.wrappedMasterKey.slice(0,16), ciphertext: payload.wrappedMasterKey.slice(16) }; }

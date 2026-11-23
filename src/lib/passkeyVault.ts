@@ -26,7 +26,7 @@ export interface EncryptedVaultValue {
   ciphertext: string
 }
 
-let current: { internalUserId: string; rawKey: Bytes } | null = null
+let current: { internalUserId: string; rawKey: Bytes; localDerivationKey: Promise<CryptoKey> } | null = null
 let vaultRevision = 0
 
 function toBase64(bytes: Uint8Array): string {
@@ -140,13 +140,21 @@ export async function unlockWrappedMasterKey(prfOutput: Uint8Array, internalUser
 
 function unlockVault(internalUserId: string, rawKey: Uint8Array): void {
   clearVaultKey()
-  current = { internalUserId, rawKey: new Uint8Array(rawKey) }
+  const masterKey = new Uint8Array(rawKey)
+  const localDerivationKey = crypto.subtle.importKey('raw', masterKey, 'HKDF', false, ['deriveKey'])
+  // Local operations await the original promise, which may settle before the first use.
+  void localDerivationKey.catch(() => {})
+  current = { internalUserId, rawKey: masterKey, localDerivationKey }
 }
 
 /** Returns a temporary copy of the in-memory key. Callers must clear it after use. */
 export function getVaultKey(internalUserId?: string): Bytes | null {
   if (!current || (internalUserId && current.internalUserId !== internalUserId)) return null
   return new Uint8Array(current.rawKey)
+}
+
+export function getVaultLocalDerivationKey(internalUserId: string): Promise<CryptoKey> | null {
+  return current?.internalUserId === internalUserId ? current.localDerivationKey : null
 }
 
 export function getVaultInternalUserId(): string | null {
