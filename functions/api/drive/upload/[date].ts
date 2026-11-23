@@ -7,7 +7,8 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return jsonResponse({ error: 'Invalid date' }, 400)
   const { session, sessionId, accessToken, idToken } = data
   if (!session?.user_id) return jsonResponse({ error: 'Unauthorized' }, 401)
-  if (!env.S3_WORKFLOW_SERVICE) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
+  const { DIARY_WRITER: writer, S3_WORKFLOW_SERVICE: service } = env
+  if (!writer && !service) return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
 
   const reader = request.body?.getReader()
   if (!reader) return jsonResponse({ error: 'Missing upload instructions' }, 400)
@@ -52,7 +53,9 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
     return jsonResponse({ error: 'Invalid upload instructions' }, 400)
   }
   try {
-    const result = await env.S3_WORKFLOW_SERVICE.uploadDiaryEntry(input)
+    const result = writer
+      ? await writer.getByName(session.user_id).upload(input)
+      : await service!.uploadDiaryEntry(input)
     const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
     return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
   } catch {

@@ -53,6 +53,20 @@ describe('Pages to coordinated diary writer', () => {
 })
 
 describe('direct upload instructions', () => {
+  it('calls the bound account object directly when both bindings are present', async () => {
+    const body = { action: 'prepare', operationId: crypto.randomUUID(), bytes: 7 }
+    const ctx = context('POST', JSON.stringify(body))
+    const upload = vi.fn(async () => ({ status: 429, body: { error: 'A diary upload is in progress' }, retryAfter: '1' }))
+    const getByName = vi.fn(() => ({ upload }))
+
+    const response = await onUpload({ ...ctx, env: { ...ctx.env, DIARY_WRITER: { getByName } } } as never)
+    expect(getByName).toHaveBeenCalledExactlyOnceWith('account-a')
+    expect(upload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...body, accountKey: 'account-a' }))
+    expect(ctx.uploadDiaryEntry).not.toHaveBeenCalled()
+    expect(response.status).toBe(429)
+    expect(response.headers.get('Retry-After')).toBe('1')
+  })
+
   it('forwards authorized metadata to the writer', async () => {
     const body = { action: 'prepare', operationId: crypto.randomUUID(), bytes: 5, baseVersion: '7' }
     const ctx = context('POST', JSON.stringify(body), { Origin: 'https://example.com' })

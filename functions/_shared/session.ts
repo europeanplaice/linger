@@ -1,5 +1,5 @@
 import type { S3BackupRequest, S3WorkflowService } from './s3Workflow'
-import type { DiaryWriterAuth } from './diaryWriter'
+import type { DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from './diaryWriter'
 import type { DriveFileMeta } from './drive'
 import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
 
@@ -22,11 +22,12 @@ export interface Env {
   CF_PAGES_COMMIT_SHA?: string
   S3_WORKFLOW_SERVICE?: S3WorkflowService
   S3_SYNC_INDEX?: { getByName(name: string): { backup(input: S3BackupRequest): Promise<Response> } }
-  // Present inside the Workflow Worker. Pages uses S3_WORKFLOW_SERVICE instead;
-  // both bindings route folder discovery to the same account-scoped object.
+  // Pages sends upload metadata directly to the same account-scoped writer
+  // used by the Workflow Worker for folder discovery and legacy writes.
   DIARY_WRITER?: {
     getByName(name: string): {
       getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
+      upload(input: DiaryUploadInput): Promise<DiaryUploadResult>
       ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
       selectFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string; folderId: string }): Promise<string>
     }
