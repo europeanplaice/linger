@@ -122,16 +122,34 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
             </div>
           )}
           <div className="passkey-gate-actions passkey-gate-navigation">
-            <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || ((!setup || !!setupEmail) && verificationFailed) || (setup && !!setupEmail && !token) || (recovery && !!setupEmail && !recoveryConfirmed)}
-              aria-describedby={setup && setupEmail ? 'passkey-verify-help' : setup && !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
-              aria-busy={busy}
-              onClick={() => setup ? (setupEmail ? (onSetup(0, recovery, token), setToken(''), pendingReset.current = true) : connectGoogle()) : unlock(!options)}>
-              {setup ? (setupEmail ? (recovery ? t.login.passkeyRecoveryCreate : t.login.passkeySetup) : t.login.passkeyConnectGoogle) : t.login.passkeyUnlock}
-            </button>
-            {setup && setupEmail && <button className="btn-use-another-account" type="button" disabled={busy} onClick={connectGoogle}>{t.login.passkeyChooseGoogle}</button>}
-            <button className="btn-use-another-account" type="button" disabled={staticPreview || busy} onClick={() => changeView(setup ? 'welcome' : 'setup')}>
-              {setup ? t.login.passkeyBackToSignIn : t.login.passkeyFirstTime}
-            </button>
+            {setup ? <>
+              <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || (!!setupEmail && verificationFailed) || (!!setupEmail && !token) || (recovery && !!setupEmail && !recoveryConfirmed)}
+                aria-describedby={setupEmail ? 'passkey-verify-help' : !recovery ? 'passkey-gate-description passkey-setup-note' : 'passkey-gate-description'}
+                aria-busy={busy}
+                onClick={() => setupEmail ? (onSetup(0, recovery, token), setToken(''), pendingReset.current = true) : connectGoogle()}>
+                {setupEmail ? (recovery ? t.login.passkeyRecoveryCreate : t.login.passkeySetup) : t.login.passkeyConnectGoogle}
+              </button>
+              {setupEmail && <button className="btn-use-another-account" type="button" disabled={busy} onClick={connectGoogle}>{t.login.passkeyChooseGoogle}</button>}
+              <button className="btn-use-another-account" type="button" disabled={staticPreview || busy} onClick={() => changeView('welcome')}>
+                {t.login.passkeyBackToSignIn}
+              </button>
+            </> : <>
+              <div className="passkey-action-group">
+                <span className="passkey-action-hint">{t.login.passkeyReturningHint}</span>
+                <button className="btn-signin-google passkey-primary" type="button" disabled={staticPreview || busy || verificationFailed}
+                  aria-describedby="passkey-gate-description"
+                  aria-busy={busy}
+                  onClick={() => unlock(!options)}>
+                  {t.login.passkeyUnlock}
+                </button>
+              </div>
+              <div className="passkey-action-group">
+                <span className="passkey-action-hint">{t.login.passkeyNewUserHint}</span>
+                <button className="passkey-secondary" type="button" disabled={staticPreview || busy} onClick={() => changeView('setup')}>
+                  {t.login.passkeyFirstTime}
+                </button>
+              </div>
+            </>}
           </div>
           {!setup && <details className="passkey-recovery-help">
             <summary>{t.login.passkeyRecoveryTitle}</summary>

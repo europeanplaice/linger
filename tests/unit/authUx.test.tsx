@@ -43,6 +43,8 @@ describe('authentication guidance', () => {
   it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.getByText('Already have a passkey?')).toBeTruthy()
+    expect(screen.getByText('New to Linger? Connect Google & create a passkey')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
     expect(screen.getByText('Having trouble with your passkey?')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
