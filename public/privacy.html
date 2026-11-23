@@ -38,8 +38,8 @@
   <h2>1. Overview</h2>
   <p>
     Linger is a personal diary web app. Your Google Drive is the primary store for diary entries.
-    Linger's Cloudflare backend handles sign-in and requests to Google Drive. It processes diary
-    text while carrying out those requests, but does not use Cloudflare databases as a diary store.
+    Linger's Cloudflare backend handles sign-in and coordinates diary saves. Your browser sends and
+    receives diary text directly from Google Drive during ordinary saves and reads.
     If you enable the optional S3 backup, Linger also sends diary files to the S3 bucket you
     configure in your own AWS account.
   </p>
@@ -84,9 +84,10 @@
 
   <h2>4. Cloudflare Hosting, Sessions, and Sync Metadata</h2>
   <p>
-    Linger runs on Cloudflare Pages and Workers. When you read or save an entry, its contents pass
-    through Cloudflare's network so the backend can make the authorized Google Drive request. The
-    backend does not use its authentication database or sync index to store diary text.
+    Linger runs on Cloudflare Pages and Workers. When you read or save an entry, your browser
+    transfers the entry text directly to or from Google Drive. The backend processes account
+    information, file metadata, and upload coordination requests. It also handles entry text
+    during S3 backup and restore, and for compatibility requests from older clients.
   </p>
   <p>
     Linger processes diary text, Google OAuth credentials, and AWS temporary credentials in memory
@@ -122,8 +123,9 @@
   </p>
   <p>
     Cloudflare's coordination services store operational metadata for coordinating writes and backups.
-    New cached Drive identifiers, create reservations, and S3 sync details such as entry dates, versions,
-    status, and errors are encrypted with the user metadata key. Job counts, timestamps, and state remain
+    Cached Drive identifiers, create reservations, active Drive upload URLs and their receipts,
+    and S3 sync details such as entry dates, versions, status, and errors are encrypted with the
+    user metadata key. Job counts, timestamps, and state remain
     visible; keyed lookups also reveal repeated access and the number of entries. Older records may remain
     unencrypted until migrated, and dates may appear in request paths or provider diagnostics. This metadata
     does not include diary entry text. Cloudflare may also process request
@@ -154,8 +156,9 @@
   <p>
     Here, "host administrator" means the operator who controls Linger's Cloudflare project and
     deployed code. Linger has no admin screen for browsing users' diary entries, and its database
-    and sync index are not used to store diary text. However, Linger does not use end-to-end
-    encryption: diary text and request-scoped OAuth tokens pass through its backend.
+    and sync index are not used to store diary text. Diary files are plaintext in Google Drive
+    and in the optional S3 backup. The backend handles request-scoped OAuth tokens that can
+    authorize access to those diary files in Google Drive.
   </p>
   <p>
     Linger's source code is public on
@@ -172,7 +175,7 @@
   <h3>Information the host administrator may access, or cause Linger to access</h3>
   <ul>
     <li>Encrypted account metadata and a Google refresh credential in Cloudflare D1. The stored data alone does not reveal the credential or authorize Drive access.</li>
-    <li>Diary entries and milestones while processing your authorized requests. The backend receives tokens transiently for these operations. An administrator who changes deployed code could capture those tokens or contents, so we cannot guarantee inaccessibility to an administrator with deployment access.</li>
+    <li>Diary entries and milestones available to Linger under your Google Drive authorization. The backend receives tokens transiently during authorized operations. An administrator who changes deployed code could use those tokens to access diary files or capture content in the browser.</li>
     <li>If you enable S3 backup, the configured bucket's contents within the permissions of your AWS IAM role during authorized operations. Linger uses temporary credentials in request memory to mirror and restore entries.</li>
     <li>Operational records available in Cloudflare, such as sync status, entry dates and versions, backfill progress, and service logs or error details.</li>
   </ul>

@@ -72,8 +72,10 @@ devices should explicitly sign out.
 An operator with only stored data and server configuration cannot decrypt the
 protected metadata. An operator or attacker who can inspect request memory or
 change the served code can capture a key during use. Public source and deployment
-verification help review that risk; they do not eliminate it. The backend still
-processes plaintext diary requests and Google identity during authorized operations.
+verification help users review the code. During ordinary diary saves and reads, the
+browser transfers the body directly to or from Drive. The backend handles Google
+credentials and identity and reads diary text for enabled S3 backup or restore
+and for compatibility requests from older clients.
 
 ## Browser-local encrypted data
 

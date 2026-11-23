@@ -2,6 +2,7 @@ import { createSession, getSession, saveSession } from '../../../functions/_shar
 import { env, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { isAtLeast } from '../../../functions/_shared/s3'
+import { beginEntryUpload, cancelEntryUpload } from '../../../functions/_shared/drive'
 import type { SessionData } from '../../../functions/_shared/session'
 import {
   assertWithinDailyStepBudget,
@@ -24,6 +25,29 @@ import { createTestSession, testSession } from './auth'
 function httpError(status: number): Error {
   return Object.assign(new Error(`HTTP ${status}`), { status })
 }
+
+describe('Google upload requests in Workers', () => {
+  it('constructs requests in workerd without following redirects', async () => {
+    const location = 'https://www.googleapis.com/upload/drive/v3/files?upload_id=test'
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      // Exercise workerd's Request constructor rather than just spying on
+      // arguments. It rejects the redirect mode 'error' before issuing I/O.
+      const request = new Request(input, init)
+      expect(request.redirect).toBe('manual')
+      return request.method === 'DELETE'
+        ? new Response(null, { status: 204 })
+        : new Response(null, { headers: { Location: location } })
+    })
+    try {
+      await expect(beginEntryUpload('token', 'https://linger.example', '2026-01-05', 'folder', 'new-file', true, 7))
+        .resolves.toBe(location)
+      await expect(cancelEntryUpload(location)).resolves.toBeUndefined()
+      expect(fetch).toHaveBeenCalledTimes(2)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+})
 
 describe('entryKey / isValidDate', () => {
   it('builds the plain-text object key for a date', () => {

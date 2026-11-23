@@ -10,6 +10,7 @@ import { deleteDraft, getAllDrafts, putDraft } from '../../src/lib/draftStorage'
 import { setActiveAccount } from '../../src/lib/accountSession'
 import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
 import type { DriveChange, DriveFileMeta, LoadedDiaryEntry } from '../../src/types'
+import { clearOAuthCredentials, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 import { todayYmd } from '../../src/utils/date'
 
 // Keep the Hook, API client, storage adapter and IDB cache real. Only the HTTP
@@ -45,6 +46,7 @@ beforeEach(async () => {
   localStorage.setItem('linger_session_user', email)
   unlockVaultWithKey('test-vault', new Uint8Array(32).fill(5))
   setActiveAccount(`email:${encodeURIComponent(email)}`, false, email)
+  setOAuthCredentials({ accessToken: 'test-token', idToken: 'test-id', expiresAt: Date.now() + 60_000 })
   await clearCache()
   await new SyncQueueManager(email).clear()
   for (const draft of await getAllDrafts(email)) await deleteDraft(draft.date, email)
@@ -55,15 +57,41 @@ beforeEach(async () => {
   changes = []
   read = vi.fn().mockImplementation(async () => json(null, 404))
   write = vi.fn().mockImplementation(async () => json({ error: 'unexpected write' }, 400))
+  const contents = new Map<string, string>()
+  const uploads = new Map<string, Promise<Response>>()
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = new URL(String(input), window.location.origin)
     if (url.pathname === '/api/drive/entries') return json({ files })
     if (url.pathname === '/api/drive/search') return json({ files })
     if (url.pathname === '/api/drive/changes') return json({ changes, newStartPageToken: 'tok-2' })
+    const day = url.pathname.split('/').pop()!
     if (url.pathname.startsWith('/api/drive/entry/')) {
-      const day = url.pathname.split('/').pop()!
-      return init?.method === 'POST' ? write(day, JSON.parse(String(init.body))) : read(day)
+      const response = await read(day)
+      if (!response.ok) return response
+      const loaded = await response.json() as LoadedDiaryEntry
+      contents.set(loaded.meta.id, loaded.entry.content)
+      return json({ meta: loaded.meta })
     }
+    if (url.pathname.startsWith('/drive/v3/files/')) return new Response(contents.get(day))
+    if (url.pathname.startsWith('/api/drive/upload/')) {
+      const { action, operationId, ...metadata } = JSON.parse(String(init?.body))
+      if (action === 'prepare') {
+        // The feature tests exercise the hook's storage and replay semantics.
+        // Drive's body transfer itself is asserted in driveEntries.test.ts.
+        uploads.set(operationId, write(day, metadata))
+        const response = await uploads.get(operationId)!
+        if (response.status === 409) {
+          const { conflict } = await response.json() as { conflict: LoadedDiaryEntry | null }
+          if (conflict) contents.set(conflict.meta.id, conflict.entry.content)
+          return json({ conflict: conflict?.meta ?? null }, 409)
+        }
+        if (!response.ok) return response
+        return json({ uploadUrl: `https://www.googleapis.com/upload/drive/v3/files?upload_id=${operationId}` })
+      }
+      const response = await uploads.get(operationId)!
+      return json({ meta: await response.json() })
+    }
+    if (url.pathname === '/upload/drive/v3/files') return new Response(null, { status: 200 })
     throw new Error(`Unexpected fetch: ${init?.method ?? 'GET'} ${input}`)
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -77,6 +105,7 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   setActiveAccount(null)
   clearVaultKey()
+  clearOAuthCredentials()
 })
 
 async function start(initialFiles: DriveFileMeta[] = []) {
@@ -131,14 +160,14 @@ describe('useDiary HTTP and storage integration', () => {
     expect(await getAllDrafts(email)).toMatchObject([{ content: 'same text', baseVersion: 'newer-base' }])
   })
 
-  it('first save posts once without a fileId and persists the returned entry', async () => {
+  it('first save prepares without a fileId and persists the returned entry', async () => {
     const { result } = await start()
     write.mockResolvedValue(json(meta()))
     await act(async () => {
       expect(await result.current.save(date, 'hello', null)).toEqual(entry())
     })
-    expect(write).toHaveBeenCalledExactlyOnceWith(date, { content: 'hello', baseVersion: null, force: false })
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledExactlyOnceWith(date, { bytes: 5, baseVersion: null, force: false })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(await getAllCached()).toEqual([expect.objectContaining({ owner: email, date, meta: meta(), content: entry().entry })])
   })
 
@@ -146,7 +175,7 @@ describe('useDiary HTTP and storage integration', () => {
     ['1', '2', undefined],
     ['5', '6', undefined],
     ['2', '4', 'draft'],
-  ])('saves over cached version %s as version %s with one POST', async (baseVersion, nextVersion, baseContent) => {
+  ])('saves over cached version %s as version %s with a single upload', async (baseVersion, nextVersion, baseContent) => {
     const { result } = await start()
     write.mockResolvedValueOnce(json(meta(date, baseVersion)))
     await act(async () => { await result.current.save(date, 'draft', null) })
@@ -156,10 +185,9 @@ describe('useDiary HTTP and storage integration', () => {
     await act(async () => {
       expect((await result.current.save(date, 'draft with more', baseVersion, false, baseContent)).meta.version).toBe(nextVersion)
     })
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(write).toHaveBeenCalledExactlyOnceWith(date, {
-      content: 'draft with more', fileId: meta().id, baseVersion, force: false,
-      ...(baseContent === undefined ? {} : { baseContent }),
+      bytes: 15, fileId: meta().id, baseVersion, force: false,
     })
   })
 
@@ -178,7 +206,7 @@ describe('useDiary HTTP and storage integration', () => {
         name: EntryConflictError.name, remote,
       })
     })
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect((await getAllDrafts(email))[0]).toMatchObject({ date, content: 'my local edits' })
   })
 
@@ -191,8 +219,8 @@ describe('useDiary HTTP and storage integration', () => {
     await act(async () => {
       expect(await result.current.getContent(date, { forceNetwork: true })).toEqual(entry(date, '2', 'fresh text'))
     })
-    expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock.mock.calls[0][0]).toBe(`/api/drive/entry/${date}?fileId=${meta().id}`)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/drive/entry/${date}?metadata=1&fileId=${meta().id}`)
     fetchMock.mockClear()
     await act(async () => {
       expect((await result.current.getContent(date))?.entry.content).toBe('fresh text')
@@ -249,20 +277,21 @@ describe('useDiary HTTP and storage integration', () => {
     expect(onExpired).toHaveBeenCalledOnce()
   })
 
-  it('preserves baseContent when retrying a pending save after session expiry', async () => {
+  it('preserves the draft base while retrying a pending save after session expiry', async () => {
     const { result, onExpired } = await start([meta()])
     write.mockResolvedValueOnce(json({}, 401))
     await act(async () => {
       await expect(result.current.save(date, 'pending content', '1', false, 'saved base')).rejects.toBeInstanceOf(TokenExpiredError)
     })
     expect(onExpired).toHaveBeenCalledOnce()
+    expect(await getAllDrafts(email)).toMatchObject([{ baseContent: 'saved base' }])
     write.mockResolvedValueOnce(json(meta(date, '2')))
     await act(async () => {
       expect((await result.current.retryPendingSave())?.meta.version).toBe('2')
     })
     expect(write).toHaveBeenCalledTimes(2)
     expect(write.mock.calls[1]).toEqual([date, {
-      content: 'pending content', fileId: meta().id, baseVersion: '1', baseContent: 'saved base', force: false,
+      bytes: 15, fileId: meta().id, baseVersion: '1', force: false,
     }])
     expect(await getAllDrafts(email)).toEqual([])
   })
@@ -336,7 +365,7 @@ describe('useDiary HTTP and storage integration', () => {
         imported: ['2026-05-03'], skipped: [date, '2026-05-02'], failed: [],
       })
     })
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(write.mock.calls[0][0]).toBe('2026-05-03')
   })
 

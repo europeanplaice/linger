@@ -1,9 +1,12 @@
 import { getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
 import { env, createExecutionContext, runInDurableObject } from 'cloudflare:test'
+import { exports as bindings } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
 import * as drive from '../../../functions/_shared/drive'
-import type { DiaryMutationInput } from '../../../functions/_shared/diaryWriter'
+import type { DiaryMutationInput, DiaryUploadInput } from '../../../functions/_shared/diaryWriter'
+import { DIARY_UPLOAD_URL } from '../../../functions/_shared/diaryWriter'
+import { mirrorCurrentEntry } from '../../../functions/_shared/s3Settings'
 import type { DiaryWriter } from '../src/diaryWriter'
 import type { S3SyncIndex } from '../src/syncIndex'
 import type { WorkflowEnv } from '../src/types'
@@ -14,11 +17,13 @@ vi.mock('../../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(), findEntryMeta: vi.fn(), getDiaryFileMeta: vi.fn(),
   getEntryContent: vi.fn(), getEntryMeta: vi.fn(), inspectDriveFolder: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
+  beginEntryUpload: vi.fn(), entryUploadStatus: vi.fn(), cancelEntryUpload: vi.fn(),
 }))
 vi.mock('../../../functions/_shared/s3Settings', async original => ({
   ...await original<typeof import('../../../functions/_shared/s3Settings')>(),
   mirrorEntrySave: vi.fn(async () => {}),
   mirrorEntryDelete: vi.fn(async () => {}),
+  mirrorCurrentEntry: vi.fn(async () => {}),
 }))
 const { default: Service } = await import('../src/index')
 
@@ -517,5 +522,86 @@ describe('account-scoped diary mutations', () => {
     expect((await first).status).toBe(200)
     await rejected
     expect(drive.saveEntry).toHaveBeenCalledOnce()
+  })
+})
+
+describe('coordinated direct Drive uploads', () => {
+  const uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?upload_id=provider-session'
+
+  beforeEach(() => {
+    vi.mocked(drive.beginEntryUpload).mockResolvedValue(uploadUrl)
+    vi.mocked(drive.entryUploadStatus).mockResolvedValue('incomplete')
+    vi.mocked(drive.cancelEntryUpload).mockResolvedValue()
+  })
+
+  it('keeps the reservation across retries and hands only metadata to S3 after Drive commits', async () => {
+    const { auth, service, writer, input } = await account()
+    const rpc = (bindings as typeof bindings & { default: Pick<InstanceType<typeof Service>, 'uploadDiaryEntry'> }).default
+    const prepare: DiaryUploadInput = {
+      ...auth, date, action: 'prepare', operationId: crypto.randomUUID(), origin: 'https://linger.example',
+      bytes: 11, baseVersion: null,
+    }
+    const [first, second] = await Promise.all([
+      writer.fetch(DIARY_UPLOAD_URL, { method: 'POST', body: JSON.stringify(prepare) }),
+      rpc.uploadDiaryEntry(prepare),
+    ])
+    expect(await first.json()).toEqual({ uploadUrl })
+    expect(second.body).toEqual({ uploadUrl })
+    expect(drive.beginEntryUpload).toHaveBeenCalledOnce()
+    expect(drive.generateFileId).toHaveBeenCalledOnce()
+    expect(drive.saveEntry).not.toHaveBeenCalled()
+
+    const competing = await service.uploadDiaryEntry({ ...prepare, operationId: crypto.randomUUID() })
+    expect(competing.status).toBe(429)
+    expect((await service.mutateDiaryEntry({ ...input(''), method: 'DELETE' })).status).toBe(429)
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'other-folder' })).rejects.toThrow('in progress')
+
+    const id = await vi.mocked(drive.generateFileId).mock.results[0].value!
+    const meta = { id, name: `diary-${date}.txt`, version: '1', mimeType: 'text/plain', parents: [`folder-${auth.accountKey}`] }
+    vi.mocked(drive.entryUploadStatus).mockResolvedValue(meta)
+    // Model a completed upload whose tab closed before calling complete.
+    await service.ensureDiaryFolder(auth)
+    expect(mirrorCurrentEntry).toHaveBeenCalledExactlyOnceWith(auth.accessToken, auth.sessionId, expect.anything(), expect.anything(), date)
+
+    const complete: DiaryUploadInput = { ...auth, date, action: 'complete', operationId: prepare.operationId }
+    expect((await rpc.uploadDiaryEntry(complete)).body).toEqual({ meta })
+    expect(mirrorCurrentEntry).toHaveBeenCalledOnce()
+    const metadata = await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.list())
+    expect([...metadata.keys()].some(key => key.startsWith('upload:pending:'))).toBe(false)
+    expect(JSON.stringify([...metadata])).not.toContain('provider-session')
+    expect(drive.getEntryContent).not.toHaveBeenCalled()
+  })
+
+  it('cancels an abandoned upload before assigning another session for the same date', async () => {
+    const { auth, service, writer } = await account()
+    const prepare: DiaryUploadInput = {
+      ...auth, date, action: 'prepare', operationId: crypto.randomUUID(), origin: 'https://linger.example',
+      bytes: 3, baseVersion: null,
+    }
+    expect((await service.uploadDiaryEntry(prepare)).status).toBe(200)
+    await runInDurableObject(writer, async (_instance: DiaryWriter, state) => {
+      const [[key, envelope]] = [...(await state.storage.list<string>({ prefix: 'upload:pending:' })).entries()]
+      const purpose = `diary-writer:${key}`
+      const upload = await openVaultValue<Record<string, unknown>>(auth.vaultKey, auth.accountKey, purpose, envelope)
+      await state.storage.put(key, await sealVaultValue(auth.vaultKey, auth.accountKey, purpose, { ...upload, startedAt: Date.now() - 61_000 }))
+    })
+    vi.mocked(drive.entryUploadStatus).mockResolvedValueOnce('incomplete').mockResolvedValueOnce('expired')
+    expect((await service.uploadDiaryEntry({ ...prepare, operationId: crypto.randomUUID() })).status).toBe(200)
+    expect(drive.cancelEntryUpload).toHaveBeenCalledExactlyOnceWith(uploadUrl)
+    expect(drive.beginEntryUpload).toHaveBeenCalledTimes(2)
+    expect(drive.generateFileId).toHaveBeenCalledOnce()
+  })
+
+  it('returns conflict metadata without reading either version of the entry', async () => {
+    const { auth, service, input } = await account()
+    const meta = await (await service.mutateDiaryEntry(input('previous version'))).json() as DriveFileMeta
+    const response = await service.uploadDiaryEntry({
+      ...auth, date, action: 'prepare', operationId: crypto.randomUUID(), origin: 'https://linger.example',
+      bytes: 3, fileId: meta.id, baseVersion: '0',
+    })
+    expect(response.status).toBe(409)
+    expect(response.body).toEqual({ conflict: meta, canRebase: true })
+    expect(drive.getEntryContent).not.toHaveBeenCalled()
+    expect(drive.beginEntryUpload).not.toHaveBeenCalled()
   })
 })

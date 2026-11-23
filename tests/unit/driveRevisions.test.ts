@@ -1,8 +1,7 @@
 import { expect, test } from 'vitest'
-import type { DiaryEntry } from '../../src/types'
 import { listRevisions, getRevisionContent } from '../../src/api/driveRevisions'
 import { TokenExpiredError, DriveHttpError } from '../../src/api/driveEntries'
-import { FetchMock, jsonResponse } from '../helpers/mockFetch'
+import { FetchMock, jsonResponse, textResponse } from '../helpers/mockFetch'
 
 const fetchMock = new FetchMock()
 
@@ -60,9 +59,8 @@ test.describe('listRevisions', () => {
 })
 
 test.describe('getRevisionContent', () => {
-  test('fetches revision content from /api/drive/revisions/:fileId/:revisionId', async () => {
-    const entry: DiaryEntry = { date: '2026-05-01', content: 'old text' }
-    fetchMock.mock(jsonResponse(entry))
+  test('downloads a legacy revision directly and parses its date', async () => {
+    fetchMock.mock(jsonResponse({ ok: true }), textResponse('---\ndate: 2026-05-01\n---\nold text', 200))
 
     const result = await getRevisionContent('file-1', 'rev-2')
 
@@ -71,13 +69,14 @@ test.describe('getRevisionContent', () => {
   })
 
   test('calls the correct URL with credentials', async () => {
-    fetchMock.mock(jsonResponse({ date: '2026-05-01', content: '' }))
+    fetchMock.mock(jsonResponse({ ok: true }), textResponse('', 200))
 
     await getRevisionContent('file-abc', 'rev-xyz')
 
-    expect(fetchMock.calls).toHaveLength(1)
-    expect(fetchMock.calls[0].url).toBe('/api/drive/revisions/file-abc/rev-xyz')
+    expect(fetchMock.calls[0].url).toBe('/api/drive/revisions/file-abc/rev-xyz?metadata=1')
     expect(fetchMock.calls[0].init?.credentials).toBe('include')
+    expect(fetchMock.calls[1].url).toBe('https://www.googleapis.com/drive/v3/files/file-abc/revisions/rev-xyz?alt=media')
+    expect(fetchMock.calls[1].init?.credentials).toBe('omit')
   })
 
   test('throws TokenExpiredError on 401', async () => {

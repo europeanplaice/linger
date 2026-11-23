@@ -17,6 +17,11 @@ preview_id = "<YOUR_PREVIEW_KV_NAMESPACE_ID>"
 binding = "S3_WORKFLOW_SERVICE"
 service = "linger-s3-workflows"
 
+[[durable_objects.bindings]]
+name = "DIARY_WRITER"
+class_name = "DiaryWriter"
+script_name = "linger-s3-workflows"
+
 # Set a shared UTC cutoff at least 30 days after the last KV-only deployment.
 [vars]
 AUTH_KV_FALLBACK_UNTIL = ""

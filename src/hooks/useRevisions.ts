@@ -60,6 +60,7 @@ interface Params {
   savedText: string
   isDirty: boolean
   autoSave: boolean
+  showUnsavedInAutoSave?: boolean
   onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
   onRestored: (result: LoadedDiaryEntry) => void
   onExpired: () => void
@@ -88,8 +89,8 @@ async function buildDiffSegments(previous: string, current: string): Promise<Dif
   }))
 }
 
-export function useRevisions({ fileId, date, baseVersion, text, savedText, isDirty, autoSave, onSave, onRestored, onExpired, messages = DEFAULT_MESSAGES }: Params): RevisionsState {
-  const showUnsavedEntry = !autoSave && isDirty
+export function useRevisions({ fileId, date, baseVersion, text, savedText, isDirty, autoSave, showUnsavedInAutoSave = false, onSave, onRestored, onExpired, messages = DEFAULT_MESSAGES }: Params): RevisionsState {
+  const showUnsavedEntry = isDirty && (!autoSave || showUnsavedInAutoSave)
 
   const [revisions, setRevisions] = useState<DriveRevisionMeta[]>([])
   const [listLoading, setListLoading] = useState(true)

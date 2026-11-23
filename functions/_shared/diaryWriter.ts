@@ -24,11 +24,29 @@ export interface DiaryFolderSelection extends DiaryWriterAuth {
   allowEmpty?: boolean
 }
 
+export type DiaryUploadInput = DiaryWriterAuth & { date: string; operationId: string } & (
+  | { action: 'prepare'; origin: string; bytes: number; fileId?: string; baseVersion?: string | null; force?: boolean }
+  | { action: 'complete' }
+)
+
+export type DiaryUploadResult =
+  | { status: 200; body: { uploadUrl: string } | { meta: DriveFileMeta } }
+  | { status: 409; body: { conflict: DriveFileMeta | null; canRebase: boolean } }
+  | { status: number; body: { error: string }; retryAfter?: string }
+
+export const DIARY_UPLOAD_URL = 'https://diary-writer.internal/upload'
+
+export function diaryUploadResponse(result: DiaryUploadResult): Response {
+  const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
+  return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
+}
+
 export interface DiaryWriterService {
   getDiaryEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
   selectDiaryFolder(input: DiaryFolderSelection): Promise<string>
   mutateDiaryEntry(input: DiaryMutationInput): Promise<Response>
+  uploadDiaryEntry(input: DiaryUploadInput): Promise<DiaryUploadResult>
 }
 
 // Never fall back to an uncoordinated write when the service is unavailable.

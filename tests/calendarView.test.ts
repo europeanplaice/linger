@@ -127,4 +127,31 @@ test.describe('CalendarView', () => {
     const outlineStyle = await todayCell.evaluate(el => getComputedStyle(el).outlineStyle)
     expect(outlineStyle).toBe('none')
   })
+
+  test('does not expand calendar-grid-wrap vertically while transitioning between months', async ({ page }) => {
+    const wrap = page.locator('.calendar-grid-wrap')
+    const initialHeight = (await wrap.boundingBox())?.height ?? 0
+    expect(initialHeight).toBeGreaterThan(0)
+
+    await page.evaluate(() => {
+      const el = document.querySelector('.calendar-grid-wrap') as HTMLElement
+      const heights: number[] = []
+      ;(window as unknown as { __calWrapHeights: number[] }).__calWrapHeights = heights
+      const ro = new ResizeObserver(entries => {
+        for (const entry of entries) heights.push(entry.contentRect.height)
+      })
+      ro.observe(el)
+    })
+
+    await page.getByRole('button', { name: 'Next month' }).click()
+    await expect(page.locator('.calendar-grid')).toHaveCount(1)
+
+    const gridArea = await page.locator('.calendar-grid').evaluate(el => getComputedStyle(el).gridArea)
+    expect(gridArea).toBe('1 / 1')
+
+    const observedHeights = await page.evaluate(() => (window as unknown as { __calWrapHeights: number[] }).__calWrapHeights)
+    for (const h of observedHeights) {
+      expect(Math.abs(h - initialHeight)).toBeLessThan(1)
+    }
+  })
 })

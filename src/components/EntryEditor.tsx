@@ -19,7 +19,7 @@ import { shareEntry } from '../utils/share'
 import { useI18n } from '../i18n'
 import { useSaveProgress } from '../hooks/useSaveProgress'
 import { useEvent, useLatestRef } from '../hooks/useEvent'
-import { useAutoSave } from '../hooks/useAutoSave'
+import { useAutoSave, type AutoSaveSaveOptions } from '../hooks/useAutoSave'
 import { useKeyboardInset } from '../hooks/useKeyboardInset'
 import { useFooterInset } from '../hooks/useFooterInset'
 import { useScrollEdges } from '../hooks/useScrollEdges'
@@ -75,7 +75,7 @@ export interface ReauthSaveFailure {
 interface Props {
   date: string
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
-  onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
+  onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null, options?: { keepalive?: boolean }) => Promise<LoadedDiaryEntry>
   onDelete: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   onMenuClick: () => void
   onDirtyChange: (isDirty: boolean) => void
@@ -193,16 +193,17 @@ interface SyncBadgeProps {
   label: string
   onClick?: () => void
   busy?: boolean
+  justSaved?: boolean
   direction?: 'read' | 'write'
   children: React.ReactNode
 }
 
-function SyncBadge({ status, title, label, onClick, busy, direction, children }: SyncBadgeProps) {
+function SyncBadge({ status, title, label, onClick, busy, justSaved, direction, children }: SyncBadgeProps) {
   const Badge = onClick ? 'button' : 'div'
   return (
     <Badge
       type={onClick ? 'button' : undefined}
-      className={`editor-meta-badge editor-meta-badge--${status}`}
+      className={`editor-meta-badge editor-meta-badge--${status}${justSaved ? ' editor-meta-badge--just-saved' : ''}`}
       title={title}
       aria-label={label}
       aria-busy={busy || undefined}
@@ -260,9 +261,28 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const [deleting, setDeleting] = useState(false)
   const [discardedText, setDiscardedText] = useState<string | null>(null)
   const discardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Briefly true right after a save completes so the Drive badge plays a single
+  // confirmation pulse rather than popping in flatly (off on plain entry loads).
+  const [justSaved, setJustSaved] = useState(false)
+  const justSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerJustSaved = useCallback(() => {
+    setJustSaved(true)
+    if (justSavedTimerRef.current) clearTimeout(justSavedTimerRef.current)
+    justSavedTimerRef.current = setTimeout(() => {
+      justSavedTimerRef.current = null
+      setJustSaved(false)
+    }, 950)
+  }, [])
   // True while auto-save is silently persisting before an auto-confirmed day switch;
   // suppresses the "unsaved — leave?" banner so it doesn't flash in auto-save mode.
   const [autoNavSaving, setAutoNavSaving] = useState(false)
+  // Pauses automatic Drive saves after the user clicks "Keep local" on a conflict
+  // so auto-save doesn't immediately re-send the stale baseVersion and re-open
+  // the conflict panel. Cleared on the next explicit/manual save or resolution.
+  const [autoSavePaused, setAutoSavePaused] = useState(false)
+  // True while an IME composition (e.g. Japanese kana-kanji conversion) is in
+  // progress so uncommitted composition text isn't written as a draft/revision.
+  const [isComposing, setIsComposing] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
@@ -380,6 +400,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const baseVersionRef = useLatestRef(baseVersion)
   const savingRef = useLatestRef(saving)
   const hasConflictRef = useLatestRef(hasConflict)
+  const autoSavePausedRef = useLatestRef(autoSavePaused)
+  const isComposingRef = useLatestRef(isComposing)
+  const showHistoryModalRef = useLatestRef(showHistoryModal)
   const loadingRef = useLatestRef(loading)
   const loadFailedRef = useLatestRef(loadFailed)
   const refreshingRef = useLatestRef(refreshing)
@@ -395,6 +418,15 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     baseVersionRef.current = value
     setBaseVersion(value)
   }, [baseVersionRef])
+
+  const setAutoSavePausedValue = useCallback((value: boolean) => {
+    autoSavePausedRef.current = value
+    setAutoSavePaused(value)
+  }, [autoSavePausedRef])
+
+  useEffect(() => {
+    if (!autoSave) setAutoSavePausedValue(false)
+  }, [autoSave, setAutoSavePausedValue])
 
   // Checks /api/s3/entry-status for the AWS S3 mirror status of a given Drive
   // version. Used two ways, both with `retry: true` (default) so a transient
@@ -596,6 +628,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setDraftWriteFailed(false)
     setHasConflict(false)
     setConflictRemote(null)
+    setAutoSavePausedValue(false)
+    isComposingRef.current = false
+    setIsComposing(false)
     setPendingOfflineSave(false)
     setS3Status(null)
     setS3Retrying(false) // a retry in flight belongs to the date we're leaving, not this one
@@ -606,6 +641,8 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setIdeaIndex(0)
     insertedIdeaTextsRef.current = []
     if (discardToastTimerRef.current) { clearTimeout(discardToastTimerRef.current); discardToastTimerRef.current = null }
+    if (justSavedTimerRef.current) { clearTimeout(justSavedTimerRef.current); justSavedTimerRef.current = null }
+    setJustSaved(false)
     fileIdRef.current = null
     void (async () => {
       if (isSignedIn && !draftOwner) {
@@ -669,7 +706,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [date, draftOwner, applyLoadedEntry, applyDraft, pollS3Status])
+  }, [date, draftOwner, applyLoadedEntry, applyDraft, pollS3Status, setAutoSavePausedValue, isComposingRef])
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
@@ -706,33 +743,83 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [s3Retrying, pollS3Status])
 
   const isDirty = text !== savedText
+  const draftTimerRef = useRef<number | null>(null)
+  const draftWriteGenRef = useRef(0)
+  const savingContentRef = useRef<string | null>(null)
+
+  const persistLocalDraft = useCallback((content: string, forDate: string): Promise<boolean> => {
+    if (!draftOwner) return Promise.resolve(false)
+    if (content === savedTextRef.current || currentDateRef.current !== forDate) return Promise.resolve(true)
+    if (savingRef.current && savingContentRef.current === content) return Promise.resolve(true)
+    const gen = ++draftWriteGenRef.current
+    return getDraft(forDate, draftOwner).then(existing => {
+      if (
+        draftWriteGenRef.current !== gen ||
+        (savingRef.current && savingContentRef.current === content) ||
+        textRef.current !== content ||
+        textRef.current === savedTextRef.current ||
+        currentDateRef.current !== forDate
+      ) return true
+      return putDraft({
+        owner: draftOwner,
+        date: forDate,
+        content,
+        baseVersion: baseVersionRef.current,
+        baseContent: savedTextRef.current,
+        savedAt: nextDraftCheckpointTime(),
+        conflicted: existing?.conflicted,
+      }).then(() => true)
+    }).then((ok) => {
+      if (ok && draftWriteGenRef.current === gen && currentDateRef.current === forDate && textRef.current === content) {
+        setDraftWriteFailed(false)
+      }
+      return ok
+    }).catch(() => {
+      if (currentDateRef.current === forDate) setDraftWriteFailed(true)
+      return false
+    })
+  }, [draftOwner, baseVersionRef, savedTextRef, savingRef, textRef])
+
+  const flushLocalDraft = useCallback((): Promise<boolean> => {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current)
+      draftTimerRef.current = null
+    }
+    if (loadingRef.current || hasConflictRef.current) return Promise.resolve(false)
+    if (textRef.current === savedTextRef.current) return Promise.resolve(true)
+    return persistLocalDraft(textRef.current, currentDateRef.current)
+  }, [hasConflictRef, loadingRef, persistLocalDraft, savedTextRef, textRef])
 
   // Keep a small, account-scoped local recovery point while typing. This runs
   // independently of Drive auto-save, so an expired session or failed request
   // cannot be the first time we try to preserve the editor contents.
   useEffect(() => {
-    if (!draftOwner || !isDirty || loading || hasConflict) return
+    if (!draftOwner || !isDirty || loading || hasConflict || isComposing) return
     const content = text
     const timer = window.setTimeout(() => {
-      void getDraft(date, draftOwner).then(existing => {
-        if (textRef.current !== content || currentDateRef.current !== date) return
-        return putDraft({
-          owner: draftOwner,
-          date,
-          content,
-          baseVersion: baseVersionRef.current,
-          baseContent: savedTextRef.current,
-          savedAt: nextDraftCheckpointTime(),
-          conflicted: existing?.conflicted,
-        })
-      }).then(() => {
-        if (currentDateRef.current === date && textRef.current === content) setDraftWriteFailed(false)
-      }).catch(() => {
-        if (currentDateRef.current === date) setDraftWriteFailed(true)
-      })
+      if (draftTimerRef.current === timer) draftTimerRef.current = null
+      void persistLocalDraft(content, date)
     }, 350)
-    return () => window.clearTimeout(timer)
-  }, [date, draftOwner, isDirty, loading, hasConflict, text])
+    draftTimerRef.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (draftTimerRef.current === timer) draftTimerRef.current = null
+    }
+  }, [date, draftOwner, isDirty, loading, hasConflict, isComposing, text, persistLocalDraft])
+
+  // Flush the 350ms debounced local draft immediately when the tab is hidden or
+  // leaving so keystrokes typed in the last moments are still recovered locally.
+  useEffect(() => {
+    if (!draftOwner) return
+    const onVisibility = () => { if (document.visibilityState === 'hidden') void flushLocalDraft() }
+    const onPageHide = () => { void flushLocalDraft() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+  }, [draftOwner, flushLocalDraft])
 
   useEffect(() => {
     onDirtyChange(isDirty)
@@ -783,9 +870,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const onCancelNavigationRef = useLatestRef(onCancelNavigation)
   const saveInFlightRef = useRef<Promise<boolean> | null>(null)
 
-  const save = useCallback((explicit = true): Promise<boolean> => {
+  const save = useCallback((explicit = true, options?: AutoSaveSaveOptions): Promise<boolean> => {
     if (saveInFlightRef.current) return saveInFlightRef.current
     if (savingRef.current || loadFailedRef.current) return Promise.resolve(false)
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current)
+      draftTimerRef.current = null
+    }
+    draftWriteGenRef.current += 1
+    const currentText = textRef.current
+    savingContentRef.current = currentText
     savingRef.current = true
     setSaving(true)
     if (explicit) startSave()
@@ -793,13 +887,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setStatus('')
       setHasConflict(false)
       setConflictRemote(null)
+      setAutoSavePausedValue(false)
     }
     const run = async (): Promise<boolean> => {
       let success = false
       const dateGeneration = dateGenerationRef.current
       try {
-        const currentText = textRef.current
-        const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current)
+        const saved = await onSaveRef.current(date, currentText, baseVersionRef.current, undefined, savedTextRef.current, options)
         if (dateGenerationRef.current !== dateGeneration) return true
         const newVersion = saved.meta.version ?? null
         const newId = saved.meta.id
@@ -807,7 +901,9 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         setBaseVersionValue(newVersion)
         fileIdRef.current = newId
         setPendingOfflineSave(false)
+        setAutoSavePausedValue(false)
         setStatus(savedStatus)
+        triggerJustSaved()
         // Captured only once the Drive save itself has resolved — the mirror is
         // scheduled server-side after that response, so starting the clock any
         // earlier would burn part of the poll/grace budget on the Drive round
@@ -841,6 +937,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         }
         return false
       } finally {
+        savingContentRef.current = null
         savingRef.current = false
         setSaving(false)
         if (explicit) completeSave(success)
@@ -849,7 +946,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     const pending = run().finally(() => { saveInFlightRef.current = null })
     saveInFlightRef.current = pending
     return pending
-  }, [date, savedStatus, t, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status])
+  }, [date, savedStatus, t, setAutoSavePausedValue, setBaseVersionValue, setSavedTextValue, startSave, completeSave, pollS3Status, triggerJustSaved])
 
   const handleExplicitSave = useCallback(async () => {
     const ok = await save(true)
@@ -870,13 +967,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   }, [save, onPendingNavigate, onCancelNavigation, pendingNavDateRef])
 
   // In auto-save mode a pending day switch shouldn't surface the "save before
-  // leaving?" banner — just persist the edits and navigate. If the save fails
-  // (offline / conflict), fall back to showing the banner for manual resolution.
+  // leaving?" banner — just persist the edits and navigate. While offline,
+  // flush the encrypted local recovery draft and navigate immediately (it will
+  // replay automatically on reconnect). If a Drive save fails (e.g. conflict)
+  // or auto-save is paused after keeping local edits, fall back to the banner.
   useEffect(() => {
-    if (!pendingNavDate || !autoSave) { setAutoNavSaving(false); return }
+    if (!pendingNavDate || !autoSave || autoSavePaused) { setAutoNavSaving(false); return }
     let active = true
     setAutoNavSaving(true)
     void (async () => {
+      if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        const draftOk = await flushLocalDraft()
+        if (!active) return
+        setAutoNavSaving(false)
+        if (draftOk) onPendingNavigate()
+        return
+      }
       // A blur may already have started a save. Wait for it, and also persist
       // any edits made while that request was in flight before leaving.
       let ok = true
@@ -889,7 +995,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       if (ok) onPendingNavigate()
     })()
     return () => { active = false }
-  }, [pendingNavDate, autoSave, save, onPendingNavigate])
+  }, [pendingNavDate, autoSave, autoSavePaused, isOnline, flushLocalDraft, save, onPendingNavigate])
 
   const loadRemote = () => {
     const discardedDraft = textRef.current
@@ -900,6 +1006,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     fileIdRef.current = conflictRemote?.meta.id ?? null
     setHasConflict(false)
     setConflictRemote(null)
+    setAutoSavePausedValue(false)
     setPendingOfflineSave(false)
     if (draftOwner) deleteDraft(date, draftOwner, discardedDraft).catch(() => setDraftWriteFailed(true))
     setStatus(conflictRemote ? t.entry.loadedLatest : t.entry.remoteDeleted)
@@ -908,6 +1015,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const keepLocal = () => {
     setHasConflict(false)
     setConflictRemote(null)
+    if (autoSave) setAutoSavePausedValue(true)
     setStatus(t.entry.localKept)
   }
 
@@ -922,8 +1030,10 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setBaseVersionValue(newVersion)
       setHasConflict(false)
       setConflictRemote(null)
+      setAutoSavePausedValue(false)
       setPendingOfflineSave(false)
       setStatus(savedStatus)
+      triggerJustSaved()
       // Same rationale as save() above: this is a genuine write, so give the
       // mirror it schedules server-side the same since-scoped pending grace
       // window instead of resetS3ForVersion's default since-less check, and
@@ -965,6 +1075,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       setDraftKeyMismatch(false)
       setHasConflict(false)
       setConflictRemote(null)
+      setAutoSavePausedValue(false)
     } catch (error) {
       if (currentDateRef.current === capturedDate && !silent) {
         if (error instanceof DraftKeyMismatchError) { setDraftReadFailed(true); setDraftKeyMismatch(true); setLoadFailed(true) }
@@ -1003,6 +1114,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const handleDiscardClick = () => {
     const previous = text
     setText(savedTextRef.current)
+    setAutoSavePausedValue(false)
     setStatus('')
     if (draftOwner) deleteDraft(date, draftOwner, previous).catch(() => setDraftWriteFailed(true))
     if (pendingOfflineSaveRef.current) {
@@ -1060,18 +1172,54 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     }
   }
 
-  // A silent save may run when nothing is in flight and there are unsaved edits.
+  const handleManualAutoSave = useCallback(() => {
+    setAutoSavePausedValue(false)
+    void save(false)
+  }, [save, setAutoSavePausedValue])
+
+  const openHistory = useCallback(() => {
+    setShowMoreMenu(false)
+    if (!autoSave || !isDirty || !isOnline || autoSavePausedRef.current || hasConflictRef.current || status === t.entry.saveFailed) {
+      setShowHistoryModal(true)
+      return
+    }
+    const gen = dateGenerationRef.current
+    void (async () => {
+      if (saveInFlightRef.current || textRef.current !== savedTextRef.current) {
+        await save(false)
+      }
+      if (dateGenerationRef.current === gen && fileIdRef.current) setShowHistoryModal(true)
+    })()
+  }, [autoSave, isDirty, isOnline, status, t.entry.saveFailed, save, autoSavePausedRef, hasConflictRef, textRef, savedTextRef])
+
+  // A silent save may run when nothing is in flight, online, not composing, not
+  // paused after keeping local edits, and there are unsaved edits.
   const canAutoSave = useEvent(() =>
-    !savingRef.current && !hasConflictRef.current && !loadingRef.current && !loadFailedRef.current &&
+    isOnline && !savingRef.current && !hasConflictRef.current && !autoSavePausedRef.current &&
+    !showHistoryModalRef.current && !isComposingRef.current && !loadingRef.current && !loadFailedRef.current &&
     textRef.current !== savedTextRef.current,
   )
-  const flushPendingAutoSave = useAutoSave({ enabled: autoSave, isDirty, text, save, canSave: canAutoSave })
+  const flushPendingAutoSave = useAutoSave({
+    enabled: autoSave && !autoSavePaused && !showHistoryModal,
+    isDirty,
+    isOnline,
+    isComposing,
+    savedText,
+    text,
+    save,
+    canSave: canAutoSave,
+  })
 
-  // When connectivity returns, retry a save that failed while offline.
+  // When connectivity returns, retry a save that failed while offline (or edits
+  // written while offline in auto-save mode).
+  const prevOnlineRef = useRef(isOnline)
   useEffect(() => {
-    if (!isOnline || !pendingOfflineSaveRef.current) return
+    const reconnected = !prevOnlineRef.current && isOnline
+    prevOnlineRef.current = isOnline
+    if (!isOnline) return
+    if (!pendingOfflineSaveRef.current && !(reconnected && autoSave)) return
     if (textRef.current === savedTextRef.current) { setPendingOfflineSave(false); return }
-    if (savingRef.current || hasConflictRef.current || loadingRef.current || loadFailedRef.current) return
+    if (savingRef.current || hasConflictRef.current || (autoSave && autoSavePausedRef.current) || showHistoryModalRef.current || isComposingRef.current || loadingRef.current || loadFailedRef.current) return
     void save(!autoSave)
   }, [autoSave, isOnline, save])
 
@@ -1081,14 +1229,14 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         if (isDirty && !loadFailed) {
-          if (autoSave && !hasConflict) void save(false)
+          if (autoSave && !hasConflict) handleManualAutoSave()
           else if (!autoSave) void handleExplicitSave()
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [autoSave, isDirty, hasConflict, loadFailed, handleExplicitSave, save])
+  }, [autoSave, isDirty, hasConflict, loadFailed, handleExplicitSave, handleManualAutoSave])
 
   useEffect(() => {
     if (status !== savedStatus) return
@@ -1104,6 +1252,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
 
   useEffect(() => () => {
     if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
+    if (justSavedTimerRef.current) clearTimeout(justSavedTimerRef.current)
   }, [])
 
   useKeyboardInset()
@@ -1281,6 +1430,29 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     }
   }
 
+  const autoSavePhase = hasConflict ? 'conflict'
+    : saving ? 'saving'
+    : !isOnline && isDirty ? 'offline'
+    : status === t.entry.saveFailed && isDirty ? 'error'
+    : autoSavePaused && isDirty ? 'paused'
+    : isDirty ? 'waiting'
+    : baseVersion !== null ? 'saved'
+    : 'idle'
+
+  const autoSaveStatusText = autoSavePhase === 'conflict' ? t.entry.changedElsewhere
+    : autoSavePhase === 'saving' ? t.common.savingEllipsis
+    : autoSavePhase === 'offline' ? t.entry.saveSyncPending
+    : autoSavePhase === 'error' ? t.entry.saveFailed
+    : autoSavePhase === 'paused' ? t.entry.autoSavePaused
+    : autoSavePhase === 'waiting' ? t.entry.saveWaiting
+    : autoSavePhase === 'saved' ? t.common.saved
+    : ''
+
+  const autoSaveStatusVisible = autoSavePhase !== 'saved' && autoSavePhase !== 'idle'
+  const autoSaveAction: 'retry' | 'save-now' | null =
+    autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed
+      ? (status === t.entry.saveFailed ? 'retry' : 'save-now')
+      : null
 
   return (
     <>
@@ -1295,13 +1467,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             savedText={savedText}
             isDirty={isDirty}
             autoSave={autoSave}
+            showUnsavedInAutoSave={!isOnline || status === t.entry.saveFailed || autoSavePaused || hasConflict}
             onSave={onSave}
             onRestored={(result) => {
               const content = result.entry.content
+              const newVersion = result.meta.version ?? null
               setText(content)
               setSavedTextValue(content)
-              setBaseVersionValue(result.meta.version ?? null)
+              setBaseVersionValue(newVersion)
               fileIdRef.current = result.meta.id
+              setHasConflict(false)
+              setConflictRemote(null)
+              setAutoSavePausedValue(false)
+              setPendingOfflineSave(false)
+              const attemptStartedAt = result.meta.modifiedTime ?? new Date().toISOString()
+              lastSaveAtRef.current = { date, at: attemptStartedAt }
+              resetS3ForVersion(date, newVersion, attemptStartedAt)
               setShowHistoryModal(false)
             }}
             onClose={() => setShowHistoryModal(false)}
@@ -1447,7 +1628,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
               {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}</span>
+              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}</span>
             </span>
           </motion.button>}
           {!isToday && onGoToToday && (
@@ -1491,7 +1672,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                       </button>
                     )}
                     {isSignedIn && fileIdRef.current && (
-                      <button type="button" className="more-menu-item" onClick={() => { setShowMoreMenu(false); setShowHistoryModal(true) }}>
+                      <button type="button" className="more-menu-item" onPointerDown={preventFocusSteal} onClick={openHistory}>
                         <Clock3 className="btn-icon" aria-hidden="true" size={15} strokeWidth={2} />
                         {t.entry.history}
                       </button>
@@ -1589,14 +1770,28 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </AnimatePresence>
         {autoSave && !loading && !loadFailed ? (
-          <span className={`editor-save-status${!isDirty && !saving && !hasConflict ? ' sr-only' : ''}${status === t.entry.saveFailed && isDirty && isOnline ? ' editor-save-status--error' : ''}`} role="status" aria-live="polite">
-            {hasConflict ? t.entry.changedElsewhere
-              : saving ? t.common.savingEllipsis
-              : !isOnline && isDirty ? t.entry.saveSyncPending
-              : status === t.entry.saveFailed && isDirty ? t.entry.saveFailed
-              : isDirty ? t.entry.saveWaiting
-              : baseVersion !== null ? t.common.saved
-              : ''}
+          <span
+            className={`editor-save-status${!autoSaveStatusVisible ? ' sr-only' : ` editor-save-status--${autoSavePhase}`}${autoSavePhase === 'error' && isOnline ? ' editor-save-status--error' : ''}`}
+            data-phase={autoSavePhase}
+            role="status"
+            aria-live="polite"
+          >
+            {autoSaveStatusVisible ? (
+              <motion.span
+                key={autoSavePhase}
+                className="editor-save-status-inner"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {autoSavePhase === 'saving' ? (
+                  <span className="btn-saving-spinner editor-save-spinner" aria-hidden="true" />
+                ) : (
+                  <span className={`editor-save-dot editor-save-dot--${autoSavePhase}`} aria-hidden="true" />
+                )}
+                {autoSaveStatusText}
+              </motion.span>
+            ) : autoSaveStatusText}
           </span>
         ) : <AnimatePresence initial={false}>
           {isDirty && !loading && !autoSave && (
@@ -1610,58 +1805,69 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             >{t.common.unsaved}</motion.span>
           )}
         </AnimatePresence>}
-        {autoSave && status === t.entry.saveFailed && isDirty && isOnline && !hasConflict && !saving && (
-          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={() => void save(false)}>{t.entry.saveRetry}</button>
-        )}
-        {autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed && status !== t.entry.saveFailed && (
-          <button className="editor-save-retry" type="button" onPointerDown={preventFocusSteal} onClick={() => void save(false)}>{t.entry.saveNow}</button>
-        )}
+        <AnimatePresence initial={false}>
+          {autoSaveAction && (
+            <motion.button
+              key={autoSaveAction}
+              className="editor-save-retry"
+              type="button"
+              onPointerDown={preventFocusSteal}
+              onClick={handleManualAutoSave}
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -4 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
+            >
+              {autoSaveAction === 'retry' ? t.entry.saveRetry : t.entry.saveNow}
+            </motion.button>
+          )}
+        </AnimatePresence>
         <div className="editor-meta-sync">
           <AnimatePresence initial={false}>
             {!isDirty && !loading && !loadFailed && baseVersion !== null && (
               <motion.span
                 key="drive"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
+                className="editor-meta-drive-slot"
+                initial={{ opacity: 0, scale: 0.85, y: 2 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.88, y: -2 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
               >
                 <SyncBadge
                   status="synced"
                   title={t.entry.driveBadge}
                   label={t.entry.driveBadge}
+                  justSaved={justSaved}
                 >
                   <DriveBadgeIcon />
                 </SyncBadge>
               </motion.span>
             )}
           </AnimatePresence>
-          {!isDirty && !loading && !loadFailed && baseVersion !== null && (
-            <span className="editor-meta-s3-slot">
-              <AnimatePresence initial={false}>
-                {s3Status && (
-                  <motion.span
-                    key="s3"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <SyncBadge
-                      status={s3Status}
-                      title={s3BadgeLabel}
-                      label={s3BadgeLabel}
-                      onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
-                      busy={s3Retrying}
-                      direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
-                    >
-                      <S3BadgeIcon />
-                    </SyncBadge>
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </span>
-          )}
+          <AnimatePresence initial={false}>
+            {!isDirty && !loading && !loadFailed && baseVersion !== null && s3Status && (
+              <motion.span
+                key="s3"
+                className="editor-meta-s3-slot"
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.88 }}
+                transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <SyncBadge
+                  status={s3Status}
+                  title={s3BadgeLabel}
+                  label={s3BadgeLabel}
+                  onClick={s3Retryable && !s3Retrying ? handleS3Retry : undefined}
+                  busy={s3Retrying}
+                  direction={s3Status === 'backfilling' ? 'write' : s3Status === 'pending' ? s3PollDirection : undefined}
+                >
+                  <S3BadgeIcon />
+                </SyncBadge>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
       </div>
       {shareMsgVisible && (
@@ -1808,6 +2014,20 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
                   setText(e.target.value)
                   if (status && status !== savedStatus && status !== t.entry.saveFailed && status !== t.entry.offlineSavePending) setStatus('')
                 }}
+                onCompositionStart={() => {
+                  isComposingRef.current = true
+                  setIsComposing(true)
+                }}
+                onCompositionEnd={e => {
+                  isComposingRef.current = false
+                  setIsComposing(false)
+                  if (loadFailed) return
+                  const value = e.currentTarget.value
+                  if (textRef.current !== value) {
+                    textRef.current = value
+                    setText(value)
+                  }
+                }}
                 onBlur={e => {
                   if (e.relatedTarget instanceof HTMLElement && e.relatedTarget.classList.contains('editor-save-retry')) return
                   flushPendingAutoSave()
@@ -1922,7 +2142,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </div>
       )}
-      </div>
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
         <div className="editor-related">
           <span className="editor-related-label"><Sparkles size={11} strokeWidth={1.8} aria-hidden="true" />{t.entry.relatedEntries}</span>
@@ -1940,6 +2159,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      </div>
       <dialog
         ref={previewDialogRef}
         className="related-preview-dialog"

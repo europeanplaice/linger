@@ -19,7 +19,8 @@
     "functions/_shared/s3Settings.ts",
     "functions/_shared/s3Backup.ts",
     "functions/_shared/s3BackupRequest.ts",
-    "src/utils/folderName.ts"
+    "src/utils/folderName.ts",
+    "src/utils/parseDriveEntry.ts"
   ],
   "exclude": ["workers/s3-workflows/test", "workers/s3-workflows/vitest.config.ts", "workers/s3-workflows/vitest.privacy.config.ts"]
 }

@@ -1,5 +1,6 @@
 import type { DriveRevisionMeta, DiaryEntry } from '../types'
-import { apiFetch, TokenExpiredError, DriveHttpError } from './driveEntries'
+import { apiFetch, readDriveEntry, TokenExpiredError, DriveHttpError } from './driveEntries'
+import { accountRequest } from '../lib/accountSession'
 
 export type { TokenExpiredError, DriveHttpError }
 
@@ -14,7 +15,15 @@ export async function listRevisions(fileId: string): Promise<DriveRevisionMeta[]
 }
 
 export async function getRevisionContent(fileId: string, revisionId: string): Promise<DiaryEntry> {
-  const { data, status } = await apiFetch<DiaryEntry>(`${BASE}/${fileId}/${revisionId}`)
-  if (status === 404 || !data) throw new DriveHttpError(404, 'Not found')
-  return data
+  const account = accountRequest()
+  const authorize = () => apiFetch<{ ok: boolean }>(`${BASE}/${encodeURIComponent(fileId)}/${encodeURIComponent(revisionId)}?metadata=1`)
+  const { data, accessToken } = await authorize()
+  account.assertCurrent()
+  if (!data?.ok) throw new DriveHttpError(404, 'Not found')
+  const entry = await readDriveEntry(fileId, '', {
+    accessToken,
+    verifyRefreshedToken: async () => (await authorize()).accessToken,
+  }, undefined, revisionId)
+  if (!entry) throw new DriveHttpError(404, 'Not found')
+  return entry
 }

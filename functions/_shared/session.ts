@@ -22,11 +22,12 @@ export interface Env {
   CF_PAGES_COMMIT_SHA?: string
   S3_WORKFLOW_SERVICE?: S3WorkflowService
   S3_SYNC_INDEX?: { getByName(name: string): { backup(input: S3BackupRequest): Promise<Response> } }
-  // Present inside the Workflow Worker. Pages uses S3_WORKFLOW_SERVICE instead;
-  // both bindings route folder discovery to the same account-scoped object.
+  // Pages sends upload metadata directly to the same account-scoped writer
+  // used by the Workflow Worker for folder discovery and legacy writes.
   DIARY_WRITER?: {
     getByName(name: string): {
       getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
+      fetch(request: Request): Promise<Response>
       ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
       selectFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string; folderId: string }): Promise<string>
     }

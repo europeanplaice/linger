@@ -117,13 +117,29 @@ export default defineConfig({
           .filter((script) => !script.hasAttribute('src'))
           .map((script) => script.textContent ?? '')
           .filter((script) => script.length > 0)
-        const hashes = scripts.map((script) => {
+        const scriptHashes = scripts.map((script) => {
           const hash = createHash('sha256').update(script).digest('base64')
           return `'sha256-${hash}'`
         })
+
+        const htmlFiles = readdirSync(distPath).filter((name) => name.endsWith('.html'))
+        const styleHashSet = new Set<string>()
+        for (const file of htmlFiles) {
+          const pageHtml = readFileSync(resolve(distPath, file), 'utf-8')
+          const pageDom = new JSDOM(pageHtml)
+          const styles = Array.from(pageDom.window.document.querySelectorAll('style'))
+            .map((style) => style.textContent ?? '')
+            .filter((style) => style.length > 0)
+          for (const style of styles) {
+            const hash = createHash('sha256').update(style).digest('base64')
+            styleHashSet.add(`'sha256-${hash}'`)
+          }
+        }
+
         const headersPath = resolve(distPath, '_headers')
         const updated = readFileSync(headersPath, 'utf-8')
-          .replace('__INLINE_SCRIPT_HASHES__', hashes.join(' '))
+          .replace('__INLINE_SCRIPT_HASHES__', scriptHashes.join(' '))
+          .replace('__INLINE_STYLE_HASHES__', Array.from(styleHashSet).join(' '))
         writeFileSync(headersPath, updated)
       },
     },

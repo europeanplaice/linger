@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive, mockUploadUrl } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 const date = '2026-05-01'
@@ -24,6 +25,17 @@ async function setup(context: BrowserContext, options: { blockFirstNotifications
     }
     await route.fulfill({ json: { signedIn: Boolean(account), email: account ? `${account}@example.com` : null, googleSub: account ? `account-${account}` : null } })
   })
+  const uploads = new Map<string, string>()
+  await mockGoogleDrive(context, {
+    read: id => {
+      const account = /^file-account-([AB])-/.exec(id)?.[1]
+      return account && `Account ${account} private diary`
+    },
+    save: (operationId, content) => {
+      const account = uploads.get(operationId)
+      if (account) writes.push({ account, content })
+    },
+  })
   await context.route('**/api/drive/**', async route => {
     const headers = await route.request().allHeaders()
     const account = await requestAccount(route.request().url())
@@ -39,12 +51,13 @@ async function setup(context: BrowserContext, options: { blockFirstNotifications
     const requestDate = url.pathname.split('/').pop()!
     const meta = { id: `file-account-${account}-${requestDate}`, name: `diary-${requestDate}.txt`, version: '1' }
     if (route.request().method() === 'POST') {
-      writes.push({ account, content: route.request().postDataJSON().content })
-      await route.fulfill({ json: meta }); return
+      const { action, operationId } = route.request().postDataJSON()
+      if (action === 'prepare') uploads.set(operationId, account)
+      await route.fulfill({ json: action === 'prepare' ? { uploadUrl: mockUploadUrl(operationId) } : { meta } }); return
     }
     if (route.request().method() === 'DELETE') { deletions.push(requestDate); await route.fulfill({ status: 204 }); return }
     if (requestDate !== date) { await route.fulfill({ status: 404, json: {} }); return }
-    await route.fulfill({ json: { entry: { date, content: `Account ${account} private diary` }, meta } })
+    await route.fulfill({ json: { meta } })
   })
   const first = await context.newPage()
   const second = await context.newPage()

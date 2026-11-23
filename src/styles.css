@@ -526,12 +526,18 @@ html.session-restoring .landing {
 .passkey-remember input { flex: none; width: 1.1rem; height: 1.1rem; }
 .passkey-gate-card .passkey-remember-help { text-align: left; font-size: .85rem; margin-bottom: 1rem; }
 .passkey-gate-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
-.passkey-gate-navigation { flex-direction: column; align-items: stretch; }
+.passkey-gate-navigation { flex-direction: column; align-items: stretch; gap: 0.9rem; }
 .passkey-gate-turnstile { margin-block-end: 1rem; }
+.passkey-action-group { display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.passkey-action-hint { font-size: 0.8rem; color: var(--text-muted); text-align: start; }
 .passkey-primary { justify-content: center; height: auto; min-height: 44px; padding: 0.75rem 1rem; white-space: normal; font-family: inherit; }
+.passkey-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; white-space: normal; transition: background 0.15s, border-color 0.15s; }
+.passkey-secondary:hover:not(:disabled) { background: var(--sidebar-bg); border-color: var(--text-muted); }
+.passkey-secondary:disabled { opacity: 0.65; cursor: default; }
 .passkey-gate-navigation .btn-use-another-account { margin: 0; min-height: 44px; padding: 0.5rem; }
 .passkey-setup-note { text-align: start; border-inline-start: 3px solid var(--border); padding-inline-start: 1rem; }
 .passkey-recovery-help { margin-top: 1.5rem; text-align: start; }
+.passkey-about-help + .passkey-recovery-help { margin-top: 0.25rem; }
 .passkey-recovery-help summary { cursor: pointer; min-height: 44px; padding-block: 0.65rem; }
 .passkey-recovery-help .btn-use-another-account { min-height: 44px; margin: 0; padding-inline: 0; text-align: start; }
 .passkey-recovery-help input { width: 100%; }
@@ -876,7 +882,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   transform: translateX(-50%);
   z-index: 200;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.85rem;
   padding: 0.5rem 0.75rem 0.5rem 1.1rem;
   border-radius: 8px;
@@ -890,6 +896,17 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .update-banner-action {
   flex-shrink: 0;
   cursor: pointer;
+  background: color-mix(in srgb, var(--on-accent) 18%, transparent);
+  color: var(--on-accent);
+  border: 1px solid color-mix(in srgb, var(--on-accent) 35%, transparent);
+  border-radius: 6px;
+  padding: 0.25rem 0.65rem;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color 0.15s ease;
+}
+.update-banner-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--on-accent) 28%, transparent);
 }
 .update-banner-action:disabled {
   cursor: not-allowed;
@@ -898,7 +915,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .update-banner-dismiss {
   background: none;
   border: none;
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   font-size: 0.8rem;
   opacity: 0.75;
@@ -1162,9 +1179,13 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 /* ── Calendar ── */
 .calendar { padding: 0.5rem 1rem 0; }
 .calendar-grid-wrap {
+  display: grid;
   position: relative;
   overflow: hidden;
   touch-action: pan-y pinch-zoom;
+}
+.calendar-grid-wrap > .calendar-grid {
+  grid-area: 1 / 1;
 }
 .calendar-nav {
   display: flex;
@@ -1272,6 +1293,14 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+.mypicker-year-label-wrap {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.mypicker-year-label-wrap > .mypicker-year-label {
+  grid-area: 1 / 1;
+}
 .mypicker-year-label {
   font: inherit;
   font-size: 0.85rem;
@@ -1291,6 +1320,14 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .mypicker-year-label:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+.mypicker-grid-wrap {
+  display: grid;
+  overflow: hidden;
+}
+.mypicker-grid-wrap > .mypicker-months,
+.mypicker-grid-wrap > .mypicker-years {
+  grid-area: 1 / 1;
 }
 .mypicker-months,
 .mypicker-years {
@@ -1320,21 +1357,15 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 }
 .mypicker-year-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
-}
-[data-theme="dark"] .mypicker-year-btn.active {
-  color: #1a2a1a;
 }
 .mypicker-year-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .mypicker-year-btn.active .mypicker-dot.visible {
-  background: rgba(255, 255, 255, 0.65);
-}
-[data-theme="dark"] .mypicker-year-btn.active .mypicker-dot.visible {
-  background: rgba(26, 42, 26, 0.6);
+  background: color-mix(in srgb, var(--on-accent) 65%, transparent);
 }
 .mypicker-month-btn {
   background: none;
@@ -1358,11 +1389,8 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 }
 .mypicker-month-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
-}
-[data-theme="dark"] .mypicker-month-btn.active {
-  color: #1a2a1a;
 }
 .mypicker-dot {
   width: 5px;
@@ -1373,10 +1401,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 }
 .mypicker-dot.visible { visibility: visible; }
 .mypicker-month-btn.active .mypicker-dot.visible {
-  background: rgba(255, 255, 255, 0.65);
-}
-[data-theme="dark"] .mypicker-month-btn.active .mypicker-dot.visible {
-  background: rgba(26, 42, 26, 0.6);
+  background: color-mix(in srgb, var(--on-accent) 65%, transparent);
 }
 .calendar-today-row {
   text-align: center;
@@ -1458,9 +1483,11 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   background-color: var(--milestone-glow);
 } */
 .cal-day-milestone {
+  position: absolute;
+  top: 2px;
+  right: 2px;
   font-size: 0.55rem;
   line-height: 1;
-  margin-top: 1px;
   display: block;
   pointer-events: none;
 }
@@ -1798,11 +1825,66 @@ dialog.settings-dialog::backdrop {
   opacity: 0.8;
   margin-bottom: 0.5rem;
 }
+.settings-s3-field-help {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin: -0.25rem 0 0.55rem;
+  padding-inline: 1.35rem;
+  line-height: 1.45;
+}
+.settings-s3-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg);
+}
+.settings-s3-status-badge.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--selected-bg);
+}
+.settings-s3-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.settings-s3-manual-ids {
+  padding: 0.25rem 1.35rem 0.4rem;
+}
+.settings-s3-manual-ids summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 0.25rem 0;
+}
+.settings-s3-manual-ids summary:hover {
+  color: var(--accent);
+}
+.settings-s3-manual-ids .settings-item-copy {
+  padding-inline: 0;
+}
 .settings-s3-actions {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+.settings-s3-feedback {
+  padding: 0.15rem 1.35rem 0.35rem;
+}
+.settings-s3-feedback .settings-item-success,
+.settings-s3-feedback .settings-item-error {
+  padding-inline: 0;
 }
 .settings-s3-restore-row {
   display: flex;
@@ -2323,7 +2405,7 @@ dialog.settings-dialog::backdrop {
   background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 0.72rem;
   font-weight: 500;
@@ -2481,7 +2563,7 @@ dialog.settings-dialog::backdrop {
   background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   font-size: 0.8rem;
@@ -2611,7 +2693,7 @@ dialog.settings-dialog::backdrop {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 1rem;
   line-height: 1;
   min-height: 2rem;
@@ -2666,7 +2748,7 @@ dialog.settings-dialog::backdrop {
   background: var(--danger);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--on-danger);
   cursor: pointer;
   font-size: 0.72rem;
   font-weight: 500;
@@ -2872,7 +2954,7 @@ dialog.settings-dialog::backdrop {
 }
 .emoji-picker-trigger:hover {
   border-color: var(--text-muted);
-  background: var(--hover-bg);
+  background: var(--sidebar-bg);
 }
 .emoji-picker-trigger.open,
 .emoji-picker-trigger:focus-visible {
@@ -2961,7 +3043,7 @@ dialog.settings-dialog::backdrop {
 }
 .emoji-picker-cat-btn:hover {
   opacity: 0.85;
-  background: var(--hover-bg);
+  background: var(--sidebar-bg);
 }
 .emoji-picker-cat-btn.active {
   opacity: 1;
@@ -2993,7 +3075,7 @@ dialog.settings-dialog::backdrop {
   padding: 0;
 }
 .emoji-picker-btn:hover {
-  background: var(--hover-bg);
+  background: var(--sidebar-bg);
   transform: scale(1.15);
 }
 .emoji-picker-btn.active {
@@ -3494,7 +3576,7 @@ dialog.related-preview-dialog::backdrop {
   width: 100%;
   padding: 0.6rem 1rem;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: 8px;
   font-size: 0.88rem;
@@ -3562,7 +3644,7 @@ dialog.related-preview-dialog::backdrop {
   padding: 0.4rem 1rem;
   font-size: 0.85rem;
   font-family: inherit;
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 .export-confirm-start:hover,
@@ -3743,6 +3825,7 @@ dialog.milestone-form-dialog::backdrop {
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--text-muted);
+  min-height: calc(28px + 0.3rem + 1px);
   padding-bottom: 0.3rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   margin-bottom: 0;
@@ -3802,8 +3885,69 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--unsaved-status);
   margin-left: 0.5em;
 }
+.editor-save-status:not(.sr-only) {
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.2s ease;
+}
+.editor-save-status-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.editor-save-status--saving {
+  color: var(--accent);
+}
+.editor-save-status--saving .editor-save-status-inner {
+  animation: save-status-pulse 1.6s ease-in-out infinite;
+}
 .editor-save-status--error {
   color: var(--warning);
+}
+.editor-save-status--error .editor-save-status-inner {
+  animation: save-error-nudge 0.32s ease-out;
+}
+.editor-save-spinner {
+  width: 0.68rem;
+  height: 0.68rem;
+  border-width: 1.75px;
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-top-color: var(--accent);
+  flex-shrink: 0;
+}
+.editor-save-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.editor-save-dot--waiting {
+  background: var(--unsaved-status);
+  animation: save-dot-breathe 2s ease-in-out infinite;
+}
+.editor-save-dot--offline {
+  background: #f59e0b;
+}
+.editor-save-dot--paused {
+  background: var(--text-muted);
+  opacity: 0.7;
+}
+.editor-save-dot--error,
+.editor-save-dot--conflict {
+  background: var(--warning);
+}
+@keyframes save-dot-breathe {
+  0%, 100% { transform: scale(0.88); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+@keyframes save-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.68; }
+}
+@keyframes save-error-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2.5px); }
+  65% { transform: translateX(2px); }
 }
 .editor-save-retry {
   border: 0;
@@ -3813,6 +3957,10 @@ dialog.milestone-form-dialog::backdrop {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.editor-save-retry:hover {
+  opacity: 0.78;
 }
 .editor-save-retry:focus-visible {
   outline: 2px solid var(--accent);
@@ -3820,6 +3968,7 @@ dialog.milestone-form-dialog::backdrop {
 }
 .editor-meta-sync {
   display: inline-flex;
+  flex-direction: row-reverse;
   align-items: center;
   gap: 0.6rem;
   margin-left: auto;
@@ -3829,17 +3978,11 @@ dialog.milestone-form-dialog::backdrop {
   display: none;
 }
 
-.editor-meta-sync::before {
-  content: '';
-  width: 1px;
-  height: 0.85em;
-  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
-  margin-right: 0.2rem;
-  flex-shrink: 0;
-}
-
+.editor-meta-drive-slot,
 .editor-meta-s3-slot {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -3940,9 +4083,33 @@ dialog.milestone-form-dialog::backdrop {
   border-color: #2563eb;
 }
 
+.editor-meta-badge--just-saved .editor-meta-badge-status--synced {
+  animation: saved-check-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.editor-meta-badge--just-saved .editor-meta-badge-status--synced::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid #22c55e;
+  animation: badge-saved-ring 0.65s cubic-bezier(0, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes badge-saved-ring {
+  0% { transform: scale(0.8); opacity: 0.85; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .editor-meta-badge-status--pending::after,
-  .editor-meta-badge-status--backfilling::after {
+  .editor-meta-badge-status--backfilling::after,
+  .editor-meta-badge--just-saved .editor-meta-badge-status--synced,
+  .editor-meta-badge--just-saved .editor-meta-badge-status--synced::after,
+  .editor-save-dot--waiting,
+  .editor-save-status--saving .editor-save-status-inner,
+  .editor-save-status--error .editor-save-status-inner {
     animation: none;
   }
 }
@@ -4102,7 +4269,7 @@ dialog.milestone-form-dialog::backdrop {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-width: 5.7rem;
+  min-width: 6.4rem;
   /* max-width drives the collapse animation for auto-save idle state. */
   max-width: 12rem;
   /* Transparent border keeps width identical to the ghost (idle) state below,
@@ -4124,6 +4291,9 @@ dialog.milestone-form-dialog::backdrop {
    background save fires or the saved confirmation appears. Mobile has its own
    FAB treatment and doesn't need this rule. */
 @media (min-width: 641px) {
+  .editor-date-group .btn-day-nav:first-of-type {
+    margin-left: -0.75rem;
+  }
   .editor-actions .btn-save[data-autosave]:disabled:not(.btn-saving):not(.btn-saved) {
     max-width: 0;
     padding-left: 0;
@@ -4152,13 +4322,13 @@ dialog.milestone-form-dialog::backdrop {
 }
 .editor-actions .btn-refresh-entry[aria-busy="true"] {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   opacity: 1;
   box-shadow: 0 2px 8px var(--save-glow);
 }
 .editor-actions .btn-refresh-entry[aria-busy="true"] .btn-saving-spinner {
   border-color: var(--spinner-border);
-  border-top-color: #fff;
+  border-top-color: var(--on-accent);
 }
 .editor-actions .btn-saving {
   opacity: 0.85;
@@ -4645,7 +4815,7 @@ dialog.session-expired-dialog::backdrop {
   border: none;
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
@@ -5021,7 +5191,7 @@ dialog.session-expired-dialog::backdrop {
 .entry-load-error button {
   border: 1px solid var(--border);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 8px;
   padding: 0.5rem 0.8rem;
   cursor: pointer;
@@ -5236,7 +5406,7 @@ dialog.history-dialog::backdrop {
 }
 .btn-restore {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: 6px;
   padding: 0.45rem 1.1rem;
@@ -5292,10 +5462,15 @@ dialog.history-dialog::backdrop {
 
 /* Keep compact icons inside separate touch targets, without overlapping hit areas. */
 @media (max-width: 640px), (pointer: coarse) {
+  .editor-meta {
+    min-height: calc(44px + 0.4rem + 1px);
+  }
+
   .editor-meta-sync {
     gap: 0;
   }
 
+  .editor-meta-drive-slot,
   .editor-meta-s3-slot {
     width: 44px;
     height: 44px;
@@ -5591,7 +5766,7 @@ dialog.history-dialog::backdrop {
     font-size: 0.78rem;
     font-weight: 500;
     letter-spacing: 0.01em;
-    background: var(--surface);
+    background: var(--card-bg);
     color: var(--text-muted);
     border: 1px solid var(--border);
     box-shadow: 0 2px 8px var(--save-btn-shadow);
@@ -5600,7 +5775,7 @@ dialog.history-dialog::backdrop {
   }
   @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
     .editor-actions .btn-today-fab {
-      background: color-mix(in srgb, var(--surface) 80%, transparent);
+      background: color-mix(in srgb, var(--card-bg) 80%, transparent);
       -webkit-backdrop-filter: blur(8px) saturate(1.1);
       backdrop-filter: blur(8px) saturate(1.1);
     }
@@ -6028,14 +6203,18 @@ dialog:not([open]) {
 }
 
 @media (max-width: 640px) {
-  .recollection-overlay {
-    padding: 0;
-  }
-  .recollection-view {
-    width: 100%;
-    min-height: 100dvh;
+  dialog.recollection-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
     border-radius: 0;
     border: none;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
   .recollection-header {
     border-radius: 0;

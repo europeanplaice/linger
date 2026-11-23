@@ -13,13 +13,14 @@ interface Props {
   savedText: string
   isDirty: boolean
   autoSave: boolean
+  showUnsavedInAutoSave?: boolean
   onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
   onRestored: (result: LoadedDiaryEntry) => void
   onClose: () => void
   onExpired: () => void
 }
 
-export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDirty, autoSave, onSave, onRestored, onClose, onExpired }: Props) {
+export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDirty, autoSave, showUnsavedInAutoSave, onSave, onRestored, onClose, onExpired }: Props) {
   const { t, locale } = useI18n()
   const dialogRef = useRef<HTMLDialogElement>(null)
   const {
@@ -35,6 +36,7 @@ export function HistoryModal({ date, fileId, baseVersion, text, savedText, isDir
     savedText,
     isDirty,
     autoSave,
+    showUnsavedInAutoSave,
     onSave,
     onRestored,
     onExpired,

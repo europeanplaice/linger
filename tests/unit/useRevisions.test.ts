@@ -256,4 +256,21 @@ describe('useRevisions', () => {
     await waitFor(() => expect(onExpired).toHaveBeenCalled())
     expect(result.current.previewError).toBeNull()
   })
+
+  it('shows the unsaved entry in auto-save mode only when showUnsavedInAutoSave is true', async () => {
+    mockListRevisions.mockResolvedValue([makeRevision('rev-1')])
+    mockGetRevisionContent.mockResolvedValue(makeEntry('rev-1'))
+
+    const { result, rerender } = renderHook(
+      ({ showUnsavedInAutoSave }) => useRevisions({ ...BASE_PARAMS, isDirty: true, autoSave: true, showUnsavedInAutoSave }),
+      { initialProps: { showUnsavedInAutoSave: false } },
+    )
+    await waitFor(() => expect(result.current.listLoading).toBe(false))
+    expect(result.current.showUnsavedEntry).toBe(false)
+    expect(result.current.selectedId).toBe('rev-1')
+
+    rerender({ showUnsavedInAutoSave: true })
+    await waitFor(() => expect(result.current.selectedId).toBe('__unsaved__'))
+    expect(result.current.showUnsavedEntry).toBe(true)
+  })
 })

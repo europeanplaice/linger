@@ -15,6 +15,8 @@ import { FetchMock, jsonResponse, textResponse } from '../helpers/mockFetch'
 import { clearOAuthCredentials, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 
 const fetchMock = new FetchMock()
+const uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=test'
+const prepared = () => jsonResponse({ uploadUrl })
 
 test.beforeEach(() => fetchMock.reset())
 test.afterEach(() => { fetchMock.restore(); vi.unstubAllGlobals(); clearOAuthCredentials() })
@@ -74,87 +76,143 @@ test.describe('driveEntries proxy API', () => {
     expect(fetchMock.calls[0].init?.credentials).toBe('include')
   })
 
-  test('getEntryByDate returns entry and meta on success', async () => {
-    const entry = { date: '2026-04-29', content: 'today', updated_at: '2026-04-29T00:00:00.000Z' }
-    const meta = { id: 'entry-1', name: 'diary-2026-04-29.json', version: '3' }
-    fetchMock.mock(jsonResponse({ entry, meta }))
+  test('loads metadata from Linger and downloads only with a Google access token', async () => {
+    const entry = { date: '2026-04-29', content: 'today' }
+    const meta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '3' }
+    fetchMock.mock(jsonResponse({ meta }), textResponse('today', 200))
 
-    const result = await getEntryByDate('2026-04-29')
-
-    expect(result).toEqual({ entry, meta })
-    expect(fetchMock.calls[0].url).toBe('/api/drive/entry/2026-04-29')
+    expect(await getEntryByDate('2026-04-29')).toEqual({ entry, meta })
+    expect(fetchMock.calls[0].url).toBe('/api/drive/entry/2026-04-29?metadata=1')
     expect(fetchMock.calls[0].init?.credentials).toBe('include')
+    expect(fetchMock.calls[1].url).toBe('https://www.googleapis.com/drive/v3/files/entry-1?alt=media')
+    expect(fetchMock.calls[1].init).toMatchObject({
+      credentials: 'omit', headers: { Authorization: 'Bearer test-access-token' }, redirect: 'error',
+    })
+  })
+
+  test('uses the token verified by the metadata request during a concurrent credential swap', async () => {
+    const credentials = (token: string) => ({ accessToken: token, idToken: `${token}-id`, expiresAt: Date.now() + 120_000 })
+    setOAuthCredentials(credentials('verified'))
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => {
+        setOAuthCredentials(credentials('different'))
+        return jsonResponse({ meta: { id: 'entry-1' } })
+      })
+      .mockResolvedValueOnce(textResponse('today', 200))
+    vi.stubGlobal('fetch', fetch)
+
+    await getEntryByDate('2026-04-29')
+
+    expect(new Headers(fetch.mock.calls[1][1].headers).get('Authorization')).toBe('Bearer verified')
+  })
+
+  test('verifies a refreshed credential with Linger before retrying a Drive 401', async () => {
+    const credentials = (token: string) => ({ accessToken: token, idToken: `${token}-id`, expiresAt: Date.now() + 120_000 })
+    setOAuthCredentials(credentials('old'))
+    const metadata = { meta: { id: 'entry-1' } }
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(metadata))
+      .mockImplementationOnce(async () => {
+        setOAuthCredentials(credentials('new'))
+        return textResponse('', 401)
+      })
+      .mockResolvedValueOnce(jsonResponse(metadata))
+      .mockResolvedValueOnce(textResponse('today', 200))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(getEntryByDate('2026-04-29')).resolves.toMatchObject({ entry: { content: 'today' } })
+    expect(fetch.mock.calls[2][0]).toBe('/api/drive/entry/2026-04-29?metadata=1')
+    expect(new Headers(fetch.mock.calls[3][1].headers).get('Authorization')).toBe('Bearer new')
   })
 
   test('getEntryByDate returns null on 404', async () => {
     fetchMock.mock(jsonResponse(null, 404))
 
-    const result = await getEntryByDate('2026-04-29')
-
-    expect(result).toBeNull()
+    expect(await getEntryByDate('2026-04-29')).toBeNull()
   })
 
-  test('saveEntry posts JSON to /api/drive/entry/:date', async () => {
-    const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.json', version: '1' }
-    fetchMock.mock(jsonResponse(meta))
+  test('conditional metadata read does not download the body on a cache hit', async () => {
+    fetchMock.mock(textResponse('', 304))
 
-    const entry = { date: '2026-04-29', content: 'saved text', updated_at: '2026-04-29T00:00:00.000Z' }
-    const result = await saveEntry('2026-04-29', entry)
-
-    expect(result).toEqual(meta)
-    expect(fetchMock.calls[0].url).toBe('/api/drive/entry/2026-04-29')
-    expect(fetchMock.calls[0].init?.method).toBe('POST')
-    expect(fetchMock.calls[0].init?.credentials).toBe('include')
-    const body = JSON.parse(String(fetchMock.calls[0].init?.body))
-    expect(body.content).toBe('saved text')
-    expect(body.fileId).toBeUndefined()
+    expect(await getEntryByDate('2026-04-29', '3', 'entry-1')).toBe('not-modified')
+    expect(fetchMock.calls).toHaveLength(1)
+    expect(new Headers(fetchMock.calls[0].init?.headers).get('If-None-Match')).toBe('3')
   })
 
-  test('saveEntry includes fileId when provided', async () => {
-    const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.json', version: '2' }
-    fetchMock.mock(jsonResponse(meta))
+  test('sends only the diary text to Drive, then confirms with metadata', async () => {
+    const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '1' }
+    fetchMock.mock(prepared(), textResponse('', 200), jsonResponse({ meta }))
 
-    const entry = { date: '2026-04-29', content: 'updated', updated_at: '2026-04-29T00:00:00.000Z' }
-    await saveEntry('2026-04-29', entry, 'entry-1')
+    const entry = { date: '2026-04-29', content: '日記' }
+    expect(await saveEntry(entry.date, entry, { fileId: 'entry-1', baseVersion: '1', baseContent: 'private base' })).toEqual(meta)
 
-    const body = JSON.parse(String(fetchMock.calls[0].init?.body))
-    expect(body.fileId).toBe('entry-1')
+    const [prepare, upload, complete] = fetchMock.calls
+    expect(prepare.url).toBe('/api/drive/upload/2026-04-29')
+    expect(complete.url).toBe(prepare.url)
+    const prepareBody = JSON.parse(String(prepare.init?.body))
+    expect(prepareBody).toEqual({ action: 'prepare', bytes: 6, fileId: 'entry-1', baseVersion: '1', operationId: expect.any(String) })
+    expect(upload).toMatchObject({ url: uploadUrl, init: { method: 'PUT', credentials: 'omit', body: '日記' } })
+    expect(new Headers(upload.init?.headers).has('Authorization')).toBe(false)
+    expect(JSON.parse(String(complete.init?.body))).toEqual({ action: 'complete', operationId: prepareBody.operationId })
   })
 
-  test('saveEntry sends conflict metadata and throws on 409 conflict', async () => {
-    const conflict = {
-      entry: { date: '2026-04-29', content: 'remote', updated_at: '2026-04-29T00:00:00.000Z' },
-      meta: { id: 'entry-1', name: 'diary-2026-04-29.json', version: '3' },
-    }
-    fetchMock.mock(jsonResponse({ conflict }, 409))
+  test('rejects an upload session on an unexpected origin before sending text', async () => {
+    fetchMock.mock(jsonResponse({ uploadUrl: 'https://example.com/upload/drive/v3/files?upload_id=invalid' }))
+    await expect(saveEntry('2026-04-29', { date: '2026-04-29', content: 'secret' })).rejects.toMatchObject({ status: 502 })
+    expect(fetchMock.calls).toHaveLength(1)
+  })
 
-    const entry = { date: '2026-04-29', content: 'updated', updated_at: '2026-04-29T00:00:00.000Z' }
-    const err = await saveEntry('2026-04-29', entry, {
-      fileId: 'entry-1',
-      baseVersion: '2',
-      baseContent: 'local base',
-    }).catch(e => e)
+  test('checks for a successful Drive commit when the upload response was lost', async () => {
+    const meta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '2' }
+    setOAuthCredentials({ accessToken: 'test-token', idToken: 'test-id', expiresAt: Date.now() + 60_000 })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(prepared())
+      .mockRejectedValueOnce(new TypeError('Connection lost'))
+      .mockResolvedValueOnce(jsonResponse({ meta }))
+    vi.stubGlobal('fetch', fetch)
 
-    expect(err).toBeInstanceOf(SaveConflictError)
-    expect((err as SaveConflictError).remote).toEqual(conflict)
-    const body = JSON.parse(String(fetchMock.calls[0].init?.body))
-    expect(body).toMatchObject({
-      fileId: 'entry-1',
-      baseVersion: '2',
-      baseContent: 'local base',
-    })
+    await expect(saveEntry('2026-04-29', { date: '2026-04-29', content: 'saved' })).resolves.toEqual(meta)
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  test('allows upload keepalive for small bodies only', async () => {
+    const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '2' }
+    fetchMock.mock(prepared(), textResponse('', 200), jsonResponse({ meta }), prepared(), textResponse('', 200), jsonResponse({ meta }))
+
+    await saveEntry('2026-04-29', { date: '2026-04-29', content: 'short note' }, { keepalive: true })
+    await saveEntry('2026-04-29', { date: '2026-04-29', content: 'x'.repeat(65_000) }, { keepalive: true })
+    expect(fetchMock.calls[1].init?.keepalive).toBe(true)
+    expect(fetchMock.calls[4].init?.keepalive).toBe(false)
+  })
+
+  test('downloads conflicting text directly and keeps it out of Linger requests', async () => {
+    const conflict = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '3' }
+    fetchMock.mock(jsonResponse({ conflict, canRebase: true }, 409), textResponse('remote', 200))
+
+    const entry = { date: '2026-04-29', content: 'updated' }
+    await expect(saveEntry(entry.date, entry, { fileId: conflict.id, baseVersion: '2', baseContent: 'local base' }))
+      .rejects.toMatchObject({ remote: { entry: { date: entry.date, content: 'remote' }, meta: conflict } })
+
+    expect(fetchMock.calls[0].init?.body).not.toContain('local base')
+    expect(fetchMock.calls[1].url).toBe('https://www.googleapis.com/drive/v3/files/entry-1?alt=media')
+  })
+
+  test('rechecks the version with Linger when the remote text still matches the base', async () => {
+    const meta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '3' }
+    fetchMock.mock(jsonResponse({ conflict: meta, canRebase: true }, 409), textResponse('base', 200),
+      prepared(), textResponse('', 200), jsonResponse({ meta: { ...meta, version: '4' } }))
+
+    await expect(saveEntry('2026-04-29', { date: '2026-04-29', content: 'edit' }, {
+      fileId: meta.id, baseVersion: '2', baseContent: 'base',
+    })).resolves.toMatchObject({ version: '4' })
+    expect(JSON.parse(String(fetchMock.calls[2].init?.body))).toMatchObject({ fileId: meta.id, baseVersion: '3' })
   })
 
   test('saveEntry maps deleted-entry conflicts to SaveConflictError with null remote', async () => {
     fetchMock.mock(jsonResponse({ conflict: null }, 409))
+    const entry = { date: '2026-04-29', content: 'updated' }
 
-    const entry = { date: '2026-04-29', content: 'updated', updated_at: '2026-04-29T00:00:00.000Z' }
-    const err = await saveEntry('2026-04-29', entry, {
-      fileId: 'entry-1',
-      baseVersion: '2',
-      baseContent: 'local base',
-    }).catch(e => e)
-
+    const err = await saveEntry(entry.date, entry, { fileId: 'entry-1', baseVersion: '2' }).catch(e => e)
     expect(err).toBeInstanceOf(SaveConflictError)
     expect((err as SaveConflictError).remote).toBeNull()
   })

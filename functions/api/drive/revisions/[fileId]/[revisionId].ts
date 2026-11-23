@@ -12,6 +12,7 @@ export const onRequestGet: PagesFunction<Env, 'fileId' | 'revisionId', Data> = a
 
   try {
     await getDiaryFileMeta(accessToken, sessionId, session, context.env, fileId)
+    if (new URL(context.request.url).searchParams.get('metadata') === '1') return jsonResponse({ ok: true })
     const entry = await getRevisionContent(accessToken, fileId, revisionId)
     return jsonResponse(entry)
   } catch (e) {

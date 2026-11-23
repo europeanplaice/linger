@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 // State/branch coverage lives in tests/unit/searchBar.test.tsx. These cases
@@ -27,10 +28,11 @@ test('searching in the app and selecting a result opens that diary entry', async
   await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [meta] } }))
   await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
   await page.route('/api/drive/search', route => route.fulfill({ json: { files: [meta] } }))
+  await mockGoogleDrive(page, { read: id => id === meta.id ? 'alpha diary from April' : undefined })
   await page.route('/api/drive/entry/**', route => {
     const requestedDate = new URL(route.request().url()).pathname.split('/').pop()
     return requestedDate === '2026-04-01'
-      ? route.fulfill({ json: { entry: { date: '2026-04-01', content: 'alpha diary from April' }, meta } })
+      ? route.fulfill({ json: { meta } })
       : route.fulfill({ status: 404, json: {} })
   })
 

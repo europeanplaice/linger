@@ -8,6 +8,8 @@ import { clearVaultKey, unlockVaultWithKey } from '../src/lib/passkeyVault'
 import type { CachedEntry } from '../src/lib/diaryCache'
 import type { LoadedDiaryEntry } from '../src/types'
 import type { ImportResult } from '../src/hooks/useDiary'
+import { setOAuthCredentials } from '../src/lib/oauthCredentials'
+import { mockUploadUrl } from './helpers/mockGoogleDrive'
 import { todayYmd } from '../src/utils/date'
 
 subscribeDatabaseNotice(() => { if (getDatabaseNotice() === 'confirm-upgrade') queueMicrotask(confirmLegacyUpgrade) })
@@ -17,6 +19,8 @@ type QueuedResponse = { status: number; body: unknown; delayMs?: number }
 
 const fetchCalls: FetchCall[] = []
 const queue: QueuedResponse[] = []
+const contentById = new Map<string, string>()
+const uploadById = new Map<string, unknown>()
 let startupToday: QueuedResponse | undefined
 let startupList: QueuedResponse | undefined
 const evictedCalls: string[][] = []
@@ -24,8 +28,21 @@ let currentEmail: string | null = 'user@example.com'
 let _setSelectedDate: ((date: string | undefined) => void) | null = null
 
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-  fetchCalls.push({ url: String(input), method: String(init?.method ?? 'GET'), body: typeof init?.body === 'string' ? init.body : undefined })
   const url = String(input)
+  const body = typeof init?.body === 'string' ? init.body : undefined
+  if (url.startsWith('https://www.googleapis.com/drive/v3/files/')) {
+    const id = new URL(url).pathname.split('/').pop()!
+    const text = contentById.get(id)
+    return new Response(text, { status: text === undefined ? 404 : 200 })
+  }
+  if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files')) return new Response(null, { status: 200 })
+  const upload = url.startsWith('/api/drive/upload/') ? JSON.parse(body ?? '{}') : undefined
+  if (upload?.action === 'complete') {
+    const meta = uploadById.get(upload.operationId)
+    uploadById.delete(upload.operationId)
+    return Response.json({ meta })
+  }
+  fetchCalls.push({ url, method: String(init?.method ?? 'GET'), body })
   let resp: QueuedResponse | undefined
   if (url === '/api/drive/entries' && startupList) {
     resp = startupList
@@ -38,13 +55,24 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (resp.delayMs) {
     await new Promise(r => setTimeout(r, resp.delayMs))
   }
-  return {
-    status: resp.status,
-    ok: resp.status >= 200 && resp.status < 300,
-    headers: new Headers(),
-    json: async () => resp.body,
-    text: async () => JSON.stringify(resp.body),
-  } as Response
+  if (upload?.action === 'prepare') {
+    if (resp.status === 200) {
+      uploadById.set(upload.operationId, resp.body)
+      return Response.json({ uploadUrl: mockUploadUrl(upload.operationId) })
+    }
+    if (resp.status === 409) {
+      const { conflict } = resp.body as { conflict: LoadedDiaryEntry | null }
+      if (conflict) contentById.set(conflict.meta.id, conflict.entry.content)
+      return Response.json({ conflict: conflict?.meta ?? null }, { status: 409 })
+    }
+  }
+  if (resp.status === 200 && url.startsWith('/api/drive/entry/')) {
+    const loaded = resp.body as LoadedDiaryEntry
+    contentById.set(loaded.meta.id, loaded.entry.content)
+    return Response.json({ meta: loaded.meta })
+  }
+  if (resp.status === 304) return new Response(null, { status: 304 })
+  return Response.json(resp.body ?? null, { status: resp.status })
 }
 
 type SaveFn = (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null) => Promise<LoadedDiaryEntry>
@@ -105,6 +133,7 @@ window.diaryHarness = {
       startupList = queue.shift()
     }
     if (currentEmail) {
+      setOAuthCredentials({ accessToken: 'harness-token', idToken: 'harness-id', expiresAt: Date.now() + 60 * 60 * 1000 })
       unlockVaultWithKey(`harness:${currentEmail}`, new Uint8Array(32).fill(17))
       setActiveAccount(`email:${encodeURIComponent(currentEmail)}`, false, currentEmail)
     } else {
@@ -166,6 +195,8 @@ window.diaryHarness = {
   },
   progressCalls: () => [...progressCalls],
   resetFolderState: () => {
+    contentById.clear()
+    uploadById.clear()
     queue.splice(0)
     startupToday = undefined
     startupList = undefined
