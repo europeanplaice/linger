@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import { DIARY_UPLOAD_URL, diaryUploadResponse } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorCurrentEntry, mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
 import { beginEntryUpload, cancelEntryUpload, DriveConflictError, DriveError, ensureFolder, entryUploadStatus, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
@@ -274,9 +275,18 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     return id
   }
 
+  async fetch(request: Request): Promise<Response> {
+    if (request.url !== DIARY_UPLOAD_URL || request.method !== 'POST') return new Response(null, { status: 404 })
+    const input = await request.json<DiaryUploadInput>()
+    try {
+      return diaryUploadResponse(await this.upload(input))
+    } catch {
+      console.warn('Diary upload coordinator failed', input.action === 'prepare' ? 'prepare' : 'complete')
+      return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
+    }
+  }
+
   async upload(input: DiaryUploadInput): Promise<DiaryUploadResult> {
-    // Pages builds the HTTP response. Both RPC hops carry small serializable
-    // values and do not have to keep a response stream alive.
     return this.serialize<DiaryUploadResult>(async () => {
       const session = await this.session(input)
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')

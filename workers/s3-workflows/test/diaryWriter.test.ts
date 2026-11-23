@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
 import * as drive from '../../../functions/_shared/drive'
 import type { DiaryMutationInput, DiaryUploadInput } from '../../../functions/_shared/diaryWriter'
+import { DIARY_UPLOAD_URL } from '../../../functions/_shared/diaryWriter'
 import { mirrorCurrentEntry } from '../../../functions/_shared/s3Settings'
 import type { DiaryWriter } from '../src/diaryWriter'
 import type { S3SyncIndex } from '../src/syncIndex'
@@ -540,8 +541,12 @@ describe('coordinated direct Drive uploads', () => {
       ...auth, date, action: 'prepare', operationId: crypto.randomUUID(), origin: 'https://linger.example',
       bytes: 11, baseVersion: null,
     }
-    const [first, second] = await Promise.all([rpc.uploadDiaryEntry(prepare), rpc.uploadDiaryEntry(prepare)])
-    for (const response of [first, second]) expect(response.body).toEqual({ uploadUrl })
+    const [first, second] = await Promise.all([
+      writer.fetch(DIARY_UPLOAD_URL, { method: 'POST', body: JSON.stringify(prepare) }),
+      rpc.uploadDiaryEntry(prepare),
+    ])
+    expect(await first.json()).toEqual({ uploadUrl })
+    expect(second.body).toEqual({ uploadUrl })
     expect(drive.beginEntryUpload).toHaveBeenCalledOnce()
     expect(drive.generateFileId).toHaveBeenCalledOnce()
     expect(drive.saveEntry).not.toHaveBeenCalled()

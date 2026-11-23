@@ -1,6 +1,7 @@
 import type { Data, Env } from '../../../_shared/session'
 import { jsonResponse } from '../../../_shared/session'
 import type { DiaryUploadInput } from '../../../_shared/diaryWriter'
+import { DIARY_UPLOAD_URL, diaryUploadResponse } from '../../../_shared/diaryWriter'
 
 export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request, params, data, env }) => {
   const date = params.date as string
@@ -53,12 +54,14 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
     return jsonResponse({ error: 'Invalid upload instructions' }, 400)
   }
   try {
-    const result = writer
-      ? await writer.getByName(session.user_id).upload(input)
-      : await service!.uploadDiaryEntry(input)
-    const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
-    return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
+    if (writer) {
+      return await writer.getByName(session.user_id).fetch(new Request(DIARY_UPLOAD_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+      }))
+    }
+    return diaryUploadResponse(await service!.uploadDiaryEntry(input))
   } catch {
+    console.warn('Diary upload coordinator request failed', action)
     return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
   }
 }

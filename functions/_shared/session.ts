@@ -1,5 +1,5 @@
 import type { S3BackupRequest, S3WorkflowService } from './s3Workflow'
-import type { DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from './diaryWriter'
+import type { DiaryWriterAuth } from './diaryWriter'
 import type { DriveFileMeta } from './drive'
 import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
 
@@ -27,7 +27,7 @@ export interface Env {
   DIARY_WRITER?: {
     getByName(name: string): {
       getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
-      upload(input: DiaryUploadInput): Promise<DiaryUploadResult>
+      fetch(request: Request): Promise<Response>
       ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
       selectFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string; folderId: string }): Promise<string>
     }

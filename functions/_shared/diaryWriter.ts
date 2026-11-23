@@ -34,6 +34,13 @@ export type DiaryUploadResult =
   | { status: 409; body: { conflict: DriveFileMeta | null; canRebase: boolean } }
   | { status: number; body: { error: string }; retryAfter?: string }
 
+export const DIARY_UPLOAD_URL = 'https://diary-writer.internal/upload'
+
+export function diaryUploadResponse(result: DiaryUploadResult): Response {
+  const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
+  return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
+}
+
 export interface DiaryWriterService {
   getDiaryEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
