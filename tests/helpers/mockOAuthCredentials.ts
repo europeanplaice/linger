@@ -58,6 +58,7 @@ export async function installMockOAuthCredentials(
         clearVaultKey();
         const rawKey = new Uint8Array(key);
         const localDerivationKey = crypto.subtle.importKey('raw', rawKey, 'HKDF', false, ['deriveKey']);
+        void localDerivationKey.catch(() => {});
         current = { internalUserId: id, rawKey, localDerivationKey };
       }
       ${seedVault ? `unlockVaultWithKey('${userId}', new Uint8Array(32).fill(43));` : ''}

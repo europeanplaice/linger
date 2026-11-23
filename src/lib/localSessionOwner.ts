@@ -18,7 +18,9 @@ function isOwnerHash(value: string): boolean {
 }
 
 function normalizeOwner(value: string | null): string | null | Promise<string> {
-  return value && value !== UNKNOWN_OWNER && !isOwnerHash(value) ? hashOwner(value) : value
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed !== UNKNOWN_OWNER && !isOwnerHash(trimmed) ? hashOwner(trimmed) : trimmed
 }
 
 export function readSessionOwner(): string | null {

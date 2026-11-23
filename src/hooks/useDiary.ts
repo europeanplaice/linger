@@ -413,24 +413,24 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       return latest?.id === authEvent?.id || (clearSessionOwner && latest?.account === null)
     }
     const sessionEmail = isSignedIn ? email : clearSessionOwner ? null : undefined
-    void updateLocalSessionOwner(sessionEmail, isCurrent).catch(() => {})
 
     if (!isSignedIn) {
       scope.releaseCache()
       setFreshListLoaded(false)
       setLoading(false)
-      // Only wipe the persistent cache once the session is known to be gone;
-      // while auth is still restoring ('initializing') the cache must survive
-      // so the IDB preload below has data after a reload.
-      if (clearSessionOwner && account.clearSharedData) {
-        void (async () => {
-          const storedUser = readSessionOwner()
-          const sameOwner = !storedUser || (email !== null && await matchesLocalSessionOwner(storedUser, email))
-          if (sameOwner && isCurrent()) await clearLocalData()
-        })().catch(() => {})
-      }
+      void (async () => {
+        // Only wipe the persistent cache once the session is known to be gone;
+        // while auth is still restoring ('initializing') the cache must survive
+        // so the IDB preload below has data after a reload.
+        const storedUser = readSessionOwner()
+        const shouldClearLocalData = clearSessionOwner && account.clearSharedData &&
+          (!storedUser || (email !== null && await matchesLocalSessionOwner(storedUser, email)))
+        await updateLocalSessionOwner(sessionEmail, isCurrent)
+        if (shouldClearLocalData && isCurrent()) await clearLocalData()
+      })().catch(() => {})
       return
     }
+    void updateLocalSessionOwner(sessionEmail, isCurrent).catch(() => {})
     setFreshListLoaded(false)
     setLoading(true)
     setError(null)

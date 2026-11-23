@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { baseUrl } from './baseUrl'
 
 const ENTRIES_EMPTY = { files: [] }
-const ownerHash = (email: string) => `sha256:${createHash('sha256').update(`linger-session-owner-v1:${email}`).digest('hex')}`
+const ownerHash = (email: string) => `sha256:${createHash('sha256').update(`linger-session-owner-v1:${email.trim().toLowerCase()}`).digest('hex')}`
 
 function fileMeta(version: string, id = 'file-1') {
   return { id, name: 'diary-2026-05-01.json', version }
