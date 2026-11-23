@@ -17,6 +17,7 @@
   --mobile-save-action-space: 0px;
   --font-body: 'Inter', 'LINE Seed JP', sans-serif;
   --font-editor: 'Inter', 'LINE Seed JP', sans-serif;
+  --font-size-diary-control: 0.9375rem;
   /* Additional themeable tokens */
   --card-bg: #fff;
   --input-bg: #fff;
@@ -1085,7 +1086,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   border-radius: 6px;
   background: var(--input-bg);
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: var(--font-size-diary-control);
   font-family: inherit;
   outline: none;
   transition: border-color 120ms ease-out;
@@ -3789,9 +3790,10 @@ dialog.milestone-form-dialog::backdrop {
 }
 .editor-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.25rem 1rem;
   margin-bottom: 0.15rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   padding-bottom: 0.35rem;
@@ -3855,12 +3857,14 @@ dialog.milestone-form-dialog::backdrop {
 .editor-date-group {
   display: flex;
   align-items: center;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   gap: 0.6rem;
-  min-width: max-content;
+  min-width: 0;
 }
 .editor-header h2 {
+  min-width: 0;
   font-size: 1.3rem;
+  font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
 }
@@ -4228,9 +4232,9 @@ dialog.milestone-form-dialog::backdrop {
 .editor-actions {
   display: flex;
   align-items: center;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   gap: 0.7rem;
-  min-width: 0;
+  margin-inline-start: auto;
 }
 .editor-status {
   color: var(--text-muted);
@@ -4278,8 +4282,7 @@ dialog.milestone-form-dialog::backdrop {
   transition: opacity 0.35s ease, background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease,
               max-width 0.3s ease, padding-left 0.3s ease, padding-right 0.3s ease;
 }
-/* Idle state (nothing to save): quiet ghost button instead of a loud solid
-   accent, so the resting editor stays calm. Saving/saved keep the solid look. */
+/* The outlined idle state keeps attention on the entry. */
 .editor-actions .btn-save:disabled:not(.btn-saving):not(.btn-saved) {
   background: transparent;
   border-color: var(--border);
@@ -4377,12 +4380,16 @@ dialog.milestone-form-dialog::backdrop {
 .editor-actions .btn-save.btn-saved {
   background: transparent;
   border-color: var(--border);
-  color: var(--accent);
-  opacity: 0.8;
+  color: var(--text-muted);
+  opacity: 1;
   cursor: default;
 }
 .editor-actions .btn-save.btn-saved .btn-icon {
+  color: var(--accent);
   animation: saved-check-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.editor-actions .btn-save .btn-text {
+  font-size: var(--font-size-diary-control);
 }
 .btn-delete { background: var(--danger) !important; color: var(--on-danger) !important; }
 .btn-delete:not(:disabled):hover { background: var(--danger-hover) !important; }
@@ -4448,14 +4455,14 @@ dialog.milestone-form-dialog::backdrop {
   padding: 0.5rem 0.7rem;
   color: var(--text);
   cursor: pointer;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   width: 100%;
   background: transparent;
   border: none;
   border-radius: 5px;
   text-align: left;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--font-size-diary-control);
   line-height: 1.25;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
@@ -4824,7 +4831,7 @@ dialog.session-expired-dialog::backdrop {
 .btn-reauth:not(:disabled):hover { filter: brightness(1.08); }
 .entry-skeleton {
   flex: 1;
-  padding-top: 0.35rem;
+  padding-block-start: var(--entry-content-padding-start, 0.35rem);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -5026,6 +5033,11 @@ dialog.session-expired-dialog::backdrop {
   initial-value: 0%;
 }
 
+.restoring-editor-body,
+.editor-scroll-wrap {
+  --entry-content-padding-start: 0.8rem;
+}
+
 .editor-scroll-wrap {
   --entry-date-mask-start: 0%;
   --entry-date-mask-end: 0%;
@@ -5149,7 +5161,7 @@ dialog.session-expired-dialog::backdrop {
   font-family: var(--font-editor);
   font-size: var(--editor-font-size, 1.1rem);
   font-weight: 400;
-  line-height: 1.8;
+  line-height: 2;
   letter-spacing: 0.02em;
   color: var(--text);
   background: transparent;
@@ -5157,7 +5169,7 @@ dialog.session-expired-dialog::backdrop {
   word-break: normal;
   overflow-wrap: anywhere;
   line-break: strict;
-  padding-top: 0.2rem;
+  padding-block-start: var(--entry-content-padding-start);
   text-rendering: optimizeLegibility;
 }
 
@@ -5584,13 +5596,8 @@ dialog.history-dialog::backdrop {
     grid-template-columns: minmax(0, 1fr) max-content;
   }
 
-  .editor-header h2 {
-    min-width: 0;
-  }
-
   .editor-date-group {
     gap: 0.4rem;
-    min-width: 0;
   }
 
   .btn-day-nav {
@@ -5794,7 +5801,6 @@ dialog.history-dialog::backdrop {
   .editor-actions .more-menu .more-menu-item {
     min-height: 44px;
     padding: 0.6rem 0.75rem;
-    font-size: 0.95rem;
   }
 
   @media (max-width: 340px) {
@@ -5855,7 +5861,7 @@ dialog.history-dialog::backdrop {
   border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--font-size-diary-control);
   font-family: inherit;
   padding: 0.5rem 0.7rem;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
@@ -6174,7 +6180,7 @@ dialog.shortcuts-dialog::backdrop {
   outline-offset: 2px;
 }
 .sidebar-help-label {
-  font-size: 0.82rem;
+  font-size: var(--font-size-diary-control);
   line-height: 1.3;
   text-align: start;
 }
