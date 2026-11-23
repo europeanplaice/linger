@@ -55,9 +55,22 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
   }
   try {
     if (writer) {
-      return await writer.getByName(session.user_id).fetch(new Request(DIARY_UPLOAD_URL, {
+      const response = await writer.getByName(session.user_id).fetch(new Request(DIARY_UPLOAD_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
       }))
+      if (response.status >= 500) {
+        switch (response.headers.get('X-Linger-Upload-Diagnostic')) {
+          case 'session': console.warn('Diary upload failed during session validation'); break
+          case 'metadata': console.warn('Diary upload failed while loading stored metadata'); break
+          case 'recovery': console.warn('Diary upload failed while recovering an open upload'); break
+          case 'folder': console.warn('Diary upload failed while resolving the folder'); break
+          case 'target': console.warn('Diary upload failed while reserving a file'); break
+          case 'google': console.warn('Diary upload failed while opening a Google upload session'); break
+          case 'store': console.warn('Diary upload failed while saving an upload reservation'); break
+          default: console.warn('Diary upload failed before the coordinator returned a diagnostic')
+        }
+      }
+      return response
     }
     return diaryUploadResponse(await service!.uploadDiaryEntry(input))
   } catch {

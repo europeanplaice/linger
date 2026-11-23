@@ -32,13 +32,15 @@ export type DiaryUploadInput = DiaryWriterAuth & { date: string; operationId: st
 export type DiaryUploadResult =
   | { status: 200; body: { uploadUrl: string } | { meta: DriveFileMeta } }
   | { status: 409; body: { conflict: DriveFileMeta | null; canRebase: boolean } }
-  | { status: number; body: { error: string }; retryAfter?: string }
+  | { status: number; body: { error: string }; retryAfter?: string; diagnostic?: string }
 
 export const DIARY_UPLOAD_URL = 'https://diary-writer.internal/upload'
 
 export function diaryUploadResponse(result: DiaryUploadResult): Response {
-  const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
-  return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
+  const headers: Record<string, string> = {}
+  if ('retryAfter' in result && result.retryAfter) headers['Retry-After'] = result.retryAfter
+  if ('diagnostic' in result && result.diagnostic) headers['X-Linger-Upload-Diagnostic'] = result.diagnostic
+  return jsonResponse(result.body, result.status, headers)
 }
 
 export interface DiaryWriterService {

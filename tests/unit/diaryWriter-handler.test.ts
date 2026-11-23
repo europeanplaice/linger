@@ -56,7 +56,9 @@ describe('direct upload instructions', () => {
   it('calls the bound account object directly when both bindings are present', async () => {
     const body = { action: 'prepare', operationId: crypto.randomUUID(), bytes: 7 }
     const ctx = context('POST', JSON.stringify(body))
-    const upload = vi.fn(async (_request: Request) => new Response('{}', { status: 429, headers: { 'Retry-After': '1' } }))
+    const upload = vi.fn<(request: Request) => Promise<Response>>().mockResolvedValue(
+      new Response('{}', { status: 429, headers: { 'Retry-After': '1' } }),
+    )
     const getByName = vi.fn(() => ({ fetch: upload }))
 
     const response = await onUpload({ ...ctx, env: { ...ctx.env, DIARY_WRITER: { getByName } } } as never)
