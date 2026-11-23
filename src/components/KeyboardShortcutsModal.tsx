@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { motion } from 'motion/react'
 import { useI18n } from '../i18n'
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
 interface KeyboardShortcutsModalProps {
   onClose: () => void
@@ -10,35 +13,45 @@ export function KeyboardShortcutsModal({ onClose }: KeyboardShortcutsModalProps)
   const dialogRef = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
-    dialogRef.current?.showModal()
+    const dialog = dialogRef.current!
+    dialog.showModal()
+    return () => { if (dialog.open) dialog.close() }
   }, [])
 
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const handleClose = () => onClose()
-    dialog.addEventListener('close', handleClose)
-    return () => dialog.removeEventListener('close', handleClose)
-  }, [onClose])
-
   const handleBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    if (e.target === dialogRef.current) dialogRef.current?.close()
+    if (e.target === dialogRef.current) onClose()
   }
 
   const shortcuts = [
-    { desc: t.settings.saveEntry, keys: <><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></> },
+    {
+      desc: t.settings.saveEntry,
+      keys: isMac ? <><kbd>⌘</kbd><kbd>S</kbd></> : <><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></>,
+    },
     { desc: t.settings.previousNextDay, keys: <><kbd>Alt</kbd><span>+</span><kbd>←</kbd><span>/</span><kbd>→</kbd></> },
     { desc: t.settings.goToToday, keys: <><kbd>Alt</kbd><span>+</span><kbd>↑</kbd></> },
     { desc: t.settings.toggleDarkTheme, keys: <><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>D</kbd></> },
     { desc: t.settings.toggleSerifFont, keys: <><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>F</kbd></> },
-    { desc: t.settings.focusSearch, keys: <><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></> },
+    {
+      desc: t.settings.focusSearch,
+      keys: isMac ? <><kbd>⌘</kbd><kbd>K</kbd></> : <><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></>,
+    },
   ]
 
   return (
-    <dialog ref={dialogRef} className="shortcuts-dialog" onClick={handleBackdropClick}>
+    <motion.dialog
+      ref={dialogRef}
+      className="shortcuts-dialog"
+      aria-labelledby="shortcuts-title"
+      onCancel={(e) => { e.preventDefault(); onClose() }}
+      onClick={handleBackdropClick}
+      initial={{ opacity: 0, y: 14, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+    >
       <div className="shortcuts-header">
-        <h3>{t.settings.keyboardShortcuts}</h3>
-        <button className="shortcuts-close" onClick={() => dialogRef.current?.close()} aria-label={t.app.closeMenu}>×</button>
+        <h3 id="shortcuts-title">{t.settings.keyboardShortcuts}</h3>
+        <button className="shortcuts-close" onClick={onClose} aria-label={t.app.closeMenu}>×</button>
       </div>
       <div className="shortcuts-body">
         {shortcuts.map(({ desc, keys }, i) => (
@@ -48,6 +61,6 @@ export function KeyboardShortcutsModal({ onClose }: KeyboardShortcutsModalProps)
           </div>
         ))}
       </div>
-    </dialog>
+    </motion.dialog>
   )
 }

@@ -129,6 +129,19 @@ test.describe('Design regression — calendar structure', () => {
     )
     expect(dotColor).not.toBe('')
   })
+
+  test('calendar rows with milestone badges keep the same height as rows without milestones', async ({ page }) => {
+    await page.goto(`${baseUrl}/tests/calendarViewHarness.html?milestones=1`)
+    const milestoneCell = page.getByRole('button', { name: /2026-04-10/ })
+    const plainCell = page.getByRole('button', { name: '2026-04-17' })
+    await expect(milestoneCell.locator('.cal-day-milestone')).toBeVisible()
+
+    const milestoneBox = await milestoneCell.boundingBox()
+    const plainBox = await plainCell.boundingBox()
+    expect(milestoneBox).not.toBeNull()
+    expect(plainBox).not.toBeNull()
+    expect(Math.abs((milestoneBox?.height ?? 0) - (plainBox?.height ?? 0))).toBeLessThan(0.5)
+  })
 })
 
 // ── Entry editor states ───────────────────────────────────────────────────────
@@ -136,6 +149,23 @@ test.describe('Design regression — calendar structure', () => {
 test.describe('Design regression — entry editor states', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`${baseUrl}/tests/entryEditorHarness.html`)
+  })
+
+  test('mobile today FAB has a visible non-transparent background', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.evaluate(() =>
+      window.editorHarness.render({
+        date: '2026-05-01',
+        initialContent: 'saved content',
+        version: '1',
+      })
+    )
+    const fab = page.locator('button.btn-today-fab')
+    await expect(fab).toBeVisible()
+
+    const bg = await fab.evaluate(el => getComputedStyle(el).backgroundColor)
+    expect(bg).not.toBe('rgba(0, 0, 0, 0)')
+    expect(bg).not.toBe('transparent')
   })
 
   test('loading skeleton rows have shimmer animation and token-driven background', async ({ page }) => {

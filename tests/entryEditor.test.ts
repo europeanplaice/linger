@@ -1864,6 +1864,44 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     expect(syncAfter).toEqual(syncBefore)
   })
 
+  test('does not shift the Google Drive badge or textarea when S3 resolves to disabled or while editing and saving', async ({ page }) => {
+    let releaseStatus!: () => void
+    const statusReady = new Promise<void>(resolve => { releaseStatus = resolve })
+    await loadHarness(page)
+    await page.route('**/api/s3/entry-status/**', async route => {
+      await statusReady
+      await route.fulfill({ json: { status: 'disabled' } })
+    })
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
+
+    const drive = page.getByTitle('Saved to Google Drive')
+    const textarea = page.locator('textarea.editor-textarea')
+    await expect(drive).toBeVisible()
+    await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
+
+    const driveBefore = await drive.boundingBox()
+    const textareaBefore = await textarea.boundingBox()
+
+    releaseStatus()
+    await expect(page.locator('.editor-meta-s3-slot')).toHaveCount(0)
+
+    const driveAfterDisabled = await drive.boundingBox()
+    const textareaAfterDisabled = await textarea.boundingBox()
+    expect(driveAfterDisabled).toEqual(driveBefore)
+    expect(textareaAfterDisabled?.y).toBe(textareaBefore?.y)
+
+    await textarea.fill('edited content')
+    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    const textareaWhileDirty = await textarea.boundingBox()
+    expect(textareaWhileDirty?.y).toBe(textareaBefore?.y)
+
+    await page.locator('button.btn-save').click()
+    await expect(drive).toBeVisible()
+    await expect.poll(() => drive.boundingBox()).toEqual(driveBefore)
+    const textareaAfterSave = await textarea.boundingBox()
+    expect(textareaAfterSave?.y).toBe(textareaBefore?.y)
+  })
+
   test('clears the synced S3 badge after deleting the entry', async ({ page }) => {
     // Regression test: confirmDelete cleared baseVersion (hiding the Drive badge)
     // but never touched s3Status, so a synced badge for the now-deleted entry kept

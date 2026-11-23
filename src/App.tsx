@@ -138,6 +138,9 @@ function RestoringScreen({ selectedDate }: { selectedDate: string }) {
               <span className="btn-more restoring-header-placeholder" aria-hidden="true">···</span>
             </div>
           </div>
+          <div className="editor-meta editor-meta--loading" aria-hidden="true">
+            {isToday ? <span className="editor-meta-today">{t.common.today}</span> : null}
+          </div>
           <div className="restoring-editor-body">
             <div className="entry-skeleton" aria-label={t.app.loading} aria-live="polite">
               <div className="entry-skeleton-row short" />

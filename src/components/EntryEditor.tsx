@@ -1628,7 +1628,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
               {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}</span>
+              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}</span>
             </span>
           </motion.button>}
           {!isToday && onGoToToday && (
@@ -1828,6 +1828,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             {!isDirty && !loading && !loadFailed && baseVersion !== null && (
               <motion.span
                 key="drive"
+                className="editor-meta-drive-slot"
                 initial={{ opacity: 0, scale: 0.85, y: 2 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.88, y: -2 }}
@@ -2141,7 +2142,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           )}
         </div>
       )}
-      </div>
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
         <div className="editor-related">
           <span className="editor-related-label"><Sparkles size={11} strokeWidth={1.8} aria-hidden="true" />{t.entry.relatedEntries}</span>
@@ -2159,6 +2159,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         </div>
       )}
+      </div>
       <dialog
         ref={previewDialogRef}
         className="related-preview-dialog"
