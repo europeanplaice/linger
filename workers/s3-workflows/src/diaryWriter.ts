@@ -288,11 +288,9 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   }
 
   async upload(input: DiaryUploadInput): Promise<DiaryUploadResult> {
-    let step = 'session'
     return this.serialize<DiaryUploadResult>(async () => {
       const session = await this.session(input)
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
-      step = 'metadata'
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
       const pendingKey = `${PENDING_UPLOAD_PREFIX}${dateKey}`
       const receipt = await this.readMetadata<CompletedUpload>(`${UPLOAD_RECEIPT_PREFIX}${dateKey}`, input)
@@ -300,7 +298,6 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const upload = await this.readMetadata<PendingUpload>(pendingKey, input)
       if (upload) {
         const matches = upload.operationId === input.operationId
-        step = 'recovery'
         const result = await this.recoverUpload(input, session, dateKey, upload)
         if (result === 'incomplete') {
           if (matches && input.action === 'prepare' && input.bytes === upload.bytes) return { status: 200, body: { uploadUrl: upload.url } }
@@ -313,9 +310,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const pending = await this.ctx.storage.list({ prefix: PENDING_UPLOAD_PREFIX, limit: MAX_PENDING_UPLOADS })
       if (pending.size >= MAX_PENDING_UPLOADS && !await this.recoverPendingUploads(input, session)) return uploadBusy
 
-      step = 'folder'
       const folderId = await this.folder(input, session)
-      step = 'target'
       const key = `file:v2:${dateKey}`
       const reservationKey = `create:v2:${dateKey}`
       const knownFile = input.force || input.baseVersion !== null ? input.fileId : undefined
@@ -332,32 +327,14 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         return { status: 409, body: { conflict: meta, canRebase: !identityMismatch && Boolean(meta?.version) } }
       }
       const fileId = meta?.id ?? await this.reserveEntryId(input, folderId, reservationKey)
-      step = 'google'
       const url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, !meta, input.bytes)
-      step = 'store'
       await this.writeMetadata(pendingKey, input, {
         operationId: input.operationId, date: input.date, fileId, url, bytes: input.bytes, startedAt: Date.now(),
       } satisfies PendingUpload)
       return { status: 200, body: { uploadUrl: url } }
     }).catch(error => {
-      if (error instanceof DriveError) return { status: error.status, body: { error: 'Drive upload temporarily unavailable' }, diagnostic: step }
-      switch (step) {
-        case 'session': console.warn('Diary upload failed during session validation'); break
-        case 'metadata': console.warn('Diary upload failed while loading stored metadata'); break
-        case 'recovery': console.warn('Diary upload failed while recovering an open upload'); break
-        case 'folder': console.warn('Diary upload failed while resolving the folder'); break
-        case 'target': console.warn('Diary upload failed while reserving a file'); break
-        case 'google': console.warn('Diary upload failed while opening a Google upload session'); break
-        case 'store': console.warn('Diary upload failed while saving an upload reservation'); break
-      }
-      if (error instanceof Error) {
-        if (/hang|hung|never generate/i.test(error.message)) console.warn('Diary upload runtime reported an unresolved request')
-        else if (/I\/O|canceled|cancelled/i.test(error.message)) console.warn('Diary upload runtime reported canceled I/O')
-        else if (/invalid url|cannot parse url/i.test(error.message)) console.warn('Diary upload received a malformed URL')
-        else if (/authorization|Unauthorized|Google access token expired/i.test(error.message)) console.warn('Diary upload authorization is unavailable')
-        else if (error instanceof TypeError) console.warn('Diary upload received a TypeError')
-      }
-      return { status: 503, body: { error: 'Diary writer temporarily unavailable' }, diagnostic: step }
+      if (error instanceof DriveError) return { status: error.status, body: { error: 'Drive upload temporarily unavailable' } }
+      throw error
     })
   }
 

@@ -532,7 +532,8 @@ export async function beginEntryUpload(
         'X-Upload-Content-Length': String(bytes),
       }),
       body: JSON.stringify(create ? { id: fileId, name: `diary-${date}.txt`, mimeType: 'text/plain', parents: [folderId] } : {}),
-      redirect: 'error',
+      // Workers supports manual redirects. The retry helper rejects 3xx responses.
+      redirect: 'manual',
       signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
     }),
     async response => {
@@ -564,7 +565,7 @@ export async function entryUploadStatus(url: string, bytes: number): Promise<Dri
 }
 
 export async function cancelEntryUpload(url: string): Promise<void> {
-  const response = await fetch(url, { method: 'DELETE', redirect: 'error', signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) })
+  const response = await fetch(url, { method: 'DELETE', redirect: 'manual', signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) })
   await response.body?.cancel()
   if (!response.ok && ![404, 410, 499].includes(response.status)) {
     throw new DriveError(502, 'Drive upload could not be cancelled')
