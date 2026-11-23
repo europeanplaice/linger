@@ -1854,6 +1854,7 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const drive = page.getByTitle('Saved to Google Drive')
     await expect(drive).toBeVisible()
     await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
+    await expect.poll(() => page.locator('.editor-meta-drive-slot').evaluate(el => getComputedStyle(el).transform)).toBe('none')
     const before = await drive.boundingBox()
     const syncBefore = await page.locator('.editor-meta-sync').boundingBox()
     releaseStatus()
@@ -1878,6 +1879,8 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     const textarea = page.locator('textarea.editor-textarea')
     await expect(drive).toBeVisible()
     await expect(page.getByTitle('Checking AWS backup status…')).toBeVisible()
+    await expect.poll(() => page.locator('.editor-meta-drive-slot').evaluate(el => getComputedStyle(el).transform)).toBe('none')
+    await expect.poll(() => textarea.evaluate(el => getComputedStyle(el).transform)).toBe('none')
 
     const driveBefore = await drive.boundingBox()
     const textareaBefore = await textarea.boundingBox()
@@ -1897,7 +1900,8 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
 
     await page.locator('button.btn-save').click()
     await expect(drive).toBeVisible()
-    await expect.poll(() => drive.boundingBox()).toEqual(driveBefore)
+    await expect.poll(() => page.locator('.editor-meta-drive-slot').evaluate(el => getComputedStyle(el).transform)).toBe('none')
+    expect(await drive.boundingBox()).toEqual(driveBefore)
     const textareaAfterSave = await textarea.boundingBox()
     expect(textareaAfterSave?.y).toBe(textareaBefore?.y)
   })
