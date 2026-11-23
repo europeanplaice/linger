@@ -142,6 +142,25 @@ test.describe('Design regression — calendar structure', () => {
     expect(plainBox).not.toBeNull()
     expect(Math.abs((milestoneBox?.height ?? 0) - (plainBox?.height ?? 0))).toBeLessThan(0.5)
   })
+
+  test('the milestone icon is centered in a sidebar cell alongside the entry dot', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`${baseUrl}/tests/calendarViewHarness.html?milestones=1`)
+    await page.addStyleTag({ content: '#root { max-inline-size: 280px; }' })
+
+    const cell = page.getByRole('button', { name: /2026-04-10/ })
+    const icon = cell.locator('.cal-day-milestone')
+    const dot = cell.locator('.dot')
+    await expect(icon).toBeVisible()
+    await expect(dot).toHaveCSS('opacity', '1')
+
+    const cellBox = (await cell.boundingBox())!
+    const iconBox = (await icon.boundingBox())!
+    const dotBox = (await dot.boundingBox())!
+    expect(iconBox.x + iconBox.width / 2).toBeCloseTo(cellBox.x + cellBox.width / 2, 1)
+    expect(dotBox.x).toBeGreaterThan(iconBox.x + iconBox.width)
+    expect(dotBox.x + dotBox.width).toBeLessThan(cellBox.x + cellBox.width)
+  })
 })
 
 // ── Entry editor states ───────────────────────────────────────────────────────

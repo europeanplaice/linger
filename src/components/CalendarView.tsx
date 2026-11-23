@@ -376,7 +376,7 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
               if (day === null) return (
                 <div key={`empty-${i}`} className="cal-day cal-day-empty" aria-hidden="true">
                   <span>&nbsp;</span>
-                  <span className="dot" />
+                  <span className="cal-day-markers" />
                 </div>
               )
               const dateStr = ymd(year, month + 1, day)
@@ -403,12 +403,12 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
                   transition={{ type: 'spring', stiffness: 600, damping: 25 }}
                 >
                   {day}
-                  <span className="dot" aria-hidden="true" />
-                  {hasMilestone && (
-                    <span className="cal-day-milestone" aria-hidden="true">
-                      {dayMilestones[0].emoji ?? '🎀'}
-                    </span>
-                  )}
+                  <span className="cal-day-markers" aria-hidden="true">
+                    {hasMilestone && (
+                      <span className="cal-day-milestone">{dayMilestones[0].emoji ?? '🎀'}</span>
+                    )}
+                    <span className="dot" />
+                  </span>
                 </motion.button>
               )
             })}
