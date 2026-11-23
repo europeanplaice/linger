@@ -1,5 +1,6 @@
 import { getSession, invalidateSession, saveSession } from '../../../functions/_shared/session'
 import { env, createExecutionContext, runInDurableObject } from 'cloudflare:test'
+import { exports as bindings } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DriveFileMeta } from '../../../functions/_shared/drive'
 import * as drive from '../../../functions/_shared/drive'
@@ -534,12 +535,13 @@ describe('coordinated direct Drive uploads', () => {
 
   it('keeps the reservation across retries and hands only metadata to S3 after Drive commits', async () => {
     const { auth, service, writer, input } = await account()
+    const rpc = (bindings as typeof bindings & { default: Pick<InstanceType<typeof Service>, 'uploadDiaryEntry'> }).default
     const prepare: DiaryUploadInput = {
       ...auth, date, action: 'prepare', operationId: crypto.randomUUID(), origin: 'https://linger.example',
       bytes: 11, baseVersion: null,
     }
-    const [first, second] = await Promise.all([service.uploadDiaryEntry(prepare), service.uploadDiaryEntry(prepare)])
-    for (const response of [first, second]) expect(await response.json()).toEqual({ uploadUrl })
+    const [first, second] = await Promise.all([rpc.uploadDiaryEntry(prepare), rpc.uploadDiaryEntry(prepare)])
+    for (const response of [first, second]) expect(response.body).toEqual({ uploadUrl })
     expect(drive.beginEntryUpload).toHaveBeenCalledOnce()
     expect(drive.generateFileId).toHaveBeenCalledOnce()
     expect(drive.saveEntry).not.toHaveBeenCalled()
@@ -557,7 +559,7 @@ describe('coordinated direct Drive uploads', () => {
     expect(mirrorCurrentEntry).toHaveBeenCalledExactlyOnceWith(auth.accessToken, auth.sessionId, expect.anything(), expect.anything(), date)
 
     const complete: DiaryUploadInput = { ...auth, date, action: 'complete', operationId: prepare.operationId }
-    expect(await (await service.uploadDiaryEntry(complete)).json()).toEqual({ meta })
+    expect((await rpc.uploadDiaryEntry(complete)).body).toEqual({ meta })
     expect(mirrorCurrentEntry).toHaveBeenCalledOnce()
     const metadata = await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.list())
     expect([...metadata.keys()].some(key => key.startsWith('upload:pending:'))).toBe(false)
@@ -593,7 +595,7 @@ describe('coordinated direct Drive uploads', () => {
       bytes: 3, fileId: meta.id, baseVersion: '0',
     })
     expect(response.status).toBe(409)
-    expect(await response.json()).toEqual({ conflict: meta, canRebase: true })
+    expect(response.body).toEqual({ conflict: meta, canRebase: true })
     expect(drive.getEntryContent).not.toHaveBeenCalled()
     expect(drive.beginEntryUpload).not.toHaveBeenCalled()
   })

@@ -4,7 +4,7 @@ import { onRequestPost as onUpload } from '../../functions/api/drive/upload/[dat
 
 function context(method: string, body?: string, headers?: HeadersInit) {
   const mutateDiaryEntry = vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
-  const uploadDiaryEntry = vi.fn(async () => new Response('{}'))
+  const uploadDiaryEntry = vi.fn(async () => ({ status: 200, body: { uploadUrl: 'test-url' } }))
   return {
     request: new Request('https://example.com/api/drive/entry/2026-10-31', { method, body, headers }),
     params: { date: '2026-10-31' },
@@ -57,7 +57,10 @@ describe('direct upload instructions', () => {
     const body = { action: 'prepare', operationId: crypto.randomUUID(), bytes: 5, baseVersion: '7' }
     const ctx = context('POST', JSON.stringify(body), { Origin: 'https://example.com' })
 
-    expect((await onUpload(ctx as never)).status).toBe(200)
+    const response = await onUpload(ctx as never)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(await response.json()).toEqual({ uploadUrl: 'test-url' })
     expect(ctx.uploadDiaryEntry).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       ...body, sessionId: 'session-a', accountKey: 'account-a', date: '2026-10-31', origin: 'https://example.com',
     }))

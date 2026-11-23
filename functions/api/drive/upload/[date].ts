@@ -52,7 +52,9 @@ export const onRequestPost: PagesFunction<Env, 'date', Data> = async ({ request,
     return jsonResponse({ error: 'Invalid upload instructions' }, 400)
   }
   try {
-    return await env.S3_WORKFLOW_SERVICE.uploadDiaryEntry(input)
+    const result = await env.S3_WORKFLOW_SERVICE.uploadDiaryEntry(input)
+    const retryAfter = 'retryAfter' in result ? result.retryAfter : undefined
+    return jsonResponse(result.body, result.status, retryAfter ? { 'Retry-After': retryAfter } : undefined)
   } catch {
     return jsonResponse({ error: 'Diary writer temporarily unavailable' }, 503)
   }

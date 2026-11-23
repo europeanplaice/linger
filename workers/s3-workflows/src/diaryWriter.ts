@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import type { DiaryMutationInput, DiaryUploadInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import type { DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorCurrentEntry, mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
 import { beginEntryUpload, cancelEntryUpload, DriveConflictError, DriveError, ensureFolder, entryUploadStatus, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
@@ -26,9 +26,11 @@ interface CompletedUpload {
   operationId: string
   meta: DriveFileMeta
 }
-function uploadBusy(): Response {
-  return jsonResponse({ error: 'A diary upload is in progress' }, 429, { 'Retry-After': '1' })
-}
+const uploadBusy = {
+  status: 429,
+  body: { error: 'A diary upload is in progress' },
+  retryAfter: '1',
+} satisfies DiaryUploadResult
 
 // One object per internal Linger account and deployment environment. All
 // sessions/devices use this queue, including folder discovery and restores. Do not hold a storage
@@ -196,7 +198,9 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
       const upload = await this.readMetadata<PendingUpload>(`${PENDING_UPLOAD_PREFIX}${dateKey}`, input)
-      if (upload && await this.recoverUpload(input, session, dateKey, upload) === 'incomplete') return uploadBusy()
+      if (upload && await this.recoverUpload(input, session, dateKey, upload) === 'incomplete') {
+        return jsonResponse(uploadBusy.body, uploadBusy.status, { 'Retry-After': uploadBusy.retryAfter })
+      }
       const key = `file:v2:${dateKey}`
       const reservationKey = `create:v2:${dateKey}`
       const findEntry = () => this.findIndexedEntry(input, session, input.date, key)
@@ -270,28 +274,30 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     return id
   }
 
-  async upload(input: DiaryUploadInput): Promise<Response> {
-    return this.serialize(async () => {
+  async upload(input: DiaryUploadInput): Promise<DiaryUploadResult> {
+    // Pages builds the HTTP response. Both RPC hops carry small serializable
+    // values and do not have to keep a response stream alive.
+    return this.serialize<DiaryUploadResult>(async () => {
       const session = await this.session(input)
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
       const pendingKey = `${PENDING_UPLOAD_PREFIX}${dateKey}`
       const receipt = await this.readMetadata<CompletedUpload>(`${UPLOAD_RECEIPT_PREFIX}${dateKey}`, input)
-      if (receipt?.operationId === input.operationId) return jsonResponse({ meta: receipt.meta })
+      if (receipt?.operationId === input.operationId) return { status: 200, body: { meta: receipt.meta } }
       const upload = await this.readMetadata<PendingUpload>(pendingKey, input)
       if (upload) {
         const matches = upload.operationId === input.operationId
         const result = await this.recoverUpload(input, session, dateKey, upload)
         if (result === 'incomplete') {
-          if (matches && input.action === 'prepare' && input.bytes === upload.bytes) return jsonResponse({ uploadUrl: upload.url })
-          return uploadBusy()
+          if (matches && input.action === 'prepare' && input.bytes === upload.bytes) return { status: 200, body: { uploadUrl: upload.url } }
+          return uploadBusy
         }
-        if (matches && result !== 'expired') return jsonResponse({ meta: result })
+        if (matches && result !== 'expired') return { status: 200, body: { meta: result } }
       }
-      if (input.action === 'complete') return jsonResponse({ error: 'Upload session expired' }, 409)
+      if (input.action === 'complete') return { status: 409, body: { error: 'Upload session expired' } }
 
       const pending = await this.ctx.storage.list({ prefix: PENDING_UPLOAD_PREFIX, limit: MAX_PENDING_UPLOADS })
-      if (pending.size >= MAX_PENDING_UPLOADS && !await this.recoverPendingUploads(input, session)) return uploadBusy()
+      if (pending.size >= MAX_PENDING_UPLOADS && !await this.recoverPendingUploads(input, session)) return uploadBusy
 
       const folderId = await this.folder(input, session)
       const key = `file:v2:${dateKey}`
@@ -307,16 +313,16 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const identityMismatch = Boolean(meta && input.fileId && meta.id !== input.fileId)
       if (identityMismatch || (!meta && (knownFile || (!input.force && input.baseVersion != null)))
         || (meta && !input.force && (!meta.version || meta.version !== input.baseVersion))) {
-        return jsonResponse({ conflict: meta, canRebase: !identityMismatch && Boolean(meta?.version) }, 409)
+        return { status: 409, body: { conflict: meta, canRebase: !identityMismatch && Boolean(meta?.version) } }
       }
       const fileId = meta?.id ?? await this.reserveEntryId(input, folderId, reservationKey)
       const url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, !meta, input.bytes)
       await this.writeMetadata(pendingKey, input, {
         operationId: input.operationId, date: input.date, fileId, url, bytes: input.bytes, startedAt: Date.now(),
       } satisfies PendingUpload)
-      return jsonResponse({ uploadUrl: url })
+      return { status: 200, body: { uploadUrl: url } }
     }).catch(error => {
-      if (error instanceof DriveError) return jsonResponse({ error: 'Drive upload temporarily unavailable' }, error.status)
+      if (error instanceof DriveError) return { status: error.status, body: { error: 'Drive upload temporarily unavailable' } }
       throw error
     })
   }
