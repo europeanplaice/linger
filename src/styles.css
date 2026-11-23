@@ -537,6 +537,7 @@ html.session-restoring .landing {
 .passkey-gate-navigation .btn-use-another-account { margin: 0; min-height: 44px; padding: 0.5rem; }
 .passkey-setup-note { text-align: start; border-inline-start: 3px solid var(--border); padding-inline-start: 1rem; }
 .passkey-recovery-help { margin-top: 1.5rem; text-align: start; }
+.passkey-about-help + .passkey-recovery-help { margin-top: 0.25rem; }
 .passkey-recovery-help summary { cursor: pointer; min-height: 44px; padding-block: 0.65rem; }
 .passkey-recovery-help .btn-use-another-account { min-height: 44px; margin: 0; padding-inline: 0; text-align: start; }
 .passkey-recovery-help input { width: 100%; }

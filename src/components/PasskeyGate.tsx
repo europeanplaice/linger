@@ -151,15 +151,24 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
               </div>
             </>}
           </div>
-          {!setup && <details className="passkey-recovery-help">
-            <summary>{t.login.passkeyRecoveryTitle}</summary>
-            <h2>{t.login.passkeyOtherDeviceTitle}</h2>
-            <p>{t.login.passkeyOtherDeviceHelp}</p>
-            <button type="button" className="btn-use-another-account" disabled={staticPreview || busy || verificationFailed} onClick={() => unlock(false)}>{t.login.passkeyOtherDeviceAction}</button>
-            <h2>{t.login.passkeyLostTitle}</h2>
-            <p>{t.login.passkeyRecoveryAccountHelp}</p>
-            <button type="button" className="btn-use-another-account" disabled={staticPreview || busy} onClick={() => changeView('recovery')}>{t.login.passkeyRecoveryStart}</button>
-          </details>}
+          {!setup && <>
+            <details className="passkey-recovery-help passkey-about-help">
+              <summary>{t.login.passkeyAboutTitle}</summary>
+              <h2>{t.login.passkeyAboutWhatTitle}</h2>
+              <p>{t.login.passkeyAboutWhatBody}</p>
+              <h2>{t.login.passkeyAboutWhyTitle}</h2>
+              <p>{t.login.passkeyAboutWhyBody}</p>
+            </details>
+            <details className="passkey-recovery-help">
+              <summary>{t.login.passkeyRecoveryTitle}</summary>
+              <h2>{t.login.passkeyOtherDeviceTitle}</h2>
+              <p>{t.login.passkeyOtherDeviceHelp}</p>
+              <button type="button" className="btn-use-another-account" disabled={staticPreview || busy || verificationFailed} onClick={() => unlock(false)}>{t.login.passkeyOtherDeviceAction}</button>
+              <h2>{t.login.passkeyLostTitle}</h2>
+              <p>{t.login.passkeyRecoveryAccountHelp}</p>
+              <button type="button" className="btn-use-another-account" disabled={staticPreview || busy} onClick={() => changeView('recovery')}>{t.login.passkeyRecoveryStart}</button>
+            </details>
+          </>}
           {error && !(options && error === 'cancelled') && onClearError && <button className="passkey-error-dismiss" type="button" onClick={() => { if (options) setView('options'); onClearError() }}>{t.common.close}</button>}
         </>}
         <p className="login-footer">

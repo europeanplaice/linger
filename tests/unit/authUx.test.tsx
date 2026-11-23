@@ -133,6 +133,13 @@ describe('authentication guidance', () => {
     expect(screen.getByRole('alert').textContent).not.toContain('This passkey')
   })
 
+  it('explains what a passkey is and why Linger uses it', () => {
+    gate()
+    fireEvent.click(screen.getByText('What is a passkey? Why use one?'))
+    expect(screen.getByText('What is a passkey?')).toBeTruthy()
+    expect(screen.getByText('Why does Linger use a passkey?')).toBeTruthy()
+  })
+
   it('retries a connection outage without opening Google authorization', () => {
     const signIn = vi.fn(), retry = vi.fn()
     render(<I18nProvider initialLanguage="en"><LoginScreen onSignIn={signIn} onRetryConnection={retry} googleConnection="unavailable" email="person@example.com" /></I18nProvider>)
