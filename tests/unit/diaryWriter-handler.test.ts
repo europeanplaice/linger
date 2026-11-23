@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { onRequestPost, onRequestDelete } from '../../functions/api/drive/entry/[date]'
+import { onRequestPost as onUpload } from '../../functions/api/drive/upload/[date]'
 
 function context(method: string, body?: string, headers?: HeadersInit) {
   const mutateDiaryEntry = vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+  const uploadDiaryEntry = vi.fn(async () => new Response('{}'))
   return {
     request: new Request('https://example.com/api/drive/entry/2026-10-31', { method, body, headers }),
     params: { date: '2026-10-31' },
     data: { sessionId: 'session-a', session: { google_sub: 'google-a', user_id: 'account-a', vault_key: 'request-key' } },
-    env: { S3_WORKFLOW_SERVICE: { mutateDiaryEntry } }, mutateDiaryEntry,
+    env: { S3_WORKFLOW_SERVICE: { mutateDiaryEntry, uploadDiaryEntry } }, mutateDiaryEntry, uploadDiaryEntry,
   }
 }
 
@@ -47,5 +49,27 @@ describe('Pages to coordinated diary writer', () => {
     const ctx = context('DELETE')
     expect((await onRequestDelete({ ...ctx, params: { date: 'invalid' } } as never)).status).toBe(400)
     expect(ctx.mutateDiaryEntry).not.toHaveBeenCalled()
+  })
+})
+
+describe('direct upload instructions', () => {
+  it('forwards authorized metadata to the writer', async () => {
+    const body = { action: 'prepare', operationId: crypto.randomUUID(), bytes: 5, baseVersion: '7' }
+    const ctx = context('POST', JSON.stringify(body), { Origin: 'https://example.com' })
+
+    expect((await onUpload(ctx as never)).status).toBe(200)
+    expect(ctx.uploadDiaryEntry).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      ...body, sessionId: 'session-a', accountKey: 'account-a', date: '2026-10-31', origin: 'https://example.com',
+    }))
+    expect(ctx.mutateDiaryEntry).not.toHaveBeenCalled()
+  })
+
+  it('rejects a diary body in the upload-instruction request', async () => {
+    const ctx = context('POST', JSON.stringify({
+      action: 'prepare', operationId: crypto.randomUUID(), bytes: 6, content: 'private',
+    }))
+
+    expect((await onUpload(ctx as never)).status).toBe(400)
+    expect(ctx.uploadDiaryEntry).not.toHaveBeenCalled()
   })
 })

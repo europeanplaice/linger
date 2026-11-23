@@ -31,6 +31,9 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
       return new Response(null, { status: 304 })
     }
 
+    if (new URL(context.request.url).searchParams.get('metadata') === '1') {
+      return jsonResponse({ meta })
+    }
     const entry = await getEntryContent(accessToken, meta.id, date)
     return jsonResponse({ entry, meta }, 200, meta.version ? { ETag: meta.version } : undefined)
   } catch (e) {

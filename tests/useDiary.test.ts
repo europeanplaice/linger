@@ -483,7 +483,7 @@ test.describe('useDiary save — entry not found at save time', () => {
     const calls = await page.evaluate(() => window.diaryHarness.calls())
     // Force with existing cache should go straight to save
     expect(calls[0].method).toBe('POST')
-    expect(calls[0].url).toContain('/api/drive/entry/')
+    expect(calls[0].url).toContain('/api/drive/upload/')
   })
 })
 
@@ -668,7 +668,7 @@ test.describe('useDiary offline drafts', () => {
     await expect.poll(() => page.evaluate(() => window.diaryHarness.getDrafts())).toEqual([])
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '2026-05-01')
     const calls = await page.evaluate(() => window.diaryHarness.calls())
-    expect(calls.at(-1)).toMatchObject({ url: '/api/drive/entry/2026-05-01', method: 'POST' })
+    expect(calls.at(-1)).toMatchObject({ url: '/api/drive/upload/2026-05-01', method: 'POST' })
   })
 
   test('marks a draft conflicted when replay hits a conflict and stops retrying it', async ({ page, context }) => {

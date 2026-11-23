@@ -4,6 +4,7 @@ import {
   inspectDriveFolder, ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
   listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
+  beginEntryUpload, entryUploadStatus,
 } from '../../functions/_shared/drive'
 
 vi.mock('../../functions/_shared/session', async importOriginal => ({
@@ -550,6 +551,34 @@ describe('recoverable diary deletion and idempotent creation', () => {
     await saveEntry('token', { date: '2026-10-31', content: 'retained' }, 'folder-1', undefined, undefined, id)
     expect(fetchMock.mock.calls[0][0]).toContain('/files/generateIds?')
     expect(fetchMock.mock.calls[1][1].body).toContain('"id":"reserved-id"')
+  })
+})
+
+describe('Drive resumable diary upload', () => {
+  it.each([true, false])('initiates a metadata-only upload (create=%s)', async create => {
+    const path = create ? '/files' : '/files/reserved-id'
+    const location = `https://www.googleapis.com/upload/drive/v3${path}?uploadType=resumable&upload_id=temporary`
+    mockFetch(new Response(null, { headers: { Location: location } }))
+
+    await expect(beginEntryUpload('token', 'https://linger.example', '2026-10-31', 'folder-1', 'reserved-id', create, 7))
+      .resolves.toBe(location)
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(String(url)).toContain(`${path}?uploadType=resumable`)
+    expect(init?.method).toBe(create ? 'POST' : 'PATCH')
+    expect(init?.headers).toMatchObject({ Origin: 'https://linger.example', 'X-Upload-Content-Length': '7' })
+    expect(JSON.parse(String(init?.body))).toEqual(create
+      ? { id: 'reserved-id', name: 'diary-2026-10-31.txt', mimeType: 'text/plain', parents: ['folder-1'] }
+      : {})
+  })
+
+  it('probes an upload without sending the text or Google credentials', async () => {
+    mockFetch(new Response(null, { status: 308 }))
+    const url = 'https://www.googleapis.com/upload/drive/v3/files?upload_id=temporary'
+    await expect(entryUploadStatus(url, 42)).resolves.toBe('incomplete')
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(url, expect.objectContaining({
+      method: 'PUT', headers: { 'Content-Range': 'bytes */42' }, redirect: 'manual',
+    }))
+    expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBeUndefined()
   })
 })
 

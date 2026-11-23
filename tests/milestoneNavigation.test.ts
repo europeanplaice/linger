@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 const currentDate = '2026-01-01'
@@ -25,12 +26,11 @@ test.beforeEach(async ({ page }) => {
       { id: 'birthday', label: 'Birthday', date: milestoneDate },
     ],
   }))
+  await mockGoogleDrive(page, { read: id => id === `${milestoneDate}-file` ? 'Milestone entry' : 'Current entry' })
   await page.route('/api/drive/entry/**', route => {
     const date = new URL(route.request().url()).pathname.split('/').pop()
-    const content = date === milestoneDate ? 'Milestone entry' : 'Current entry'
     return route.fulfill({
       json: {
-        entry: { date, content },
         meta: { id: `${date}-file`, name: `diary-${date}.txt`, version: '1' },
       },
     })

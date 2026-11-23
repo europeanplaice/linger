@@ -1,8 +1,10 @@
 import type { Env, SessionData } from './session'
 import { invalidateFolderScopedS3Cache, saveSession, SESSION_TTL } from './session'
 import { folderNameForOrigin } from '../../src/utils/folderName'
+import { parseDriveEntry } from '../../src/utils/parseDriveEntry'
 const BASE = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
+const ENTRY_WRITE_FIELDS = encodeURIComponent('id,name,modifiedTime,version')
 
 export interface DriveFileMeta {
   id: string
@@ -453,29 +455,10 @@ function serializeEntry(entry: DiaryEntry): string {
   return entry.content
 }
 
-// Parses a diary file body. The authoritative date comes from the filename and
-// is passed in via `date`. Legacy files carry a `---\ndate: …\n---` frontmatter
-// block: when present it is stripped from the body, and its date is used as a
-// fallback if no `date` was provided. New files have no frontmatter, so the
-// whole text is the body. Never throws.
-function parseEntry(text: string, date: string): DiaryEntry {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
-  if (match) {
-    const frontmatter = match[1]
-    const fmDate = frontmatter.match(/^date:\s*(.+)$/m)?.[1]?.trim() ?? ''
-    // Ordinary Markdown separators are diary text, not a legacy file header.
-    if (/^\d{4}-\d{2}-\d{2}$/.test(fmDate)) {
-      const content = match[2].replace(/^\r?\n/, '')
-      return { date: date || fmDate, content }
-    }
-  }
-  return { date, content: text }
-}
-
 export async function getEntryContent(token: string, fileId: string, date: string): Promise<DiaryEntry> {
   return driveWithRetry(
     () => fetch(`${BASE}/files/${fileId}?alt=media`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-    async r => parseEntry(await r.text(), date),
+    async r => parseDriveEntry(await r.text(), date),
   )
 }
 
@@ -504,7 +487,7 @@ export async function saveEntry(
   createFileId?: string,
 ): Promise<DriveFileMeta> {
   const body = serializeEntry(entry)
-  const fields = encodeURIComponent('id,name,modifiedTime,version')
+  const fields = ENTRY_WRITE_FIELDS
 
   if (fileId) {
     const extra: Record<string, string> = { 'Content-Type': 'text/plain; charset=UTF-8' }
@@ -532,6 +515,60 @@ export async function saveEntry(
     }),
     r => r.json() as Promise<DriveFileMeta>,
   )
+}
+
+export async function beginEntryUpload(
+  token: string, origin: string, date: string, folderId: string, fileId: string, create: boolean, bytes: number,
+): Promise<string> {
+  const path = create ? '/files' : `/files/${encodeURIComponent(fileId)}`
+  const url = `${UPLOAD_BASE}${path}?uploadType=resumable&fields=${ENTRY_WRITE_FIELDS}`
+  return driveWithRetry(
+    () => fetch(url, {
+      method: create ? 'POST' : 'PATCH',
+      headers: driveHeaders(token, {
+        Origin: origin,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': 'text/plain; charset=UTF-8',
+        'X-Upload-Content-Length': String(bytes),
+      }),
+      body: JSON.stringify(create ? { id: fileId, name: `diary-${date}.txt`, mimeType: 'text/plain', parents: [folderId] } : {}),
+      redirect: 'error',
+      signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
+    }),
+    async response => {
+      const location = response.headers.get('Location')
+      if (!location) throw new DriveError(502, 'Drive did not return an upload session')
+      const sessionUrl = new URL(location)
+      if (sessionUrl.origin !== 'https://www.googleapis.com'
+        || ![`/upload/drive/v3${path}`, `/resumable/upload/drive/v3${path}`].includes(sessionUrl.pathname)
+        || !sessionUrl.searchParams.get('upload_id') || sessionUrl.username || sessionUrl.password || sessionUrl.hash) {
+        throw new DriveError(502, 'Drive returned an invalid upload session')
+      }
+      return sessionUrl.href
+    },
+  )
+}
+
+export async function entryUploadStatus(url: string, bytes: number): Promise<DriveFileMeta | 'incomplete' | 'expired'> {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Range': `bytes */${bytes}` },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
+  })
+  if (response.ok) return response.json() as Promise<DriveFileMeta>
+  await response.body?.cancel()
+  if (response.status === 308) return 'incomplete'
+  if ([404, 410, 499].includes(response.status)) return 'expired'
+  throw new DriveError(502, 'Drive upload status is temporarily unavailable')
+}
+
+export async function cancelEntryUpload(url: string): Promise<void> {
+  const response = await fetch(url, { method: 'DELETE', redirect: 'error', signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) })
+  await response.body?.cancel()
+  if (!response.ok && ![404, 410, 499].includes(response.status)) {
+    throw new DriveError(502, 'Drive upload could not be cancelled')
+  }
 }
 
 // One-time migration: rename legacy `diary-YYYY-MM-DD.md` files to `.txt`.
@@ -596,7 +633,7 @@ export async function getRevisionContent(token: string, fileId: string, revision
   // new revisions have none. An empty date is acceptable for revision display.
   return driveWithRetry(
     () => fetch(`${BASE}/files/${fileId}/revisions/${revisionId}?alt=media`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-    async r => parseEntry(await r.text(), ''),
+    async r => parseDriveEntry(await r.text(), ''),
   )
 }
 

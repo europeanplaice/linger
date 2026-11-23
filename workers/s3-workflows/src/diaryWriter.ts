@@ -1,14 +1,34 @@
 import { DurableObject } from 'cloudflare:workers'
-import type { DiaryMutationInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import type { DiaryMutationInput, DiaryUploadInput, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
-import { mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
-import { DriveConflictError, DriveError, ensureFolder, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
+import { mirrorCurrentEntry, mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
+import { beginEntryUpload, cancelEntryUpload, DriveConflictError, DriveError, ensureFolder, entryUploadStatus, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
 import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
 import { authorizedSession } from './runtime'
 import type { WorkflowEnv } from './types'
 import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functions/_shared/vaultCrypto'
+
+const PENDING_UPLOAD_PREFIX = 'upload:pending:'
+const UPLOAD_RECEIPT_PREFIX = 'upload:receipt:'
+const UPLOAD_IDLE_MS = 60_000
+const MAX_PENDING_UPLOADS = 32
+interface PendingUpload {
+  operationId: string
+  date: string
+  fileId: string
+  url: string
+  bytes: number
+  startedAt: number
+}
+interface CompletedUpload {
+  operationId: string
+  meta: DriveFileMeta
+}
+function uploadBusy(): Response {
+  return jsonResponse({ error: 'A diary upload is in progress' }, 429, { 'Retry-After': '1' })
+}
 
 // One object per internal Linger account and deployment environment. All
 // sessions/devices use this queue, including folder discovery and restores. Do not hold a storage
@@ -83,7 +103,14 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   }
 
   async ensureFolder(auth: DiaryWriterAuth): Promise<string> {
-    return this.serialize(async () => this.folder(auth, await this.session(auth)))
+    return this.serialize(async () => {
+      const session = await this.session(auth)
+      const folderId = await this.folder(auth, session)
+      // A page may close after the upload but before reporting completion.
+      // Reading or opening the app still works while another tab is uploading.
+      await this.recoverPendingUploads(auth, session).catch(() => {})
+      return folderId
+    })
   }
 
   async getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null> {
@@ -94,17 +121,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
       const key = `file:v2:${dateKey}`
-      const known = await this.readMetadata<string>(key, input)
-      if (known) {
-        try { return await getDiaryFileMeta(input.accessToken, input.sessionId, session, this.env, known, input.date, { withinCoordinator: true }) }
-        catch (error) {
-          if (!(error instanceof DriveError && error.status === 404)) throw error
-          await this.ctx.storage.delete(key)
-        }
-      }
-      const meta = await findEntryMeta(input.accessToken, input.sessionId, session, this.env, input.date, { withinCoordinator: true })
-      if (meta) await this.writeMetadata(key, input, meta.id)
-      return meta
+      return this.findIndexedEntry(input, session, input.date, key)
     })
   }
 
@@ -115,6 +132,9 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     if (this.queued !== 0) throw new DriveError(409, 'Diary activity is in progress; try selecting the folder again')
     return this.serialize(async () => {
       const session = await this.session(input)
+      if (!await this.recoverPendingUploads(input, session)) {
+        throw new DriveError(409, 'Diary activity is in progress; try selecting the folder again')
+      }
       const candidates = await listDriveFolders(input.accessToken)
       if (!candidates.some(folder => folder.id === input.folderId)) {
         throw new DriveError(400, 'Selected folder is not available to this Google account')
@@ -136,11 +156,12 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       // Clear per-date Drive IDs and pending create reservations before the new
       // pointer is visible. A failure here leaves the old folder selected with
       // empty, safely reconstructible caches.
-      const [files, creates] = await Promise.all([
+      const [files, creates, receipts] = await Promise.all([
         this.ctx.storage.list({ prefix: 'file:' }),
         this.ctx.storage.list({ prefix: 'create:' }),
+        this.ctx.storage.list({ prefix: UPLOAD_RECEIPT_PREFIX }),
       ])
-      const cacheKeys = [...files.keys(), ...creates.keys()]
+      const cacheKeys = [...files.keys(), ...creates.keys(), ...receipts.keys()]
       for (let i = 0; i < cacheKeys.length; i += 128) {
         await this.ctx.storage.delete(cacheKeys.slice(i, i + 128))
       }
@@ -174,28 +195,15 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const token = input.accessToken
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
+      const upload = await this.readMetadata<PendingUpload>(`${PENDING_UPLOAD_PREFIX}${dateKey}`, input)
+      if (upload && await this.recoverUpload(input, session, dateKey, upload) === 'incomplete') return uploadBusy()
       const key = `file:v2:${dateKey}`
       const reservationKey = `create:v2:${dateKey}`
-      const findEntry = async (): Promise<DriveFileMeta | null> => {
-        const known = await this.readMetadata<string>(key, input)
-        if (known) {
-          try { return await getDiaryFileMeta(token, input.sessionId, session, this.env, known, input.date, { withinCoordinator: true }) }
-          catch (e) { if (!(e instanceof DriveError && e.status === 404)) throw e }
-          await this.ctx.storage.delete(key)
-        }
-        const meta = await findEntryMeta(token, input.sessionId, session, this.env, input.date, { withinCoordinator: true })
-        if (meta) await this.writeMetadata(key, input, meta.id)
-        return meta
-      }
+      const findEntry = () => this.findIndexedEntry(input, session, input.date, key)
       const createEntry = async (entry: DiaryEntry, folderId: string): Promise<DriveFileMeta> => {
         // Persist a Drive-generated ID BEFORE creating. A timeout, lost response,
         // or object restart can retry this ID without creating a second file.
-        let reservation = await this.readMetadata<{ id: string; folderId: string }>(reservationKey, input)
-        if (!reservation || reservation.folderId !== folderId) {
-          reservation = { id: await generateFileId(token), folderId }
-          await this.writeMetadata(reservationKey, input, reservation)
-        }
-        const { id } = reservation
+        const id = await this.reserveEntryId(input, folderId, reservationKey)
         let meta: DriveFileMeta
         try { meta = await saveEntry(token, entry, folderId, undefined, undefined, id) }
         catch (e) {
@@ -231,6 +239,123 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       }
       return response
     })
+  }
+
+  private async findIndexedEntry(auth: DiaryWriterAuth, session: SessionData, date: string, key: string): Promise<DriveFileMeta | null> {
+    const known = await this.readMetadata<string>(key, auth)
+    if (known) {
+      const meta = await this.lookupEntry(auth, session, date, known)
+      if (meta) return meta
+      await this.ctx.storage.delete(key)
+    }
+    const meta = await findEntryMeta(auth.accessToken, auth.sessionId, session, this.env, date, { withinCoordinator: true })
+    if (meta) await this.writeMetadata(key, auth, meta.id)
+    return meta
+  }
+
+  private async lookupEntry(auth: DiaryWriterAuth, session: SessionData, date: string, id: string): Promise<DriveFileMeta | null> {
+    try {
+      return await getDiaryFileMeta(auth.accessToken, auth.sessionId, session, this.env, id, date, { withinCoordinator: true })
+    } catch (error) {
+      if (error instanceof DriveError && error.status === 404) return null
+      throw error
+    }
+  }
+
+  private async reserveEntryId(auth: DiaryWriterAuth, folderId: string, key: string): Promise<string> {
+    const reservation = await this.readMetadata<{ id: string; folderId: string }>(key, auth)
+    if (reservation?.folderId === folderId) return reservation.id
+    const id = await generateFileId(auth.accessToken)
+    await this.writeMetadata(key, auth, { id, folderId })
+    return id
+  }
+
+  async upload(input: DiaryUploadInput): Promise<Response> {
+    return this.serialize(async () => {
+      const session = await this.session(input)
+      if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
+      const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
+      const pendingKey = `${PENDING_UPLOAD_PREFIX}${dateKey}`
+      const receipt = await this.readMetadata<CompletedUpload>(`${UPLOAD_RECEIPT_PREFIX}${dateKey}`, input)
+      if (receipt?.operationId === input.operationId) return jsonResponse({ meta: receipt.meta })
+      const upload = await this.readMetadata<PendingUpload>(pendingKey, input)
+      if (upload) {
+        const matches = upload.operationId === input.operationId
+        const result = await this.recoverUpload(input, session, dateKey, upload)
+        if (result === 'incomplete') {
+          if (matches && input.action === 'prepare' && input.bytes === upload.bytes) return jsonResponse({ uploadUrl: upload.url })
+          return uploadBusy()
+        }
+        if (matches && result !== 'expired') return jsonResponse({ meta: result })
+      }
+      if (input.action === 'complete') return jsonResponse({ error: 'Upload session expired' }, 409)
+
+      const pending = await this.ctx.storage.list({ prefix: PENDING_UPLOAD_PREFIX, limit: MAX_PENDING_UPLOADS })
+      if (pending.size >= MAX_PENDING_UPLOADS && !await this.recoverPendingUploads(input, session)) return uploadBusy()
+
+      const folderId = await this.folder(input, session)
+      const key = `file:v2:${dateKey}`
+      const reservationKey = `create:v2:${dateKey}`
+      const knownFile = input.force || input.baseVersion !== null ? input.fileId : undefined
+      let meta = knownFile
+        ? await this.lookupEntry(input, session, input.date, knownFile)
+        : await this.findIndexedEntry(input, session, input.date, key)
+      if (!meta && !knownFile) {
+        const reservation = await this.readMetadata<{ id: string; folderId: string }>(reservationKey, input)
+        if (reservation?.folderId === folderId) meta = await this.lookupEntry(input, session, input.date, reservation.id)
+      }
+      const identityMismatch = Boolean(meta && input.fileId && meta.id !== input.fileId)
+      if (identityMismatch || (!meta && (knownFile || (!input.force && input.baseVersion != null)))
+        || (meta && !input.force && (!meta.version || meta.version !== input.baseVersion))) {
+        return jsonResponse({ conflict: meta, canRebase: !identityMismatch && Boolean(meta?.version) }, 409)
+      }
+      const fileId = meta?.id ?? await this.reserveEntryId(input, folderId, reservationKey)
+      const url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, !meta, input.bytes)
+      await this.writeMetadata(pendingKey, input, {
+        operationId: input.operationId, date: input.date, fileId, url, bytes: input.bytes, startedAt: Date.now(),
+      } satisfies PendingUpload)
+      return jsonResponse({ uploadUrl: url })
+    }).catch(error => {
+      if (error instanceof DriveError) return jsonResponse({ error: 'Drive upload temporarily unavailable' }, error.status)
+      throw error
+    })
+  }
+
+  private async recoverPendingUploads(auth: DiaryWriterAuth, session: SessionData): Promise<boolean> {
+    const pending = await this.ctx.storage.list({ prefix: PENDING_UPLOAD_PREFIX })
+    const statuses = await Promise.allSettled([...pending.keys()].map(async key => {
+      const upload = await this.readMetadata<PendingUpload>(key, auth)
+      return upload && this.recoverUpload(auth, session, key.slice(PENDING_UPLOAD_PREFIX.length), upload)
+    }))
+    return statuses.every(status => status.status === 'fulfilled' && status.value !== 'incomplete')
+  }
+
+  private async recoverUpload(auth: DiaryWriterAuth, session: SessionData, dateKey: string, upload: PendingUpload): Promise<DriveFileMeta | 'incomplete' | 'expired'> {
+    const pendingKey = `${PENDING_UPLOAD_PREFIX}${dateKey}`
+    let result = await entryUploadStatus(upload.url, upload.bytes)
+    if (result === 'incomplete' && Date.now() >= upload.startedAt + UPLOAD_IDLE_MS) {
+      // Confirm the old URL can no longer commit before allowing another writer.
+      await cancelEntryUpload(upload.url)
+      result = await entryUploadStatus(upload.url, upload.bytes)
+    }
+    if (result === 'expired') await this.ctx.storage.delete(pendingKey)
+    if (typeof result === 'string') return result
+    if (result.id !== upload.fileId || typeof result.version !== 'string' || typeof result.name !== 'string') {
+      throw new DriveError(502, 'Unexpected Drive upload receipt')
+    }
+    if (!auth.vaultKey) throw new Error('Vault key required to persist protected Drive metadata')
+    const fileKey = `file:v2:${dateKey}`
+    const receiptKey = `${UPLOAD_RECEIPT_PREFIX}${dateKey}`
+    const [fileEnvelope, receiptEnvelope] = await Promise.all([
+      sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:${fileKey}`, result.id),
+      sealVaultValue(auth.vaultKey, auth.accountKey, `diary-writer:${receiptKey}`, { operationId: upload.operationId, meta: result } satisfies CompletedUpload),
+    ])
+    await this.ctx.storage.transaction(async txn => {
+      await txn.put({ [fileKey]: fileEnvelope, [receiptKey]: receiptEnvelope })
+      await txn.delete([pendingKey, `create:v2:${dateKey}`])
+    })
+    this.ctx.waitUntil(mirrorCurrentEntry(auth.accessToken, auth.sessionId, session, this.env, upload.date))
+    return result
   }
 
   private async readMetadata<T>(storageKey: string, auth: DiaryWriterAuth): Promise<T | undefined> {

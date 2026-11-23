@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive, mockUploadUrl } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 test.describe('sidebar empty state', () => {
@@ -46,15 +47,13 @@ test.describe('sidebar empty state', () => {
         },
       }),
     )
-    await page.route('/api/drive/entry/**', async route => {
-      if (route.request().method() === 'PUT' || route.request().method() === 'POST') {
-        entryExists = true
-        await route.fulfill({
-          json: { id: 'file-1', name: 'diary-2026-05-15.json', version: '1' },
-        })
-      } else {
-        await route.fulfill({ status: 404, body: '' })
-      }
+    await mockGoogleDrive(page, { save: () => { entryExists = true } })
+    await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404 }))
+    await page.route('/api/drive/upload/**', route => {
+      const { action, operationId } = route.request().postDataJSON()
+      return route.fulfill({ json: action === 'prepare'
+        ? { uploadUrl: mockUploadUrl(operationId) }
+        : { meta: { id: 'file-1', name: 'diary-2026-05-15.json', version: '1' } } })
     })
     await page.route('/api/drive/milestones', route =>
       route.fulfill({ json: [] }),

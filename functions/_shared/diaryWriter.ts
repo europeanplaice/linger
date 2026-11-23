@@ -24,11 +24,17 @@ export interface DiaryFolderSelection extends DiaryWriterAuth {
   allowEmpty?: boolean
 }
 
+export type DiaryUploadInput = DiaryWriterAuth & { date: string; operationId: string } & (
+  | { action: 'prepare'; origin: string; bytes: number; fileId?: string; baseVersion?: string | null; force?: boolean }
+  | { action: 'complete' }
+)
+
 export interface DiaryWriterService {
   getDiaryEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
   ensureDiaryFolder(input: DiaryWriterAuth): Promise<string>
   selectDiaryFolder(input: DiaryFolderSelection): Promise<string>
   mutateDiaryEntry(input: DiaryMutationInput): Promise<Response>
+  uploadDiaryEntry(input: DiaryUploadInput): Promise<Response>
 }
 
 // Never fall back to an uncoordinated write when the service is unavailable.

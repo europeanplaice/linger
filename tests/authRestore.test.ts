@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 test.beforeEach(async ({ page }) => {
@@ -84,6 +85,7 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
     await window.diaryHarness.seedDrafts([{ date, content: 'Unsaved offline draft', baseVersion: '1', baseContent: content, savedAt: Date.now() }])
   }, { email, content, date })
 
+  await mockGoogleDrive(page, { read: id => id === 'cached-file' ? content : undefined })
   let releaseDrive!: () => void
   const gate = new Promise<void>(resolve => { releaseDrive = resolve })
   await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, email, googleSub: 'cached-reader' } }))
@@ -93,7 +95,7 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
   })
   await page.route('/api/drive/entry/**', async route => {
     await gate
-    await route.fulfill({ json: { entry: { date, content }, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' } } })
+    await route.fulfill({ json: { meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' } } })
   })
   // The first mount has in-memory credentials. Reload creates a fresh module
   // instance with no credentials, so it must request sign-in while retaining
@@ -283,6 +285,12 @@ test('loads the selected entry and shows its content', async ({ page }) => {
     })
   })
 
+  const driveContent = new Map([
+    ['file-selected', 'selected entry content'],
+    ['file-older', 'older entry content'],
+  ])
+  await mockGoogleDrive(page, { read: id => driveContent.get(id) })
+  await page.route('/api/drive/milestones', route => route.fulfill({ json: [] }))
   await page.route('/api/drive/entry/**', async route => {
     const date = new URL(route.request().url()).pathname.split('/').pop()
     if (date === selectedDate) {
@@ -290,7 +298,6 @@ test('loads the selected entry and shows its content', async ({ page }) => {
       await selectedEntryGate
       await route.fulfill({
         json: {
-          entry: { date: selectedDate, content: 'selected entry content', updated_at: '2026-05-01T00:00:00.000Z' },
           meta: { id: 'file-selected', name: `diary-${selectedDate}.json`, version: '11' },
         },
       })
@@ -301,7 +308,6 @@ test('loads the selected entry and shows its content', async ({ page }) => {
       requestLog.push('older')
       await route.fulfill({
         json: {
-          entry: { date: olderDate, content: 'older entry content', updated_at: '2026-04-30T00:00:00.000Z' },
           meta: { id: 'file-older', name: `diary-${olderDate}.json`, version: '10' },
         },
       })

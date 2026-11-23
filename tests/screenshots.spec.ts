@@ -1,5 +1,6 @@
 import { test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive } from './helpers/mockGoogleDrive'
 
 // Marketing screenshot capture. Skipped in normal/CI runs — regenerate with:
 //   CAPTURE_SCREENSHOTS=1 npx playwright test screenshots --project=chromium
@@ -48,11 +49,12 @@ async function mockBackend(page: import('@playwright/test').Page) {
       .map(([d]) => fileMeta(d))
     r.fulfill({ json: { files } })
   })
+  await mockGoogleDrive(page, { read: id => entries[id.slice('file-'.length)] })
   await page.route('**/api/drive/entry/**', r => {
     const m = r.request().url().match(/entry\/(\d{4}-\d{2}-\d{2})/)
     const date = m?.[1]
     if (!date || !entries[date]) return r.fulfill({ status: 404, body: '' })
-    return r.fulfill({ json: { entry: { date, content: entries[date] }, meta: fileMeta(date) } })
+    return r.fulfill({ json: { meta: fileMeta(date) } })
   })
 }
 

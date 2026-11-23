@@ -34,12 +34,21 @@ authorization. Revocation or expiry requires reconnecting Google. S3 work advanc
 user's authorization remains valid; progress metadata can survive a pause, but
 credentials cannot be placed in a durable job to keep it running unattended.
 
-Diary text still passes through the backend. This change is not end-to-end
-encryption. An operator who can alter the running backend or frontend can capture
-credentials or content during an authorized operation. The public GitHub source
-and deployment commit provide transparency, not a cryptographic proof that the
-running code is identical. Protecting against a malicious code publisher requires
-an independently trusted client distribution mechanism.
+During ordinary diary saves, reads, and revision downloads, the browser transfers
+the body directly to or from Google Drive. Linger's backend verifies the account,
+checks file metadata and edit versions, and coordinates saves. It encrypts the
+temporary Drive upload URL and save metadata in the account's DiaryWriter while
+an upload is outstanding. The browser uses that URL to send the body to Google.
+Linger checks the upload result with Google before confirming the save. If the
+browser disconnects before confirmation, a later authorized request can recover
+the result and start the existing S3 reconciliation.
+
+Diary files are plaintext in Drive and in the optional S3 backup. S3 backup and
+restore, and compatibility requests from older clients, still process text in
+the backend. An operator who can alter the running backend or frontend can use
+the Google credentials available during an authorized operation to access diary
+contents. Protecting against a malicious code publisher also requires an
+independently trusted client distribution mechanism.
 
 ## Diagnostics and deployment checks
 

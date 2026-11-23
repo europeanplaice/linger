@@ -357,7 +357,7 @@ export async function mirrorEntryDelete(
   await mirrorCurrentEntry(accessToken, sessionId, session, env, date)
 }
 
-async function mirrorCurrentEntry(accessToken: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<void> {
+export async function mirrorCurrentEntry(accessToken: string, sessionId: string, session: SessionData, env: Env, date: string): Promise<void> {
   const response = await forwardS3Backup({ env, data: { accessToken, sessionId, session } }, { kind: 'reconcile', date })
   if (!response.ok) console.error('S3 reconciliation deferred; retry from the open application')
 }

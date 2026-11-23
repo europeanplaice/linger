@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { HistoryModal } from '../src/components/HistoryModal'
 import { EntryConflictError } from '../src/hooks/useDiary'
 import type { LoadedDiaryEntry } from '../src/types'
+import { setOAuthCredentials } from '../src/lib/oauthCredentials'
 import { I18nProvider } from '../src/i18n'
 import '../src/styles.css'
 
@@ -23,13 +24,14 @@ let closeCalls = 0
 let expiredCalls = 0
 let saveReject: 'conflict' | 'error' | null = null
 
-// content URL: /api/drive/revisions/<fileId>/<revisionId>
-const CONTENT_RE = /\/api\/drive\/revisions\/[^/]+\/([^/]+)$/
+const CONTENT_RE = /\/drive\/v3\/files\/[^/]+\/revisions\/([^/]+)\?alt=media$/
+setOAuthCredentials({ accessToken: 'history-test-token', idToken: 'history-test-id', expiresAt: Date.now() + 60 * 60 * 1000 })
 
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
   fetchCalls.push({ url, method: String(init?.method ?? 'GET') })
 
+  if (url.endsWith('?metadata=1')) return Response.json({ ok: true })
   const match = url.match(CONTENT_RE)
   const resp = match ? contentResponses.get(match[1]) : listResponse
 
@@ -40,13 +42,11 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (effective.delayMs) {
     await new Promise(r => setTimeout(r, effective.delayMs))
   }
-  return {
-    status: effective.status,
-    ok: effective.status >= 200 && effective.status < 300,
-    headers: new Headers(),
-    json: async () => effective.body,
-    text: async () => JSON.stringify(effective.body),
-  } as Response
+  if (match && effective.status === 200) {
+    const body = effective.body as { date?: string; content: string }
+    return new Response(body.date ? `---\ndate: ${body.date}\n---\n${body.content}` : body.content)
+  }
+  return Response.json(effective.body ?? null, { status: effective.status })
 }
 
 interface AppProps {

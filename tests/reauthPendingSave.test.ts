@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { baseUrl } from './baseUrl'
+import { mockGoogleDrive, mockUploadUrl } from './helpers/mockGoogleDrive'
 import { installMockOAuthCredentials } from './helpers/mockOAuthCredentials'
 
 async function setUpExpiredSave(
@@ -32,15 +33,21 @@ async function setUpExpiredSave(
   await page.route('/api/**', route => route.fulfill({ status: 404, body: '{}' }))
   await page.route('/api/s3/entry-status/**', route => route.fulfill({ json: { status: 'disabled' } }))
   await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
-  await page.route('/api/drive/entry/**', async route => {
-    if (route.request().method() === 'POST') {
-      const count = Number(await page.evaluate(() => Number(sessionStorage.getItem('pendingSaveCount') ?? 0))) + 1
-      await page.evaluate(value => sessionStorage.setItem('pendingSaveCount', String(value)), count)
-      if (count === 1) return route.fulfill({ status: 401, body: '{}' })
-      if (retryStatus === 503) return route.fulfill({ status: 503, body: '{}' })
-      return route.fulfill({ json: { id: 'saved-entry', name: 'diary-entry.txt', version: String(count) } })
+  await mockGoogleDrive(page, { save: () => {} })
+  await page.route('/api/drive/entry/**', route => route.fulfill({ status: 404 }))
+  await page.route('/api/drive/upload/**', async route => {
+    const { action, operationId } = route.request().postDataJSON()
+    if (action === 'complete') {
+      return route.fulfill({ json: { meta: { id: 'saved-entry', name: 'diary-entry.txt', version: '2' } } })
     }
-    return route.fulfill({ status: 404, body: '' })
+    const count = await page.evaluate(() => {
+      const next = Number(sessionStorage.getItem('pendingSaveCount') ?? 0) + 1
+      sessionStorage.setItem('pendingSaveCount', String(next))
+      return next
+    })
+    if (count === 1) return route.fulfill({ status: 401, body: '{}' })
+    if (retryStatus === 503) return route.fulfill({ status: 503, body: '{}' })
+    return route.fulfill({ json: { uploadUrl: mockUploadUrl(operationId) } })
   })
 
   await page.goto(baseUrl)

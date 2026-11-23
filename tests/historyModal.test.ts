@@ -118,7 +118,7 @@ test.describe('HistoryModal — preview', () => {
     // Wait for all revisions to be prefetched so the next selection is a cache hit.
     await expect.poll(async () => {
       const urls = (await page.evaluate(() => window.historyHarness.calls())).map(c => c.url)
-      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`/api/drive/revisions/file-123/${id}`))
+      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`https://www.googleapis.com/drive/v3/files/file-123/revisions/${id}?alt=media`))
     }).toBe(true)
 
     await page.locator('.history-revision-item').nth(1).click()
@@ -155,7 +155,7 @@ test.describe('HistoryModal — preview', () => {
 
     await expect.poll(async () => {
       const urls = (await page.evaluate(() => window.historyHarness.calls())).map(c => c.url)
-      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`/api/drive/revisions/my-file-id/${id}`))
+      return ['rev-3', 'rev-2', 'rev-1'].every(id => urls.includes(`https://www.googleapis.com/drive/v3/files/my-file-id/revisions/${id}?alt=media`))
     }).toBe(true)
   })
 
@@ -445,7 +445,7 @@ test.describe('HistoryModal — API calls', () => {
     const calls = await page.evaluate(() => window.historyHarness.calls())
     expect(calls[0].url).toBe('/api/drive/revisions/my-file-id')
     const urls = calls.map(c => c.url)
-    expect(urls).toContain('/api/drive/revisions/my-file-id/rev-3')
+    expect(urls).toContain('https://www.googleapis.com/drive/v3/files/my-file-id/revisions/rev-3?alt=media')
   })
 })
 
