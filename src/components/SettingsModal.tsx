@@ -225,7 +225,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   const [s3Collisions, setS3Collisions] = useState<string[]>([])
   const [copiedField, setCopiedField] = useState<'sub' | 'clientId' | null>(null)
   const s3OverwriteDialogRef = useRef<HTMLDialogElement>(null)
-  const [s3SetupOpen, setS3SetupOpen] = useState(true)
+  const [s3SetupOpen, setS3SetupOpen] = useState(false)
   const s3SetupTouched = useRef(false)
   // Dates that exist in the bucket but not in Drive (null = not loaded yet).
   const [s3RestoreCandidates, setS3RestoreCandidates] = useState<string[] | null>(null)
@@ -353,22 +353,15 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     setS3TestCollisions(null)
   }, [])
 
-  const handleS3EnabledChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setS3Enabled(e.target.checked)
-    setS3SaveState('idle')
-    // Whether collisions matter at all depends on this checkbox (only the first-time-enable
-    // path checks them), so a stale warning from before the toggle would be misleading.
-    setS3TestCollisions(null)
-  }, [])
-
-  const handleS3Save = useCallback(async () => {
+  const handleS3Save = useCallback(async (nextEnabled: boolean) => {
     setS3SaveState('saving')
     setS3TestState('idle')
     try {
-      const settings: S3Settings = { enabled: s3Enabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
+      const settings: S3Settings = { enabled: nextEnabled, roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() }
       await saveS3Settings(settings)
+      setS3Enabled(nextEnabled)
       setS3SaveState('saved')
-      setS3InitiallyEnabled(s3Enabled)
+      setS3InitiallyEnabled(nextEnabled)
       // Refresh server-owned progress after every save, including target changes
       // while backup is already enabled. Unresolved errors remain visible.
       onS3StartBackfill()
@@ -377,7 +370,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       console.error('Failed to save S3 settings:', e)
       setS3SaveState('error')
     }
-  }, [s3Enabled, s3RoleArn, s3Bucket, s3Region, onS3StartBackfill])
+  }, [s3RoleArn, s3Bucket, s3Region, onS3StartBackfill])
 
   const handleS3RetryBackfill = useCallback(async () => {
     setS3Retrying(true)
@@ -414,8 +407,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   // can back out instead of finding out after the fact. Re-enabling later (once
   // s3InitiallyEnabled is already true) skips this, since a fresh backfill isn't
   // triggered again.
-  const handleS3SaveClick = useCallback(async () => {
-    if (s3Enabled && !s3InitiallyEnabled) {
+  const handleS3SaveClick = useCallback(async (nextEnabled: boolean) => {
+    if (nextEnabled && !s3InitiallyEnabled) {
       setS3Prechecking(true)
       try {
         const result = await precheckS3Settings({ roleArn: s3RoleArn.trim(), bucket: s3Bucket.trim(), region: s3Region.trim() })
@@ -433,8 +426,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         setS3Prechecking(false)
       }
     }
-    await handleS3Save()
-  }, [s3Enabled, s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region, handleS3Save])
+    await handleS3Save(nextEnabled)
+  }, [s3InitiallyEnabled, s3RoleArn, s3Bucket, s3Region, handleS3Save])
 
   const handleS3Test = useCallback(async () => {
     const missing: string[] = []
@@ -453,7 +446,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     // Collisions only matter on the first-time-enable path (see handleS3SaveClick) — run
     // it alongside the connectivity check there so Test surfaces the same risk Save would
     // otherwise only reveal after the fact, without slowing down a routine re-test.
-    const checkCollisions = s3Enabled && !s3InitiallyEnabled
+    const checkCollisions = !s3InitiallyEnabled
     try {
       const [result, precheck] = await Promise.all([
         testS3Settings(trimmed),
@@ -474,7 +467,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
       setS3TestState('error')
       setS3TestError(null)
     }
-  }, [s3RoleArn, s3Bucket, s3Region, s3Enabled, s3InitiallyEnabled, t])
+  }, [s3RoleArn, s3Bucket, s3Region, s3InitiallyEnabled, t])
 
   // Save, Resync, and Retry all end up overwriting the same server-side
   // s3_settings.json (see saveS3Settings / resyncS3Backfill / retryS3Backfill) with
@@ -497,15 +490,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
     : s3Retrying ? t.settings.s3OpRetry
     : s3BackfillActive ? t.settings.s3OpBackfill
     : null
-
-  // The checkbox reading "Enable S3 backup" implies checking it takes effect immediately,
-  // but nothing happens until this button is pressed — name the button after what it will
-  // actually do (turn backup on/off, or just persist an edit to an already-enabled setup)
-  // instead of a generic "Save" that leaves that ambiguous.
-  const s3SaveLabel = s3Enabled && !s3InitiallyEnabled ? t.settings.s3SaveEnable
-    : !s3Enabled && s3InitiallyEnabled ? t.settings.s3SaveDisable
-    : s3Enabled && s3InitiallyEnabled ? t.settings.s3SaveChanges
-    : t.settings.s3Save
 
   const handleCopy = useCallback((field: 'sub' | 'clientId', value: string | undefined) => {
     if (!value) return
@@ -1088,7 +1072,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
         {/* S3 backup */}
         <div className="settings-section" id="settings-backup">
           <h4 className="settings-section-title">{t.settings.sectionS3}</h4>
-          
+          <p className="settings-about-text settings-s3-help">
+            {t.settings.s3Help}
+          </p>
+
           <div className="settings-s3-group-title">
             <span className="settings-s3-group-title-label">{t.settings.s3GroupSetup}</span>
             <button
@@ -1108,15 +1095,91 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
             transition={{ duration: 0.18 }}
             style={{ overflowY: 'clip', overflowX: 'visible' }}
           >
-          <p className="settings-about-text settings-s3-help">
-            {t.settings.s3Help}
-          </p>
-          <ol className="settings-about-list settings-s3-help">
-            {t.settings.s3Steps.map((step, i) => <li key={i}>{step}</li>)}
-          </ol>
-          <p className="settings-about-text settings-s3-help">
-            {t.settings.s3FederationHelp}
-          </p>
+            <ol className="settings-about-list settings-s3-help">
+              {t.settings.s3Steps.map((step, i) => <li key={i}>{step}</li>)}
+            </ol>
+            <p className="settings-about-text settings-s3-help">
+              {t.settings.s3FederationHelp}
+            </p>
+            <p className="settings-about-text settings-s3-help settings-s3-help-links">
+              <button
+                type="button"
+                className="settings-action-btn settings-action-btn--secondary"
+                onClick={handleDownloadTfvars}
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                {t.settings.s3DownloadTfvars}
+              </button>
+              <a
+                href={`/self-hosted-s3${language === 'ja' ? '?lang=ja' : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t.settings.s3SetupGuide} ↗
+              </a>
+            </p>
+            <p className="settings-s3-field-help">{t.settings.s3DownloadTfvarsHint}</p>
+
+            {(googleClientId || googleSub) && (
+              <details className="settings-s3-manual-ids">
+                <summary>{t.settings.s3ManualIdsToggle}</summary>
+                {googleClientId && (
+                  <div className="settings-item settings-item-copy">
+                    <span className="settings-item-label-group">
+                      <span className="settings-item-label">{t.settings.s3LingerClientId}</span>
+                      <InfoTip text={t.settings.s3LingerClientIdHelp} />
+                    </span>
+                    <div className="settings-copy-row">
+                      <code className="settings-copy-value" title={googleClientId}>{googleClientId}</code>
+                      <button
+                        type="button"
+                        className="settings-copy-btn"
+                        onClick={() => handleCopy('clientId', googleClientId)}
+                      >
+                        {copiedField === 'clientId' ? (
+                          <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        ) : (
+                          <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        )}
+                        {copiedField === 'clientId' ? t.settings.s3Copied : t.settings.s3Copy}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {googleSub && (
+                  <div className="settings-item settings-item-copy">
+                    <span className="settings-item-label-group">
+                      <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
+                      <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
+                    </span>
+                    <div className="settings-copy-row">
+                      <code className="settings-copy-value" title={googleSub}>{googleSub}</code>
+                      <button
+                        type="button"
+                        className="settings-copy-btn"
+                        onClick={() => handleCopy('sub', googleSub)}
+                      >
+                        {copiedField === 'sub' ? (
+                          <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        ) : (
+                          <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        )}
+                        {copiedField === 'sub' ? t.settings.s3Copied : t.settings.s3Copy}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </details>
+            )}
+          </motion.div>
+
+          <div className="settings-s3-group-title">
+            <span className="settings-s3-group-title-label">{t.settings.s3GroupConnection}</span>
+            <span className={`settings-s3-status-badge${s3InitiallyEnabled ? ' active' : ''}`}>
+              <span className="settings-s3-status-dot" aria-hidden="true" />
+              {s3InitiallyEnabled ? t.settings.s3StatusActive : t.settings.s3StatusInactive}
+            </span>
+          </div>
 
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3Bucket}</span>
@@ -1129,6 +1192,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               spellCheck={false}
             />
           </div>
+          <p className="settings-s3-field-help">{t.settings.s3BucketHelp}</p>
+
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3Region}</span>
             <input
@@ -1140,76 +1205,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               spellCheck={false}
             />
           </div>
+          <p className="settings-s3-field-help">{t.settings.s3RegionHelp}</p>
 
-          {googleClientId && (
-            <div className="settings-item settings-item-copy">
-              <span className="settings-item-label-group">
-                <span className="settings-item-label">{t.settings.s3LingerClientId}</span>
-                <InfoTip text={t.settings.s3LingerClientIdHelp} />
-              </span>
-              <div className="settings-copy-row">
-                <code className="settings-copy-value" title={googleClientId}>{googleClientId}</code>
-                <button
-                  type="button"
-                  className="settings-copy-btn"
-                  onClick={() => handleCopy('clientId', googleClientId)}
-                >
-                  {copiedField === 'clientId' ? (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  ) : (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  )}
-                  {copiedField === 'clientId' ? t.settings.s3Copied : t.settings.s3Copy}
-                </button>
-              </div>
-            </div>
-          )}
-          {googleSub && (
-            <div className="settings-item settings-item-copy">
-              <span className="settings-item-label-group">
-                <span className="settings-item-label">{t.settings.s3GoogleAccountId}</span>
-                <InfoTip text={t.settings.s3GoogleAccountIdHelp} />
-              </span>
-              <div className="settings-copy-row">
-                <code className="settings-copy-value" title={googleSub}>{googleSub}</code>
-                <button
-                  type="button"
-                  className="settings-copy-btn"
-                  onClick={() => handleCopy('sub', googleSub)}
-                >
-                  {copiedField === 'sub' ? (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  ) : (
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  )}
-                  {copiedField === 'sub' ? t.settings.s3Copied : t.settings.s3Copy}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <p className="settings-about-text settings-s3-help settings-s3-help-links">
-            <a
-              href="/self-hosted-s3"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t.settings.s3SetupGuide} ↗
-            </a>
-            <span className="settings-s3-link-separator" aria-hidden="true">|</span>
-            <button
-              type="button"
-              className="settings-tfvars-download-btn"
-              onClick={handleDownloadTfvars}
-            >
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              {t.settings.s3DownloadTfvars}
-            </button>
-          </p>
-          </motion.div>
-
-          <div className="settings-s3-group-title">{t.settings.s3GroupConnection}</div>
-          
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.s3RoleArn}</span>
             <input
@@ -1221,15 +1218,8 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               spellCheck={false}
             />
           </div>
-          <div className="settings-item">
-            <span className="settings-item-label">{t.settings.s3Enabled}</span>
-            <input
-              type="checkbox"
-              checked={s3Enabled}
-              onChange={handleS3EnabledChange}
-              aria-label={t.settings.s3Enabled}
-            />
-          </div>
+          <p className="settings-s3-field-help">{t.settings.s3RoleArnHelp}</p>
+
           <p className="settings-about-text settings-s3-help settings-s3-actions-help">
             {t.settings.s3ActionsHelp}
           </p>
@@ -1250,29 +1240,110 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               <button
                 type="button"
                 className={`settings-action-btn${(s3SaveState === 'saving' || s3Prechecking) ? ' btn-saving' : ''}`}
-                onClick={() => { void handleS3SaveClick() }}
+                onClick={() => { void handleS3SaveClick(true) }}
                 disabled={s3SyncBusy}
                 aria-busy={s3SaveState === 'saving' || s3Prechecking}
                 title={(s3Resyncing || s3Retrying || s3BackfillActive || s3TestState === 'testing') ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
               >
                 {(s3SaveState === 'saving' || s3Prechecking) && <SpinnerIcon />}
-                {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : s3SaveLabel}
+                {s3Prechecking ? t.settings.s3Checking : s3SaveState === 'saved' ? t.settings.s3Saved : s3InitiallyEnabled ? t.settings.s3SaveChanges : t.settings.s3SaveEnable}
               </button>
               {s3InitiallyEnabled && (
-                <button
-                  type="button"
-                  className={`settings-action-btn settings-action-btn--secondary${(s3Resyncing || s3BackfillActive) ? ' btn-saving' : ''}`}
-                  onClick={() => { void handleS3Resync() }}
-                  disabled={s3SyncBusy}
-                  aria-busy={s3Resyncing || s3BackfillActive}
-                  title={(!s3Resyncing && !s3BackfillActive && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
-                >
-                  {(s3Resyncing || s3BackfillActive) && <SpinnerIcon />}
-                  {s3Resyncing || s3BackfillActive ? t.settings.s3Resyncing : t.settings.s3Resync}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={`settings-action-btn settings-action-btn--secondary${(s3Resyncing || s3BackfillActive) ? ' btn-saving' : ''}`}
+                    onClick={() => { void handleS3Resync() }}
+                    disabled={s3SyncBusy}
+                    aria-busy={s3Resyncing || s3BackfillActive}
+                    title={(!s3Resyncing && !s3BackfillActive && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
+                  >
+                    {(s3Resyncing || s3BackfillActive) && <SpinnerIcon />}
+                    {s3Resyncing || s3BackfillActive ? t.settings.s3Resyncing : t.settings.s3Resync}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-action-btn settings-action-btn--secondary"
+                    onClick={() => { void handleS3SaveClick(false) }}
+                    disabled={s3SyncBusy}
+                    title={(s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
+                  >
+                    {t.settings.s3SaveDisable}
+                  </button>
+                </>
               )}
             </div>
           </div>
+
+          <div className="settings-s3-feedback" aria-live="polite">
+            {s3TestState === 'ok' && <p className="settings-item-success"><CheckIcon />{t.settings.s3TestOkMsg}</p>}
+            {s3TestState === 'ok' && s3TestCollisions && s3TestCollisions.length > 0 && (
+              <div className="settings-backfill-failed">
+                <p className="settings-item-error">{t.settings.s3OverwriteConfirmDesc(s3TestCollisions.length)}</p>
+                <ul className="export-format-tree s3-overwrite-confirm-list">
+                  {s3TestCollisions.slice(0, 20).map(key => <li key={key} className="export-format-file">{key}</li>)}
+                  {s3TestCollisions.length > 20 && (
+                    <li className="export-format-file">{t.settings.s3OverwriteConfirmMore(s3TestCollisions.length - 20)}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+            {s3TestState === 'error' && (
+              <p className="settings-item-error"><ErrorIcon />{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
+            )}
+            {s3TestState === 'invalid' && <p className="settings-item-error"><ErrorIcon />{s3TestError}</p>}
+            {s3SaveState === 'saved' && (
+              <p className="settings-item-success">
+                <CheckIcon />{s3InitiallyEnabled ? t.settings.s3SaveSuccess : t.settings.s3SaveDisabledSuccess}
+              </p>
+            )}
+            {s3SaveState === 'error' && <p className="settings-item-error"><ErrorIcon />{t.settings.s3SaveError}</p>}
+          </div>
+
+          {s3Enabled && s3BackfillProgress && !s3BackfillProgress.finishedAt && (
+            <div className="settings-backfill-progress" aria-live="polite">
+              <p className="settings-about-text settings-s3-help">
+                {t.settings.s3BackfillInProgress(s3BackfillProgress.done, s3BackfillProgress.total)}
+              </p>
+              <p className="settings-about-text settings-s3-help">
+                {t.settings.s3BackfillTabWarning}
+              </p>
+              <progress
+                className="settings-backfill-progress-bar"
+                value={s3BackfillProgress.done}
+                max={Math.max(s3BackfillProgress.total, 1)}
+              />
+            </div>
+          )}
+          {s3Enabled && s3BackfillProgress?.finishedAt && s3BackfillProgress.failed.length > 0 && (
+            <div className="settings-backfill-failed">
+              <p className="settings-item-error">{t.settings.s3BackfillFailedSummary(s3BackfillProgress.failed.length)}</p>
+              <ul className="export-format-tree s3-overwrite-confirm-list">
+                {s3BackfillProgress.failed.slice(0, 20).map(date => <li key={date} className="export-format-file">{date}</li>)}
+                {s3BackfillProgress.failed.length > 20 && (
+                  <li className="export-format-file">{t.settings.s3BackfillFailedMore(s3BackfillProgress.failed.length - 20)}</li>
+                )}
+              </ul>
+              <button
+                type="button"
+                className={`settings-action-btn settings-action-btn--secondary${s3Retrying ? ' btn-saving' : ''}`}
+                onClick={() => { void handleS3RetryBackfill() }}
+                disabled={s3SyncBusy}
+                aria-busy={s3Retrying}
+                title={(!s3Retrying && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
+              >
+                {s3Retrying && <SpinnerIcon />}
+                {s3Retrying ? t.settings.s3BackfillRetrying : t.settings.s3BackfillRetry}
+              </button>
+            </div>
+          )}
+          {s3Enabled && s3LastSyncError && !(s3BackfillProgress && s3BackfillProgress.failed.length > 0) && (
+            <p className="settings-item-error">
+              {t.settings.s3SyncError}: {s3LastSyncError}
+              {s3LastSyncErrorAt ? ` (${new Date(s3LastSyncErrorAt).toLocaleString()})` : ''}
+            </p>
+          )}
+
           {s3InitiallyEnabled && (
             <p className="settings-about-text settings-s3-help settings-s3-actions-help">
               {t.settings.s3ResyncHelp}
@@ -1313,66 +1384,6 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 <p className="settings-item-error"><ErrorIcon />{t.settings.s3RestoreFailed}: {s3RestoreError}</p>
               )}
             </>
-          )}
-          <div aria-live="polite">
-            {s3TestState === 'ok' && <p className="settings-item-success"><CheckIcon />{t.settings.s3TestOkMsg}</p>}
-            {s3TestState === 'ok' && s3TestCollisions && s3TestCollisions.length > 0 && (
-              <div className="settings-backfill-failed">
-                <p className="settings-item-error">{t.settings.s3OverwriteConfirmDesc(s3TestCollisions.length)}</p>
-                <ul className="export-format-tree s3-overwrite-confirm-list">
-                  {s3TestCollisions.slice(0, 20).map(key => <li key={key} className="export-format-file">{key}</li>)}
-                  {s3TestCollisions.length > 20 && (
-                    <li className="export-format-file">{t.settings.s3OverwriteConfirmMore(s3TestCollisions.length - 20)}</li>
-                  )}
-                </ul>
-              </div>
-            )}
-            {s3TestState === 'error' && (
-              <p className="settings-item-error"><ErrorIcon />{t.settings.s3TestFailed}{s3TestError ? `: ${s3TestError}` : ''}</p>
-            )}
-            {s3TestState === 'invalid' && <p className="settings-item-error"><ErrorIcon />{s3TestError}</p>}
-            {s3SaveState === 'saved' && <p className="settings-item-success"><CheckIcon />{t.settings.s3SaveSuccess}</p>}
-            {s3SaveState === 'error' && <p className="settings-item-error"><ErrorIcon />{t.settings.s3SaveError}</p>}
-          </div>
-          {s3Enabled && s3BackfillProgress && !s3BackfillProgress.finishedAt && (
-            <div className="settings-backfill-progress" aria-live="polite">
-              <p className="settings-about-text settings-s3-help">
-                {t.settings.s3BackfillInProgress(s3BackfillProgress.done, s3BackfillProgress.total)}
-              </p>
-              <progress
-                className="settings-backfill-progress-bar"
-                value={s3BackfillProgress.done}
-                max={Math.max(s3BackfillProgress.total, 1)}
-              />
-            </div>
-          )}
-          {s3Enabled && s3BackfillProgress?.finishedAt && s3BackfillProgress.failed.length > 0 && (
-            <div className="settings-backfill-failed">
-              <p className="settings-item-error">{t.settings.s3BackfillFailedSummary(s3BackfillProgress.failed.length)}</p>
-              <ul className="export-format-tree s3-overwrite-confirm-list">
-                {s3BackfillProgress.failed.slice(0, 20).map(date => <li key={date} className="export-format-file">{date}</li>)}
-                {s3BackfillProgress.failed.length > 20 && (
-                  <li className="export-format-file">{t.settings.s3BackfillFailedMore(s3BackfillProgress.failed.length - 20)}</li>
-                )}
-              </ul>
-              <button
-                type="button"
-                className={`settings-action-btn settings-action-btn--secondary${s3Retrying ? ' btn-saving' : ''}`}
-                onClick={() => { void handleS3RetryBackfill() }}
-                disabled={s3SyncBusy}
-                aria-busy={s3Retrying}
-                title={(!s3Retrying && s3SyncBusy) ? t.settings.s3ActionDisabledByOp(s3BusyOpLabel ?? t.settings.s3OpSave) : undefined}
-              >
-                {s3Retrying && <SpinnerIcon />}
-                {s3Retrying ? t.settings.s3BackfillRetrying : t.settings.s3BackfillRetry}
-              </button>
-            </div>
-          )}
-          {s3Enabled && s3LastSyncError && !(s3BackfillProgress && s3BackfillProgress.failed.length > 0) && (
-            <p className="settings-item-error">
-              {t.settings.s3SyncError}: {s3LastSyncError}
-              {s3LastSyncErrorAt ? ` (${new Date(s3LastSyncErrorAt).toLocaleString()})` : ''}
-            </p>
           )}
         </div>
 
@@ -1448,7 +1459,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <button className="signout-confirm-cancel" onClick={() => setS3OverwriteConfirmOpen(false)}>{t.common.cancel}</button>
           <button
             className="signout-confirm-start"
-            onClick={() => { setS3OverwriteConfirmOpen(false); void handleS3Save() }}
+            onClick={() => { setS3OverwriteConfirmOpen(false); void handleS3Save(true) }}
           >
             {t.settings.s3OverwriteConfirmProceed}
           </button>

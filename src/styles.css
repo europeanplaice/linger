@@ -1819,11 +1819,66 @@ dialog.settings-dialog::backdrop {
   opacity: 0.8;
   margin-bottom: 0.5rem;
 }
+.settings-s3-field-help {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin: -0.25rem 0 0.55rem;
+  padding-inline: 1.35rem;
+  line-height: 1.45;
+}
+.settings-s3-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg);
+}
+.settings-s3-status-badge.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--selected-bg);
+}
+.settings-s3-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.settings-s3-manual-ids {
+  padding: 0.25rem 1.35rem 0.4rem;
+}
+.settings-s3-manual-ids summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 0.25rem 0;
+}
+.settings-s3-manual-ids summary:hover {
+  color: var(--accent);
+}
+.settings-s3-manual-ids .settings-item-copy {
+  padding-inline: 0;
+}
 .settings-s3-actions {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+.settings-s3-feedback {
+  padding: 0.15rem 1.35rem 0.35rem;
+}
+.settings-s3-feedback .settings-item-success,
+.settings-s3-feedback .settings-item-error {
+  padding-inline: 0;
 }
 .settings-s3-restore-row {
   display: flex;

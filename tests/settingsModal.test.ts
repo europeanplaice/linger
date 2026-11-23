@@ -1293,10 +1293,10 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     lastSyncErrorAt?: string
   }
 
-  const bucketField = (page: Page) => page.getByPlaceholder('my-linger-diary')
+  const bucketField = (page: Page) => page.getByPlaceholder('linger-diary-example-12345')
   const regionField = (page: Page) => page.getByPlaceholder('us-east-1')
   const roleArnField = (page: Page) => page.getByPlaceholder(/arn:aws:iam/)
-  const enabledCheckbox = (page: Page) => page.getByRole('checkbox', { name: 'Enable S3 backup' })
+  const statusBadge = (page: Page) => page.locator('.settings-s3-status-badge')
   const overwriteDialog = (page: Page) => page.locator('.s3-overwrite-confirm-dialog')
 
   // The component fetches /api/s3/settings itself on mount, so these routes stand
@@ -1342,7 +1342,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     await expect(bucketField(page)).toHaveValue('existing-bucket')
     await expect(regionField(page)).toHaveValue('eu-west-1')
     await expect(roleArnField(page)).toHaveValue('arn:aws:iam::123456789012:role/x')
-    await expect(enabledCheckbox(page)).toBeChecked()
+    await expect(statusBadge(page)).toHaveText('Active (auto-backup on)')
   })
 
   test('Test connection shows a success message on a valid connection', async ({ page }) => {
@@ -1401,9 +1401,8 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     })
     await render(page)
     await fillConnectionFields(page)
-    await enabledCheckbox(page).check()
 
-    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable S3 backup', exact: true }).click()
 
     await expect(page.getByText('Settings saved.')).toBeVisible()
     await expect(overwriteDialog(page)).toBeHidden()
@@ -1419,9 +1418,8 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     })
     await render(page)
     await fillConnectionFields(page)
-    await enabledCheckbox(page).check()
 
-    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable S3 backup', exact: true }).click()
 
     const dialog = overwriteDialog(page)
     await expect(dialog).toBeVisible()
@@ -1444,8 +1442,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
     })
     await render(page)
     await fillConnectionFields(page)
-    await enabledCheckbox(page).check()
-    await page.getByRole('button', { name: 'Enable backup', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable S3 backup', exact: true }).click()
 
     const dialog = overwriteDialog(page)
     await expect(dialog).toBeVisible()
@@ -1470,7 +1467,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
       await route.fulfill({ json: { ok: true, collisions: ['should-not-be-checked.txt'] } })
     })
     await render(page)
-    await expect(enabledCheckbox(page)).toBeChecked()
+    await expect(statusBadge(page)).toHaveText('Active (auto-backup on)')
 
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
 
@@ -1520,7 +1517,7 @@ test.describe('SettingsModal — S3 backup (advanced)', () => {
       await route.fulfill({ json: { ok: true } })
     })
     await render(page)
-    await expect(enabledCheckbox(page)).toBeChecked()
+    await expect(statusBadge(page)).toHaveText('Active (auto-backup on)')
     await bucketField(page).fill('new-bucket')
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
     await expect.poll(() => continued).toBe(1)
