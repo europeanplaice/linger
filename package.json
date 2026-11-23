@@ -34,7 +34,7 @@
     "aws4fetch": "^1.0.20",
     "diff": "^9.0.0",
     "jszip": "^3.10.2",
-    "lucide-react": "^1.75.0",
+    "lucide-react": "^1.77.0",
     "motion": "^14.14.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.5",
-    "@cloudflare/workers-types": "^5.20261114.1",
+    "@cloudflare/workers-types": "^5.20261120.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.1",
     "@testing-library/react": "^16.3.3",
