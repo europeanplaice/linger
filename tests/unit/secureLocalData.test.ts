@@ -107,6 +107,8 @@ describe('encrypted application data', () => {
     localStorage.setItem('linger_session_user', email)
     localStorage.setItem('linger_local_entry_2030-01-01', 'other account')
     expect(await new LocalStorageAdapter().getEntry('2030-01-01')).toBeNull()
+    await expect(new LocalStorageAdapter().recoverLegacy()).rejects.toThrow('Legacy mirror belongs to another account')
+    expect(localStorage.getItem('linger_local_mirror_legacy_owner')).toMatch(/^sha256:[0-9a-f]{64}$/)
     expect(localStorage.getItem('linger_local_entry_2030-01-01')).toBe('other account')
   })
 

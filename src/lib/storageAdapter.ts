@@ -1,6 +1,7 @@
 import type { LoadedDiaryEntry, StorageMode } from '../types'
 import { SecureLocalData } from './secureLocalData'
-import { prepareLocalContext, sameLocalOwner } from './secureLocalContext'
+import { prepareLocalContext } from './secureLocalContext'
+import { canRecoverLegacyOwner, LEGACY_MIRROR_OWNER_KEY, LEGACY_MIRROR_PREFIX, readLegacyOwner, updateLocalSessionOwner } from './localSessionOwner'
 
 export interface StorageAdapter {
   getMode(): StorageMode
@@ -11,7 +12,6 @@ export interface StorageAdapter {
   clearAll(): Promise<void>
 }
 
-const LOCAL_STORAGE_PREFIX = 'linger_local_entry_'
 const LOCAL_STORAGE_INDEX = 'linger_local_entries_index'
 
 interface StoredEntry {
@@ -29,14 +29,16 @@ export class LocalStorageAdapter implements StorageAdapter {
   private async migrate(allowLegacy = false): Promise<void> {
     if (!allowLegacy) return
     const state = await prepareLocalContext()
-    const previousOwner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
+    await updateLocalSessionOwner(undefined, () => { state.assertCurrent(); return true })
+    const previousOwner = readLegacyOwner(LEGACY_MIRROR_OWNER_KEY)
     // These records predate account-bound storage. The user must explicitly
     // choose to import them; a known different owner is never imported.
-    if (previousOwner && previousOwner !== '__unknown__' && !sameLocalOwner(previousOwner, state.owner)) throw new Error('Legacy mirror belongs to another account')
-    const keys = Object.keys(localStorage).filter(key => key.startsWith(LOCAL_STORAGE_PREFIX))
+    if (!await canRecoverLegacyOwner(previousOwner, state.owner)) throw new Error('Legacy mirror belongs to another account')
+    const keys = Object.keys(localStorage).filter(key => key.startsWith(LEGACY_MIRROR_PREFIX))
     for (const key of keys) {
       state.assertCurrent()
-      const date = key.slice(LOCAL_STORAGE_PREFIX.length)
+      if (readLegacyOwner(LEGACY_MIRROR_OWNER_KEY) !== previousOwner) throw new Error('Legacy mirror owner changed during recovery')
+      const date = key.slice(LEGACY_MIRROR_PREFIX.length)
       const raw = localStorage.getItem(key)
       if (!date || raw === null) continue
       let value: unknown
@@ -53,20 +55,20 @@ export class LocalStorageAdapter implements StorageAdapter {
         return current ?? entry
       })
       state.assertCurrent()
-      const owner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
+      const owner = readLegacyOwner(LEGACY_MIRROR_OWNER_KEY)
       if (owner === previousOwner && localStorage.getItem(key) === raw) localStorage.removeItem(key)
     }
     state.assertCurrent()
-    const owner = localStorage.getItem('linger_local_mirror_legacy_owner') ?? localStorage.getItem('linger_session_user')
-    if (owner === previousOwner && !Object.keys(localStorage).some(key => key.startsWith(LOCAL_STORAGE_PREFIX))) {
+    const owner = readLegacyOwner(LEGACY_MIRROR_OWNER_KEY)
+    if (owner === previousOwner && !Object.keys(localStorage).some(key => key.startsWith(LEGACY_MIRROR_PREFIX))) {
       localStorage.removeItem(LOCAL_STORAGE_INDEX)
-      localStorage.removeItem('linger_local_mirror_legacy_owner')
+      localStorage.removeItem(LEGACY_MIRROR_OWNER_KEY)
     }
   }
 
   async recoverLegacy(): Promise<void> {
     await this.migrate(true)
-    if (Object.keys(localStorage).some(key => key.startsWith(LOCAL_STORAGE_PREFIX))) throw new Error('Legacy mirror could not be imported')
+    if (Object.keys(localStorage).some(key => key.startsWith(LEGACY_MIRROR_PREFIX))) throw new Error('Legacy mirror could not be imported')
   }
 
   private toLoadedEntry(record: StoredEntry): LoadedDiaryEntry {

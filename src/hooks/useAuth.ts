@@ -10,6 +10,7 @@ import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
 import { hasRegisteredPasskey } from '../lib/passkeyRegistrationHistory'
+import { clearSeen } from '../utils/serendipitySeen'
 
 export type AuthStatus = 'initializing' | 'signedOut' | 'signedIn'
 
@@ -151,6 +152,7 @@ export function useAuth(): AuthState {
   }, [])
 
   useEffect(() => {
+    clearSeen()
     const unsubscribe = subscribeAccountChanges(event => {
       // Initial session restoration checks the event again after the response;
       // two tabs restoring the same account must not sign each other out.

@@ -7,7 +7,8 @@ import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
 import { SyncQueueManager } from '../lib/syncQueue'
 import { broadcastMessage } from '../utils/tabSync'
-import { getAccountSnapshot } from '../lib/accountSession'
+import { accountIdentity, getAccountSnapshot, readAuthEvent } from '../lib/accountSession'
+import { matchesLocalSessionOwner, readSessionOwner, updateLocalSessionOwner } from '../lib/localSessionOwner'
 import type { AuthStatus } from './useAuth'
 import { shiftDate, todayYmd } from '../utils/date'
 import { useLatestRef } from './useEvent'
@@ -401,6 +402,19 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   useEffect(() => {
     const scope = getScope()
     if (!scope) return
+    const account = getAccountSnapshot()
+    const authEvent = readAuthEvent()
+    // A stale tab must preserve the shared marker of a newer signed-in account.
+    const clearSessionOwner = authStatus === 'signedOut' && (authEvent?.account === null ||
+      (account.clearSharedData && (!authEvent || authEvent.account === accountIdentity({ email, googleSub }))))
+    const isCurrent = () => {
+      if (!scope.active || getAccountSnapshot() !== account) return false
+      const latest = readAuthEvent()
+      return latest?.id === authEvent?.id || (clearSessionOwner && latest?.account === null)
+    }
+    const sessionEmail = isSignedIn ? email : clearSessionOwner ? null : undefined
+    void updateLocalSessionOwner(sessionEmail, isCurrent).catch(() => {})
+
     if (!isSignedIn) {
       scope.releaseCache()
       setFreshListLoaded(false)
@@ -408,13 +422,12 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
       // Only wipe the persistent cache once the session is known to be gone;
       // while auth is still restoring ('initializing') the cache must survive
       // so the IDB preload below has data after a reload.
-      if (authStatus === 'signedOut') {
-        // A stale tab must not wipe the new account's shared cache. Its own
-        // offline queue is partitioned by account and can always be discarded.
-        const storedUser = localStorage.getItem('linger_session_user')
-        if (getAccountSnapshot().clearSharedData && (!storedUser || storedUser === email)) {
-          clearLocalData().catch(() => {})
-        }
+      if (clearSessionOwner && account.clearSharedData) {
+        void (async () => {
+          const storedUser = readSessionOwner()
+          const sameOwner = !storedUser || (email !== null && await matchesLocalSessionOwner(storedUser, email))
+          if (sameOwner && isCurrent()) await clearLocalData()
+        })().catch(() => {})
       }
       return
     }
@@ -423,34 +436,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     setError(null)
     ;(async () => {
       try {
-        // If the signed-in account differs from the last known account, evict shared
-        // local entries (IDB cache and entry mirror) before
-        // hydrating to prevent one user's diary from briefly appearing to another.
         const canUsePersistentCache = email !== null
-        const storedUser = localStorage.getItem('linger_session_user')
-        if (!canUsePersistentCache) {
-          // Without a verified owner no encrypted data can safely be opened or
-          // cleared. Preserve any old unscoped recovery records as well.
-          if (Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')) && !localStorage.getItem('linger_local_mirror_legacy_owner')) {
-            localStorage.setItem('linger_local_mirror_legacy_owner', storedUser ?? '__unknown__')
-          }
-          if (localStorage.getItem('linger_pending_sync_queue') && !localStorage.getItem('linger_legacy_queue_owner')) {
-            localStorage.setItem('linger_legacy_queue_owner', storedUser ?? '__unknown__')
-          }
-          if (!scope.active) return
-          localStorage.removeItem('linger_session_user')
-        } else if (storedUser !== email) {
-          // Remember the old unscoped mirror's owner before changing the shared
-          // session marker. Never attribute it to the next signed-in account.
-          if (Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')) && !localStorage.getItem('linger_local_mirror_legacy_owner')) {
-            localStorage.setItem('linger_local_mirror_legacy_owner', storedUser ?? '__unknown__')
-          }
-          if (localStorage.getItem('linger_pending_sync_queue') && !localStorage.getItem('linger_legacy_queue_owner')) {
-            localStorage.setItem('linger_legacy_queue_owner', storedUser ?? '__unknown__')
-          }
-          if (!scope.active) return
-          localStorage.setItem('linger_session_user', email)
-        }
 
         // Preload from IDB immediately so the sidebar and previously-opened entries
         // appear without waiting for the Drive network round trip.
@@ -495,7 +481,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         if (scope.active) setLoading(false)
       }
     })()
-  }, [authStatus, isSignedIn, email, loadEntryList, updateCache, getContent, clearLocalData, getScope, syncQueue])
+  }, [authStatus, isSignedIn, email, googleSub, loadEntryList, updateCache, getContent, clearLocalData, getScope])
 
   const refreshEntries = useCallback(async (): Promise<void> => {
     const scope = getScope()

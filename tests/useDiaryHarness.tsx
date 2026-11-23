@@ -217,7 +217,7 @@ window.diaryHarness = {
     await Promise.all(entries.map(e => putCached(e as CachedEntry)))
   },
   seedDrafts: async (drafts) => {
-    const owner = localStorage.getItem('linger_session_user') ?? currentEmail ?? undefined
+    const owner = currentEmail ?? undefined
     await Promise.all(drafts.map(d => putDraft({ ...d, owner })))
   },
   getDrafts: () => getAllDrafts(currentEmail ?? undefined),

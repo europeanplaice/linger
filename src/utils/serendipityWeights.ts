@@ -43,7 +43,7 @@ function seasonDistance(a: string, b: string): number {
 
 export interface WeightOpts {
   today: string
-  recentlyShown?: SeenEntry[]
+  recentlyShown?: readonly SeenEntry[]
   /** Dates known (from already-loaded previews) to be empty/very short. */
   emptyDates?: Set<string>
   /** Current time in ms; injectable for deterministic tests. Defaults to Date.now(). */

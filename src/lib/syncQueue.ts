@@ -1,5 +1,6 @@
 import { SecureLocalData } from './secureLocalData'
-import { captureLocalContext, sameLocalOwner } from './secureLocalContext'
+import { captureLocalContext } from './secureLocalContext'
+import { canRecoverLegacyOwner, LEGACY_QUEUE_KEY, LEGACY_QUEUE_OWNER_KEY, readLegacyOwner, updateLocalSessionOwner } from './localSessionOwner'
 
 export interface QueueItem {
   id: string
@@ -11,7 +12,6 @@ export interface QueueItem {
   timestamp: number
 }
 
-const LEGACY_KEY = 'linger_pending_sync_queue'
 const ITEM_PREFIX = 'linger_pending_sync_item:'
 
 function validItem(value: unknown): value is QueueItem {
@@ -37,7 +37,7 @@ export class SyncQueueManager {
       return
     }
     const context = captureLocalContext(this.owner)
-    const legacyOwner = localStorage.getItem('linger_legacy_queue_owner') ?? localStorage.getItem('linger_session_user')
+    let legacyOwner: string | null = null
     const sources: Array<{ key: string; raw: string; items: QueueItem[] }> = []
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
@@ -50,18 +50,21 @@ export class SyncQueueManager {
       sources.push({ key, raw, items: [value] })
     }
     if (allowUnscoped) {
-      const state = captureLocalContext(this.owner)
-      if (legacyOwner && legacyOwner !== '__unknown__' && !sameLocalOwner(legacyOwner, state.owner)) throw new Error('Legacy queue belongs to another account')
-      const raw = localStorage.getItem(LEGACY_KEY)
+      await updateLocalSessionOwner(undefined, () => { context.assertCurrent(); return true })
+      legacyOwner = readLegacyOwner(LEGACY_QUEUE_OWNER_KEY)
+      if (!await canRecoverLegacyOwner(legacyOwner, context.owner)) throw new Error('Legacy queue belongs to another account')
+      const raw = localStorage.getItem(LEGACY_QUEUE_KEY)
       if (raw !== null) {
         try {
           const value: unknown = JSON.parse(raw)
-          if (Array.isArray(value) && value.every(validItem)) sources.push({ key: LEGACY_KEY, raw, items: value })
+          if (Array.isArray(value) && value.every(validItem)) sources.push({ key: LEGACY_QUEUE_KEY, raw, items: value })
         } catch { /* Preserve malformed recovery data. */ }
       }
     }
     for (const source of sources) {
       for (const item of source.items) {
+        context.assertCurrent()
+        if (source.key === LEGACY_QUEUE_KEY && readLegacyOwner(LEGACY_QUEUE_OWNER_KEY) !== legacyOwner) throw new Error('Legacy queue owner changed during recovery')
         await this.records.update(item.id, current => {
           if (current && JSON.stringify(current) !== JSON.stringify(item)) throw new Error('Conflicting legacy sync operation requires recovery')
           return current ?? item
@@ -70,10 +73,10 @@ export class SyncQueueManager {
       context.assertCurrent()
       // localStorage and IndexedDB cannot share a transaction. Only delete a
       // source if it has not changed since the successful encrypted writes.
-      if (localStorage.getItem(source.key) === source.raw && (source.key !== LEGACY_KEY ||
-          (localStorage.getItem('linger_legacy_queue_owner') ?? localStorage.getItem('linger_session_user')) === legacyOwner)) {
+      if (localStorage.getItem(source.key) === source.raw && (source.key !== LEGACY_QUEUE_KEY ||
+          readLegacyOwner(LEGACY_QUEUE_OWNER_KEY) === legacyOwner)) {
         localStorage.removeItem(source.key)
-        if (source.key === LEGACY_KEY) localStorage.removeItem('linger_legacy_queue_owner')
+        if (source.key === LEGACY_QUEUE_KEY) localStorage.removeItem(LEGACY_QUEUE_OWNER_KEY)
       }
     }
   }
@@ -81,7 +84,7 @@ export class SyncQueueManager {
   /** Import an unscoped queue only after an explicit user decision. */
   async recoverLegacy(): Promise<void> {
     await this.migrateLegacy(true)
-    if (localStorage.getItem(LEGACY_KEY) !== null) throw new Error('Legacy queue could not be imported')
+    if (localStorage.getItem(LEGACY_QUEUE_KEY) !== null) throw new Error('Legacy queue could not be imported')
   }
 
   async getPending(): Promise<QueueItem[]> {

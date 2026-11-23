@@ -1,4 +1,5 @@
 import { broadcastMessage, subscribeTabSync } from '../utils/tabSync'
+import { clearSeen } from '../utils/serendipitySeen'
 import { clearOAuthCredentials } from './oauthCredentials'
 
 export const ACCOUNT_HEADER = 'X-Linger-Account'
@@ -19,6 +20,7 @@ export function getAccountSnapshot(): AccountSnapshot { return current }
 
 export function setActiveAccount(account: string | null, clearSharedData = false, verifiedEmail: string | null = null): void {
   const email = account ? verifiedEmail : null
+  if (current.account !== account || current.verifiedEmail !== email || (!account && clearSharedData)) clearSeen()
   if (current.account === account && current.clearSharedData === clearSharedData && current.verifiedEmail === email) return
   current = { account, clearSharedData, verifiedEmail: email }
 }

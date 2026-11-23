@@ -61,6 +61,8 @@ describe('SyncQueueManager', () => {
     localStorage.setItem('linger_pending_sync_queue', JSON.stringify([{ id: 'a', type: 'REMOVE', date: '2026-05-01', timestamp: 1 }]));
     setAccount('b@example.com');
     expect(await new SyncQueueManager('b@example.com').getPending()).toEqual([]);
+    await expect(new SyncQueueManager('b@example.com').recoverLegacy()).rejects.toThrow('Legacy queue belongs to another account');
+    expect(localStorage.getItem('linger_legacy_queue_owner')).toMatch(/^sha256:[0-9a-f]{64}$/);
     setAccount('a@example.com');
     const a = new SyncQueueManager('a@example.com');
     expect(await a.getPending()).toEqual([]);

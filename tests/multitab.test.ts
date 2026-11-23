@@ -88,9 +88,15 @@ for (const withoutBroadcastChannel of [false, true]) {
   test(`logout clears the other tab's authentication and cached content (storage fallback: ${withoutBroadcastChannel})`, async ({ context }) => {
     const { first, second } = await setup(context, { withoutBroadcastChannel })
     await first.evaluate(date => window.multitabHarness.diary.getContent(date), date)
-    await second.evaluate(() => window.multitabHarness.auth.signOut())
+    await expect.poll(() => second.evaluate(() => localStorage.getItem('linger_session_user'))).toMatch(/^sha256:[0-9a-f]{64}$/)
+    await second.evaluate(() => {
+      localStorage.setItem('linger_serendipity_seen', JSON.stringify([{ date: '2026-05-01', ts: 1 }]))
+      window.multitabHarness.auth.signOut()
+    })
     await expect(first.locator('#ready')).toHaveAttribute('data-status', 'signedOut')
     expect(await first.evaluate(date => window.multitabHarness.diary.getContent(date), date)).toBeNull()
+    await expect.poll(() => second.evaluate(() => localStorage.getItem('linger_session_user'))).toBeNull()
+    expect(await first.evaluate(() => localStorage.getItem('linger_serendipity_seen'))).toBeNull()
   })
 }
 
@@ -139,10 +145,14 @@ test('sign-out from an unaware old tab preserves the new account session and cac
   await second.reload()
   await expect(second.locator('#ready')).toHaveAttribute('data-loaded', 'true')
   await second.evaluate(date => window.multitabHarness.diary.getContent(date), date)
+  const sessionOwner = () => second.evaluate(() => localStorage.getItem('linger_session_user'))
+  await expect.poll(sessionOwner).toMatch(/^sha256:[0-9a-f]{64}$/)
+  const previousOwner = await sessionOwner()
   await first.evaluate(() => window.multitabHarness.auth.signOut())
   await expect(first.locator('#ready')).toHaveAttribute('data-status', 'signedOut')
   expect((await context.cookies()).find(cookie => cookie.name === 'linger_session')?.value).toBe('B')
   await expect(second.locator('#ready')).toHaveAttribute('data-status', 'signedIn')
+  expect(await sessionOwner()).toBe(previousOwner)
   expect(await second.evaluate(() => window.multitabHarness.getAllCached())).toContainEqual(expect.objectContaining({ owner: 'B@example.com' }))
 })
 

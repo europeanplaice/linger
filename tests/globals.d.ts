@@ -181,5 +181,6 @@ interface Window {
     selectedDates: () => string[]
     closeCount: () => number
     getContentCalls: () => string[]
+    seenDates: () => string[]
   }
 }

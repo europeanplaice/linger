@@ -1,10 +1,8 @@
 /**
- * Persists the dates recently surfaced by the serendipity ("A day, by chance")
- * slot, so reopening Looking Back can avoid showing the same day twice in a row.
- * Only dates are stored — never entry content.
+ * Keeps recently surfaced serendipity dates in this tab for the current session,
+ * so reopening Looking Back can avoid showing the same day twice in a row.
  */
 
-const KEY = 'linger_serendipity_seen'
 const MAX = 30
 
 export interface SeenEntry {
@@ -12,28 +10,17 @@ export interface SeenEntry {
   ts: number
 }
 
-export function loadSeen(): SeenEntry[] {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(
-      (e): e is SeenEntry =>
-        e != null && typeof e.date === 'string' && typeof e.ts === 'number',
-    )
-  } catch {
-    return []
-  }
-}
+let seen: SeenEntry[] = []
+
+export function loadSeen(): readonly SeenEntry[] { return seen }
 
 /** Records `date` as just-shown (newest first, deduped, capped at MAX). */
 export function recordSeen(date: string, now: number = Date.now()): void {
-  try {
-    const existing = loadSeen().filter(e => e.date !== date)
-    const next = [{ date, ts: now }, ...existing].slice(0, MAX)
-    localStorage.setItem(KEY, JSON.stringify(next))
-  } catch {
-    // Ignore: storage unavailable or quota exceeded — non-essential feature.
-  }
+  seen = [{ date, ts: now }, ...seen.filter(entry => entry.date !== date)].slice(0, MAX)
+}
+
+export function clearSeen(): void {
+  seen = []
+  try { localStorage.removeItem('linger_serendipity_seen') }
+  catch { /* Unavailable storage must not prevent authentication changes. */ }
 }

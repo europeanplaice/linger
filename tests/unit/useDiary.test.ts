@@ -77,6 +77,25 @@ function renderUseDiary(opts: { email?: string | null; authStatus?: 'initializin
 }
 
 describe('useDiary initial load parallelization', () => {
+  it('removes the signed-out session marker and preserves hashed owners for legacy data', async () => {
+    localStorage.clear()
+    localStorage.setItem('linger_session_user', 'User@example.com')
+    localStorage.setItem('linger_local_entry_2026-05-01', 'old mirror')
+    localStorage.setItem('linger_pending_sync_queue', '[]')
+    localStorage.setItem('linger_legacy_queue_owner', 'other@example.com')
+
+    renderUseDiary({ authStatus: 'signedOut' })
+
+    await waitFor(() => expect(localStorage.getItem('linger_session_user')).toBeNull())
+    const mirrorOwner = localStorage.getItem('linger_local_mirror_legacy_owner')
+    const queueOwner = localStorage.getItem('linger_legacy_queue_owner')
+    expect(mirrorOwner).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(queueOwner).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(mirrorOwner).not.toBe(queueOwner)
+    expect(localStorage.getItem('linger_local_entry_2026-05-01')).toBe('old mirror')
+    expect(localStorage.getItem('linger_pending_sync_queue')).toBe('[]')
+  })
+
   it('discards an expired pending save when the Google sub changes, even if the email stays the same', async () => {
     localStorage.clear()
     const onExpired = vi.fn()

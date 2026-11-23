@@ -11,6 +11,10 @@ test.beforeEach(async ({ page }) => {
 
 test('valid session skips login screen and shows diary directly', async ({ page }) => {
   await installMockOAuthCredentials(page)
+  await page.addInitScript(() => {
+    localStorage.setItem('linger_session_user', 'Person@example.com')
+    localStorage.setItem('linger_serendipity_seen', JSON.stringify([{ date: '2026-05-01', ts: 1 }]))
+  })
   await page.route('/auth/session', async route => {
     await route.fulfill({ json: { signedIn: true, email: 'person@example.com', googleSub: 'person' } })
   })
@@ -25,6 +29,8 @@ test('valid session skips login screen and shows diary directly', async ({ page 
 
   await expect(page.locator('.editor-textarea')).toBeVisible()
   await expect(page.locator('.login-screen')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('linger_session_user'))).toMatch(/^sha256:[0-9a-f]{64}$/)
+  expect(await page.evaluate(() => localStorage.getItem('linger_serendipity_seen'))).toBeNull()
 })
 
 test('asks the user to close older tabs before upgrading legacy draft storage', async ({ page }) => {
@@ -81,6 +87,7 @@ test('reload requires fresh auth while preserving the cached draft', async ({ pa
   })
   await page.evaluate(async ({ email, content, date }) => {
     localStorage.setItem('linger_session_user', email)
+    window.diaryHarness.setEmail(email)
     await window.diaryHarness.seedIdb([{ owner: email, date, meta: { id: 'cached-file', name: `diary-${date}.txt`, version: '1' }, content: { date, content } }])
     await window.diaryHarness.seedDrafts([{ date, content: 'Unsaved offline draft', baseVersion: '1', baseContent: content, savedAt: Date.now() }])
   }, { email, content, date })

@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { createHash } from 'node:crypto'
 import { baseUrl } from './baseUrl'
 
 const ENTRIES_EMPTY = { files: [] }
+const ownerHash = (email: string) => `sha256:${createHash('sha256').update(`linger-session-owner-v1:${email}`).digest('hex')}`
 
 function fileMeta(version: string, id = 'file-1') {
   return { id, name: 'diary-2026-05-01.json', version }
@@ -67,9 +69,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     }, { meta: { id: 'file-1', name: 'diary-2026-05-01.md', version: '1' } })
     await page.evaluate(() => window.diaryHarness.save('2026-05-01', 'secret diary', null))
 
-    // Verify linger_session_user was set to the default email
-    const firstUser = await page.evaluate(() => localStorage.getItem('linger_session_user'))
-    expect(firstUser).toBe('user@example.com')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('linger_session_user'))).toBe(ownerHash('user@example.com'))
 
     // The save must not mirror the entry in plaintext localStorage.
     const mirrored = await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))
@@ -91,12 +91,11 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
 
     // No dates from user@example.com's session are visible to the other account.
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '')
-    const stored = await page.evaluate(() => localStorage.getItem('linger_session_user'))
-    expect(stored).toBe('other@example.com')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('linger_session_user'))).toBe(ownerHash('other@example.com'))
     // The old queue remains, attributed to the old session for recovery.
     expect(await page.evaluate(() => localStorage.getItem('linger_local_entry_2026-05-01'))).toBeNull()
     expect(await page.evaluate(() => localStorage.getItem('linger_pending_sync_queue'))).not.toBeNull()
-    expect(await page.evaluate(() => localStorage.getItem('linger_legacy_queue_owner'))).toBe('user@example.com')
+    expect(await page.evaluate(() => localStorage.getItem('linger_legacy_queue_owner'))).toBe(ownerHash('user@example.com'))
   })
 
   test('does not hydrate IDB when the signed-in account email is unknown', async ({ page }) => {
@@ -116,8 +115,7 @@ test.describe('useDiary IDB cache — cross-account isolation', () => {
     await page.waitForSelector('#harness-ready')
 
     await expect(page.locator('#harness-ready')).toHaveAttribute('data-dates', '')
-    const stored = await page.evaluate(() => localStorage.getItem('linger_session_user'))
-    expect(stored).toBeNull()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('linger_session_user'))).toBeNull()
   })
 
   test('preserves IDB when the same account signs back in', async ({ page }) => {

@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { RecollectionJourney } from '../src/components/RecollectionJourney'
 import { I18nProvider } from '../src/i18n'
 import type { LoadedDiaryEntry } from '../src/types'
+import { loadSeen } from '../src/utils/serendipitySeen'
 import '../src/styles.css'
 
 const root = createRoot(document.getElementById('root') as HTMLElement)
@@ -45,4 +46,5 @@ window.recollectionHarness = {
   selectedDates: () => [...selectedDates],
   closeCount: () => closeCount,
   getContentCalls: () => [...getContentLog],
+  seenDates: () => loadSeen().map(entry => entry.date),
 }

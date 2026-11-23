@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { loadSeen, recordSeen } from '../../src/utils/serendipitySeen'
+import { setActiveAccount } from '../../src/lib/accountSession'
+import { clearSeen, loadSeen, recordSeen } from '../../src/utils/serendipitySeen'
 
 const KEY = 'linger_serendipity_seen'
 
 describe('serendipitySeen', () => {
   beforeEach(() => {
-    localStorage.clear()
+    setActiveAccount(null)
+    clearSeen()
   })
 
   it('returns an empty array when nothing is stored', () => {
@@ -34,18 +36,25 @@ describe('serendipitySeen', () => {
     expect(loadSeen().length).toBe(30)
   })
 
-  it('recovers gracefully from corrupt JSON', () => {
-    localStorage.setItem(KEY, '{not json')
-    expect(loadSeen()).toEqual([])
+  it('discards old plaintext history and keeps new history in memory', () => {
+    localStorage.setItem(KEY, JSON.stringify([{ date: '2020-01-01', ts: 1 }]))
+    clearSeen()
+    recordSeen('2020-02-02', 2)
+    expect(loadSeen()).toEqual([{ date: '2020-02-02', ts: 2 }])
+    expect(localStorage.getItem(KEY)).toBeNull()
   })
 
-  it('ignores non-array stored values', () => {
-    localStorage.setItem(KEY, '"a string"')
+  it('clears history when signing out or switching accounts', () => {
+    setActiveAccount('sub:account-a')
+    recordSeen('2020-01-01', 1)
+    setActiveAccount('sub:account-a')
+    expect(loadSeen()).toHaveLength(1)
+    setActiveAccount('sub:account-b')
     expect(loadSeen()).toEqual([])
-  })
-
-  it('filters out malformed entries', () => {
-    localStorage.setItem(KEY, JSON.stringify([{ date: 'x', ts: 1 }, { date: 5 }, null, { ts: 2 }]))
-    expect(loadSeen()).toEqual([{ date: 'x', ts: 1 }])
+    recordSeen('2020-02-02', 2)
+    localStorage.setItem(KEY, JSON.stringify([{ date: '2020-01-01', ts: 1 }]))
+    setActiveAccount(null, true)
+    expect(localStorage.getItem(KEY)).toBeNull()
+    expect(loadSeen()).toEqual([])
   })
 })
