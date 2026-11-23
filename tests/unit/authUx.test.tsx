@@ -43,6 +43,8 @@ describe('authentication guidance', () => {
   it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
     expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.getByText('Already have a passkey?')).toBeTruthy()
+    expect(screen.getByText('New to Linger? Connect Google & create a passkey')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
     expect(screen.getByText('Having trouble with your passkey?')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
@@ -129,6 +131,13 @@ describe('authentication guidance', () => {
     render(<I18nProvider initialLanguage="ja"><PasskeyGate busy={false} error="unsupported" setupEmail={null} onSetup={vi.fn()} onBeginSetup={vi.fn()} onCancelSetup={vi.fn()} onUnlock={vi.fn()} /></I18nProvider>)
     expect(screen.getByRole('alert').textContent).toContain('対応')
     expect(screen.getByRole('alert').textContent).not.toContain('This passkey')
+  })
+
+  it('explains what a passkey is and why Linger uses it', () => {
+    gate()
+    fireEvent.click(screen.getByText('What is a passkey? Why use one?'))
+    expect(screen.getByText('What is a passkey?')).toBeTruthy()
+    expect(screen.getByText('Why does Linger use a passkey?')).toBeTruthy()
   })
 
   it('retries a connection outage without opening Google authorization', () => {
