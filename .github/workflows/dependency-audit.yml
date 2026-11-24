@@ -19,7 +19,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - run: npm install --global npm@12.2.2
+      - run: npm install --global npm@12.2.3
 
       - run: npm ci --ignore-scripts
 
