@@ -1,5 +1,5 @@
 name = "linger-staging"
-# Configure TURNSTILE_SECRET as a Pages secret for this separate project.
+# Configure TURNSTILE_SECRET and RISC_INDEX_PEPPER as Pages secrets for this separate project.
 compatibility_date = "2024-11-01"
 pages_build_output_dir = "dist"
 

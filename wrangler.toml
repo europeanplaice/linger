@@ -7,6 +7,7 @@ pages_build_output_dir = "dist"
 #   GOOGLE_CLIENT_SECRET = <OAuth 2.0 client secret>
 #   SESSION_DOMAIN       = https://linger.europeanplaice.com
 #   TURNSTILE_SECRET     = existing Turnstile widget secret
+#   RISC_INDEX_PEPPER    = <random 32+ char secret for targeted RISC revocation>
 
 [[kv_namespaces]]
 binding = "SESSIONS"

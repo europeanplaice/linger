@@ -585,4 +585,26 @@ describe('passkey handlers', () => {
     expect(await readD1Session(decodeURIComponent(sessionCookie!), { ...env, AUTH_DB: env.AUTH_DB! }, key)).toBeNull()
     db.close()
   })
+
+  it('rate-limits unauthenticated login/options requests per hashed IP while exempting authenticated sessions', async () => {
+    const { env, db, headers } = await createPasskeyTestEnv()
+    try {
+      const ip = '198.51.100.77'
+      for (let i = 0; i < 20; i++) {
+        const res = await loginOptions(request('/auth/passkey/login/options', undefined, { 'CF-Connecting-IP': ip }), env)
+        expect(res.status).toBe(200)
+      }
+      const blocked = await loginOptions(request('/auth/passkey/login/options', undefined, { 'CF-Connecting-IP': ip }), env)
+      expect(blocked.status).toBe(429)
+      expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1)
+      expect(db.prepare('SELECT COUNT(*) AS count FROM passkey_challenges').get()).toEqual({ count: 20 })
+      expect(JSON.stringify(db.prepare('SELECT * FROM auth_rate_limits').all())).not.toContain(ip)
+
+      // Authenticated management-verification login/options bypasses the unauthenticated IP cap.
+      const authenticated = await loginOptions(request('/auth/passkey/login/options', undefined, { ...headers, 'CF-Connecting-IP': ip }), env)
+      expect(authenticated.status).toBe(200)
+    } finally {
+      db.close()
+    }
+  })
 })

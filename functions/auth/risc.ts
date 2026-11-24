@@ -1,8 +1,11 @@
 import type { Env } from '../_shared/session'
 import { deleteAllSessionsForSub, jsonResponse } from '../_shared/session'
+import { claimRiscEvent, commitRiscEvent, releaseRiscEvent } from '../_shared/authStore'
 
 const GOOGLE_ISSUER = 'https://accounts.google.com'
 const GOOGLE_RISC_JWKS_URL = 'https://accounts.google.com/o/oauth2/risc/jwks'
+const MAX_SET_BODY_BYTES = 64 * 1024
+const JWKS_FETCH_TIMEOUT_MS = 10_000
 
 const HANDLED_EVENT_TYPES = new Set<string>([
   'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked',
@@ -34,7 +37,7 @@ interface SetClaims {
   aud: string | string[]
   iat: number
   exp?: number
-  jti?: string
+  jti: string
   events: Record<string, SetEventPayload>
 }
 
@@ -74,7 +77,9 @@ async function fetchJwks(forceRefresh = false): Promise<JwkKey[]> {
     }
   }
 
-  const resp = await fetch(GOOGLE_RISC_JWKS_URL)
+  const resp = await fetch(GOOGLE_RISC_JWKS_URL, {
+    signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS),
+  })
   if (!resp.ok) throw new Error(`JWKS fetch failed: ${resp.status}`)
   const json = await resp.json() as { keys: JwkKey[] }
 
@@ -148,9 +153,39 @@ async function verifyJwt(token: string, clientId: string): Promise<SetClaims> {
     throw new Error('Token expired')
   }
 
+  if (typeof claims.jti !== 'string' || !claims.jti.trim() || claims.jti.length > 512) {
+    throw new Error('Missing jti')
+  }
+
   if (!claims.events || typeof claims.events !== 'object') throw new Error('Missing events')
 
   return claims
+}
+
+async function readBoundedText(request: Request, maxBytes: number): Promise<string | null> {
+  const declared = Number(request.headers.get('Content-Length') ?? 0)
+  if (Number.isFinite(declared) && declared > maxBytes) return null
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes).trim()
 }
 
 function extractEmail(payload: SetEventPayload): string | null {
@@ -164,7 +199,8 @@ function extractSub(payload: SetEventPayload): string | null {
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const body = (await request.text()).trim()
+  const body = await readBoundedText(request, MAX_SET_BODY_BYTES)
+  if (body === null) return jsonResponse({ error: 'Request too large' }, 413)
   if (!body) return jsonResponse({ error: 'Empty request body' }, 400)
 
   let claims: SetClaims
@@ -173,6 +209,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   } catch (err) {
     console.error('RISC SET verification failed')
     return jsonResponse({ error: 'invalid SET' }, 400)
+  }
+
+  const expiresAt = (claims.iat + MAX_SET_AGE_SEC + 60) * 1000
+  const claimed = await claimRiscEvent(claims.jti, expiresAt, env)
+  if (!claimed) {
+    return jsonResponse({ ok: true, handled: 0, revoked: 0, duplicate: true }, 202)
   }
 
   let handled = 0
@@ -211,6 +253,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
   }
 
-  if (failed) return jsonResponse({ error: 'Session revocation temporarily unavailable' }, 503, { 'Retry-After': '1' })
+  if (failed) {
+    await releaseRiscEvent(claims.jti, env).catch(() => {})
+    return jsonResponse({ error: 'Session revocation temporarily unavailable' }, 503, { 'Retry-After': '1' })
+  }
+  await commitRiscEvent(claims.jti, expiresAt, env)
   return jsonResponse({ ok: true, handled, revoked }, 202)
 }

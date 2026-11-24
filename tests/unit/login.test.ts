@@ -3,8 +3,8 @@ import { onRequestGet, onRequestPost } from '../../functions/auth/login'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 
 async function fixture() { return createPasskeyTestEnv({}, { domain: 'https://example.com' }) }
-function loginRequest(path = '/auth/login', sessionId = 'sid123') {
-  return new Request(`https://example.com${path}`, { headers: { Cookie: `linger_session=${sessionId}` } })
+function loginRequest(path = '/auth/login', sessionId = 'sid123', headers: HeadersInit = {}) {
+  return new Request(`https://example.com${path}`, { headers: { Cookie: `linger_session=${sessionId}`, ...headers } })
 }
 
 describe('OAuth login popup redirect', () => {
@@ -100,5 +100,49 @@ describe('OAuth login popup redirect', () => {
   it('rejects POST instead of accepting a credential-bearing login request', async () => {
     const response = await onRequestPost({} as never)
     expect(response.status).toBe(405)
+  })
+
+  it('rejects cross-site or non-document login requests without writing OAuth state', async () => {
+    const { env, db } = await fixture()
+    const crossSite = await onRequestGet({
+      env,
+      request: loginRequest('/auth/login?setup=1', 'missing-session', { 'Sec-Fetch-Site': 'cross-site' }),
+    } as never)
+    expect(crossSite.status).toBe(403)
+    const nonDocument = await onRequestGet({
+      env,
+      request: loginRequest('/auth/login?setup=1', 'missing-session', { 'Sec-Fetch-Dest': 'image' }),
+    } as never)
+    expect(nonDocument.status).toBe(403)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM auth_oauth_states').get()).toEqual({ count: 0 })
+    db.close()
+  })
+
+  it('rate-limits unauthenticated setup requests per hashed IP and prunes expired OAuth states', async () => {
+    const { env, db } = await fixture()
+    try {
+      db.prepare('INSERT INTO auth_oauth_states (id, data, expires_at) VALUES (?, ?, ?)').run('stale-state', '{}', Date.now() - 1000)
+      const ip = '203.0.113.42'
+      for (let i = 0; i < 10; i++) {
+        const res = await onRequestGet({
+          env,
+          request: loginRequest('/auth/login?setup=1', 'missing-session', { 'CF-Connecting-IP': ip }),
+        } as never)
+        expect(res.status).toBe(302)
+      }
+      expect(db.prepare('SELECT id FROM auth_oauth_states WHERE id = ?').get('stale-state')).toBeUndefined()
+
+      const blocked = await onRequestGet({
+        env,
+        request: loginRequest('/auth/login?setup=1', 'missing-session', { 'CF-Connecting-IP': ip }),
+      } as never)
+      expect(blocked.status).toBe(429)
+      expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1)
+      expect(db.prepare('SELECT COUNT(*) AS count FROM auth_oauth_states').get()).toEqual({ count: 10 })
+      const buckets = JSON.stringify(db.prepare('SELECT * FROM auth_rate_limits').all())
+      expect(buckets).not.toContain(ip)
+    } finally {
+      db.close()
+    }
   })
 })

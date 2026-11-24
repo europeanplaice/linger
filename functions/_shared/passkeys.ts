@@ -9,7 +9,7 @@ import {
 } from '@simplewebauthn/server'
 import type { Env } from './session'
 import { makeSessionCookie, parseSessionId, SESSION_TTL, jsonResponse } from './session'
-import { createPasskeySession, getPasskeySessionInfo, getPasskeySessionUserId, sessionStorageId } from './authStore'
+import { checkAuthRateLimit, createPasskeySession, getPasskeySessionInfo, getPasskeySessionUserId, sessionStorageId } from './authStore'
 import { openVaultValue, sealVaultValue, validVaultKey } from './vaultCrypto'
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000
@@ -335,6 +335,11 @@ export async function loginOptions(request: Request, env: Env): Promise<Response
   const rejected = sameOrigin(request, env)
   if (rejected) return rejected
   if (!hasAuthDb(env)) return jsonResponse({ error: 'Passkeys unavailable' }, 503)
+  const userId = await authenticatedUser(request, env)
+  if (!userId) {
+    const rate = await checkAuthRateLimit(request, env, 'passkey-login-options', 20, 5 * 60_000)
+    if (!rate.allowed) return jsonResponse({ error: 'Too many requests' }, 429, { 'Retry-After': String(rate.retryAfter) })
+  }
   try {
     const { rpID } = relyingParty(request, env)
     const options = await generateAuthenticationOptions({

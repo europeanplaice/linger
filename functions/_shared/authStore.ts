@@ -13,15 +13,42 @@ interface SessionRow {
 }
 const SESSION_ID_HASH_PREFIX = 'sha256:'
 const PROFILE_PURPOSE = 'account-metadata'
+const MIN_RISC_PEPPER_LENGTH = 32
+const encoder = new TextEncoder()
 const SESSION_SELECT = `SELECT s.user_id, s.revoked, s.expires_at, u.account_envelope, u.revision,
     CASE WHEN s.credential_id IS NULL OR EXISTS (
       SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
     ) THEN 1 ELSE 0 END AS credential_exists
   FROM auth_sessions s LEFT JOIN passkey_users u ON u.id = s.user_id WHERE s.id = ?`
 
+function toHex(bytes: ArrayBuffer | Uint8Array): string {
+  return Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function configuredRiscPepper(env: Env): string | null {
+  return typeof env.RISC_INDEX_PEPPER === 'string' && env.RISC_INDEX_PEPPER.length >= MIN_RISC_PEPPER_LENGTH
+    ? env.RISC_INDEX_PEPPER
+    : null
+}
+
+async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  return toHex(await crypto.subtle.sign('HMAC', key, encoder.encode(message)))
+}
+
+export async function riscSubjectHash(googleSub: string, pepper: string): Promise<string> {
+  return `hmac-sha256:${await hmacSha256Hex(pepper, `linger-risc-sub/v1:${googleSub}`)}`
+}
+
 export async function sessionStorageId(id: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id)))
-  return SESSION_ID_HASH_PREFIX + Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(id))
+  return SESSION_ID_HASH_PREFIX + toHex(digest)
 }
 
 export async function durableSessionHandle(id: string, env: Env): Promise<string> {
@@ -134,14 +161,18 @@ export async function saveD1Session(id: string, session: SessionData, env: AuthE
       else merged[field] = value
     }
     const envelope = await sealVaultValue(key, session.user_id, PROFILE_PURPOSE, merged)
-    const updated = await env.AUTH_DB.prepare(`UPDATE passkey_users SET account_envelope = ?, revision = revision + 1
+    const pepper = configuredRiscPepper(env)
+    const subjectHash = typeof merged.google_sub === 'string' && merged.google_sub && pepper
+      ? await riscSubjectHash(merged.google_sub, pepper)
+      : null
+    const updated = await env.AUTH_DB.prepare(`UPDATE passkey_users SET account_envelope = ?, revision = revision + 1, risc_subject_hash = COALESCE(?, risc_subject_hash)
       WHERE id = ? AND revision = ? AND EXISTS (
         SELECT 1 FROM auth_sessions s WHERE s.id = ? AND s.user_id = passkey_users.id AND s.revoked = 0 AND s.expires_at > ?
           AND (s.credential_id IS NULL OR EXISTS (
             SELECT 1 FROM passkey_credentials c WHERE c.credential_id = s.credential_id AND c.user_id = s.user_id
           ))
       ) RETURNING revision`)
-      .bind(envelope, session.user_id, row.revision, storageId, Date.now()).first<{ revision: number }>()
+      .bind(envelope, subjectHash, session.user_id, row.revision, storageId, Date.now()).first<{ revision: number }>()
     if (!updated) continue
     const renewed = await env.AUTH_DB.prepare('UPDATE auth_sessions SET expires_at = MAX(expires_at, ?) WHERE id = ? AND revoked = 0 AND expires_at > ? RETURNING id')
       .bind(Date.now() + SESSION_TTL * 1000, storageId, Date.now()).first()
@@ -164,15 +195,57 @@ export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
     .bind(await sessionStorageId(id)).run()
 }
 
-// A Google-sub lookup index would undo the privacy boundary. A verified RISC
-// event conservatively revokes all sessions rather than retaining that index.
+// When RISC_INDEX_PEPPER is configured, revoke the matching keyed blind index
+// plus any unindexed legacy accounts; otherwise conservatively revoke all sessions.
 export async function revokeD1Account(field: 'email' | 'google_sub', value: string, env: AuthEnv): Promise<void> {
-  void field
-  void value
+  const pepper = field === 'google_sub' ? configuredRiscPepper(env) : null
+  if (pepper) {
+    const targetHash = await riscSubjectHash(value, pepper)
+    await env.AUTH_DB.batch([
+      env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1
+        WHERE revoked = 0 AND (
+          user_id IS NULL
+          OR user_id NOT IN (SELECT id FROM passkey_users WHERE risc_subject_hash IS NOT NULL)
+          OR user_id IN (SELECT id FROM passkey_users WHERE risc_subject_hash = ?)
+        )`).bind(targetHash),
+      env.AUTH_DB.prepare(`DELETE FROM google_refresh_vault
+        WHERE user_id NOT IN (SELECT id FROM passkey_users WHERE risc_subject_hash IS NOT NULL)
+           OR user_id IN (SELECT id FROM passkey_users WHERE risc_subject_hash = ?)`).bind(targetHash),
+    ])
+    return
+  }
   await env.AUTH_DB.batch([
     env.AUTH_DB.prepare('UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1 WHERE revoked = 0'),
     env.AUTH_DB.prepare('DELETE FROM google_refresh_vault'),
   ])
+}
+
+async function riscJtiHash(jti: string): Promise<string> {
+  return `sha256:${toHex(await crypto.subtle.digest('SHA-256', encoder.encode(`linger-risc-jti/v1:${jti}`)))}`
+}
+
+export async function claimRiscEvent(jti: string, expiresAt: number, env: Env): Promise<boolean> {
+  const hash = await riscJtiHash(jti)
+  if (env.AUTH_DB) {
+    await env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash = ? AND expires_at <= ?')
+      .bind(hash, Date.now()).run()
+    const inserted = await env.AUTH_DB.prepare('INSERT OR IGNORE INTO risc_processed_events (jti_hash, expires_at) VALUES (?, ?)')
+      .bind(hash, expiresAt).run()
+    return inserted.meta.changes === 1
+  }
+  return (await env.SESSIONS.get(`risc_jti:${hash}`)) !== '1'
+}
+
+export async function commitRiscEvent(jti: string, expiresAt: number, env: Env): Promise<void> {
+  if (env.AUTH_DB) return
+  const ttl = Math.max(60, Math.ceil((expiresAt - Date.now()) / 1000))
+  await env.SESSIONS.put(`risc_jti:${await riscJtiHash(jti)}`, '1', { expirationTtl: ttl })
+}
+
+export async function releaseRiscEvent(jti: string, env: Env): Promise<void> {
+  if (!env.AUTH_DB) return
+  await env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash = ?')
+    .bind(await riscJtiHash(jti)).run()
 }
 
 export async function saveOAuthState(state: string, data: string, env: Env): Promise<void> {
@@ -180,8 +253,37 @@ export async function saveOAuthState(state: string, data: string, env: Env): Pro
     await env.SESSIONS.put(`oauth_state:${state}`, data, { expirationTtl: OAUTH_STATE_TTL })
     return
   }
+  await env.AUTH_DB.prepare('DELETE FROM auth_oauth_states WHERE id IN (SELECT id FROM auth_oauth_states WHERE expires_at <= ? LIMIT 100)')
+    .bind(Date.now()).run()
   await env.AUTH_DB.prepare('INSERT INTO auth_oauth_states (id, data, expires_at) VALUES (?, ?, ?)')
     .bind(state, data, Date.now() + OAUTH_STATE_TTL * 1000).run()
+}
+
+export async function checkAuthRateLimit(
+  request: Request,
+  env: Env,
+  action: 'oauth-setup' | 'passkey-login-options',
+  limit: number,
+  windowMs: number,
+): Promise<{ allowed: true } | { allowed: false; retryAfter: number }> {
+  if (!env.AUTH_DB) return { allowed: true }
+  const ip = request.headers.get('CF-Connecting-IP')?.trim()
+  if (!ip) return { allowed: true }
+  const now = Date.now()
+  const windowStart = Math.floor(now / windowMs) * windowMs
+  const expiresAt = windowStart + windowMs
+  const secret = env.RISC_INDEX_PEPPER || env.GOOGLE_CLIENT_SECRET || 'local-dev'
+  const bucketKey = `hmac-sha256:${await hmacSha256Hex(secret, `rl:v1:${action}:${windowStart}:${ip}`)}`
+  await env.AUTH_DB.prepare('DELETE FROM auth_rate_limits WHERE bucket_key IN (SELECT bucket_key FROM auth_rate_limits WHERE expires_at <= ? LIMIT 100)')
+    .bind(now).run()
+  const row = await env.AUTH_DB.prepare(`INSERT INTO auth_rate_limits (bucket_key, count, expires_at) VALUES (?, 1, ?)
+    ON CONFLICT(bucket_key) DO UPDATE SET count = count + 1
+    RETURNING count`)
+    .bind(bucketKey, expiresAt).first<{ count: number }>()
+  if ((row?.count ?? 0) > limit) {
+    return { allowed: false, retryAfter: Math.max(1, Math.ceil((expiresAt - now) / 1000)) }
+  }
+  return { allowed: true }
 }
 
 export async function consumeOAuthState(state: string, env: Env): Promise<string | null> {
@@ -212,6 +314,10 @@ export async function cleanupAuth(env: AuthEnv): Promise<void> {
   await env.AUTH_DB.batch([
     env.AUTH_DB.prepare('DELETE FROM auth_oauth_states WHERE id IN (SELECT id FROM auth_oauth_states WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM auth_sessions WHERE id IN (SELECT id FROM auth_sessions WHERE expires_at <= ? LIMIT 500)').bind(now),
+    env.AUTH_DB.prepare('DELETE FROM passkey_challenges WHERE id IN (SELECT id FROM passkey_challenges WHERE expires_at <= ? LIMIT 500)').bind(now),
+    env.AUTH_DB.prepare('DELETE FROM passkey_management_grants WHERE session_id IN (SELECT session_id FROM passkey_management_grants WHERE expires_at <= ? LIMIT 500)').bind(now),
+    env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash IN (SELECT jti_hash FROM risc_processed_events WHERE expires_at <= ? LIMIT 500)').bind(now),
+    env.AUTH_DB.prepare('DELETE FROM auth_rate_limits WHERE bucket_key IN (SELECT bucket_key FROM auth_rate_limits WHERE expires_at <= ? LIMIT 500)').bind(now),
   ])
   await purgeLegacyCredentialSessions(env)
   await purgeLegacyEmailIndexes(env)

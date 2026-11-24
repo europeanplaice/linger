@@ -20,10 +20,13 @@ sync metadata and the encrypted refresh token. A session cookie or a database du
 alone cannot unlock the token and authorize a Drive operation.
 
 Session storage does not retain Google email addresses. The session endpoint reads
-the email for display from the verified request-scoped identity token. RISC events
-with a Google subject conservatively revoke all sessions because no readable
-subject index is retained, and also clear all encrypted refresh credentials;
-email-only events receive a retryable error. Migration 0004
+the email for display from the verified request-scoped identity token. When
+`RISC_INDEX_PEPPER` is configured, `passkey_users` stores a keyed HMAC-SHA-256
+blind index of the Google subject so RISC events with a `sub` revoke only the
+matching account (and any unindexed legacy accounts) while clearing its encrypted
+refresh credentials; without the pepper, RISC events conservatively revoke all
+sessions and refresh credentials. Processed SET `jti` digests are tracked until
+expiry to prevent replay, and email-only events receive a retryable error. Migration 0004
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 
@@ -137,7 +140,8 @@ revocation mechanism; this document does not mean those operations have run.
 
 Google OAuth grant revocation must not be treated as revoking already-issued Google
 identity JWTs or AWS STS credentials. Treat an old identity JWT as potentially usable
-at AWS until its signed expiry. The app requests STS sessions of up to 12 hours.
+at AWS until its signed expiry. The app requests STS sessions of 900 seconds (15 minutes;
+historical deployments requested up to 12 hours).
 Stop legacy issuance and account for the last possible session issuance before
 waiting out that duration. If immediate invalidation is required, the AWS role
 owner must use the documented role-session revocation or permissions controls;

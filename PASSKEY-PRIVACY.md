@@ -144,11 +144,17 @@ one; a lost Google session/device must also be secured through Google.
 
 ## Google security notifications
 
-There is no persistent Google-sub lookup index. A verified, supported RISC event
-therefore conservatively revokes all current Linger sessions and deletes saved
-refresh credentials. Users must unlock
-and authorize again; their passkeys, keys, and diary files are not deleted. This
-trades targeted revocation for avoiding a server-readable identity index.
+When `RISC_INDEX_PEPPER` (32+ characters) is configured, authenticated session
+saves record a server-keyed HMAC-SHA-256 digest (`risc_subject_hash`) of the
+Google `sub` on `passkey_users` instead of a readable Google identifier. A
+verified, supported RISC event with a `sub` then revokes sessions and clears saved
+refresh credentials for that matching blind-indexed account (plus any unindexed
+legacy accounts whose `risc_subject_hash` is still `NULL`). If `RISC_INDEX_PEPPER`
+is not configured, or for email-only events, the handler conservatively falls back
+to revoking all sessions or returning a retryable error. Processed SET `jti`
+digests are retained until expiry to block token replay within the validity window.
+Users whose sessions are revoked must unlock and authorize again; their passkeys,
+keys, and diary files are not deleted.
 
 ## Rollout
 

@@ -1,5 +1,16 @@
 # Authentication metadata in D1
 
+## Targeted RISC revocation, replay protection, and auth rate limits (migration 0010)
+
+Apply `0010_risc_hardening.sql` before deploying the matching Pages and Worker
+code. The migration adds a keyed blind RISC subject index (`risc_subject_hash`)
+on `passkey_users`, single-use SET `jti` replay tracking
+(`risc_processed_events`), hashed-IP rate-limit buckets (`auth_rate_limits`), and
+an expiry index on `passkey_management_grants`. Configure `RISC_INDEX_PEPPER` (a
+random secret of at least 32 characters) in Pages secrets to enable targeted
+per-account RISC revocation; unindexed legacy accounts continue to fall back
+conservatively until their next authenticated session save.
+
 ## Passkey management verification (migration 0008)
 
 Apply `0008_passkey_management_grants.sql` before deploying the matching Pages

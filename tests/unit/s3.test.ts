@@ -27,7 +27,7 @@ describe('assumeRoleWithWebIdentity', () => {
       RoleArn: roleArn,
       RoleSessionName: 'linger',
       WebIdentityToken: idToken,
-      DurationSeconds: '43200',
+      DurationSeconds: '900',
     })
   })
 
@@ -58,7 +58,7 @@ describe('assumeRoleWithWebIdentity', () => {
 
     const result = await assumeRoleWithWebIdentity('idtok', 'arn:aws:iam::123456789012:role/linger-s3', 'us-east-1')
 
-    expect(result.expiresAt).toBe(Date.now() + 43200 * 1000)
+    expect(result.expiresAt).toBe(Date.now() + 900 * 1000)
     vi.useRealTimers()
   })
 

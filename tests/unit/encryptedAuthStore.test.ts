@@ -87,4 +87,43 @@ describe('encrypted account metadata and opaque passkey sessions', () => {
       expect(indexes).not.toContain('auth_sessions_sub')
     } finally { db.close() }
   })
+
+  it('uses a keyed blind index for targeted revocation when RISC_INDEX_PEPPER is configured', async () => {
+    const pepper = 'test-risc-pepper-value-at-least-32-chars'
+    const envA = await createPasskeyTestEnv({ google_sub: 'sub-a' }, { userId: 'user-a', sessionId: 'session-a' })
+    try {
+      const db = envA.db
+      const authDb = envA.env.AUTH_DB!
+      const envWithPepper = { ...envA.env, AUTH_DB: authDb, RISC_INDEX_PEPPER: pepper }
+
+      // Re-save user-a with pepper so risc_subject_hash is populated, and reject plaintext writes.
+      const sessionA = (await getSession('session-a', envWithPepper, envA.key))!
+      sessionA.folder_id = 'folder-a'
+      await saveSession('session-a', sessionA, envWithPepper)
+
+      const userB = 'user-b'
+      const sessionBId = 'session-b'
+      const keyB = encodeVaultBytes(crypto.getRandomValues(new Uint8Array(32)))
+      const { createPasskeySession, saveD1Session } = await import('../../functions/_shared/authStore')
+      db.prepare('INSERT INTO passkey_users (id, created_at) VALUES (?, ?)').run(userB, Date.now())
+      await createPasskeySession(sessionBId, userB, envWithPepper)
+      await saveD1Session(sessionBId, { user_id: userB, vault_key: keyB, google_sub: 'sub-b' }, { ...envWithPepper, AUTH_DB: authDb })
+
+      const legacyUser = 'user-legacy'
+      const legacySessionId = 'session-legacy'
+      db.prepare('INSERT INTO passkey_users (id, created_at) VALUES (?, ?)').run(legacyUser, Date.now())
+      await createPasskeySession(legacySessionId, legacyUser, envWithPepper)
+
+      const userARow = db.prepare('SELECT risc_subject_hash FROM passkey_users WHERE id = ?').get('user-a') as { risc_subject_hash: string }
+      expect(userARow.risc_subject_hash).toMatch(/^hmac-sha256:[0-9a-f]{64}$/)
+      expect(userARow.risc_subject_hash).not.toContain('sub-a')
+      expect(() => db.prepare('UPDATE passkey_users SET risc_subject_hash = ? WHERE id = ?').run('sub-a', 'user-a')).toThrow()
+
+      await revokeD1Account('google_sub', 'sub-a', envWithPepper)
+
+      expect(await getPasskeySessionUserId('session-a', envWithPepper)).toBeNull()
+      expect(await getPasskeySessionUserId(legacySessionId, envWithPepper)).toBeNull()
+      expect(await getPasskeySessionUserId(sessionBId, envWithPepper)).toBe(userB)
+    } finally { envA.db.close() }
+  })
 })

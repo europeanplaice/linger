@@ -25,6 +25,7 @@ export interface AssumedCredentials {
 // Every fetch()/client.fetch() call below passes this as `signal`; a fresh one is
 // created per call so each of putObjectIfNewer's retry attempts gets its own budget.
 const S3_FETCH_TIMEOUT_MS = 20_000
+const STS_DURATION_SECONDS = 900
 
 // sts:AssumeRoleWithWebIdentity is unauthenticated (that's the point of web
 // identity federation) — no request signing needed for this call itself, only
@@ -36,7 +37,7 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     RoleArn: roleArn,
     RoleSessionName: 'linger',
     WebIdentityToken: idToken,
-    DurationSeconds: '43200',
+    DurationSeconds: String(STS_DURATION_SECONDS),
   })
 
   // Keep the identity token out of URLs captured by request logs and traces.
@@ -66,7 +67,7 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
   }
   const raw = data.AssumeRoleWithWebIdentityResponse.AssumeRoleWithWebIdentityResult.Credentials
   // Falls back to a conservative estimate (DurationSeconds requested above) if STS ever
-  // returns an unparseable Expiration — the fixed 12h (43200s) duration was requested, so
+  // returns an unparseable Expiration — the fixed 15m (900s) duration was requested, so
   // this is exact in practice, just defensive against an unexpected format ever making a
   // caller cache/persist a NaN expiry and treat these credentials as eternally valid.
   const parsedExpiration = Date.parse(raw.Expiration)
@@ -74,7 +75,7 @@ export async function assumeRoleWithWebIdentity(idToken: string, roleArn: string
     accessKeyId: raw.AccessKeyId,
     secretAccessKey: raw.SecretAccessKey,
     sessionToken: raw.SessionToken,
-    expiresAt: isNaN(parsedExpiration) ? Date.now() + 43200 * 1000 : parsedExpiration,
+    expiresAt: isNaN(parsedExpiration) ? Date.now() + STS_DURATION_SECONDS * 1000 : parsedExpiration,
   }
 
   return creds

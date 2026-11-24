@@ -1,6 +1,6 @@
 import type { Env } from '../_shared/session'
 import { jsonResponse, makeOAuthStateCookie, makeOAuthPkceCookie, parseSessionId } from '../_shared/session'
-import { saveOAuthState, getPasskeySessionUserId, sessionStorageId } from '../_shared/authStore'
+import { checkAuthRateLimit, saveOAuthState, getPasskeySessionUserId, sessionStorageId } from '../_shared/authStore'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
 
@@ -16,11 +16,26 @@ function randomVerifier(): string {
 }
 
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
+  const fetchSite = request.headers.get('Sec-Fetch-Site')
+  if (fetchSite && !['same-origin', 'same-site', 'none'].includes(fetchSite)) {
+    return jsonResponse({ error: 'Forbidden' }, 403)
+  }
+  const fetchDest = request.headers.get('Sec-Fetch-Dest')
+  if (fetchDest && fetchDest !== 'document') {
+    return jsonResponse({ error: 'Forbidden' }, 403)
+  }
+
   const sessionId = parseSessionId(request)
   const userId = sessionId ? await getPasskeySessionUserId(sessionId, env) : null
   const url = new URL(request.url)
   const setup = url.searchParams.get('setup') === '1'
   if ((!sessionId || !userId) && !setup) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
+  if (!userId) {
+    const rate = await checkAuthRateLimit(request, env, 'oauth-setup', 10, 5 * 60_000)
+    if (!rate.allowed) {
+      return jsonResponse({ error: 'Too many requests' }, 429, { 'Retry-After': String(rate.retryAfter) })
+    }
+  }
   const requestedChannelId = url.searchParams.get('channel_id')
   const channelId = requestedChannelId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedChannelId)
     ? requestedChannelId
