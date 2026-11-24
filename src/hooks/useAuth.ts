@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { startSignIn, checkSession, revokeSession, refreshGoogleCredentials, clearPendingGoogleCredential, hasPendingGoogleCredential } from '../api/auth'
-import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
+import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount, matchesAuthEventAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../lib/accountSession'
 import { clearOAuthCredentials, getOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
@@ -157,7 +157,7 @@ export function useAuth(): AuthState {
       // Initial session restoration checks the event again after the response;
       // two tabs restoring the same account must not sign each other out.
       if (restoring.current && event.account !== null) return
-      if (event.account === null || event.account !== getAccountSnapshot().account) invalidateAccount()
+      if (event.account === null || !matchesAuthEventAccount(event.account, getAccountSnapshot().account)) invalidateAccount()
     }, () => {
       authRevision.current++
       needsGoogleCredential.current = true
@@ -262,7 +262,7 @@ export function useAuth(): AuthState {
       if (!isCurrent()) return
       const account = info?.signedIn ? accountIdentity(info) : null
       const latest = readAuthEvent()
-      if (latest && latest.id !== startedEvent && latest.account !== account) {
+      if (latest && latest.id !== startedEvent && !matchesAuthEventAccount(latest.account, account)) {
         invalidateAccount()
         return
       }
@@ -308,8 +308,7 @@ export function useAuth(): AuthState {
     restoring.current = false
     setAuthError(null)
     setSigningIn(true)
-    const hint = options.expectedGoogleSub ?? googleSub
-    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current, ...(!options.selectAccount && hint ? { loginHint: hint } : {}) })
+    const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current })
     // Do not retain the previous Google credentials during account switching.
     saveTabSession()
     pendingSignIn.then(async info => {
@@ -363,7 +362,7 @@ export function useAuth(): AuthState {
       setAuthError(['account_mismatch', 'cancelled', 'network', 'popup_blocked'].includes(code) ? code as AuthErrorCode : 'sign_in_failed')
       if (code === 'verification_failed') console.error('Google sign-in failed:', error)
     })
-  }, [googleSub])
+  }, [])
 
   const beginSetup = useCallback((recovery = false) => {
     const revision = ++authRevision.current
@@ -526,7 +525,8 @@ export function useAuth(): AuthState {
     const account = getAccountSnapshot().account
     revokeSession().then(() => {
       // A delayed logout completion must not clear a newly signed-in account.
-      if (getAccountSnapshot().account === null && (!readAuthEvent() || readAuthEvent()?.account === account)) announceAccount(null)
+      const latest = readAuthEvent()
+      if (getAccountSnapshot().account === null && (!latest || matchesAuthEventAccount(latest.account, account))) announceAccount(null)
     }).catch(() => {})
     vaultRevision.current++
     vaultOperation.current?.abort()

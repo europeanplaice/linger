@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiFetch, deleteEntry } from '../../src/api/driveEntries'
-import { accountRequest, AUTH_EVENT_KEY, getAccountSnapshot, setActiveAccount, subscribeAccountChanges } from '../../src/lib/accountSession'
+import { accountRequest, announceAccount, AUTH_EVENT_KEY, getAccountSnapshot, matchesAuthEventAccount, readAuthEvent, setActiveAccount, subscribeAccountChanges } from '../../src/lib/accountSession'
 
 vi.mock('../../src/utils/tabSync', () => ({ broadcastMessage: vi.fn(), subscribeTabSync: () => () => {} }))
 
@@ -61,4 +61,16 @@ it('ignores older notifications after observing a newer shared auth event', () =
     expect(changed).toHaveBeenCalledOnce()
     expect(changed).toHaveBeenCalledWith({ id: 'new', account: 'sub:b' })
   } finally { unsubscribe() }
+})
+
+it('stores an opaque digest instead of raw Google sub in localStorage auth events', () => {
+  announceAccount('sub:google-secret-123')
+  const storedRaw = localStorage.getItem(AUTH_EVENT_KEY) ?? ''
+  expect(storedRaw).not.toContain('google-secret-123')
+  const event = readAuthEvent()
+  expect(event?.account).toMatch(/^tag:[0-9a-f]{64}$/)
+  expect(matchesAuthEventAccount(event!.account, 'sub:google-secret-123')).toBe(true)
+  expect(matchesAuthEventAccount(event!.account, 'sub:other-user')).toBe(false)
+  announceAccount(null)
+  expect(readAuthEvent()?.account).toBeNull()
 })

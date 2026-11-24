@@ -35,7 +35,37 @@ const DIARY_FILENAME = /^diary-(\d{4}-\d{2}-\d{2})\.(?:txt|md)$/
 const MILESTONES_FILENAME = 'milestones.json'
 const LEGACY_MILESTONES_FILENAME = 'anniversaries.json'
 
+export const MAX_ZIP_FILE_BYTES = 50 * 1024 * 1024
+export const MAX_ZIP_FILES = 20_000
+export const MAX_ENTRY_CHARS = 500_000
+export const MAX_MILESTONES_CHARS = 1_000_000
+export const MAX_TOTAL_EXTRACTED_CHARS = 100_000_000
+
+export interface ZipImportLimits {
+  maxZipFileBytes: number
+  maxZipFiles: number
+  maxEntryChars: number
+  maxMilestonesChars: number
+  maxTotalExtractedChars: number
+}
+
+export const DEFAULT_ZIP_LIMITS: ZipImportLimits = {
+  maxZipFileBytes: MAX_ZIP_FILE_BYTES,
+  maxZipFiles: MAX_ZIP_FILES,
+  maxEntryChars: MAX_ENTRY_CHARS,
+  maxMilestonesChars: MAX_MILESTONES_CHARS,
+  maxTotalExtractedChars: MAX_TOTAL_EXTRACTED_CHARS,
+}
+
 class InvalidDiaryArchiveError extends Error {}
+export class ArchiveTooLargeError extends Error {}
+
+function checkDeclaredUncompressedBytes(zipEntry: JSZip.JSZipObject, maxBytes: number): void {
+  const declared = (zipEntry as unknown as { _data?: { uncompressedSize?: unknown } })._data?.uncompressedSize
+  if (typeof declared === 'number' && Number.isFinite(declared) && declared >= 0 && declared > maxBytes) {
+    throw new ArchiveTooLargeError()
+  }
+}
 
 // Legacy .md entries carry a `---\ndate: …\n---` frontmatter block; the date
 // there is never authoritative (the filename is), so only the body is kept.
@@ -44,14 +74,19 @@ function stripFrontmatter(text: string): string {
   return match ? match[1].replace(/^\n/, '') : text
 }
 
-async function parseZip(file: File): Promise<ParsedZip> {
+export async function parseZip(file: File, limits: ZipImportLimits = DEFAULT_ZIP_LIMITS): Promise<ParsedZip> {
+  if (file.size > limits.maxZipFileBytes) throw new ArchiveTooLargeError()
   const { default: JSZip } = await import('jszip')
   const zip = await JSZip.loadAsync(file)
+  const zipEntries = Object.values(zip.files)
+  if (zipEntries.length > limits.maxZipFiles) throw new ArchiveTooLargeError()
+
   const entries: ParsedEntry[] = []
   const dates = new Set<string>()
   let milestonesEntry: JSZip.JSZipObject | null = null
+  let totalExtractedChars = 0
 
-  for (const zipEntry of Object.values(zip.files)) {
+  for (const zipEntry of zipEntries) {
     if (zipEntry.dir) continue
     const basename = zipEntry.name.split('/').pop() ?? ''
 
@@ -59,8 +94,16 @@ async function parseZip(file: File): Promise<ParsedZip> {
     if (diaryMatch) {
       if (!parseYmd(diaryMatch[1]) || dates.has(diaryMatch[1])) throw new InvalidDiaryArchiveError()
       dates.add(diaryMatch[1])
+      const remainingChars = Math.max(0, limits.maxTotalExtractedChars - totalExtractedChars)
+      checkDeclaredUncompressedBytes(zipEntry, Math.min(limits.maxEntryChars, remainingChars) * 4)
       const content = await zipEntry.async('string')
-      entries.push({ date: diaryMatch[1], content: basename.endsWith('.md') ? stripFrontmatter(content) : content })
+      const normalized = basename.endsWith('.md') ? stripFrontmatter(content) : content
+      if (content.length > limits.maxEntryChars || normalized.length > limits.maxEntryChars) {
+        throw new ArchiveTooLargeError()
+      }
+      totalExtractedChars += content.length
+      if (totalExtractedChars > limits.maxTotalExtractedChars) throw new ArchiveTooLargeError()
+      entries.push({ date: diaryMatch[1], content: normalized })
       continue
     }
 
@@ -75,8 +118,14 @@ async function parseZip(file: File): Promise<ParsedZip> {
 
   let milestones: Milestone[] = []
   if (milestonesEntry) {
+    const remainingChars = Math.max(0, limits.maxTotalExtractedChars - totalExtractedChars)
+    checkDeclaredUncompressedBytes(milestonesEntry, Math.min(limits.maxMilestonesChars, remainingChars) * 4)
+    const milestonesText = await milestonesEntry.async('string')
+    if (milestonesText.length > limits.maxMilestonesChars) throw new ArchiveTooLargeError()
+    totalExtractedChars += milestonesText.length
+    if (totalExtractedChars > limits.maxTotalExtractedChars) throw new ArchiveTooLargeError()
     try {
-      milestones = normalizeMilestones(JSON.parse(await milestonesEntry.async('string')))
+      milestones = normalizeMilestones(JSON.parse(milestonesText))
     } catch (err) {
       console.error('Import: failed to parse milestones file', err)
     }
@@ -151,7 +200,11 @@ export function ImportButton({ existingDates, onImport, existingMilestones = [],
       setPhase('confirming')
     } catch (err) {
       console.error('Import parse failed:', err)
-      setErrorMsg(err instanceof InvalidDiaryArchiveError ? t.import.invalidDiaryArchive : t.import.invalidFile)
+      setErrorMsg(
+        err instanceof ArchiveTooLargeError ? t.import.archiveTooLarge
+          : err instanceof InvalidDiaryArchiveError ? t.import.invalidDiaryArchive
+            : t.import.invalidFile,
+      )
       setPhase('error')
     }
   }, [t])

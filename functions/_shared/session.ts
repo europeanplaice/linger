@@ -338,34 +338,37 @@ function originOf(value: string): string | null {
   }
 }
 
-function allowedOrigins(request: Request, env: Env): Set<string> {
+function isLocalDevOrigin(origin: string | null): boolean {
+  return Boolean(origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')))
+}
+
+function allowedOrigins(env: Env): { origins: Set<string>; isLocalDev: boolean } {
   const origins = new Set<string>()
   const sessionOrigin = originOf(env.SESSION_DOMAIN)
-  const requestOrigin = originOf(request.url)
   if (sessionOrigin) origins.add(sessionOrigin)
-  if (requestOrigin) origins.add(requestOrigin)
 
   // Local development commonly proxies Vite (5173) to Pages Functions (8788).
-  if (sessionOrigin?.startsWith('http://localhost') || sessionOrigin?.startsWith('http://127.0.0.1')) {
+  const isLocalDev = isLocalDevOrigin(sessionOrigin)
+  if (isLocalDev) {
     origins.add('http://localhost:5173')
     origins.add('http://127.0.0.1:5173')
   }
 
-  return origins
+  return { origins, isLocalDev }
 }
 
 export function validateMutationOrigin(request: Request, env: Env): Response | null {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method.toUpperCase())) return null
 
+  const { origins, isLocalDev } = allowedOrigins(env)
   const origin = request.headers.get('Origin')
-  if (origin && !allowedOrigins(request, env).has(origin)) {
+  if (!origin || !origins.has(origin)) {
     return jsonResponse({ error: 'Forbidden' }, 403)
   }
 
   const fetchSite = request.headers.get('Sec-Fetch-Site')
-  // 'none' means the request has no browsing context initiator (e.g. browser extension,
-  // direct navigation) — not a cross-site page load, so it is safe to allow.
-  if (fetchSite && !['same-origin', 'same-site', 'none'].includes(fetchSite)) {
+  const allowedFetchSites = isLocalDev ? ['same-origin', 'same-site'] : ['same-origin']
+  if (fetchSite && !allowedFetchSites.includes(fetchSite)) {
     return jsonResponse({ error: 'Forbidden' }, 403)
   }
 

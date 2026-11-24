@@ -341,6 +341,16 @@ describe('get entry handler', () => {
     expect(drive.getEntryMeta).not.toHaveBeenCalled()
   })
 
+  it('sanitizes raw DriveError upstream response bodies before returning to clients', async () => {
+    vi.mocked(drive.findEntryMeta).mockRejectedValueOnce(new drive.DriveError(403, '{"error":"raw-upstream-secret"}'))
+    const ctx = makeContext({ params: { date: '2026-05-01' } })
+    const res = await onGetEntry(ctx as any)
+    expect(res.status).toBe(403)
+    const body = await res.json()
+    expect(JSON.stringify(body)).not.toContain('raw-upstream-secret')
+    expect(body).toEqual({ error: 'Google Drive access denied' })
+  })
+
   it('validates a provided fileId against the diary folder and date before reading', async () => {
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/entry/2026-05-01?fileId=validFileId1234567890'),

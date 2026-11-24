@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest'
 import { encodeVaultBytes } from '../../functions/_shared/vaultCrypto'
 import {
   inspectDriveFolder, ensureFolder, getEntryContent, saveEntry, trashEntry, generateFileId,
-  listRevisions, getRevisionContent, getDiaryFileMeta, DriveError, DriveConflictError,
+  listRevisions, getRevisionContent, getDiaryFileMeta, describeDriveError, DriveError, DriveConflictError,
   listEntries, getStartPageToken, getChanges, migrateMdToTxt, findJsonFile,
   beginEntryUpload, entryUploadStatus,
 } from '../../functions/_shared/drive'
@@ -41,6 +41,12 @@ describe('DriveError', () => {
     expect(e.status).toBe(404)
     expect(e.message).toBe('Not found')
     expect(e.name).toBe('DriveError')
+  })
+
+  it('maps DriveError to fixed safe messages without leaking upstream bodies', () => {
+    expect(describeDriveError(new DriveError(403, '{"error":"secret upstream info"}'))).toBe('Google Drive access denied')
+    expect(describeDriveError(new DriveError(502, 'raw backend trace'))).toBe('Google Drive temporarily unavailable')
+    expect(describeDriveError(new DriveError(404, 'missing'))).toBe('not_found')
   })
 })
 
@@ -517,18 +523,22 @@ describe('saveEntry', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('builds multipart body with boundary', async () => {
+  it('builds multipart body with a per-request random boundary', async () => {
     const meta = { id: 'f', name: 'diary-2026-05-01.json', version: '1' }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(driveJsonResponse(meta)))
-    const entry = { date: '2026-05-01', content: 'test', updated_at: '2026-05-01T00:00:00.000Z' }
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => driveJsonResponse(meta)))
+    const entry = { date: '2026-05-01', content: '--linger_boundary\n--linger_boundary--', updated_at: '2026-05-01T00:00:00.000Z' }
 
     await saveEntry('token', entry, 'folder-1')
+    await saveEntry('token', entry, 'folder-1')
 
-    const fetchCall = (vi.mocked(fetch).mock.calls[0] as any)
-    const contentType = fetchCall[1].headers['Content-Type']
-    expect(contentType).toContain('multipart/related')
-    expect(contentType).toContain('boundary=linger_boundary')
-    expect(fetchCall[1].body).toContain('linger_boundary')
+    const calls = vi.mocked(fetch).mock.calls as any[]
+    const ct1 = calls[0][1].headers['Content-Type'] as string
+    const ct2 = calls[1][1].headers['Content-Type'] as string
+    expect(ct1).toContain('multipart/related')
+    expect(ct1).toMatch(/boundary=linger_boundary_[0-9a-f]{32}/)
+    expect(ct2).toMatch(/boundary=linger_boundary_[0-9a-f]{32}/)
+    expect(ct1).not.toBe(ct2)
+    expect(calls[0][1].body).toContain('linger_boundary')
   })
 })
 

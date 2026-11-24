@@ -51,3 +51,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "diary" {
     }
   }
 }
+
+data "aws_iam_policy_document" "diary_tls_only" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    resources = [
+      aws_s3_bucket.diary.arn,
+      "${aws_s3_bucket.diary.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "diary_tls_only" {
+  bucket = aws_s3_bucket.diary.id
+  policy = data.aws_iam_policy_document.diary_tls_only.json
+}

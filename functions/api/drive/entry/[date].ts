@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../../_shared/session'
 import { jsonResponse } from '../../../_shared/session'
-import { findEntryMeta, getEntryContent, getDiaryFileMeta, DriveError } from '../../../_shared/drive'
+import { findEntryMeta, getEntryContent, getDiaryFileMeta, describeDriveError, DriveError } from '../../../_shared/drive'
 import { forwardDiaryMutation } from '../../../_shared/diaryWriter'
 
 export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) => {
@@ -39,7 +39,7 @@ export const onRequestGet: PagesFunction<Env, 'date', Data> = async (context) =>
   } catch (e) {
     if (e instanceof DriveError) {
       if (e.status === 404) return jsonResponse({ error: 'not_found' }, 404)
-      return jsonResponse({ error: e.message }, e.status)
+      return jsonResponse({ error: describeDriveError(e) }, e.status)
     }
     return jsonResponse({ error: 'Internal error' }, 500)
   }

@@ -7,6 +7,7 @@ import {
   trashEntry,
   ensureFolder,
   getDiaryFileMeta,
+  describeDriveError,
   DriveError,
   DriveConflictError,
 } from './drive'
@@ -152,7 +153,7 @@ export async function saveDiaryEntry(context: EntryMutationContext): Promise<Res
       const entry = meta ? await getEntryContent(accessToken, meta.id, date) : null
       return jsonResponse({ conflict: meta && entry ? { entry, meta } : null }, 409)
     }
-    if (e instanceof DriveError) return jsonResponse({ error: e.message }, e.status)
+    if (e instanceof DriveError) return jsonResponse({ error: describeDriveError(e) }, e.status)
     return jsonResponse({ error: 'Internal error' }, 500)
   }
 }
@@ -182,7 +183,7 @@ export async function removeDiaryEntry(context: EntryMutationContext): Promise<R
   } catch (e) {
     if (e instanceof DriveError) {
       if (e.status === 404) return new Response(null, { status: 204 })
-      return jsonResponse({ error: e.message }, e.status)
+      return jsonResponse({ error: describeDriveError(e) }, e.status)
     }
     return jsonResponse({ error: 'Internal error' }, 500)
   }

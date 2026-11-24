@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestGet, __clearEntryStatusSettingsCacheForTests } from '../../functions/api/s3/entry-status/[date]'
+import { onRequestGet, __clearEntryStatusSettingsCacheForTests, __getEntryStatusSettingsCacheKeysForTests } from '../../functions/api/s3/entry-status/[date]'
 import * as s3Settings from '../../functions/_shared/s3Settings'
 import * as session from '../../functions/_shared/session'
 import * as s3 from '../../functions/_shared/s3'
@@ -455,6 +455,28 @@ describe('GET /api/s3/entry-status/[date] — settings lookup caching', () => {
 
     expect(await res2.json()).toEqual({ status: 'disabled' })
     expect(s3Settings.getS3Settings).toHaveBeenCalledTimes(2)
+  })
+
+  it('keys the cache by hashed session ID, evicts expired entries, and caps total cache size', async () => {
+    vi.mocked(s3Settings.getS3Settings).mockResolvedValue(enabledSettings)
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-05-01T00:00:00.000Z').getTime())
+    try {
+      await (await onRequestGet(makeContext({ data: { accessToken: 'tok', sessionId: 'raw-secret-sid', session: {} } }) as any)).json()
+      const keys = __getEntryStatusSettingsCacheKeysForTests()
+      expect(keys).toHaveLength(1)
+      expect(keys[0]).not.toContain('raw-secret-sid')
+      expect(keys[0]).toMatch(/^sha256:/)
+
+      dateSpy.mockReturnValue(new Date('2026-05-01T00:00:06.000Z').getTime())
+      for (let i = 0; i < 105; i++) {
+        await (await onRequestGet(makeContext({ data: { accessToken: 'tok', sessionId: `sid-${i}`, session: {} } }) as any)).json()
+      }
+      const boundedKeys = __getEntryStatusSettingsCacheKeysForTests()
+      expect(boundedKeys.length).toBeLessThanOrEqual(100)
+      expect(boundedKeys).not.toContain(keys[0])
+    } finally {
+      dateSpy.mockRestore()
+    }
   })
 })
 

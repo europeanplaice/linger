@@ -102,10 +102,16 @@ function clearChallengeCookie(env: Env): string {
 function sameOrigin(request: Request, env: Env): Response | null {
   const origin = request.headers.get('Origin')
   let allowed: Set<string>
-  try { allowed = passkeyAllowedOrigins(env) } catch { return jsonResponse({ error: 'Passkeys unavailable' }, 503) }
+  let isLocalDev = false
+  try {
+    allowed = passkeyAllowedOrigins(env)
+    const configured = new URL(env.SESSION_DOMAIN)
+    isLocalDev = configured.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(configured.hostname)
+  } catch { return jsonResponse({ error: 'Passkeys unavailable' }, 503) }
   if (!origin || !allowed.has(origin)) return jsonResponse({ error: 'Forbidden' }, 403)
   const fetchSite = request.headers.get('Sec-Fetch-Site')
-  if (fetchSite && !['same-origin', 'same-site'].includes(fetchSite)) return jsonResponse({ error: 'Forbidden' }, 403)
+  const allowedFetchSites = isLocalDev ? ['same-origin', 'same-site'] : ['same-origin']
+  if (fetchSite && !allowedFetchSites.includes(fetchSite)) return jsonResponse({ error: 'Forbidden' }, 403)
   return null
 }
 

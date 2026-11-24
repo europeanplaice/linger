@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../../../_shared/session'
 import { jsonResponse } from '../../../../_shared/session'
-import { getRevisionContent, getDiaryFileMeta, DriveError } from '../../../../_shared/drive'
+import { getRevisionContent, getDiaryFileMeta, describeDriveError, DriveError } from '../../../../_shared/drive'
 
 export const onRequestGet: PagesFunction<Env, 'fileId' | 'revisionId', Data> = async (context) => {
   const { accessToken, sessionId, session } = context.data
@@ -16,7 +16,7 @@ export const onRequestGet: PagesFunction<Env, 'fileId' | 'revisionId', Data> = a
     const entry = await getRevisionContent(accessToken, fileId, revisionId)
     return jsonResponse(entry)
   } catch (e) {
-    if (e instanceof DriveError) return jsonResponse({ error: e.message }, e.status)
+    if (e instanceof DriveError) return jsonResponse({ error: describeDriveError(e) }, e.status)
     return jsonResponse({ error: 'Internal error' }, 500)
   }
 }

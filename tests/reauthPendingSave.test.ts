@@ -70,7 +70,7 @@ test('pending save waits for popup completion, then retries for the same Google 
   await page.getByRole('button', { name: 'Reconnect Google Drive' }).click()
   const popup = await popupPromise
   await popup.waitForLoadState()
-  expect(new URL(popup.url()).searchParams.get('login_hint')).toBe('google-a')
+  expect(new URL(popup.url()).searchParams.has('login_hint')).toBe(false)
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('pendingSaveCount'))).toBe('1')
 
   await popup.evaluate(() => window.opener?.postMessage({

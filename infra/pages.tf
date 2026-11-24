@@ -23,7 +23,7 @@ resource "cloudflare_pages_project" "linger" {
         AUTH_DB = { id = cloudflare_d1_database.auth["preview"].id }
       }
       durable_object_namespaces = {}
-      fail_open                 = true
+      fail_open                 = false
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_preview.id
@@ -44,7 +44,7 @@ resource "cloudflare_pages_project" "linger" {
         AUTH_DB = { id = cloudflare_d1_database.auth["production"].id }
       }
       durable_object_namespaces = {}
-      fail_open                 = true
+      fail_open                 = false
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions.id
@@ -103,7 +103,7 @@ resource "cloudflare_pages_project" "linger_staging" {
         AUTH_DB = { id = cloudflare_d1_database.auth["staging"].id }
       }
       durable_object_namespaces = {}
-      fail_open                 = true
+      fail_open                 = false
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_staging.id
@@ -124,7 +124,7 @@ resource "cloudflare_pages_project" "linger_staging" {
         AUTH_DB = { id = cloudflare_d1_database.auth["staging"].id }
       }
       durable_object_namespaces = {}
-      fail_open                 = true
+      fail_open                 = false
       kv_namespaces = {
         SESSIONS = {
           namespace_id = cloudflare_workers_kv_namespace.sessions_staging.id

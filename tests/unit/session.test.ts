@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   parseSessionId, getSession, saveSession, getValidAccessToken, getValidIdToken,
-  makeSessionCookie, clearSessionCookie, jsonResponse,
+  makeSessionCookie, clearSessionCookie, jsonResponse, validateMutationOrigin,
   removeEmailSessionIndex, invalidateSession,
 } from '../../functions/_shared/session'
 import { sessionStorageId } from '../../functions/_shared/authStore'
@@ -127,5 +127,57 @@ describe('session indexes and revocation', () => {
     expect(db.prepare('SELECT id FROM passkey_users WHERE id = ?').get(userId)).toEqual({ id: userId })
     expect(kv.size()).toBe(0)
     db.close()
+  })
+})
+
+describe('validateMutationOrigin', () => {
+  const prodEnv = { SESSION_DOMAIN: 'https://linger.example' } as never
+  const localEnv = { SESSION_DOMAIN: 'http://localhost:8788' } as never
+
+  it('allows GET requests without Origin', () => {
+    expect(validateMutationOrigin(new Request('https://linger.example/api/drive/entries'), prodEnv)).toBeNull()
+  })
+
+  it('allows POST with matching SESSION_DOMAIN Origin and Sec-Fetch-Site: same-origin', () => {
+    const req = new Request('https://linger.example/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://linger.example', 'Sec-Fetch-Site': 'same-origin' },
+    })
+    expect(validateMutationOrigin(req, prodEnv)).toBeNull()
+  })
+
+  it('rejects mutation requests without an Origin header', () => {
+    const req = new Request('https://linger.example/auth/logout', { method: 'POST' })
+    expect(validateMutationOrigin(req, prodEnv)?.status).toBe(403)
+  })
+
+  it('rejects mutation requests whose Origin matches request.url host instead of SESSION_DOMAIN', () => {
+    const req = new Request('https://other-preview.pages.dev/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://other-preview.pages.dev', 'Sec-Fetch-Site': 'same-origin' },
+    })
+    expect(validateMutationOrigin(req, prodEnv)?.status).toBe(403)
+  })
+
+  it('rejects Sec-Fetch-Site: same-site on HTTPS production, but allows local Vite proxy', () => {
+    const prodReq = new Request('https://linger.example/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://linger.example', 'Sec-Fetch-Site': 'same-site' },
+    })
+    expect(validateMutationOrigin(prodReq, prodEnv)?.status).toBe(403)
+
+    const devReq = new Request('http://localhost:8788/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' },
+    })
+    expect(validateMutationOrigin(devReq, localEnv)).toBeNull()
+  })
+
+  it.each(['cross-site', 'none'])('rejects Sec-Fetch-Site: %s', fetchSite => {
+    const req = new Request('https://linger.example/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://linger.example', 'Sec-Fetch-Site': fetchSite },
+    })
+    expect(validateMutationOrigin(req, prodEnv)?.status).toBe(403)
   })
 })

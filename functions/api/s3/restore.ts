@@ -1,7 +1,7 @@
 import type { Env, Data } from '../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../_shared/session'
 import { listObjectKeys, getObjectContent, S3Error, describeError } from '../../_shared/s3'
-import { listEntries, findEntryMeta, DriveError } from '../../_shared/drive'
+import { listEntries, findEntryMeta, describeDriveError, DriveError } from '../../_shared/drive'
 import { loadS3SettingsRecord, getAssumedCredentials, entryKey, DIARY_FILENAME_RE } from '../../_shared/s3Settings'
 
 // Restore-from-backup: the mirror is write-only everywhere else, so if an entry
@@ -105,7 +105,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async (context) =
     }
     if (e instanceof DriveError) {
       console.error('s3/restore.ts: Drive write failed')
-      return jsonResponse({ ok: false, error: e.message }, e.status)
+      return jsonResponse({ ok: false, error: describeDriveError(e) }, e.status)
     }
     console.error('s3/restore.ts: unexpected failure')
     return jsonResponse({ ok: false, error: 'Unexpected error' })

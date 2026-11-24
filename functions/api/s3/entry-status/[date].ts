@@ -2,6 +2,7 @@ import type { Env, Data, SessionData } from '../../../_shared/session'
 import { jsonResponse, getValidIdToken } from '../../../_shared/session'
 import { headObject, isAtLeast, describeError } from '../../../_shared/s3'
 import { findCurrentEntryMeta } from '../../../_shared/drive'
+import { sessionStorageId } from '../../../_shared/authStore'
 import { getS3Settings, entryKey, getAssumedCredentials, type S3Settings } from '../../../_shared/s3Settings'
 
 // A single save schedules up to 7 status polls (S3_POLL_DELAYS_MS in
@@ -17,17 +18,36 @@ import { getS3Settings, entryKey, getAssumedCredentials, type S3Settings } from 
 // current config; see loadS3SettingsRecord).
 const settingsCheckCache = new Map<string, { settings: S3Settings | null; expiresAt: number }>()
 const SETTINGS_CHECK_CACHE_MS = 5_000
+const MAX_SETTINGS_CACHE_ENTRIES = 100
 
 export function __clearEntryStatusSettingsCacheForTests(): void {
   settingsCheckCache.clear()
 }
 
+export function __getEntryStatusSettingsCacheKeysForTests(): string[] {
+  return [...settingsCheckCache.keys()]
+}
+
+function pruneSettingsCache(now: number): void {
+  for (const [key, entry] of settingsCheckCache) {
+    if (entry.expiresAt <= now) settingsCheckCache.delete(key)
+  }
+  while (settingsCheckCache.size >= MAX_SETTINGS_CACHE_ENTRIES) {
+    const oldestKey = settingsCheckCache.keys().next().value
+    if (oldestKey === undefined) break
+    settingsCheckCache.delete(oldestKey)
+  }
+}
+
 async function getS3SettingsForStatusCheck(token: string, sessionId: string, session: SessionData, env: Env): Promise<S3Settings | null> {
-  const cached = settingsCheckCache.get(sessionId)
+  const cacheKey = await sessionStorageId(sessionId)
+  const cached = settingsCheckCache.get(cacheKey)
   const now = Date.now()
   if (cached && cached.expiresAt > now) return cached.settings
+  if (cached) settingsCheckCache.delete(cacheKey)
   const settings = await getS3Settings(token, sessionId, session, env)
-  settingsCheckCache.set(sessionId, { settings, expiresAt: now + SETTINGS_CHECK_CACHE_MS })
+  pruneSettingsCache(now)
+  settingsCheckCache.set(cacheKey, { settings, expiresAt: now + SETTINGS_CHECK_CACHE_MS })
   return settings
 }
 

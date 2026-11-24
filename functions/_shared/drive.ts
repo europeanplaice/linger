@@ -68,6 +68,20 @@ export class DriveError extends Error {
   }
 }
 
+export function describeDriveError(error: DriveError): string {
+  switch (error.status) {
+    case 400: return 'Invalid Google Drive request'
+    case 401: return 'Google authorization expired or invalid'
+    case 403: return 'Google Drive access denied'
+    case 404: return 'not_found'
+    case 409: return 'Google Drive conflict'
+    case 429: return 'Too many Google Drive requests'
+    default:
+      if (error.status >= 500 && error.status < 600) return 'Google Drive temporarily unavailable'
+      return 'Google Drive request failed'
+  }
+}
+
 export class DriveConflictError extends Error {
   constructor() {
     super('Version conflict')
@@ -463,12 +477,16 @@ export async function getEntryContent(token: string, fileId: string, date: strin
 }
 
 function buildMultipart(meta: object, body: string, bodyMimeType = 'text/plain; charset=UTF-8'): { contentType: string; data: string } {
-  const boundary = 'linger_boundary'
+  const metaJson = JSON.stringify(meta)
+  let boundary: string
+  do {
+    boundary = `linger_boundary_${crypto.randomUUID().replace(/-/g, '')}`
+  } while (metaJson.includes(boundary) || body.includes(boundary))
   const parts = [
     `--${boundary}`,
     'Content-Type: application/json; charset=UTF-8',
     '',
-    JSON.stringify(meta),
+    metaJson,
     `--${boundary}`,
     `Content-Type: ${bodyMimeType}`,
     '',

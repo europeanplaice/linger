@@ -8,7 +8,9 @@ import { createSession, getSession } from '../../functions/_shared/session'
 import { clearOAuthCredentials, getAccessToken, getIdToken, setOAuthCredentials } from '../../src/lib/oauthCredentials'
 import { apiFetch, searchEntries } from '../../src/api/driveEntries'
 import { jsonResponse } from '../../functions/_shared/session'
+import { describeDriveError, DriveError } from '../../functions/_shared/drive'
 import { describeError, S3Error } from '../../functions/_shared/s3'
+import { announceAccount, AUTH_EVENT_KEY } from '../../src/lib/accountSession'
 import { unlockVaultWithKey, clearVaultKey } from '../../src/lib/passkeyVault'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { revokeSession, startSignIn } from '../../src/api/auth'
@@ -26,6 +28,9 @@ describe('diagnostic privacy boundary', () => {
     error.name = `${awsSecret} ${diaryText}`
     expect(describeError(error)).toBe('Error occurred')
     expect(describeError(new S3Error(403, `${idToken} ${diaryText}`))).toBe('Request failed (HTTP 403)')
+    const driveSummary = describeDriveError(new DriveError(403, `${accessToken} ${diaryText}`))
+    expect(driveSummary).not.toContain(accessToken)
+    expect(driveSummary).not.toContain(diaryText)
   })
 
   it('allows only fixed string literals in backend console calls', () => {
@@ -204,6 +209,13 @@ describe('browser credential lifetime', () => {
     clearOAuthCredentials()
     clearVaultKey()
     vi.restoreAllMocks()
+  })
+
+  it('does not persist raw Google identifiers in localStorage auth events', () => {
+    announceAccount('sub:sentinel-google-sub')
+    const raw = localStorage.getItem(AUTH_EVENT_KEY) ?? ''
+    expect(raw).not.toContain('sentinel-google-sub')
+    localStorage.clear()
   })
 
   it('keeps credentials in module memory and clears them on reload-equivalent reset', () => {

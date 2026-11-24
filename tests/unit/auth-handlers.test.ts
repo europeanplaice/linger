@@ -26,10 +26,12 @@ describe('logout handler', () => {
   it('revokes only the passkey session and clears the cookie', async () => {
     const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv({ google_sub: 'google-sub-123' })
     const request = new Request('https://example.com/auth/logout', {
-      method: 'POST', headers: { ...headers, 'X-Linger-Account': 'sub:google-sub-123' },
+      method: 'POST', headers: { ...headers, Origin: 'https://example.com', 'X-Linger-Account': 'sub:google-sub-123' },
     })
     const response = await onLogout({ request, env } as never)
     expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
     expect(response.headers.get('Set-Cookie')).toContain('Max-Age=0')
     expect(db.prepare('SELECT user_id, data, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
       .toEqual({ user_id: null, data: null, revoked: 1 })
@@ -40,9 +42,20 @@ describe('logout handler', () => {
   it('does not revoke a session if the browser vault user changed', async () => {
     const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv()
     const request = new Request('https://example.com/auth/logout', {
-      method: 'POST', headers: { ...headers, 'X-Linger-Vault-User': 'another-user' },
+      method: 'POST', headers: { ...headers, Origin: 'https://example.com', 'X-Linger-Vault-User': 'another-user' },
     })
     expect((await onLogout({ request, env } as never)).status).toBe(401)
+    expect(db.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
+      .toEqual({ user_id: userId, revoked: 0 })
+    db.close()
+  })
+
+  it('rejects logout requests missing Origin before revocation', async () => {
+    const { env, db, headers, sessionId, userId } = await createPasskeyTestEnv()
+    const request = new Request('https://example.com/auth/logout', {
+      method: 'POST', headers,
+    })
+    expect((await onLogout({ request, env } as never)).status).toBe(403)
     expect(db.prepare('SELECT user_id, revoked FROM auth_sessions WHERE id = ?').get(await sessionStorageId(sessionId)))
       .toEqual({ user_id: userId, revoked: 0 })
     db.close()
@@ -61,7 +74,7 @@ describe('logout handler', () => {
 
   it('omits Secure flag on HTTP domains', async () => {
     const { env, db, headers } = await createPasskeyTestEnv({}, { domain: 'http://localhost:8788' })
-    const response = await onLogout({ request: new Request('http://localhost:8788/auth/logout', { method: 'POST', headers }), env } as never)
+    const response = await onLogout({ request: new Request('http://localhost:8788/auth/logout', { method: 'POST', headers: { ...headers, Origin: 'http://localhost:8788' } }), env } as never)
     expect(response.headers.get('Set-Cookie')).not.toContain('Secure')
     db.close()
   })

@@ -19,11 +19,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
     await invalidateSession(sessionId, undefined, env)
   }
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      'Set-Cookie': clearSessionCookie(!env.SESSION_DOMAIN.startsWith('http://')),
-    },
+  return jsonResponse({ ok: true }, 200, {
+    'Set-Cookie': clearSessionCookie(!env.SESSION_DOMAIN.startsWith('http://')),
   })
 }
