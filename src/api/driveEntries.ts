@@ -268,6 +268,44 @@ export async function getEntryByDate(date: string, cachedVersion?: string, fileI
     `${BASE}/entry/${encodeURIComponent(date)}${params}`,
     { headers, signal },
   )
+
+  const initialToken = fileId && !cachedVersion ? getAccessToken() : null
+  if (fileId && !cachedVersion && initialToken) {
+    const contentController = new AbortController()
+    const contentSignal = signal ? AbortSignal.any([signal, contentController.signal]) : contentController.signal
+    const authPromise = authorize()
+    // Start downloading content in parallel with Linger's folder/account authorization.
+    // The downloaded content is only returned after authorize() succeeds for the same fileId.
+    const contentPromise = readDriveEntry(fileId, date, {
+      accessToken: initialToken,
+      verifyRefreshedToken: async () => (await authorize()).accessToken,
+    }, contentSignal)
+    // Prevent unhandled rejection if authorize() fails or returns 404/304 first.
+    contentPromise.catch(() => {})
+
+    let authResult: { data: { meta: DriveFileMeta }; status: number; accessToken: string | null }
+    try {
+      authResult = await authPromise
+    } catch (error) {
+      contentController.abort()
+      throw error
+    }
+    account.assertCurrent()
+    const { data, status, accessToken } = authResult
+    if (status === 304) { contentController.abort(); return 'not-modified' }
+    if (status === 404 || !data) { contentController.abort(); return null }
+    if (data.meta.id === fileId && accessToken === initialToken) {
+      const entry = await contentPromise
+      return entry && { entry, meta: data.meta }
+    }
+    contentController.abort()
+    const entry = await readDriveEntry(data.meta.id, date, {
+      accessToken,
+      verifyRefreshedToken: async () => (await authorize()).accessToken,
+    }, signal)
+    return entry && { entry, meta: data.meta }
+  }
+
   const { data, status, accessToken } = await authorize()
   account.assertCurrent()
   if (status === 304) return 'not-modified'

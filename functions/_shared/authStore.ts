@@ -100,6 +100,7 @@ export function sanitizeSession(session: SessionData): SessionData {
     ...(typeof session.s3_settings_file_id === 'string' ? { s3_settings_file_id: session.s3_settings_file_id } : {}),
     ...(typeof session.s3_status_file_id === 'string' ? { s3_status_file_id: session.s3_status_file_id } : {}),
     ...(typeof session.s3_status_negative_cache_at === 'number' && Number.isFinite(session.s3_status_negative_cache_at) ? { s3_status_negative_cache_at: session.s3_status_negative_cache_at } : {}),
+    ...(typeof session.milestones_file_id === 'string' ? { milestones_file_id: session.milestones_file_id } : {}),
   }
 }
 

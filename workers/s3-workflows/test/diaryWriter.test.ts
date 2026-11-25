@@ -16,7 +16,7 @@ import { createTestSession, testSession, vaultKey } from './auth'
 vi.mock('../../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../../functions/_shared/drive')>(),
   ensureFolder: vi.fn(), findEntryMeta: vi.fn(), getDiaryFileMeta: vi.fn(),
-  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), inspectDriveFolder: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), trashEntry: vi.fn(),
+  getEntryContent: vi.fn(), getEntryMeta: vi.fn(), inspectDriveFolder: vi.fn(), listDriveFolders: vi.fn(), saveEntry: vi.fn(), generateFileId: vi.fn(), generateFileIds: vi.fn(), trashEntry: vi.fn(),
   beginEntryUpload: vi.fn(), entryUploadStatus: vi.fn(), cancelEntryUpload: vi.fn(),
 }))
 vi.mock('../../../functions/_shared/s3Settings', async original => ({
@@ -58,6 +58,7 @@ beforeEach(() => {
   })
   vi.mocked(drive.getEntryContent).mockImplementation(async (_token, id) => ({ date, content: files.get(id)!.content }))
   vi.mocked(drive.generateFileId).mockImplementation(async () => `generated-file-${++sequence}`)
+  vi.mocked(drive.generateFileIds).mockImplementation(async (_token, count = 20) => Array.from({ length: count }, () => `generated-file-${++sequence}`))
   vi.mocked(drive.saveEntry).mockImplementation(async (_token, entry, folderId, fileId, _condition, createId) => {
     active++
     maxActive = Math.max(maxActive, active)
@@ -278,7 +279,7 @@ describe('account-scoped diary mutations', () => {
     await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.put(`create:${date}`, legacy))
 
     expect((await service.mutateDiaryEntry(input('entry'))).status).toBe(200)
-    expect(drive.generateFileId).not.toHaveBeenCalled()
+    expect(drive.generateFileIds).not.toHaveBeenCalled()
     expect(files.has('reserved-id')).toBe(true)
     const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => Object.fromEntries(await state.storage.list()))
     expect(JSON.stringify(stored)).not.toContain(date)
@@ -291,7 +292,7 @@ describe('account-scoped diary mutations', () => {
       state.storage.put(`create:${date}`, { id: 'legacy-reserved-id', folderId }),
     )
     expect((await service.mutateDiaryEntry(input('entry'))).status).toBe(200)
-    expect(drive.generateFileId).not.toHaveBeenCalled()
+    expect(drive.generateFileIds).not.toHaveBeenCalled()
     expect(files.has('legacy-reserved-id')).toBe(true)
     const stored = await runInDurableObject(writer, async (_instance: DiaryWriter, state) => Object.fromEntries(await state.storage.list()))
     expect(JSON.stringify(stored)).not.toContain(date)
@@ -307,7 +308,7 @@ describe('account-scoped diary mutations', () => {
     await expect(service.ensureDiaryFolder(auth)).rejects.toThrow()
     const remaining = await runInDurableObject(writer, (_instance: DiaryWriter, state) => state.storage.get(`create:${date}`))
     expect(remaining).toBe(old)
-    expect(drive.generateFileId).not.toHaveBeenCalled()
+    expect(drive.generateFileIds).not.toHaveBeenCalled()
   })
 
   it('migrates every legacy date key on an authenticated folder request', async () => {
@@ -473,7 +474,7 @@ describe('account-scoped diary mutations', () => {
     const reservation = await openVaultValue<{ id: string; folderId: string }>(auth.vaultKey, auth.accountKey, `diary-writer:${reservedKey}`, reserved!)
     expect((await service.mutateDiaryEntry(input('retained'))).status).toBe(200)
     expect(files.size).toBe(1)
-    expect(drive.generateFileId).toHaveBeenCalledOnce()
+    expect(drive.generateFileIds).toHaveBeenCalledOnce()
     expect([...files.keys()]).toEqual([reservation.id])
   })
 
@@ -548,7 +549,7 @@ describe('coordinated direct Drive uploads', () => {
     expect(await first.json()).toEqual({ uploadUrl })
     expect(second.body).toEqual({ uploadUrl })
     expect(drive.beginEntryUpload).toHaveBeenCalledOnce()
-    expect(drive.generateFileId).toHaveBeenCalledOnce()
+    expect(drive.generateFileIds).toHaveBeenCalledOnce()
     expect(drive.saveEntry).not.toHaveBeenCalled()
 
     const competing = await service.uploadDiaryEntry({ ...prepare, operationId: crypto.randomUUID() })
@@ -556,7 +557,7 @@ describe('coordinated direct Drive uploads', () => {
     expect((await service.mutateDiaryEntry({ ...input(''), method: 'DELETE' })).status).toBe(429)
     await expect(service.selectDiaryFolder({ ...auth, folderId: 'other-folder' })).rejects.toThrow('in progress')
 
-    const id = await vi.mocked(drive.generateFileId).mock.results[0].value!
+    const [id] = await vi.mocked(drive.generateFileIds).mock.results[0].value!
     const meta = { id, name: `diary-${date}.txt`, version: '1', mimeType: 'text/plain', parents: [`folder-${auth.accountKey}`] }
     vi.mocked(drive.entryUploadStatus).mockResolvedValue(meta)
     // Model a completed upload whose tab closed before calling complete.
@@ -589,7 +590,49 @@ describe('coordinated direct Drive uploads', () => {
     expect((await service.uploadDiaryEntry({ ...prepare, operationId: crypto.randomUUID() })).status).toBe(200)
     expect(drive.cancelEntryUpload).toHaveBeenCalledExactlyOnceWith(uploadUrl)
     expect(drive.beginEntryUpload).toHaveBeenCalledTimes(2)
-    expect(drive.generateFileId).toHaveBeenCalledOnce()
+    expect(drive.generateFileIds).toHaveBeenCalledOnce()
+  })
+
+  it('reuses cached folder pointer and pooled file IDs across uploads, falling back on folder 404', async () => {
+    const { auth, service } = await account()
+    await service.ensureDiaryFolder(auth)
+    vi.mocked(drive.getEntryMeta).mockClear()
+
+    const first = await service.uploadDiaryEntry({
+      ...auth, date: '2026-11-01', action: 'prepare', operationId: crypto.randomUUID(),
+      origin: 'https://linger.example', bytes: 5, baseVersion: null,
+    })
+    expect(first.status).toBe(200)
+    expect(drive.getEntryMeta).not.toHaveBeenCalled()
+    expect(drive.generateFileIds).toHaveBeenCalledOnce()
+
+    const second = await service.uploadDiaryEntry({
+      ...auth, date: '2026-11-02', action: 'prepare', operationId: crypto.randomUUID(),
+      origin: 'https://linger.example', bytes: 5, baseVersion: null,
+    })
+    expect(second.status).toBe(200)
+    expect(drive.getEntryMeta).not.toHaveBeenCalled()
+    expect(drive.generateFileIds).toHaveBeenCalledOnce()
+
+    vi.mocked(drive.beginEntryUpload)
+      .mockRejectedValueOnce(new drive.DriveError(404, 'folder missing'))
+      .mockResolvedValueOnce(uploadUrl)
+    vi.mocked(drive.getEntryMeta).mockResolvedValueOnce({
+      id: `folder-${auth.accountKey}`, name: 'linger_diary', mimeType: 'application/vnd.google-apps.folder', trashed: true,
+    })
+    vi.mocked(drive.ensureFolder).mockImplementationOnce(async (_token, _id, session) => {
+      session.folder_id = 'recovered-folder'
+      return 'recovered-folder'
+    })
+
+    const recovered = await service.uploadDiaryEntry({
+      ...auth, date: '2026-11-03', action: 'prepare', operationId: crypto.randomUUID(),
+      origin: 'https://linger.example', bytes: 5, baseVersion: null,
+    })
+    expect(recovered.status).toBe(200)
+    expect(drive.beginEntryUpload).toHaveBeenLastCalledWith(
+      auth.accessToken, 'https://linger.example', '2026-11-03', 'recovered-folder', expect.any(String), true, 5,
+    )
   })
 
   it('returns conflict metadata without reading either version of the entry', async () => {

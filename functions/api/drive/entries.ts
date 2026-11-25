@@ -13,14 +13,14 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
     ])
 
     // Persist the changes API baseline so the next incremental sync is
-    // relative to the state just observed here.
-    if (startPageToken) {
-      try {
-        session.changes_start_page_token = startPageToken
-        await saveSession(sessionId, { ...session, changes_start_page_token: startPageToken }, context.env)
-      } catch (e) {
+    // relative to the state just observed here without blocking the response.
+    if (startPageToken && startPageToken !== session.changes_start_page_token) {
+      session.changes_start_page_token = startPageToken
+      const saving = saveSession(sessionId, { ...session, changes_start_page_token: startPageToken }, context.env).catch(() => {
         console.error('entries.ts: Failed to refresh changes start page token')
-      }
+      })
+      if (typeof context.waitUntil === 'function') context.waitUntil(saving)
+      else await saving
     }
 
     return jsonResponse({ files })

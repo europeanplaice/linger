@@ -37,6 +37,7 @@ vi.mock('../../functions/_shared/drive', async (importOriginal) => ({
   getStartPageToken: vi.fn().mockResolvedValue('tok-init'),
   getChanges: vi.fn().mockResolvedValue({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' }),
   findJsonFile: vi.fn().mockResolvedValue(null),
+  findJsonFiles: vi.fn().mockResolvedValue({}),
   readJsonFile: vi.fn().mockResolvedValue([]),
   writeJsonFile: vi.fn().mockResolvedValue({ id: 'milestones-file', name: 'milestones.json' }),
   trashEntry: vi.fn().mockResolvedValue(undefined),
@@ -137,7 +138,7 @@ describe('search handler', () => {
 
 describe('milestones handler', () => {
   it('returns the stored list from milestones.json', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('milestones-file')
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'milestones.json': 'milestones-file' })
     vi.mocked(drive.readJsonFile).mockResolvedValueOnce([
       { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
     ])
@@ -151,10 +152,25 @@ describe('milestones handler', () => {
     expect(drive.readJsonFile).toHaveBeenCalledWith('tok', 'milestones-file')
   })
 
+  it('reuses cached milestones_file_id without listing Drive and falls back on 404', async () => {
+    vi.mocked(drive.readJsonFile).mockResolvedValueOnce([{ id: 'b', label: 'B', date: '2020-05-10' }])
+    const res = await onGetMilestones(makeContext({ data: { accessToken: 'tok', sessionId: 'sid', session: { milestones_file_id: 'cached-ms' } } }) as any)
+    expect(res.status).toBe(200)
+    expect(drive.findJsonFiles).not.toHaveBeenCalled()
+    expect(drive.readJsonFile).toHaveBeenCalledWith('tok', 'cached-ms')
+
+    vi.mocked(drive.readJsonFile)
+      .mockRejectedValueOnce(new drive.DriveError(404, 'not_found'))
+      .mockResolvedValueOnce([{ id: 'c', label: 'C', date: '2021-06-01' }])
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'milestones.json': 'fresh-ms' })
+    const res2 = await onGetMilestones(makeContext({ data: { accessToken: 'tok', sessionId: 'sid', session: { milestones_file_id: 'stale-ms' } } }) as any)
+    expect(res2.status).toBe(200)
+    expect(drive.findJsonFiles).toHaveBeenCalledOnce()
+    expect(drive.readJsonFile).toHaveBeenLastCalledWith('tok', 'fresh-ms')
+  })
+
   it('falls back to anniversaries.json when milestones.json does not exist', async () => {
-    vi.mocked(drive.findJsonFile)
-      .mockResolvedValueOnce(null)           // milestones.json not found
-      .mockResolvedValueOnce('legacy-file')  // anniversaries.json found
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'anniversaries.json': 'legacy-file' })
     vi.mocked(drive.readJsonFile).mockResolvedValueOnce([
       { id: 'birthday', label: 'Birthday', date: '2020-05-10' },
     ])
@@ -222,7 +238,7 @@ describe('milestones handler', () => {
   })
 
   it('updates the existing Drive file with sanitized body', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('milestones-file')
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'milestones.json': 'milestones-file' })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/milestones', {
         method: 'PUT',
@@ -243,9 +259,7 @@ describe('milestones handler', () => {
   })
 
   it('trashes legacy anniversaries.json only after writing milestones.json', async () => {
-    vi.mocked(drive.findJsonFile)
-      .mockResolvedValueOnce(null)           // milestones.json not found (first PUT call)
-      .mockResolvedValueOnce('legacy-file')  // anniversaries.json found
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'anniversaries.json': 'legacy-file' })
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/milestones', {
         method: 'PUT',
@@ -260,7 +274,7 @@ describe('milestones handler', () => {
   })
 
   it('does not trash the legacy settings when writing the replacement fails', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValueOnce(null)
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'anniversaries.json': 'legacy-file' })
     vi.mocked(drive.writeJsonFile).mockRejectedValueOnce(new drive.DriveError(403, 'Forbidden'))
     const ctx = makeContext({
       request: new Request('http://localhost/api/drive/milestones', { method: 'PUT', body: '[]' }),
@@ -306,7 +320,7 @@ describe('milestones handler', () => {
   })
 
   it('returns [] when the stored file contains corrupted JSON', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('milestones-file')
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'milestones.json': 'milestones-file' })
     vi.mocked(drive.readJsonFile).mockRejectedValueOnce(new SyntaxError('Unexpected token'))
 
     const res = await onGetMilestones(makeContext() as any)
@@ -316,7 +330,7 @@ describe('milestones handler', () => {
   })
 
   it('returns [] when the stored file contains valid JSON that is not an array', async () => {
-    vi.mocked(drive.findJsonFile).mockResolvedValueOnce('milestones-file')
+    vi.mocked(drive.findJsonFiles).mockResolvedValueOnce({ 'milestones.json': 'milestones-file' })
     vi.mocked(drive.readJsonFile).mockResolvedValueOnce({ unexpected: true })
 
     const res = await onGetMilestones(makeContext() as any)
@@ -621,10 +635,31 @@ describe('list revisions handler', () => {
     expect(res.status).toBe(400)
   })
 
-  it('accepts a valid fileId', async () => {
+  it('accepts a valid fileId and checks metadata in parallel with listing revisions', async () => {
+    const metaStarted = vi.fn()
+    const revStarted = vi.fn()
+    let resolveMeta!: () => void
+    let resolveRev!: () => void
+    vi.mocked(drive.getDiaryFileMeta).mockImplementationOnce(() => {
+      metaStarted()
+      return new Promise(resolve => { resolveMeta = () => resolve({ id: 'validFileId1234567890', name: 'diary-2026-05-01.txt' }) })
+    })
+    vi.mocked(drive.listRevisions).mockImplementationOnce(() => {
+      revStarted()
+      return new Promise(resolve => { resolveRev = () => resolve([{ id: 'rev-1', modifiedTime: '2026-05-01T00:00:00Z' }]) })
+    })
+
     const ctx = makeContext({ params: { fileId: 'validFileId1234567890' } })
-    const res = await onListRevisions(ctx as any)
+    const resPromise = onListRevisions(ctx as any)
+
+    expect(metaStarted).toHaveBeenCalledOnce()
+    expect(revStarted).toHaveBeenCalledOnce()
+    resolveMeta()
+    resolveRev()
+
+    const res = await resPromise
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([{ id: 'rev-1', modifiedTime: '2026-05-01T00:00:00Z' }])
   })
 })
 
@@ -662,6 +697,18 @@ describe('changes handler', () => {
     expect(await res.json()).toEqual({ changes: [{ fileId: 'f1', removed: false }], newStartPageToken: 'tok-next' })
     expect(drive.getChanges).toHaveBeenCalledWith('tok', 'tok-old')
     expect(sessionStore.saveSession).toHaveBeenCalledOnce()
+  })
+
+  it('skips saving the session when newStartPageToken has not changed', async () => {
+    vi.mocked(drive.getChanges).mockResolvedValueOnce({ changes: [], newStartPageToken: 'tok-same' })
+    const session: Record<string, unknown> = { changes_start_page_token: 'tok-same' }
+    const { ctx } = changesContext(session)
+
+    const res = await onChanges(ctx as any)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changes: [], newStartPageToken: 'tok-same' })
+    expect(sessionStore.saveSession).not.toHaveBeenCalled()
   })
 
   it('resets the token and returns empty changes when the stored token is stale (400)', async () => {

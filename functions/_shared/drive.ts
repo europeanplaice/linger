@@ -142,6 +142,9 @@ export interface EnsureFolderOptions {
   // On first assignment, check Drive even when this session has a cached ID so
   // pre-coordinator sessions cannot silently establish a split account root.
   discoverByName?: boolean
+  // Read-only callers can reuse session.folder_id directly and fall back to the
+  // coordinator only when Drive reports 404 or a folder mismatch.
+  allowCached?: boolean
 }
 
 export async function ensureFolder(
@@ -152,6 +155,9 @@ export async function ensureFolder(
   options: EnsureFolderOptions = {},
 ): Promise<string> {
   if (!options.withinCoordinator) {
+    if (options.allowCached && session.folder_id && !options.discoverByName) {
+      return session.folder_id
+    }
     if (!session.user_id) throw new DriveError(401, 'Google account identity missing; sign in again')
 
     // Route even a cached session through the account-level pointer. A cached
@@ -240,7 +246,7 @@ export async function listDriveFolders(token: string): Promise<DriveFolderCandid
   const folders: DriveFolderCandidate[] = []
   let pageToken: string | undefined
   do {
-    const pageUrl = `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,modifiedTime,trashed)&pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    const pageUrl = `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,modifiedTime,trashed)&pageSize=${FILES_PAGE_SIZE}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
     const page = await driveWithRetry(
       () => fetch(pageUrl, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
       r => r.json() as Promise<{ files: DriveFileMeta[]; nextPageToken?: string }>,
@@ -263,13 +269,13 @@ async function withFolderFallback<T>(
   op: (folderId: string) => Promise<T>,
   folderOptions?: EnsureFolderOptions,
 ): Promise<T> {
-  const folderId = await ensureFolder(token, sessionId, session, env, folderOptions)
+  const folderId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: true })
   try {
     return await op(folderId)
   } catch (e) {
     if (e instanceof DriveError && e.status === 404) {
       session.folder_id = undefined
-      const freshId = await ensureFolder(token, sessionId, session, env, folderOptions)
+      const freshId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: false })
       return op(freshId)
     }
     console.error('drive.ts: withFolderFallback failed')
@@ -277,9 +283,9 @@ async function withFolderFallback<T>(
   }
 }
 
-// Drive API v3 files.list caps pageSize at 100; values above are silently capped.
-// We page through nextPageToken to collect every matching file.
-const FILES_PAGE_SIZE = 100
+// Drive API v3 files.list supports pageSize up to 1000.
+// We still page through nextPageToken to collect every matching file.
+const FILES_PAGE_SIZE = 1000
 
 async function listAllFiles(token: string, baseUrl: string): Promise<DriveFileMeta[]> {
   const files: DriveFileMeta[] = []
@@ -453,12 +459,19 @@ export async function getDiaryFileMeta(
   date?: string,
   folderOptions?: EnsureFolderOptions,
 ): Promise<DriveFileMeta> {
+  const usedCachedFolder = Boolean(session.folder_id && !folderOptions?.discoverByName && !folderOptions?.withinCoordinator)
   const [folderId, meta] = await Promise.all([
-    ensureFolder(token, sessionId, session, env, folderOptions),
+    ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: true }),
     getEntryMeta(token, fileId),
   ])
 
   if (!isExpectedDiaryFile(meta, folderId, date)) {
+    if (usedCachedFolder) {
+      const freshFolderId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: false })
+      if (isExpectedDiaryFile(meta, freshFolderId, date)) {
+        return meta
+      }
+    }
     throw new DriveError(404, 'not_found')
   }
 
@@ -618,13 +631,20 @@ export async function migrateMdToTxt(token: string, sessionId: string, session: 
   return legacy.map(e => e.date)
 }
 
-export async function generateFileId(token: string): Promise<string> {
+export async function generateFileIds(token: string, count = 20): Promise<string[]> {
+  const safeCount = Math.max(1, Math.min(1000, Math.floor(count)))
   const result = await driveWithRetry(
-    () => fetch(`${BASE}/files/generateIds?count=1&space=drive&type=files`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+    () => fetch(`${BASE}/files/generateIds?count=${safeCount}&space=drive&type=files`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
     r => r.json() as Promise<{ ids: string[] }>,
   )
-  if (!result.ids?.[0]) throw new Error('Drive did not return a file ID')
-  return result.ids[0]
+  const ids = (result.ids ?? []).filter((id): id is string => typeof id === 'string' && id.length > 0)
+  if (ids.length === 0) throw new Error('Drive did not return a file ID')
+  return ids
+}
+
+export async function generateFileId(token: string): Promise<string> {
+  const [id] = await generateFileIds(token, 1)
+  return id
 }
 
 // User deletions remain recoverable from Google Drive's trash.
@@ -664,14 +684,29 @@ export async function readJsonFile<T>(token: string, fileId: string): Promise<T>
 }
 
 export async function findJsonFile(token: string, folderId: string, fileName: string): Promise<string | null> {
-  const escapedName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-  const q = encodeURIComponent(`name='${escapedName}' and '${folderId}' in parents and trashed=false`)
-  const fields = encodeURIComponent('files(id)')
+  const found = await findJsonFiles(token, folderId, [fileName])
+  return found[fileName] ?? null
+}
+
+export async function findJsonFiles(token: string, folderId: string, fileNames: string[]): Promise<Record<string, string>> {
+  if (fileNames.length === 0) return {}
+  const escapedFolder = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const nameFilter = fileNames
+    .map(name => `name='${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`)
+    .join(' or ')
+  const q = encodeURIComponent(`(${nameFilter}) and '${escapedFolder}' in parents and trashed=false`)
+  const fields = encodeURIComponent('files(id,name)')
+  const pageSize = Math.max(fileNames.length * 2, 10)
   const res = await driveWithRetry(
-    () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=1`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
-    r => r.json() as Promise<{ files?: { id: string }[] }>,
+    () => fetch(`${BASE}/files?q=${q}&fields=${fields}&pageSize=${pageSize}`, { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+    r => r.json() as Promise<{ files?: { id: string; name: string }[] }>,
   )
-  return res.files?.[0]?.id ?? null
+  const found: Record<string, string> = {}
+  for (const file of res.files ?? []) {
+    const name = file.name ?? (fileNames.length === 1 ? fileNames[0] : undefined)
+    if (file.id && name && !(name in found)) found[name] = file.id
+  }
+  return found
 }
 
 export async function writeJsonFile(
@@ -685,12 +720,11 @@ export async function writeJsonFile(
   const fields = encodeURIComponent('id,name,modifiedTime,version')
 
   if (existingFileId) {
-    const { contentType, data } = buildMultipart({}, body, 'application/json; charset=UTF-8')
     return driveWithRetry(
-      () => fetch(`${UPLOAD_BASE}/files/${existingFileId}?uploadType=multipart&fields=${fields}`, {
+      () => fetch(`${UPLOAD_BASE}/files/${existingFileId}?uploadType=media&fields=${fields}`, {
         method: 'PATCH',
-        headers: driveHeaders(token, { 'Content-Type': contentType }),
-        body: data,
+        headers: driveHeaders(token, { 'Content-Type': 'application/json; charset=UTF-8' }),
+        body,
         signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS),
       }),
       r => r.json() as Promise<DriveFileMeta>,

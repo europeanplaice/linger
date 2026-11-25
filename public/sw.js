@@ -1,4 +1,5 @@
 const CACHE_NAME = '__CACHE_VERSION__'
+const PRECACHE_ASSETS = [] // __PRECACHE_ASSETS__
 
 function scopedUrl(path) {
   return new URL(path, self.registration.scope).toString()
@@ -10,7 +11,10 @@ const APP_SHELL = [
   scopedUrl('./manifest.webmanifest'),
   scopedUrl('./favicon.svg'),
   scopedUrl('./icon.svg'),
+  scopedUrl('./apple-touch-icon.png'),
+  scopedUrl('./icon-192.png'),
   scopedUrl('./privacy.html'),
+  ...PRECACHE_ASSETS.map(scopedUrl),
 ]
 
 // Only runtime-cache responses whose MIME type matches what the request is for.

@@ -233,6 +233,40 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.remove('session-restoring')
   }, [])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const shortcut = url.searchParams.get('shortcut')
+    const sharedParts = ['title', 'text', 'url']
+      .map(key => url.searchParams.get(key)?.trim() ?? '')
+      .filter(Boolean)
+
+    if (!shortcut && sharedParts.length === 0) return
+
+    if (shortcut === 'search') {
+      pendingShortcutSearchRef.current = true
+    } else if (shortcut === 'today' || sharedParts.length > 0) {
+      const today = todayYmd()
+      setSelectedDate(today)
+      selectedDateRef.current = today
+    }
+
+    if (sharedParts.length > 0) {
+      setPendingSharedText(sharedParts.join('\n'))
+    }
+
+    for (const key of ['shortcut', 'title', 'text', 'url']) {
+      url.searchParams.delete(key)
+    }
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  useEffect(() => {
+    if (status !== 'signedIn' || tokenExpired || !pendingShortcutSearchRef.current) return
+    pendingShortcutSearchRef.current = false
+    if (isMobileLayout()) setSidebarOpen(true)
+    requestAnimationFrame(() => searchBarRef.current?.focus())
+  }, [status, tokenExpired])
   const [autoSave, setAutoSave] = useState(readStoredAutoSave)
   const [pendingDate, setPendingDate] = useState<string | null>(null)
   const pendingRelatedFromRef = useRef<string | null>(null)
@@ -245,6 +279,8 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [serendipityPrefetch, setSerendipityPrefetch] = useState<[string, string] | [string] | []>([])
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
+  const [pendingSharedText, setPendingSharedText] = useState<string | null>(null)
+  const pendingShortcutSearchRef = useRef(false)
   const searchBarRef = useRef<SearchBarHandle>(null)
   const selectedDateRef = useRef(selectedDate)
   const editorDirtyRef = useRef(editorDirty)
@@ -988,6 +1024,8 @@ export default function App() {
           getRecurringTopic={getRecurringTopic}
           backDate={previousDate ?? undefined}
           onGoBack={handleGoBack}
+          pendingSharedText={pendingSharedText}
+          onConsumeSharedText={() => setPendingSharedText(null)}
           onS3StaleEntryDetected={handleS3StaleEntryDetected}
         />
       </main>

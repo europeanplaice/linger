@@ -8,6 +8,7 @@ import { DeploymentVerification } from './DeploymentVerification'
 import { DiaryFolderSettings } from './DiaryFolderSettings'
 import { MilestoneFormModal } from './MilestoneFormModal'
 import { shareApp } from '../utils/share'
+import { usePwaInstall } from '../hooks/usePwaInstall'
 import { folderNameForHostname } from '../utils/folderName'
 import { useI18n } from '../i18n'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -203,6 +204,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
   }, [])
   const [dataTransfers, setDataTransfers] = useState(0)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
+  const { canInstall, isIosInstallable, promptInstall } = usePwaInstall()
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
   const [s3Enabled, setS3Enabled] = useState(false)
   const [s3RoleArn, setS3RoleArn] = useState('')
@@ -1389,6 +1391,21 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
 
         <footer className="settings-footer">
           <DeploymentVerification />
+          {(canInstall || isIosInstallable) && (
+            <div className="settings-item">
+              <span className="settings-item-copytext">
+                <span className="settings-item-label">{t.settings.installApp} <InfoTip text={t.settings.installAppHelp} /></span>
+                {isIosInstallable && (
+                  <span className="settings-item-description">{t.settings.installIosHelp}</span>
+                )}
+              </span>
+              {canInstall && (
+                <button type="button" className="settings-action-btn" onClick={() => { void promptInstall() }}>
+                  {t.settings.installButton}
+                </button>
+              )}
+            </div>
+          )}
           <div className="settings-item">
             <span className="settings-item-label">{t.settings.shareThisApp} <InfoTip text={t.settings.shareHelp} /></span>
             <button className="settings-action-btn" onClick={handleShareApp}>
