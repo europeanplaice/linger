@@ -193,11 +193,20 @@ export default defineConfig({
       writeBundle() {
         const distPath = resolve(import.meta.dirname, 'dist')
         const swPath = resolve(import.meta.dirname, 'dist/sw.js')
-        const version = hashDistFiles(distPath).slice(0, 16)
-        const content = readFileSync(swPath, 'utf-8').replace(
-          '__CACHE_VERSION__',
-          `linger-${version}`,
+        const assetsDir = resolve(distPath, 'assets')
+        const precacheAssets = existsSync(assetsDir)
+          ? readdirSync(assetsDir)
+              .filter((name) => name.endsWith('.js') || name.endsWith('.css'))
+              .sort((a, b) => a.localeCompare(b))
+              .map((name) => `./assets/${name}`)
+          : []
+        let content = readFileSync(swPath, 'utf-8').replace(
+          '[] // __PRECACHE_ASSETS__',
+          JSON.stringify(precacheAssets),
         )
+        writeFileSync(swPath, content)
+        const version = hashDistFiles(distPath).slice(0, 16)
+        content = content.replace('__CACHE_VERSION__', `linger-${version}`)
         writeFileSync(swPath, content)
       },
     },

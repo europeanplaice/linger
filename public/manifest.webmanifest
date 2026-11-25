@@ -1,13 +1,13 @@
 {
+  "id": "/",
   "name": "Linger",
   "short_name": "Linger",
   "description": "A private diary app backed by your Google Drive.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
-  "orientation": "portrait-primary",
-  "background_color": "#f7f1df",
-  "theme_color": "#2c3e50",
+  "background_color": "#faf9f6",
+  "theme_color": "#faf9f6",
   "icons": [
     {
       "src": "icon.svg",
@@ -16,10 +16,81 @@
       "purpose": "any"
     },
     {
-      "src": "linger_120x120.jpg",
-      "sizes": "120x120",
-      "type": "image/jpeg",
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/editor.png",
+      "sizes": "2560x1640",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Diary editor on desktop"
+    },
+    {
+      "src": "screenshots/search.png",
+      "sizes": "2560x1640",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Full-text search and calendar"
+    },
+    {
+      "src": "screenshots/mobile-editor.png",
+      "sizes": "1170x2532",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Diary editor on mobile"
+    },
+    {
+      "src": "screenshots/mobile-calendar.png",
+      "sizes": "1170x2532",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Calendar navigation on mobile"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today's entry",
+      "short_name": "Today",
+      "url": "./?shortcut=today",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Search entries",
+      "short_name": "Search",
+      "url": "./?shortcut=search",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }
