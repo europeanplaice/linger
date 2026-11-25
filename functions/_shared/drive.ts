@@ -142,6 +142,9 @@ export interface EnsureFolderOptions {
   // On first assignment, check Drive even when this session has a cached ID so
   // pre-coordinator sessions cannot silently establish a split account root.
   discoverByName?: boolean
+  // Read-only callers can reuse session.folder_id directly and fall back to the
+  // coordinator only when Drive reports 404 or a folder mismatch.
+  allowCached?: boolean
 }
 
 export async function ensureFolder(
@@ -152,6 +155,9 @@ export async function ensureFolder(
   options: EnsureFolderOptions = {},
 ): Promise<string> {
   if (!options.withinCoordinator) {
+    if (options.allowCached && session.folder_id && !options.discoverByName) {
+      return session.folder_id
+    }
     if (!session.user_id) throw new DriveError(401, 'Google account identity missing; sign in again')
 
     // Route even a cached session through the account-level pointer. A cached
@@ -263,13 +269,13 @@ async function withFolderFallback<T>(
   op: (folderId: string) => Promise<T>,
   folderOptions?: EnsureFolderOptions,
 ): Promise<T> {
-  const folderId = await ensureFolder(token, sessionId, session, env, folderOptions)
+  const folderId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: true })
   try {
     return await op(folderId)
   } catch (e) {
     if (e instanceof DriveError && e.status === 404) {
       session.folder_id = undefined
-      const freshId = await ensureFolder(token, sessionId, session, env, folderOptions)
+      const freshId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: false })
       return op(freshId)
     }
     console.error('drive.ts: withFolderFallback failed')
@@ -277,9 +283,9 @@ async function withFolderFallback<T>(
   }
 }
 
-// Drive API v3 files.list caps pageSize at 100; values above are silently capped.
-// We page through nextPageToken to collect every matching file.
-const FILES_PAGE_SIZE = 100
+// Drive API v3 files.list supports pageSize up to 1000.
+// We still page through nextPageToken to collect every matching file.
+const FILES_PAGE_SIZE = 1000
 
 async function listAllFiles(token: string, baseUrl: string): Promise<DriveFileMeta[]> {
   const files: DriveFileMeta[] = []
@@ -453,12 +459,19 @@ export async function getDiaryFileMeta(
   date?: string,
   folderOptions?: EnsureFolderOptions,
 ): Promise<DriveFileMeta> {
+  const usedCachedFolder = Boolean(session.folder_id && !folderOptions?.discoverByName && !folderOptions?.withinCoordinator)
   const [folderId, meta] = await Promise.all([
-    ensureFolder(token, sessionId, session, env, folderOptions),
+    ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: true }),
     getEntryMeta(token, fileId),
   ])
 
   if (!isExpectedDiaryFile(meta, folderId, date)) {
+    if (usedCachedFolder) {
+      const freshFolderId = await ensureFolder(token, sessionId, session, env, { ...folderOptions, allowCached: false })
+      if (isExpectedDiaryFile(meta, freshFolderId, date)) {
+        return meta
+      }
+    }
     throw new DriveError(404, 'not_found')
   }
 

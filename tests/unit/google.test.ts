@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { verifyGoogleIdToken } from '../../functions/_shared/google'
+import { verifyGoogleAccessToken, verifyGoogleIdToken } from '../../functions/_shared/google'
 
 const clientId = 'linger-client'
 const now = 1_800_000_000
@@ -122,5 +122,25 @@ describe('Google ID token verification with real RSA signatures', () => {
   it('fails closed when the key endpoint is unavailable', async () => {
     fetchMock.mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
     await expect(verifyGoogleIdToken(await token(), clientId)).rejects.toThrow('JWKS fetch failed')
+  })
+})
+
+describe('Google access token verification caching', () => {
+  it('caches a valid tokeninfo result briefly and revalidates after TTL', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      aud: clientId,
+      sub: 'account-a',
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      expires_in: 3600,
+    })))
+
+    await expect(verifyGoogleAccessToken('access-tok', clientId, 'account-a')).resolves.toBe(3600)
+    await expect(verifyGoogleAccessToken('access-tok', clientId, 'account-a')).resolves.toBe(3600)
+    expect(fetchMock).toHaveBeenCalledOnce()
+
+    // Simulate cache expiry (e.g. Cache API evicted after 30s)
+    cache.clear()
+    await expect(verifyGoogleAccessToken('access-tok', clientId, 'account-a')).resolves.toBe(3600)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

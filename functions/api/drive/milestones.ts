@@ -13,7 +13,7 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
+    const folderId = await ensureFolder(accessToken, sessionId, session, context.env, { allowCached: true })
     let fileId = await findJsonFile(accessToken, folderId, FILE_NAME)
     if (!fileId) {
       // Fall back to the legacy file name written by older versions.

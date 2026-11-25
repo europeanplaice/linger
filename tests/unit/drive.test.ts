@@ -630,7 +630,7 @@ const envStub = {
 } as any
 
 describe('listEntries pagination', () => {
-  it('uses pageSize=100 and orderBy=name', async () => {
+  it('uses pageSize=1000 and orderBy=name', async () => {
     const urls: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: any) => {
       urls.push(String(input))
@@ -640,8 +640,30 @@ describe('listEntries pagination', () => {
     await listEntries('tok', 'sid', sessionWithFolder(), envStub)
 
     expect(urls).toHaveLength(1)
-    expect(urls[0]).toContain('pageSize=100')
+    expect(urls[0]).toContain('pageSize=1000')
     expect(urls[0]).toContain('orderBy=name')
+  })
+
+  it('reuses session.folder_id on reads without calling the coordinator unless Drive returns 404', async () => {
+    const ensureDiaryFolder = vi.fn().mockResolvedValue('fresh-folder')
+    const env = {
+      SESSIONS: { get: vi.fn().mockResolvedValue(null), put: vi.fn() },
+      S3_WORKFLOW_SERVICE: { ensureDiaryFolder },
+    } as any
+    const session = sessionWithFolder()
+    const fetchMock = vi.fn(async () => driveJsonResponse({ files: [{ id: 'f1', name: 'diary-2026-05-01.txt', version: '1' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listEntries('tok', 'sid', session, env)
+    expect(ensureDiaryFolder).not.toHaveBeenCalled()
+
+    fetchMock
+      .mockResolvedValueOnce(new Response('Not found', { status: 404 }))
+      .mockResolvedValueOnce(driveJsonResponse({ files: [{ id: 'f2', name: 'diary-2026-05-02.txt', version: '1' }] }))
+
+    const files = await listEntries('tok', 'sid', session, env)
+    expect(ensureDiaryFolder).toHaveBeenCalledOnce()
+    expect(files.map(f => f.id)).toEqual(['f2'])
   })
 
   it('follows nextPageToken until exhausted and concatenates all files', async () => {

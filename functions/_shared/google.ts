@@ -1,6 +1,8 @@
 const GOOGLE_ISSUER = 'https://accounts.google.com'
 const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs'
 const JWKS_CACHE_TTL_SEC = 3600
+const ACCESS_TOKEN_CACHE_NAME = 'google-access-token-info'
+const ACCESS_TOKEN_CACHE_TTL_SEC = 30
 
 interface GoogleJwk {
   kty: string
@@ -39,9 +41,37 @@ export class GoogleIdTokenValidationError extends Error {
   constructor(message: string, readonly transient: boolean) { super(message) }
 }
 
+async function accessTokenCacheRequest(token: string, clientId: string, expectedSub: string): Promise<Request> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${clientId}\0${expectedSub}\0${token}`),
+  )
+  const hex = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+  return new Request(`https://tokeninfo-cache.internal/${hex}`)
+}
+
 // Access tokens are opaque. Ask Google's tokeninfo endpoint over POST (never put
 // the credential in a URL) and bind it to this OAuth client, user, scope, and expiry.
 export async function verifyGoogleAccessToken(token: string, clientId: string, expectedSub: string): Promise<number> {
+  let cache: Cache | null = null
+  let cacheKey: Request | null = null
+  if (typeof caches !== 'undefined') {
+    try {
+      cache = await caches.open(ACCESS_TOKEN_CACHE_NAME)
+      cacheKey = await accessTokenCacheRequest(token, clientId, expectedSub)
+      const cached = await cache.match(cacheKey)
+      if (cached) {
+        const entry = await cached.json() as { validatedAt: number; expiresIn: number }
+        const elapsedSec = Math.floor((Date.now() - entry.validatedAt) / 1000)
+        const remaining = entry.expiresIn - elapsedSec
+        if (remaining > 0) return remaining
+      }
+    } catch {
+      cache = null
+      cacheKey = null
+    }
+  }
+
   let response: Response
   try {
     response = await fetch('https://oauth2.googleapis.com/tokeninfo', {
@@ -65,6 +95,18 @@ export async function verifyGoogleAccessToken(token: string, clientId: string, e
   }
   const expiresIn = Number(info.expires_in ?? (info.exp ? Number(info.exp) - Math.floor(Date.now() / 1000) : 0))
   if (!Number.isFinite(expiresIn) || expiresIn <= 0) throw new GoogleAccessTokenValidationError('Google access token expired', false)
+
+  if (cache && cacheKey) {
+    const ttl = Math.min(ACCESS_TOKEN_CACHE_TTL_SEC, Math.floor(expiresIn))
+    if (ttl >= 1) {
+      try {
+        await cache.put(cacheKey, new Response(JSON.stringify({ validatedAt: Date.now(), expiresIn }), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${ttl}` },
+        }))
+      } catch { /* A cache write failure must not reject a verified access token. */ }
+    }
+  }
+
   return expiresIn
 }
 
