@@ -647,9 +647,10 @@ test.describe('EntryEditor — offline', () => {
     await page.fill('textarea.editor-textarea', 'written while offline')
     await page.locator('button.btn-save').click()
 
-    // No hard failure — a pending message, edits stay unsaved, no save reached the backend
-    await expect(page.getByText('Offline — your changes will be saved when you reconnect.')).toBeVisible()
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toHaveText('Waiting to sync')
+    await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'offline')
+    await expect(page.locator('.editor-meta-offline')).toHaveCount(0)
+    await expect(page.locator('.editor-status-line')).toHaveCount(0)
     expect(await page.evaluate(() => window.editorHarness.saveCalls())).toHaveLength(0)
 
     // Reconnect → the queued edits are saved automatically
@@ -1015,7 +1016,7 @@ test.describe('EntryEditor — unsaved navigation save', () => {
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls().length)).toBe(1)
-    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('second day')
   })
 
@@ -1305,11 +1306,16 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
     await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
+    await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'saving')
+    await expect(page.locator('.editor-save-status')).toHaveText('Saving…')
+    await expect(page.locator('.editor-save-status .editor-save-spinner')).toBeVisible()
     await expect(page.locator('.save-progress-bar')).toHaveCount(1)
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'saved')
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
   })
 
   test('shows inline saving state and progress bar on Ctrl+S save', async ({ page }) => {
@@ -1894,7 +1900,8 @@ test.describe('EntryEditor — Drive/S3 sync status badges', () => {
     expect(textareaAfterDisabled?.y).toBe(textareaBefore?.y)
 
     await textarea.fill('edited content')
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'waiting')
     const textareaWhileDirty = await textarea.boundingBox()
     expect(textareaWhileDirty?.y).toBe(textareaBefore?.y)
 
@@ -2578,7 +2585,7 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
-    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
   })
 
   test('unsaved label appears when user types unsaved changes', async ({ page }) => {
@@ -2587,8 +2594,11 @@ test.describe('EntryEditor — unsaved indicator', () => {
 
     await page.fill('textarea.editor-textarea', 'edited content')
 
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
-    await expect(page.locator('.editor-meta-unsaved')).toHaveText('Unsaved')
+    const status = page.locator('.editor-save-status')
+    await expect(status).toBeVisible()
+    await expect(status).toHaveAttribute('data-phase', 'waiting')
+    await expect(status).toHaveText('Unsaved')
+    await expect(status.locator('.editor-save-dot--waiting')).toBeVisible()
   })
 
   test('unsaved label stays visible during auto-save without adding a text separator', async ({ page }) => {
@@ -2609,12 +2619,26 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
     await page.fill('textarea.editor-textarea', 'edited content')
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toBeVisible()
 
     await page.locator('button.btn-save').click()
     await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
 
-    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
+  })
+
+  test('manual save shows inline save failure in editor-save-status without duplicating editor-status-line', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false, saveReject: 'error' })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await page.locator('button.btn-save').click()
+
+    const status = page.locator('.editor-save-status')
+    await expect(status).toBeVisible()
+    await expect(status).toHaveAttribute('data-phase', 'error')
+    await expect(status).toHaveText('Save failed.')
+    await expect(page.locator('.editor-status-line')).toHaveCount(0)
   })
 })
 
@@ -2765,7 +2789,8 @@ test.describe('EntryEditor — offline drafts', () => {
     await renderEditor(page, { initialContent: 'saved text', version: '1', token: 'tok', autoSave: false })
 
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('draft text written offline')
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toHaveText('Unsaved')
     await expect(page.locator('.editor-status-line')).toHaveText('Restored unsaved changes from this device.')
 
     await page.locator('button.btn-save').click()
@@ -2832,7 +2857,7 @@ test.describe('EntryEditor — offline drafts', () => {
     await renderEditor(page, { initialContent: 'same text', version: '2', token: 'tok', autoSave: false })
 
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('same text')
-    await expect(page.locator('.editor-meta-unsaved')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
     await expect.poll(() => getDrafts(page)).toEqual([])
   })
 

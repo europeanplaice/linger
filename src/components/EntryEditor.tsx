@@ -1430,25 +1430,25 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     }
   }
 
-  const autoSavePhase = hasConflict ? 'conflict'
+  const savePhase = hasConflict ? 'conflict'
     : saving ? 'saving'
-    : !isOnline && isDirty ? 'offline'
+    : !isOnline && isDirty && (autoSave || pendingOfflineSave) ? 'offline'
     : status === t.entry.saveFailed && isDirty ? 'error'
-    : autoSavePaused && isDirty ? 'paused'
+    : autoSave && autoSavePaused && isDirty ? 'paused'
     : isDirty ? 'waiting'
     : baseVersion !== null ? 'saved'
     : 'idle'
 
-  const autoSaveStatusText = autoSavePhase === 'conflict' ? t.entry.changedElsewhere
-    : autoSavePhase === 'saving' ? t.common.savingEllipsis
-    : autoSavePhase === 'offline' ? t.entry.saveSyncPending
-    : autoSavePhase === 'error' ? t.entry.saveFailed
-    : autoSavePhase === 'paused' ? t.entry.autoSavePaused
-    : autoSavePhase === 'waiting' ? t.entry.saveWaiting
-    : autoSavePhase === 'saved' ? t.common.saved
+  const saveStatusText = savePhase === 'conflict' ? t.entry.changedElsewhere
+    : savePhase === 'saving' ? t.common.savingEllipsis
+    : savePhase === 'offline' ? t.entry.saveSyncPending
+    : savePhase === 'error' ? t.entry.saveFailed
+    : savePhase === 'paused' ? t.entry.autoSavePaused
+    : savePhase === 'waiting' ? (autoSave ? t.entry.saveWaiting : t.common.unsaved)
+    : savePhase === 'saved' ? t.common.saved
     : ''
 
-  const autoSaveStatusVisible = autoSavePhase !== 'saved' && autoSavePhase !== 'idle'
+  const saveStatusVisible = savePhase !== 'saved' && savePhase !== 'idle'
   const autoSaveAction: 'retry' | 'save-now' | null =
     autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed
       ? (status === t.entry.saveFailed ? 'retry' : 'save-now')
@@ -1618,17 +1618,16 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
             onPointerDown={preventFocusSteal}
             onClick={handleExplicitSave}
-            disabled={autoSave || saving || !isDirty || loadFailed}
+            disabled={saving || !isDirty || loadFailed}
             aria-busy={saving}
-            aria-label={saving ? t.entry.saving : status === savedStatus ? t.entry.savedToDrive : autoSave ? t.entry.autoSave : t.entry.save}
-            title={autoSave ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
-            data-autosave={autoSave || undefined}
+            aria-label={saving ? t.entry.saving : status === savedStatus ? t.entry.savedToDrive : t.entry.save}
+            title={isMac ? '⌘S' : 'Ctrl+S'}
             whileTap={{ scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
               {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : autoSave ? t.entry.autoSave : t.entry.save}</span>
+              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : t.entry.save}</span>
             </span>
           </motion.button>}
           {!isToday && onGoToToday && (
@@ -1755,7 +1754,7 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </div>
         )}
         <AnimatePresence initial={false}>
-          {!isOnline && (!autoSave || !isDirty) && (
+          {!isOnline && savePhase !== 'offline' && (
             <motion.span
               key="offline"
               className="editor-meta-offline"
@@ -1769,47 +1768,37 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             </motion.span>
           )}
         </AnimatePresence>
-        {autoSave && !loading && !loadFailed ? (
+        {!loading && !loadFailed && (
           <span
-            className={`editor-save-status${!autoSaveStatusVisible ? ' sr-only' : ` editor-save-status--${autoSavePhase}`}${autoSavePhase === 'error' && isOnline ? ' editor-save-status--error' : ''}`}
-            data-phase={autoSavePhase}
+            className={`editor-save-status${!saveStatusVisible ? ' sr-only' : ` editor-save-status--${savePhase}`}${savePhase === 'error' && isOnline ? ' editor-save-status--error' : ''}`}
+            data-phase={savePhase}
+            title={savePhase === 'offline' ? t.entry.offlineSavePending : undefined}
             role="status"
             aria-live="polite"
           >
-            {autoSaveStatusVisible ? (
+            {saveStatusVisible ? (
               <motion.span
-                key={autoSavePhase}
+                key={savePhase}
                 className="editor-save-status-inner"
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               >
-                {autoSavePhase === 'saving' ? (
+                {savePhase === 'saving' ? (
                   <span className="btn-saving-spinner editor-save-spinner" aria-hidden="true" />
                 ) : (
-                  <span className={`editor-save-dot editor-save-dot--${autoSavePhase}`} aria-hidden="true" />
+                  <span className={`editor-save-dot editor-save-dot--${savePhase}`} aria-hidden="true" />
                 )}
-                {autoSaveStatusText}
+                {saveStatusText}
               </motion.span>
-            ) : autoSaveStatusText}
+            ) : saveStatusText}
           </span>
-        ) : <AnimatePresence initial={false}>
-          {isDirty && !loading && !autoSave && (
-            <motion.span
-              key="unsaved"
-              className="editor-meta-unsaved"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-            >{t.common.unsaved}</motion.span>
-          )}
-        </AnimatePresence>}
+        )}
         <AnimatePresence initial={false}>
           {autoSaveAction && (
             <motion.button
               key={autoSaveAction}
-              className="editor-save-retry"
+              className={`editor-save-retry${autoSaveAction === 'retry' ? ' editor-save-retry--retry' : ''}`}
               type="button"
               onPointerDown={preventFocusSteal}
               onClick={handleManualAutoSave}
@@ -1874,7 +1863,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>
       )}
       <AnimatePresence>
-        {status && status !== savedStatus && !loadFailed && !(autoSave && (status === t.entry.saveFailed || (hasConflict && status === t.entry.changedElsewhere))) && (
+        {status &&
+          status !== savedStatus &&
+          !loadFailed &&
+          !(savePhase === 'error' && status === t.entry.saveFailed) &&
+          !(savePhase === 'offline' && status === t.entry.offlineSavePending) &&
+          !(savePhase === 'conflict' && status === t.entry.changedElsewhere) && (
           <motion.div
             className="editor-status-line"
             role="status"

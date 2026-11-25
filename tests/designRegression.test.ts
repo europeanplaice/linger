@@ -225,6 +225,7 @@ test.describe('Design regression — entry editor states', () => {
     )
     await page.waitForSelector('textarea.editor-textarea')
     await page.locator('textarea.editor-textarea').fill('modified')
-    await expect(page.locator('.editor-meta-unsaved')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toBeVisible()
+    await expect(page.locator('.editor-save-status')).toHaveText('Unsaved')
   })
 })
