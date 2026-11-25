@@ -237,37 +237,38 @@ test.describe('EntryEditor — date header', () => {
     await expect(page.locator('.entry-date-text .entry-date-year')).toContainText(weekday)
   })
 
-   test('places mobile save action near the bottom-right thumb zone', async ({ page }) => {
+   test('places mobile save action in the editor meta row alongside save status', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-12-31', initialContent: 'saved content', version: '1', autoSave: false })
 
-    const saveButton = page.locator('button.btn-save')
+    const saveButton = page.locator('.editor-meta button.btn-save')
     const moreButton = page.locator('button.btn-more')
-    // Make the entry dirty so the save FAB becomes visible; wait for scale-in to finish
+    await expect(saveButton).toHaveCount(0)
     await page.locator('textarea').fill('modified content')
     await expect(saveButton).toBeVisible()
     await expect(moreButton).toBeVisible()
-    await expect.poll(() => saveButton.evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(56)
 
     const metrics = await page.evaluate(() => {
       const header = document.querySelector('.editor-header')?.getBoundingClientRect()
+      const meta = document.querySelector('.editor-meta')?.getBoundingClientRect()
       const editor = document.querySelector('.editor')?.getBoundingClientRect()
-      const save = document.querySelector('button.btn-save')?.getBoundingClientRect()
+      const save = document.querySelector('.editor-meta button.btn-save')?.getBoundingClientRect()
       const more = document.querySelector('button.btn-more')?.getBoundingClientRect()
-      if (!header || !editor || !save || !more) throw new Error('missing editor layout')
+      if (!header || !meta || !editor || !save || !more) throw new Error('missing editor layout')
 
       return {
         editorHeight: editor.height,
         headerLeft: header.left,
         headerRight: header.right,
         headerBottom: header.bottom,
+        metaTop: meta.top,
+        metaBottom: meta.bottom,
+        saveLeft: save.left,
         saveRight: save.right,
+        saveTop: save.top,
         saveBottom: save.bottom,
-        saveWidth: save.width,
-        saveHeight: save.height,
         moreTop: more.top,
-        moreCenterX: more.left + more.width / 2,
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
       }
@@ -277,12 +278,10 @@ test.describe('EntryEditor — date header', () => {
     expect(metrics.headerLeft).toBeGreaterThanOrEqual(0)
     expect(metrics.headerRight).toBeLessThanOrEqual(metrics.viewportWidth)
     expect(metrics.moreTop).toBeLessThan(metrics.headerBottom)
-    expect(metrics.saveRight).toBeLessThanOrEqual(metrics.viewportWidth - 16 + 1)
-    expect(metrics.saveBottom).toBeLessThanOrEqual(metrics.viewportHeight - 16 + 1)
-    expect(metrics.viewportWidth - metrics.saveRight).toBeLessThanOrEqual(17)
-    expect(metrics.viewportHeight - metrics.saveBottom).toBeLessThanOrEqual(17)
-    expect(metrics.saveWidth).toBeGreaterThanOrEqual(56)
-    expect(metrics.saveHeight).toBeGreaterThanOrEqual(56)
+    expect(metrics.saveTop).toBeGreaterThanOrEqual(metrics.metaTop - 1)
+    expect(metrics.saveBottom).toBeLessThanOrEqual(metrics.metaBottom + 1)
+    expect(metrics.saveLeft).toBeGreaterThanOrEqual(0)
+    expect(metrics.saveRight).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 
   test('moves mobile discard into the more menu so the date keeps room', async ({ page }) => {
@@ -294,23 +293,21 @@ test.describe('EntryEditor — date header', () => {
     await page.waitForSelector('button.btn-discard', { state: 'attached' })
 
     const metrics = await page.evaluate(() => {
-      const header = document.querySelector('.editor-header')?.getBoundingClientRect()
       const actions = document.querySelector('.editor-actions')?.getBoundingClientRect()
       const more = document.querySelector('button.btn-more')?.getBoundingClientRect()
-      const save = document.querySelector('button.btn-save')
+      const save = document.querySelector('.editor-meta button.btn-save')
       const discard = document.querySelector('button.btn-discard')
-      if (!header || !actions || !more || !save || !discard) throw new Error('missing editor actions')
+      if (!actions || !more || !save || !discard) throw new Error('missing editor actions')
 
       return {
-        headerBottom: header.bottom,
         actionsWidth: actions.width,
         moreWidth: more.width,
-        savePosition: getComputedStyle(save).position,
+        saveInMeta: !!save.closest('.editor-meta'),
         discardDisplay: getComputedStyle(discard).display,
       }
     })
 
-    expect(metrics.savePosition).toBe('fixed')
+    expect(metrics.saveInMeta).toBe(true)
     expect(metrics.discardDisplay).toBe('none')
     expect(metrics.actionsWidth).toBeLessThanOrEqual(metrics.moreWidth)
 
@@ -320,7 +317,7 @@ test.describe('EntryEditor — date header', () => {
     await expect(page.locator('.discard-undo-toast')).toBeVisible()
   })
 
-  test('moves the mobile save action above the visual viewport keyboard inset', async ({ page }) => {
+  test('adjusts mobile textarea bottom clearance for the visual viewport keyboard inset', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
 
@@ -349,10 +346,7 @@ test.describe('EntryEditor — date header', () => {
     })
 
     await expect.poll(() =>
-      page.locator('button.btn-save').evaluate(button => {
-        const save = button.getBoundingClientRect()
-        const textarea = document.querySelector('textarea.editor-textarea')
-        if (!textarea) throw new Error('missing textarea')
+      page.locator('textarea.editor-textarea').evaluate(textarea => {
         const textareaStyle = getComputedStyle(textarea)
         const keyboardInset = getComputedStyle(document.documentElement)
           .getPropertyValue('--mobile-keyboard-inset-bottom')
@@ -360,16 +354,14 @@ test.describe('EntryEditor — date header', () => {
 
         return {
           keyboardInset,
-          distanceFromBottom: Math.round(window.innerHeight - save.bottom),
           textareaPaddingBottom: textareaStyle.paddingBottom,
           textareaScrollPaddingBottom: textareaStyle.scrollPaddingBottom,
         }
       })
     ).toEqual({
       keyboardInset: '280px',
-      distanceFromBottom: 296,
-      textareaPaddingBottom: '368px',
-      textareaScrollPaddingBottom: '368px',
+      textareaPaddingBottom: '296px',
+      textareaScrollPaddingBottom: '296px',
     })
   })
 
@@ -660,7 +652,8 @@ test.describe('EntryEditor — offline', () => {
       { date: '2026-05-01', content: 'written while offline', baseVersion: '1' },
     ])
     await expect(page.locator('.editor-meta-offline')).toHaveCount(0)
-    await expect(page.locator('button.btn-save')).toBeDisabled()
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
   })
 
   test('auto-save while offline pauses Drive calls without flickering and syncs on reconnect', async ({ page }) => {
@@ -713,7 +706,8 @@ test.describe('EntryEditor — keyboard save', () => {
     await expect.poll(() => page.evaluate(() => window.editorHarness.saveCalls())).toEqual([
       { date: '2026-05-01', content: 'keyboard saved content', baseVersion: '1' },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
   })
 
   test('Ctrl+S passes the saved text as baseContent', async ({ page }) => {
@@ -773,11 +767,13 @@ test.describe('EntryEditor — repeated saves', () => {
 
     await page.fill('textarea.editor-textarea', 'first edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
 
     await page.fill('textarea.editor-textarea', 'second edit')
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
 
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toEqual([
@@ -852,7 +848,8 @@ test.describe('EntryEditor — conflict resolution', () => {
       { date: '2026-05-01', content: 'local edits', baseVersion: '1' },
       { date: '2026-05-01', content: 'local edits', baseVersion: '99', force: true },
     ])
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
   })
 
 })
@@ -1303,9 +1300,7 @@ test.describe('EntryEditor — save progress', () => {
     await page.evaluate(() => window.editorHarness.blockSave())
     await page.locator('button.btn-save').click()
 
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
-    await expect(page.locator('button.btn-save .btn-text')).toHaveText('Saving…')
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
     await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'saving')
     await expect(page.locator('.editor-save-status')).toHaveText('Saving…')
     await expect(page.locator('.editor-save-status .editor-save-spinner')).toBeVisible()
@@ -1313,7 +1308,7 @@ test.describe('EntryEditor — save progress', () => {
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
     await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'saved')
     await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
   })
@@ -1336,14 +1331,16 @@ test.describe('EntryEditor — save progress', () => {
     await page.evaluate(() => window.editorHarness.blockSave())
     await page.keyboard.press('Control+S')
 
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-busy', 'true')
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saving')
-    await expect(page.locator('button.btn-save .btn-saving-spinner')).toBeVisible()
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.locator('.editor-save-status')).toHaveAttribute('data-phase', 'saving')
+    await expect(page.locator('.editor-save-status')).toHaveText('Saving…')
+    await expect(page.locator('.editor-save-status .editor-save-spinner')).toBeVisible()
     await expect(page.locator('.save-progress-bar')).toHaveCount(1)
     await expect(page.locator('.saving-overlay')).toHaveCount(0)
 
     await page.evaluate(() => window.editorHarness.unblockSave())
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.locator('button.btn-save')).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
   })
 
   test('does not show saving progress or overlay on auto-save', async ({ page }) => {
@@ -2622,12 +2619,12 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await expect(page.locator('.editor-save-status')).toBeVisible()
 
     await page.locator('button.btn-save').click()
-    await expect(page.locator('button.btn-save')).toHaveAttribute('aria-label', 'Saved to Google Drive')
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
 
     await expect(page.locator('.editor-save-status')).toHaveClass(/sr-only/)
   })
 
-  test('manual save shows inline save failure in editor-save-status without duplicating editor-status-line', async ({ page }) => {
+  test('manual save shows inline save failure and retry action in editor-save-status without duplicating editor-status-line', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false, saveReject: 'error' })
 
@@ -2638,6 +2635,7 @@ test.describe('EntryEditor — unsaved indicator', () => {
     await expect(status).toBeVisible()
     await expect(status).toHaveAttribute('data-phase', 'error')
     await expect(status).toHaveText('Save failed.')
+    await expect(page.locator('.editor-meta').getByRole('button', { name: 'Retry' })).toBeVisible()
     await expect(page.locator('.editor-status-line')).toHaveCount(0)
   })
 })
@@ -2645,47 +2643,36 @@ test.describe('EntryEditor — unsaved indicator', () => {
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 
 test.describe('EntryEditor — save button appearance', () => {
-  test('save button is a quiet ghost when idle, solid accent when dirty (desktop)', async ({ page }) => {
+  test('save button is hidden when clean and appears as a solid accent pill in the meta row when dirty (desktop)', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
-    const save = page.locator('button.btn-save')
-    // Idle: nothing to save → transparent fill (ghost)
-    await expect(save).toBeDisabled()
-    expect(await save.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(TRANSPARENT)
+    const save = page.locator('.editor-meta button.btn-save')
+    await expect(save).toHaveCount(0)
 
-    // Dirty: solid accent fill (poll past the background-color transition)
     await page.fill('textarea.editor-textarea', 'edited content')
-    await expect(save).toBeEnabled()
+    await expect(save).toBeVisible()
+    await expect(save).toHaveText('Save')
     await expect.poll(() => save.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(TRANSPARENT)
-  })
 
-  test('saved save button does not run an extra flash animation', async ({ page }) => {
-    await page.setViewportSize({ width: 900, height: 700 })
-    await loadHarness(page)
-    await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
-
-    const save = page.locator('button.btn-save')
-    await page.fill('textarea.editor-textarea', 'edited content')
     await save.click()
-    await expect(save).toHaveClass(/btn-saved/)
-
-    expect(await save.evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+    await expect(save).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
   })
 
-  test('mobile save FAB is hidden when not dirty and visible when dirty', async ({ page }) => {
+  test('mobile save button uses the same inline meta-row pill as desktop', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'saved content', version: '1', autoSave: false })
 
-    const save = page.locator('button.btn-save')
-    await expect(save).toBeDisabled()
-    await expect(save).toHaveCSS('opacity', '0')
+    const save = page.locator('.editor-meta button.btn-save')
+    await expect(save).toHaveCount(0)
 
     await page.locator('textarea').fill('modified content')
-    await expect(save).toBeEnabled()
-    await expect(save).toHaveCSS('opacity', '1')
+    await expect(save).toBeVisible()
+    await expect(save).toHaveText('Save')
+    expect(await save.evaluate(el => getComputedStyle(el).position)).toBe('relative')
   })
 })
 

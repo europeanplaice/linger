@@ -94,9 +94,13 @@ test('date navigation and save controls fit next to the sidebar on a narrow desk
 
   const header = page.locator('.editor-header')
   await expect(header.locator('.entry-date-monthday')).toHaveText('September 30')
-  await expect(header.locator('.btn-save')).toBeInViewport({ ratio: 1 })
   await expect(header.locator('.btn-more')).toBeInViewport({ ratio: 1 })
   await expect.poll(() => header.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+
+  await page.locator('.editor-textarea').fill('narrow desktop edit')
+  const meta = page.locator('.editor-meta')
+  await expect(meta.locator('.btn-save')).toBeInViewport({ ratio: 1 })
+  await expect.poll(() => meta.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
 })
 
 test('mobile date selection confirms before leaving unsaved edits', async ({ page }) => {

@@ -115,19 +115,6 @@ interface Props {
   onS3StaleEntryDetected?: () => void
 }
 
-function SaveIcon() {
-  return <CloudUpload className="btn-icon" aria-hidden="true" size={15} strokeWidth={1.5} />
-}
-
-function CheckIcon() {
-  return (
-    <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6.5 18.5A4.5 4.5 0 0 1 5 10a5 5 0 0 1 9.9-1A3.5 3.5 0 0 1 19 12.5"/>
-      <path d="m9 15 2 2 4-4"/>
-    </svg>
-  )
-}
-
 function DiscardIcon() {
   return (
     <svg className="btn-icon" aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -1457,10 +1444,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     : ''
 
   const saveStatusVisible = savePhase !== 'saved' && savePhase !== 'idle'
-  const autoSaveAction: 'retry' | 'save-now' | null =
-    autoSave && isDirty && isOnline && !hasConflict && !saving && !loading && !loadFailed
-      ? (status === t.entry.saveFailed ? 'retry' : 'save-now')
-      : null
+  const saveAction: 'save' | 'save-now' | 'retry' | null =
+    !isDirty || hasConflict || saving || loading || loadFailed
+      ? null
+      : autoSave
+        ? (isOnline ? (status === t.entry.saveFailed ? 'retry' : 'save-now') : null)
+        : (savePhase === 'offline' ? null : status === t.entry.saveFailed ? 'retry' : 'save')
 
   return (
     <>
@@ -1622,22 +1611,6 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
               </motion.button>
             )}
           </AnimatePresence>
-          {!autoSave && <motion.button
-            className={`btn-save${saving ? ' btn-saving' : status === savedStatus ? ' btn-saved' : ''}`}
-            onPointerDown={preventFocusSteal}
-            onClick={handleExplicitSave}
-            disabled={saving || !isDirty || loadFailed}
-            aria-busy={saving}
-            aria-label={saving ? t.entry.saving : status === savedStatus ? t.entry.savedToDrive : t.entry.save}
-            title={isMac ? '⌘S' : 'Ctrl+S'}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-          >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-              {saving ? <SpinnerIcon /> : status === savedStatus ? <CheckIcon /> : <SaveIcon />}
-              <span className="btn-text">{saving ? t.common.savingEllipsis : status === savedStatus ? t.common.saved : t.entry.save}</span>
-            </span>
-          </motion.button>}
           {!isToday && onGoToToday && (
             <button
               type="button"
@@ -1803,20 +1776,22 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
           </span>
         )}
         <AnimatePresence initial={false}>
-          {autoSaveAction && (
+          {saveAction && (
             <motion.button
-              key={autoSaveAction}
-              className={`editor-save-retry${autoSaveAction === 'retry' ? ' editor-save-retry--retry' : ''}`}
+              key={saveAction}
+              className={`editor-save-retry${saveAction === 'retry' ? ' editor-save-retry--retry' : ''}${!autoSave ? ' btn-save' : ''}${saveAction === 'save' ? ' editor-save-retry--primary' : ''}`}
               type="button"
               onPointerDown={preventFocusSteal}
-              onClick={handleManualAutoSave}
+              onClick={autoSave ? handleManualAutoSave : handleExplicitSave}
+              title={saveAction === 'retry' ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
               initial={{ opacity: 0, x: -4 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -4 }}
               whileTap={{ scale: 0.96 }}
               transition={{ duration: 0.16, ease: 'easeOut' }}
             >
-              {autoSaveAction === 'retry' ? t.entry.saveRetry : t.entry.saveNow}
+              {saveAction === 'save' && <CloudUpload className="btn-icon" aria-hidden="true" size={13} strokeWidth={2} />}
+              {saveAction === 'retry' ? t.entry.saveRetry : saveAction === 'save-now' ? t.entry.saveNow : t.entry.save}
             </motion.button>
           )}
         </AnimatePresence>
