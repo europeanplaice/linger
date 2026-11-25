@@ -100,11 +100,17 @@ describe('Google ID token verification with real RSA signatures', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('uses cached keys on subsequent verification', async () => {
+  it('uses cached keys and verified claims on subsequent verification without nonce', async () => {
+    const verifySpy = vi.spyOn(crypto.subtle, 'verify')
     const jwt = await token()
-    await verifyGoogleIdToken(jwt, clientId)
-    await verifyGoogleIdToken(jwt, clientId)
+    await expect(verifyGoogleIdToken(jwt, clientId)).resolves.toMatchObject({ sub: 'account-a' })
+    await expect(verifyGoogleIdToken(jwt, clientId)).resolves.toMatchObject({ sub: 'account-a' })
     expect(fetchMock).toHaveBeenCalledOnce()
+    expect(verifySpy).toHaveBeenCalledOnce()
+
+    cache.clear()
+    await expect(verifyGoogleIdToken(jwt, clientId)).resolves.toMatchObject({ sub: 'account-a' })
+    expect(verifySpy).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes cached keys for a newly rotated kid', async () => {

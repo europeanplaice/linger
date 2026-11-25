@@ -3,7 +3,7 @@ import type { DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWrit
 import { DIARY_UPLOAD_URL, diaryUploadResponse } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorCurrentEntry, mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
-import { beginEntryUpload, cancelEntryUpload, DriveConflictError, DriveError, ensureFolder, entryUploadStatus, findEntryMeta, generateFileId, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
+import { beginEntryUpload, cancelEntryUpload, DriveConflictError, DriveError, ensureFolder, entryUploadStatus, findEntryMeta, generateFileIds, getDiaryFileMeta, getEntryContent, getEntryMeta, inspectDriveFolder, listDriveFolders, saveEntry } from '../../../functions/_shared/drive'
 import type { DiaryEntry, DriveFileMeta } from '../../../functions/_shared/drive'
 import { invalidateFolderScopedS3Cache, jsonResponse, saveSession } from '../../../functions/_shared/session'
 import type { SessionData } from '../../../functions/_shared/session'
@@ -13,6 +13,8 @@ import { openVaultValue, sealVaultValue, vaultLookupKey } from '../../../functio
 
 const PENDING_UPLOAD_PREFIX = 'upload:pending:'
 const UPLOAD_RECEIPT_PREFIX = 'upload:receipt:'
+const FILE_ID_POOL_KEY = 'file-id-pool:v1'
+const FILE_ID_POOL_BATCH = 20
 const UPLOAD_IDLE_MS = 60_000
 const MAX_PENDING_UPLOADS = 32
 interface PendingUpload {
@@ -59,12 +61,21 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     return session
   }
 
-  private async folder(auth: DiaryWriterAuth, session: SessionData): Promise<string> {
+  private async folder(auth: DiaryWriterAuth, session: SessionData, verifyExisting = true): Promise<string> {
     await this.migrateLegacyMetadata(auth)
     const token = auth.accessToken
     const sessionFolderId = session.folder_id
     let stored = await this.readMetadata<string>('folder', auth)
-    if (stored) session.folder_id = stored
+    if (stored) {
+      session.folder_id = stored
+      if (!verifyExisting) {
+        if (sessionFolderId !== stored) {
+          invalidateFolderScopedS3Cache(session)
+          await saveSession(auth.sessionId, session, this.env)
+        }
+        return stored
+      }
+    }
     // A persisted pointer must not pin an account to a folder the user has
     // since deleted/trashed in Drive. Preserve transient errors; only absence
     // or a non-folder invalidates the pointer.
@@ -95,7 +106,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       discoverByName: !stored,
     })
     session.folder_id = id
-    await this.writeMetadata('folder', auth, id)
+    if (stored !== id) await this.writeMetadata('folder', auth, id)
     // A stored account pointer may replace a different per-session cache. Keep
     // the session aligned so later requests do not resurrect the stale ID.
     if (sessionFolderId !== id) {
@@ -120,7 +131,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('Invalid date')
     return this.serialize(async () => {
       const session = await this.session(input)
-      await this.folder(input, session)
+      await this.folder(input, session, false)
       if (!input.vaultKey) throw new Error('Vault key required to access protected Drive metadata')
       const dateKey = await vaultLookupKey(input.vaultKey, input.accountKey, 'diary-writer-date', input.date)
       const key = `file:v2:${dateKey}`
@@ -270,7 +281,13 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
   private async reserveEntryId(auth: DiaryWriterAuth, folderId: string, key: string): Promise<string> {
     const reservation = await this.readMetadata<{ id: string; folderId: string }>(key, auth)
     if (reservation?.folderId === folderId) return reservation.id
-    const id = await generateFileId(auth.accessToken)
+    let pool = await this.readMetadata<string[]>(FILE_ID_POOL_KEY, auth) ?? []
+    if (!Array.isArray(pool) || pool.length === 0) {
+      pool = await generateFileIds(auth.accessToken, FILE_ID_POOL_BATCH)
+    }
+    const [id, ...rest] = pool
+    if (rest.length > 0) await this.writeMetadata(FILE_ID_POOL_KEY, auth, rest)
+    else await this.ctx.storage.delete(FILE_ID_POOL_KEY)
     await this.writeMetadata(key, auth, { id, folderId })
     return id
   }
@@ -310,7 +327,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const pending = await this.ctx.storage.list({ prefix: PENDING_UPLOAD_PREFIX, limit: MAX_PENDING_UPLOADS })
       if (pending.size >= MAX_PENDING_UPLOADS && !await this.recoverPendingUploads(input, session)) return uploadBusy
 
-      const folderId = await this.folder(input, session)
+      let folderId = await this.folder(input, session, false)
       const key = `file:v2:${dateKey}`
       const reservationKey = `create:v2:${dateKey}`
       const knownFile = input.force || input.baseVersion !== null ? input.fileId : undefined
@@ -326,8 +343,19 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
         || (meta && !input.force && (!meta.version || meta.version !== input.baseVersion))) {
         return { status: 409, body: { conflict: meta, canRebase: !identityMismatch && Boolean(meta?.version) } }
       }
-      const fileId = meta?.id ?? await this.reserveEntryId(input, folderId, reservationKey)
-      const url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, !meta, input.bytes)
+      let fileId = meta?.id ?? await this.reserveEntryId(input, folderId, reservationKey)
+      let url: string
+      try {
+        url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, !meta, input.bytes)
+      } catch (error) {
+        if (!meta && error instanceof DriveError && error.status === 404) {
+          folderId = await this.folder(input, session, true)
+          fileId = await this.reserveEntryId(input, folderId, reservationKey)
+          url = await beginEntryUpload(input.accessToken, input.origin, input.date, folderId, fileId, true, input.bytes)
+        } else {
+          throw error
+        }
+      }
       await this.writeMetadata(pendingKey, input, {
         operationId: input.operationId, date: input.date, fileId, url, bytes: input.bytes, startedAt: Date.now(),
       } satisfies PendingUpload)

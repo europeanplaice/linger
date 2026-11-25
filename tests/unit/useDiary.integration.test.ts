@@ -58,6 +58,7 @@ beforeEach(async () => {
   read = vi.fn().mockImplementation(async () => json(null, 404))
   write = vi.fn().mockImplementation(async () => json({ error: 'unexpected write' }, 400))
   const contents = new Map<string, string>()
+  const pendingReads = new Map<string, Promise<void>>()
   const uploads = new Map<string, Promise<Response>>()
   fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
     const url = new URL(String(input), window.location.origin)
@@ -66,13 +67,25 @@ beforeEach(async () => {
     if (url.pathname === '/api/drive/changes') return json({ changes, newStartPageToken: 'tok-2' })
     const day = url.pathname.split('/').pop()!
     if (url.pathname.startsWith('/api/drive/entry/')) {
-      const response = await read(day)
-      if (!response.ok) return response
-      const loaded = await response.json() as LoadedDiaryEntry
-      contents.set(loaded.meta.id, loaded.entry.content)
-      return json({ meta: loaded.meta })
+      const requestedFileId = url.searchParams.get('fileId')
+      let releaseRead!: () => void
+      const readGate = new Promise<void>(resolve => { releaseRead = resolve })
+      if (requestedFileId) pendingReads.set(requestedFileId, readGate)
+      try {
+        const response = await read(day)
+        if (!response.ok) return response
+        const loaded = await response.json() as LoadedDiaryEntry
+        contents.set(loaded.meta.id, loaded.entry.content)
+        return json({ meta: loaded.meta })
+      } finally {
+        releaseRead()
+        if (requestedFileId && pendingReads.get(requestedFileId) === readGate) pendingReads.delete(requestedFileId)
+      }
     }
-    if (url.pathname.startsWith('/drive/v3/files/')) return new Response(contents.get(day))
+    if (url.pathname.startsWith('/drive/v3/files/')) {
+      await pendingReads.get(day)
+      return new Response(contents.get(day))
+    }
     if (url.pathname.startsWith('/api/drive/upload/')) {
       const { action, operationId, ...metadata } = JSON.parse(String(init?.body))
       if (action === 'prepare') {

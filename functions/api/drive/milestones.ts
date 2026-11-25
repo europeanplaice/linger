@@ -1,6 +1,6 @@
 import type { Env, Data } from '../../_shared/session'
-import { jsonResponse } from '../../_shared/session'
-import { ensureFolder, findJsonFile, readJsonFile, writeJsonFile, trashEntry } from '../../_shared/drive'
+import { jsonResponse, saveSession } from '../../_shared/session'
+import { DriveError, ensureFolder, findJsonFiles, readJsonFile, writeJsonFile, trashEntry } from '../../_shared/drive'
 
 const FILE_NAME = 'milestones.json'
 const LEGACY_FILE_NAME = 'anniversaries.json'
@@ -12,14 +12,47 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
   const { accessToken, sessionId, session } = context.data
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
+  const persistSession = () => {
+    const saving = saveSession(sessionId, { ...session }, context.env).catch(() => {
+      console.error('milestones.ts: Failed to persist milestones file id')
+    })
+    if (typeof context.waitUntil === 'function') context.waitUntil(saving)
+  }
+
   try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env, { allowCached: true })
-    let fileId = await findJsonFile(accessToken, folderId, FILE_NAME)
-    if (!fileId) {
-      // Fall back to the legacy file name written by older versions.
-      fileId = await findJsonFile(accessToken, folderId, LEGACY_FILE_NAME)
+    let cachedCleared = false
+    if (session.milestones_file_id) {
+      try {
+        const data = await readJsonFile<unknown>(accessToken, session.milestones_file_id)
+        if (!Array.isArray(data)) return jsonResponse([])
+        return jsonResponse(data)
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          console.warn('milestones.ts: corrupted JSON, returning [] so next PUT can heal')
+          return jsonResponse([])
+        }
+        if (e instanceof DriveError && e.status === 404) {
+          session.milestones_file_id = undefined
+          cachedCleared = true
+        } else {
+          throw e
+        }
+      }
     }
-    if (!fileId) return jsonResponse([])
+
+    const folderId = await ensureFolder(accessToken, sessionId, session, context.env, { allowCached: true })
+    const found = await findJsonFiles(accessToken, folderId, [FILE_NAME, LEGACY_FILE_NAME])
+    const fileId = found[FILE_NAME] ?? found[LEGACY_FILE_NAME] ?? null
+    if (!fileId) {
+      if (cachedCleared) persistSession()
+      return jsonResponse([])
+    }
+    if (found[FILE_NAME] && session.milestones_file_id !== found[FILE_NAME]) {
+      session.milestones_file_id = found[FILE_NAME]
+      persistSession()
+    } else if (cachedCleared) {
+      persistSession()
+    }
 
     let data: unknown
     try {
@@ -110,17 +143,58 @@ export const onRequestPut: PagesFunction<Env, string, Data> = async (context) =>
     return jsonResponse({ error: `At most ${MAX_MILESTONE_BADGES} milestone badges can be enabled` }, 400)
   }
 
-  try {
-    const folderId = await ensureFolder(accessToken, sessionId, session, context.env)
-    const existingFileId = await findJsonFile(accessToken, folderId, FILE_NAME) ?? undefined
-    const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, sanitized, existingFileId)
+  const persistSession = () => {
+    const saving = saveSession(sessionId, { ...session }, context.env).catch(() => {
+      console.error('milestones.ts: Failed to persist milestones file id')
+    })
+    if (typeof context.waitUntil === 'function') context.waitUntil(saving)
+  }
 
-    // Only trash the legacy file after the replacement was written successfully.
-    if (!existingFileId) {
-      const legacyFileId = await findJsonFile(accessToken, folderId, LEGACY_FILE_NAME)
-      if (legacyFileId) {
-        await trashEntry(accessToken, legacyFileId)
+  try {
+    const usedCachedFolder = Boolean(session.folder_id)
+    let folderId = await ensureFolder(accessToken, sessionId, session, context.env, { allowCached: true })
+
+    if (session.milestones_file_id) {
+      try {
+        const meta = await writeJsonFile(accessToken, folderId, FILE_NAME, sanitized, session.milestones_file_id)
+        return jsonResponse(meta)
+      } catch (e) {
+        if (e instanceof DriveError && e.status === 404) {
+          session.milestones_file_id = undefined
+        } else {
+          throw e
+        }
       }
+    }
+
+    const writeWithDiscovery = async (targetFolderId: string) => {
+      const found = await findJsonFiles(accessToken, targetFolderId, [FILE_NAME, LEGACY_FILE_NAME])
+      const existingFileId = found[FILE_NAME]
+      const meta = await writeJsonFile(accessToken, targetFolderId, FILE_NAME, sanitized, existingFileId)
+
+      // Only trash the legacy file after the replacement was written successfully.
+      if (!existingFileId && found[LEGACY_FILE_NAME]) {
+        await trashEntry(accessToken, found[LEGACY_FILE_NAME])
+      }
+      return meta
+    }
+
+    let meta
+    try {
+      meta = await writeWithDiscovery(folderId)
+    } catch (e) {
+      if (usedCachedFolder && e instanceof DriveError && e.status === 404) {
+        session.folder_id = undefined
+        folderId = await ensureFolder(accessToken, sessionId, session, context.env, { allowCached: false })
+        meta = await writeWithDiscovery(folderId)
+      } else {
+        throw e
+      }
+    }
+
+    if (session.milestones_file_id !== meta.id) {
+      session.milestones_file_id = meta.id
+      persistSession()
     }
 
     return jsonResponse(meta)

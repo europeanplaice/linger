@@ -9,9 +9,13 @@ export const onRequestGet: PagesFunction<Env, 'fileId', Data> = async (context) 
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
 
   try {
-    await getDiaryFileMeta(accessToken, sessionId, session, context.env, fileId)
-    const revisions = await listRevisions(accessToken, fileId)
-    return jsonResponse(revisions)
+    const [metaResult, revisionsResult] = await Promise.allSettled([
+      getDiaryFileMeta(accessToken, sessionId, session, context.env, fileId),
+      listRevisions(accessToken, fileId),
+    ])
+    if (metaResult.status === 'rejected') throw metaResult.reason
+    if (revisionsResult.status === 'rejected') throw revisionsResult.reason
+    return jsonResponse(revisionsResult.value)
   } catch (e) {
     if (e instanceof DriveError) return jsonResponse({ error: describeDriveError(e) }, e.status)
     return jsonResponse({ error: 'Internal error' }, 500)

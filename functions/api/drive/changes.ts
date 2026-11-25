@@ -20,8 +20,10 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async (context) =>
 
     try {
       const result = await getChanges(accessToken, stored)
-      session.changes_start_page_token = result.newStartPageToken
-      await saveSession(sessionId, { ...session, changes_start_page_token: result.newStartPageToken }, context.env)
+      if (result.newStartPageToken && result.newStartPageToken !== stored) {
+        session.changes_start_page_token = result.newStartPageToken
+        await saveSession(sessionId, { ...session, changes_start_page_token: result.newStartPageToken }, context.env)
+      }
       return jsonResponse(result)
     } catch (e) {
       // A stale/invalid page token returns 400 or 404. Reset by fetching a

@@ -139,6 +139,41 @@ test.describe('driveEntries proxy API', () => {
     expect(new Headers(fetchMock.calls[0].init?.headers).get('If-None-Match')).toBe('3')
   })
 
+  test('downloads content in parallel with metadata verification when fileId is known and uncached', async () => {
+    setOAuthCredentials({ accessToken: 'test-access-token', idToken: 'test-id', expiresAt: Date.now() + 120_000 })
+    const meta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '3' }
+    let resolveAuth!: (res: unknown) => void
+    let resolveContent!: (res: unknown) => void
+    const fetch = vi.fn((url: string) => {
+      if (url.startsWith('/api/drive/entry/')) return new Promise(r => { resolveAuth = r })
+      return new Promise(r => { resolveContent = r })
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const pending = getEntryByDate('2026-04-29', undefined, 'entry-1')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch.mock.calls[0][0]).toBe('/api/drive/entry/2026-04-29?metadata=1&fileId=entry-1')
+    expect(fetch.mock.calls[1][0]).toBe('https://www.googleapis.com/drive/v3/files/entry-1?alt=media')
+
+    resolveAuth(jsonResponse({ meta }))
+    resolveContent(textResponse('parallel body', 200))
+    await expect(pending).resolves.toEqual({ entry: { date: '2026-04-29', content: 'parallel body' }, meta })
+  })
+
+  test('discards parallel content download when metadata verification returns 404', async () => {
+    setOAuthCredentials({ accessToken: 'test-access-token', idToken: 'test-id', expiresAt: Date.now() + 120_000 })
+    let contentSignal: AbortSignal | undefined
+    const fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/drive/entry/')) return Promise.resolve(jsonResponse(null, 404))
+      contentSignal = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(getEntryByDate('2026-04-29', undefined, 'entry-1')).resolves.toBeNull()
+    expect(contentSignal?.aborted).toBe(true)
+  })
+
   test('sends only the diary text to Drive, then confirms with metadata', async () => {
     const meta: DriveFileMeta = { id: 'entry-1', name: 'diary-2026-04-29.txt', version: '1' }
     fetchMock.mock(prepared(), textResponse('', 200), jsonResponse({ meta }))

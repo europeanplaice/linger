@@ -3,6 +3,8 @@ const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs'
 const JWKS_CACHE_TTL_SEC = 3600
 const ACCESS_TOKEN_CACHE_NAME = 'google-access-token-info'
 const ACCESS_TOKEN_CACHE_TTL_SEC = 30
+const ID_TOKEN_CACHE_NAME = 'google-id-token-claims'
+const ID_TOKEN_CACHE_TTL_SEC = 30
 
 interface GoogleJwk {
   kty: string
@@ -146,7 +148,34 @@ async function fetchJwks(forceRefresh = false): Promise<GoogleJwk[]> {
   }
 }
 
+async function idTokenCacheRequest(token: string, clientId: string): Promise<Request> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${clientId}\0${token}`),
+  )
+  const hex = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+  return new Request(`https://idtoken-cache.internal/${hex}`)
+}
+
 export async function verifyGoogleIdToken(token: string, clientId: string, expectedNonce?: string): Promise<GoogleIdTokenClaims> {
+  let cache: Cache | null = null
+  let cacheKey: Request | null = null
+  if (expectedNonce === undefined && typeof caches !== 'undefined') {
+    try {
+      cache = await caches.open(ID_TOKEN_CACHE_NAME)
+      cacheKey = await idTokenCacheRequest(token, clientId)
+      const cached = await cache.match(cacheKey)
+      if (cached) {
+        const claims = await cached.json() as GoogleIdTokenClaims
+        const now = Math.floor(Date.now() / 1000)
+        if (typeof claims.exp === 'number' && claims.exp > now) return claims
+      }
+    } catch {
+      cache = null
+      cacheKey = null
+    }
+  }
+
   const parts = token.split('.')
   if (parts.length !== 3) throw new Error('Malformed Google ID token')
 
@@ -191,6 +220,17 @@ export async function verifyGoogleIdToken(token: string, clientId: string, expec
   if (claims.iat !== undefined && (typeof claims.iat !== 'number' || claims.iat > now + 60)) throw new Error('Google ID token issued in the future')
   if (expectedNonce !== undefined && claims.nonce !== expectedNonce) throw new Error('Google ID token nonce mismatch')
   if (claims.email && claims.email_verified !== true) throw new Error('Google email is not verified')
+
+  if (cache && cacheKey) {
+    const ttl = Math.min(ID_TOKEN_CACHE_TTL_SEC, claims.exp - now)
+    if (ttl >= 1) {
+      try {
+        await cache.put(cacheKey, new Response(JSON.stringify(claims), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${ttl}` },
+        }))
+      } catch { /* A cache write failure must not reject a verified identity token. */ }
+    }
+  }
 
   return claims
 }
