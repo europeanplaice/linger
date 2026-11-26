@@ -2731,6 +2731,77 @@ test.describe('EntryEditor — save button appearance', () => {
     await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
   })
 
+  test('desktop save button stays on the same row as wide milestones without layout shift', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 })
+    await loadHarness(page)
+    await renderEditor(page, {
+      date: '2026-05-01',
+      initialContent: 'saved content',
+      version: '1',
+      autoSave: false,
+      milestones: [
+        { id: 'one', label: 'A very long first milestone label for desktop', date: '2026-05-01' },
+        { id: 'two', label: 'Another wide second milestone label for desktop', date: '2026-05-02' },
+        { id: 'three', label: 'A third wide milestone label for desktop', date: '2026-05-03' },
+      ],
+    })
+
+    const save = page.locator('.editor-meta button.btn-save')
+    await expect(save).toHaveCount(0)
+    await expect.poll(() => page.locator('textarea.editor-textarea').evaluate(el => getComputedStyle(el).transform)).toBe('none')
+
+    const before = await page.evaluate(() => {
+      const meta = document.querySelector('.editor-meta')?.getBoundingClientRect()
+      const textarea = document.querySelector('textarea.editor-textarea')?.getBoundingClientRect()
+      if (!meta || !textarea) throw new Error('missing editor elements')
+      return { metaHeight: meta.height, textareaTop: textarea.top }
+    })
+
+    await page.fill('textarea.editor-textarea', 'edited content')
+    await expect(save).toBeVisible()
+    await expect(page.locator('.editor-meta-drive-slot')).toHaveCount(0)
+    await expect(page.locator('.editor-meta-milestones')).toHaveClass(/has-more-end/)
+
+    const dirty = await page.evaluate(() => {
+      const meta = document.querySelector('.editor-meta')?.getBoundingClientRect()
+      const time = document.querySelector('.editor-meta-time')?.getBoundingClientRect()
+      const status = document.querySelector('.editor-save-status')?.getBoundingClientRect()
+      const saveRect = document.querySelector('.editor-meta button.btn-save')?.getBoundingClientRect()
+      const textarea = document.querySelector('textarea.editor-textarea')?.getBoundingClientRect()
+      if (!meta || !time || !status || !saveRect || !textarea) throw new Error('missing dirty editor elements')
+      return {
+        metaHeight: meta.height,
+        metaRight: meta.right,
+        textareaTop: textarea.top,
+        timeCenterY: time.top + time.height / 2,
+        statusCenterY: status.top + status.height / 2,
+        saveCenterY: saveRect.top + saveRect.height / 2,
+        saveRight: saveRect.right,
+      }
+    })
+
+    expect(Math.abs(dirty.metaHeight - before.metaHeight)).toBeLessThanOrEqual(1)
+    expect(Math.abs(dirty.textareaTop - before.textareaTop)).toBeLessThanOrEqual(1)
+    expect(Math.abs(dirty.saveCenterY - dirty.timeCenterY)).toBeLessThanOrEqual(4)
+    expect(Math.abs(dirty.statusCenterY - dirty.timeCenterY)).toBeLessThanOrEqual(4)
+    expect(dirty.saveRight).toBeLessThanOrEqual(dirty.metaRight + 1)
+    expect(dirty.metaRight - dirty.saveRight).toBeLessThanOrEqual(2)
+
+    await save.click()
+    await expect(save).toHaveCount(0)
+    await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
+
+    const after = await page.evaluate(() => {
+      const meta = document.querySelector('.editor-meta')?.getBoundingClientRect()
+      const textarea = document.querySelector('textarea.editor-textarea')?.getBoundingClientRect()
+      if (!meta || !textarea) throw new Error('missing editor elements after save')
+      return { metaHeight: meta.height, textareaTop: textarea.top }
+    })
+
+    expect(Math.abs(after.metaHeight - before.metaHeight)).toBeLessThanOrEqual(1)
+    expect(Math.abs(after.textareaTop - before.textareaTop)).toBeLessThanOrEqual(1)
+  })
+
   test('mobile save button uses the same inline meta-row pill as desktop', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 })
     await loadHarness(page)

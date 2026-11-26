@@ -3917,6 +3917,8 @@ dialog.milestone-form-dialog::backdrop {
 .editor-save-status:not(.sr-only) {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   min-height: 24px;
   line-height: 1.4;
   transition: color 0.2s ease;
@@ -3984,6 +3986,8 @@ dialog.milestone-form-dialog::backdrop {
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   gap: 0.3rem;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
   border-radius: 999px;
@@ -4029,6 +4033,7 @@ dialog.milestone-form-dialog::backdrop {
   display: inline-flex;
   flex-direction: row-reverse;
   align-items: center;
+  flex-shrink: 0;
   gap: 0.6rem;
   margin-left: auto;
 }
@@ -4207,6 +4212,8 @@ dialog.milestone-form-dialog::backdrop {
 .editor-meta-offline {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   gap: 0.3rem;
   min-height: 24px;
   line-height: 1.4;
@@ -4220,7 +4227,30 @@ dialog.milestone-form-dialog::backdrop {
   opacity: 0.85;
 }
 .editor-meta-milestones {
-  display: contents;
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 0.4rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  scroll-padding-inline: 1rem;
+  padding-block: 2px 6px;
+  margin-block: -2px -6px;
+  --milestone-fade-start: 0px;
+  --milestone-fade-end: 0px;
+  mask-image: linear-gradient(to right, transparent, black var(--milestone-fade-start), black calc(100% - var(--milestone-fade-end)), transparent);
+}
+.editor-meta-milestones::-webkit-scrollbar {
+  display: none;
+}
+.editor-meta-milestones.has-more-start {
+  --milestone-fade-start: 1rem;
+}
+.editor-meta-milestones.has-more-end {
+  --milestone-fade-end: 1rem;
 }
 .editor-meta-milestone {
   -webkit-appearance: none;
@@ -4230,6 +4260,7 @@ dialog.milestone-form-dialog::backdrop {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   font-family: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -4239,9 +4270,7 @@ dialog.milestone-form-dialog::backdrop {
   border-radius: 999px;
   padding: 0.25rem 0.6rem;
   min-height: 28px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  white-space: nowrap;
   text-align: start;
   line-height: 1.4;
   position: relative;
@@ -4268,6 +4297,8 @@ dialog.milestone-form-dialog::backdrop {
 .editor-meta-today {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -4278,6 +4309,10 @@ dialog.milestone-form-dialog::backdrop {
   padding: 0.2rem 0.6rem;
   min-height: 24px;
   line-height: 1.4;
+}
+.editor-meta-time {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .entry-date-weekday {
   color: var(--text-muted);
@@ -4327,6 +4362,9 @@ dialog.milestone-form-dialog::backdrop {
 @media (min-width: 641px) {
   .editor-date-group .btn-day-nav:first-of-type {
     margin-left: -0.75rem;
+  }
+  .editor-meta {
+    flex-wrap: nowrap;
   }
 }
 .editor-actions .btn-refresh-entry {
@@ -5662,30 +5700,13 @@ dialog.history-dialog::backdrop {
     padding-bottom: 0.4rem;
   }
   .editor-meta-milestones {
-    display: flex;
-    flex: 1 1 0;
-    min-width: 0;
-    gap: 0.4rem;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scroll-padding-inline: 1rem;
-    --milestone-fade-start: 0px;
-    --milestone-fade-end: 0px;
-    mask-image: linear-gradient(to right, transparent, black var(--milestone-fade-start), black calc(100% - var(--milestone-fade-end)), transparent);
-  }
-  .editor-meta-milestones.has-more-start {
-    --milestone-fade-start: 1rem;
-  }
-  .editor-meta-milestones.has-more-end {
-    --milestone-fade-end: 1rem;
+    padding-block: 0;
+    margin-block: 0;
   }
   .editor-meta-milestone {
-    flex: 0 0 auto;
-    max-width: none;
     border: none;
     padding: 6px 0;
     font-size: 0.75rem;
-    white-space: nowrap;
   }
   .editor-meta-milestone,
   .editor-meta-milestone:hover {
