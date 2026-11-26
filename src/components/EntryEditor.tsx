@@ -204,7 +204,31 @@ function SyncBadge({ status, title, label, onClick, busy, justSaved, direction, 
       onClick={onClick}
     >
       <span className="editor-meta-badge-icon-wrapper">
-        {busy ? <SpinnerIcon /> : children}
+        <AnimatePresence mode="wait" initial={false}>
+          {busy ? (
+            <motion.span
+              key="busy"
+              className="editor-meta-badge-icon-slot"
+              initial={{ opacity: 0, scale: 0.82 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.82 }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
+            >
+              <SpinnerIcon />
+            </motion.span>
+          ) : (
+            <motion.span
+              key="icon"
+              className="editor-meta-badge-icon-slot"
+              initial={{ opacity: 0, scale: 0.88 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.88 }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
+            >
+              {children}
+            </motion.span>
+          )}
+        </AnimatePresence>
         <span className={`editor-meta-badge-status editor-meta-badge-status--${status}${direction ? ` editor-meta-badge-status--${direction}` : ''}`}>
           {direction && (
             <svg aria-hidden="true" viewBox="0 0 10 10" className="editor-meta-badge-status-svg">
@@ -1676,20 +1700,29 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
       )}
     </AnimatePresence>
     <div className="editor">
-      {saveProgress !== null && (
-        <div className="save-progress-bar" aria-hidden="true">
-          <div
-            className="save-progress-bar-fill"
-            style={{
-              width: `${saveProgress * 100}%`,
-              opacity: saveProgress >= 1 ? 0 : 1,
-              transition: saveProgress >= 1
-                ? 'width 0.15s ease-out, opacity 0.45s ease 0.1s'
-                : 'width 60ms linear',
-            }}
-          />
-        </div>
-      )}
+      <AnimatePresence>
+        {saveProgress !== null && (
+          <motion.div
+            className="save-progress-bar"
+            aria-hidden="true"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            <div
+              className="save-progress-bar-fill"
+              style={{
+                width: `${saveProgress * 100}%`,
+                opacity: saveProgress >= 1 ? 0 : 1,
+                transition: saveProgress >= 1
+                  ? 'width 0.15s ease-out, opacity 0.45s ease 0.1s'
+                  : 'width 60ms linear',
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="editor-header">
         <div className="editor-date-group">
           <button className="btn-menu" onPointerDown={preventFocusSteal} onClick={onMenuClick} title={t.entry.openMenu} aria-label={t.entry.openMenu}>☰</button>
@@ -1891,7 +1924,7 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
                 className="editor-save-status-inner"
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
                 {savePhase === 'saving' ? (
                   <span className="btn-saving-spinner editor-save-spinner" aria-hidden="true" />
@@ -1903,7 +1936,7 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
             ) : saveStatusText}
           </span>
         )}
-        <AnimatePresence initial={false}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {saveAction && (
             <motion.button
               key={saveAction}
@@ -1912,11 +1945,11 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
               onPointerDown={preventFocusSteal}
               onClick={autoSave ? handleManualAutoSave : handleExplicitSave}
               title={saveAction === 'retry' ? undefined : isMac ? '⌘S' : 'Ctrl+S'}
-              initial={{ opacity: 0, x: -4 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -4 }}
+              initial={{ opacity: 0, scale: 0.94, x: -4 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.94, x: -4 }}
               whileTap={{ scale: 0.96 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             >
               {saveAction === 'save' && <CloudUpload className="btn-icon" aria-hidden="true" size={13} strokeWidth={2} />}
               {saveAction === 'retry' ? t.entry.saveRetry : saveAction === 'save-now' ? t.entry.saveNow : t.entry.save}
@@ -1950,9 +1983,9 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
               <motion.span
                 key="s3"
                 className="editor-meta-s3-slot"
-                initial={{ opacity: 0, scale: 0.88 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.88 }}
+                initial={{ opacity: 0, scale: 0.85, y: 2 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.88, y: -2 }}
                 transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
               >
                 <SyncBadge
@@ -2007,38 +2040,62 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
           </motion.div>
         )}
       </AnimatePresence>
-      {pendingNavDate && !autoNavSaving && (
-        <div className="unsaved-nav-banner">
-          <span>{t.entry.unsavedLeave}</span>
-          <div className="unsaved-nav-actions">
-            <button onClick={handleSaveAndNavigate} disabled={saving}>{t.common.save}</button>
-            <button onClick={onPendingNavigate}>{t.common.discard}</button>
-            <button onClick={onCancelNavigation}>{t.common.cancel}</button>
-          </div>
-        </div>
-      )}
-      {remoteUpdateAvailable && !hasConflict && (
-        <div className="conflict-panel" role="status">
-          <div>
-            <strong>{t.entry.remoteUpdateTitle}</strong>
-            <p>{text !== savedText ? t.entry.remoteUpdateHintDirty : t.entry.remoteUpdateHint}</p>
-          </div>
-          <div className="conflict-actions">
-            {text !== savedText ? (
-              <button type="button" onClick={() => void openRemoteComparison()} disabled={refreshing || saving}>
-                {refreshing ? t.entry.refreshingEntry : t.entry.remoteUpdateCompare}
-              </button>
-            ) : (
-              <button type="button" onClick={() => void loadFreshEntry()} disabled={refreshing || saving}>
-                {refreshing ? t.entry.refreshingEntry : t.entry.loadLatest}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-      {hasConflict && (
-        <>
-        <div className="conflict-panel">
+      <AnimatePresence>
+        {pendingNavDate && !autoNavSaving && (
+          <motion.div
+            className="unsaved-nav-banner"
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <span>{t.entry.unsavedLeave}</span>
+            <div className="unsaved-nav-actions">
+              <button onClick={handleSaveAndNavigate} disabled={saving}>{t.common.save}</button>
+              <button onClick={onPendingNavigate}>{t.common.discard}</button>
+              <button onClick={onCancelNavigation}>{t.common.cancel}</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {remoteUpdateAvailable && !hasConflict && (
+          <motion.div
+            className="conflict-panel"
+            role="status"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div>
+              <strong>{t.entry.remoteUpdateTitle}</strong>
+              <p>{text !== savedText ? t.entry.remoteUpdateHintDirty : t.entry.remoteUpdateHint}</p>
+            </div>
+            <div className="conflict-actions">
+              {text !== savedText ? (
+                <button type="button" onClick={() => void openRemoteComparison()} disabled={refreshing || saving}>
+                  {refreshing ? t.entry.refreshingEntry : t.entry.remoteUpdateCompare}
+                </button>
+              ) : (
+                <button type="button" onClick={() => void loadFreshEntry()} disabled={refreshing || saving}>
+                  {refreshing ? t.entry.refreshingEntry : t.entry.loadLatest}
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {hasConflict && (
+          <motion.div
+            key="conflict-wrap"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+          <div className="conflict-panel">
           <div>
             <strong>{t.entry.conflictTitle}</strong>
             <p>{conflictRemote ? t.entry.conflictRemote : t.entry.conflictDeleted}</p>
@@ -2100,8 +2157,9 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
             </div>
           </div>
         </details>
-        </>
-      )}
+        </motion.div>
+        )}
+      </AnimatePresence>
       {backDate && (
         <button className="editor-back-bar" onClick={onGoBack} onPointerDown={preventFocusSteal}>
           {t.entry.backTo(diaryDateLabel(backDate, true, 'short', locale))}

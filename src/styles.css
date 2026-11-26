@@ -3947,12 +3947,14 @@ dialog.milestone-form-dialog::backdrop {
   border-color: color-mix(in srgb, var(--accent) 26%, transparent);
   border-top-color: var(--accent);
   flex-shrink: 0;
+  animation: save-spinner 0.75s linear infinite, save-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .editor-save-dot {
   width: 0.42rem;
   height: 0.42rem;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
 }
 .editor-save-dot--waiting {
   background: var(--unsaved-status);
@@ -3960,14 +3962,21 @@ dialog.milestone-form-dialog::backdrop {
 }
 .editor-save-dot--offline {
   background: #f59e0b;
+  animation: save-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .editor-save-dot--paused {
   background: var(--text-muted);
   opacity: 0.7;
+  animation: save-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .editor-save-dot--error,
 .editor-save-dot--conflict {
   background: var(--warning);
+  animation: save-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes save-icon-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
 }
 @keyframes save-dot-breathe {
   0%, 100% { transform: scale(0.88); opacity: 0.55; }
@@ -4083,13 +4092,20 @@ dialog.milestone-form-dialog::backdrop {
   height: 24px;
 }
 
+.editor-meta-badge-icon-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .editor-meta-badge-icon-wrapper svg {
   display: block;
   opacity: 0.85;
   transition: opacity 0.2s ease;
 }
 
-.editor-meta-badge-icon-wrapper > svg {
+.editor-meta-badge-icon-wrapper > svg,
+.editor-meta-badge-icon-slot > svg {
   width: 22px;
   height: 22px;
 }
@@ -4110,6 +4126,7 @@ dialog.milestone-form-dialog::backdrop {
   justify-content: center;
   box-shadow: 0 0 0 1.5px var(--bg);
   z-index: 1;
+  transition: background-color 0.25s ease, transform 0.2s ease;
 }
 
 .editor-meta-badge-status--synced {
@@ -4171,10 +4188,18 @@ dialog.milestone-form-dialog::backdrop {
   .editor-meta-badge-status--backfilling::after,
   .editor-meta-badge--just-saved .editor-meta-badge-status--synced,
   .editor-meta-badge--just-saved .editor-meta-badge-status--synced::after,
+  .editor-meta-badge-status-svg,
   .editor-save-dot--waiting,
+  .editor-save-dot--offline,
+  .editor-save-dot--paused,
+  .editor-save-dot--error,
+  .editor-save-dot--conflict,
   .editor-save-status--saving .editor-save-status-inner,
   .editor-save-status--error .editor-save-status-inner {
     animation: none;
+  }
+  .editor-save-spinner {
+    animation: save-spinner 0.75s linear infinite;
   }
 }
 
@@ -4208,6 +4233,11 @@ dialog.milestone-form-dialog::backdrop {
   height: 8px;
   display: block;
   color: #ffffff;
+  animation: badge-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes badge-icon-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
 }
 .editor-meta-offline {
   display: inline-flex;
@@ -4714,6 +4744,7 @@ dialog.milestone-form-dialog::backdrop {
   font-family: inherit;
   font-size: 0.82rem;
   padding: 0.3rem 0.7rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
 .unsaved-nav-actions button:hover { background: var(--unsaved-hover); }
 .unsaved-nav-actions button:disabled { cursor: default; opacity: 0.5; }
