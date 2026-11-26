@@ -1,13 +1,19 @@
 import { getAllCached as getLegacyCached } from './diaryCache'
 import type { CachedEntry } from './diaryCache'
-import { migrateEncryptedCache } from './encryptedLocalStore'
+import { migrateEncryptedCache, syncEncryptedLocalBatch } from './encryptedLocalStore'
 import { SecureLocalData } from './secureLocalData'
 import { captureLocalContext, prepareLocalContext, sameLocalOwner } from './secureLocalContext'
 
 const records = new SecureLocalData<CachedEntry>('diary-cache')
 const pending = new Map<string, Promise<void>>()
+let inflightList: { key: string; promise: Promise<CachedEntry[]> } | null = null
+
+function invalidateInflightList(): void {
+  inflightList = null
+}
 
 function ordered(date: string, operation: () => Promise<void>): Promise<void> {
+  invalidateInflightList()
   const context = captureLocalContext()
   const key = JSON.stringify([context.userId, context.owner.toLowerCase(), date])
   const previous = pending.get(key) ?? Promise.resolve()
@@ -24,8 +30,8 @@ async function waitPending(): Promise<void> {
   context.assertCurrent()
 }
 
-async function migrate(): Promise<void> {
-  const state = await prepareLocalContext()
+async function migrate(prepared?: Awaited<ReturnType<typeof prepareLocalContext>>): Promise<void> {
+  const state = prepared ?? await prepareLocalContext()
   const legacy = await getLegacyCached()
   state.assertCurrent()
   for (const entry of legacy) {
@@ -37,18 +43,50 @@ async function migrate(): Promise<void> {
 
 export async function getAllCached(): Promise<CachedEntry[]> {
   await waitPending()
-  await migrate()
-  return records.list()
+  const context = captureLocalContext()
+  const key = JSON.stringify([context.userId, context.owner.toLowerCase()])
+  if (inflightList?.key === key) return inflightList.promise
+  const promise = (async () => {
+    const state = await prepareLocalContext()
+    await migrate(state)
+    return records.list()
+  })().finally(() => {
+    if (inflightList?.promise === promise) inflightList = null
+  })
+  inflightList = { key, promise }
+  return promise
 }
 
 export async function putCached(entry: CachedEntry): Promise<void> {
   return ordered(entry.date, async () => {
     const state = await prepareLocalContext(entry.owner)
     if (!entry.owner || !sameLocalOwner(entry.owner, state.owner)) throw new Error('A verified cache owner is required')
-    await migrate()
+    await migrate(state)
     state.assertCurrent()
     await records.update(entry.date, () => entry)
   })
+}
+
+export async function syncCachedBatch(upserts: CachedEntry[], deletes: string[]): Promise<void> {
+  if (upserts.length === 0 && deletes.length === 0) return
+  invalidateInflightList()
+  await waitPending()
+  const state = await prepareLocalContext(upserts[0]?.owner)
+  for (const entry of upserts) {
+    if (!entry.owner || !sameLocalOwner(entry.owner, state.owner)) {
+      throw new Error('A verified cache owner is required')
+    }
+  }
+  await migrate(state)
+  state.assertCurrent()
+  await syncEncryptedLocalBatch(
+    state.userId,
+    `diary-cache:${state.guard.ownerHash}`,
+    upserts.map(entry => ({ id: entry.date, value: entry })),
+    deletes,
+    state.guard,
+    state.assertCurrent,
+  )
 }
 
 export async function deleteCached(date: string): Promise<void> {
@@ -59,6 +97,7 @@ export async function deleteCached(date: string): Promise<void> {
 }
 
 export async function clearCache(): Promise<void> {
+  invalidateInflightList()
   await waitPending()
   await migrate()
   for (const entry of await records.list()) {

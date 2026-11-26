@@ -22,6 +22,7 @@ vi.mock('../../src/api/driveEntries', () => ({
 vi.mock('../../src/lib/secureCache', () => ({
   getAllCached: vi.fn().mockResolvedValue([]),
   putCached: vi.fn().mockResolvedValue(undefined),
+  syncCachedBatch: vi.fn().mockResolvedValue(undefined),
   deleteCached: vi.fn().mockResolvedValue(undefined),
   clearCache: vi.fn().mockResolvedValue(undefined),
   getAllDrafts: vi.fn().mockResolvedValue([]),

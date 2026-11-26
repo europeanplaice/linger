@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
 import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError, DriveHttpError } from '../api/driveEntries'
-import { getAllCached, putCached, deleteCached, clearCache } from '../lib/secureCache'
+import { getAllCached, putCached, deleteCached, clearCache, syncCachedBatch } from '../lib/secureCache'
 import { getAllDrafts, getDraft, putDraft, deleteDraft, markDraftConflicted, nextDraftCheckpointTime, reportDraftStorageError } from '../lib/draftStorage'
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
@@ -248,9 +248,16 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
         existing.meta.id === f.id &&
         existing.meta.version === f.version,
       )
+      const metaUnchanged = Boolean(
+        existing &&
+        existing.meta.id === f.id &&
+        existing.meta.version === f.version &&
+        existing.meta.modifiedTime === f.modifiedTime &&
+        existing.meta.name === f.name,
+      )
       if (!canReuseContent && existing?.content) evicted.push(date)
       next.set(date, canReuseContent ? { ...existing!, meta: f } : { meta: f })
-      if (syncPersistentCache) {
+      if (syncPersistentCache && !metaUnchanged) {
         toUpsert.push(canReuseContent && existing?.content
           ? { date, meta: f, content: existing.content, snippet: existing.snippet }
           : { date, meta: f })
@@ -265,12 +272,11 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     updateCache(() => next)
     if (evicted.length) onEvictedRef.current?.(evicted)
 
-    if (syncPersistentCache) {
-      // Background IDB sync — non-blocking
-      Promise.all([
-        ...toUpsert.map(e => putCached({ ...e, owner: scope.email ?? undefined }).catch(() => {})),
-        ...toDelete.map(d => deleteCached(d).catch(() => {})),
-      ]).catch(() => {})
+    if (syncPersistentCache && (toUpsert.length > 0 || toDelete.length > 0)) {
+      // Background IDB sync — non-blocking, batched in one transaction.
+      const owner = scope.email ?? undefined
+      const ownedUpserts = toUpsert.map(e => ({ ...e, owner }))
+      syncCachedBatch(ownedUpserts, toDelete).catch(() => {})
     }
 
     return next
@@ -545,11 +551,10 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
 
       updateCache(() => next)
       if (evicted.length) onEvictedRef.current?.(evicted)
-      if (syncPersistentCache) {
-        Promise.all([
-          ...toUpsert.map(e => putCached({ ...e, owner: scope.email ?? undefined }).catch(() => {})),
-          ...toDelete.map(d => deleteCached(d).catch(() => {})),
-        ]).catch(() => {})
+      if (syncPersistentCache && (toUpsert.length > 0 || toDelete.length > 0)) {
+        const owner = scope.email ?? undefined
+        const ownedUpserts = toUpsert.map(e => ({ ...e, owner }))
+        syncCachedBatch(ownedUpserts, toDelete).catch(() => {})
       }
     } catch (e) {
       if (!scope.active) return

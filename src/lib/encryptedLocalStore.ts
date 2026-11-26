@@ -332,3 +332,56 @@ export async function deleteEncryptedLocal(userId: string, kind: string, id: str
     tx.onerror = () => { /* onabort reports the transaction failure. */ }
   })
 }
+
+/** Batch upsert/delete encrypted cache records in a single IndexedDB transaction. */
+export async function syncEncryptedLocalBatch<T>(
+  userId: string,
+  kind: string,
+  upserts: readonly { id: string; value: T }[],
+  deletes: readonly string[],
+  guard: DraftKeyGuard,
+  assertContext: () => void,
+): Promise<void> {
+  if (upserts.length === 0 && deletes.length === 0) return
+  const vaultRevision = getVaultRevision()
+  const [group, preparedUpserts, deleteKeys] = await Promise.all([
+    localDataLookupKey(userId, 'group', kind),
+    Promise.all(upserts.map(async ({ id, value }) => {
+      const key = await localDataLookupKey(userId, kind, id)
+      const envelope = await encryptLocalData(userId, kind, key, value)
+      return { key, revision: crypto.randomUUID(), envelope }
+    })),
+    Promise.all(deletes.map(id => localDataLookupKey(userId, kind, id))),
+  ])
+  const db = await openDatabase()
+  assertContext()
+  if (!active(userId, vaultRevision)) throw new Error('Passkey vault changed during local data operation')
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([STORE, MARKERS], 'readwrite')
+    const store = tx.objectStore(STORE)
+    const marker = tx.objectStore(MARKERS).get(guard.ownerHash)
+    let failure: unknown
+    marker.onsuccess = () => {
+      try { assertContext() } catch (error) { failure = error; tx.abort(); return }
+      if (!active(userId, vaultRevision) || marker.result?.revision !== guard.revision) {
+        failure = new Error('Passkey vault changed during local data operation')
+        tx.abort()
+        return
+      }
+      try {
+        for (const item of preparedUpserts) {
+          store.put({ key: item.key, group, ownerHash: guard.ownerHash, revision: item.revision, envelope: item.envelope } satisfies StoredRecord)
+        }
+        for (const key of deleteKeys) {
+          store.delete(key)
+        }
+      } catch (error) {
+        failure = error
+        tx.abort()
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onabort = () => reject(failure ?? tx.error ?? new Error('Local data batch sync aborted'))
+    tx.onerror = () => { /* onabort reports the transaction failure. */ }
+  })
+}

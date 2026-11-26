@@ -32,8 +32,22 @@ function aad(userId: string, kind: string, recordId: string): Uint8Array<ArrayBu
   return encoder.encode(JSON.stringify(['linger-local', 1, userId, kind, recordId]))
 }
 
+let cachedVaultRevision = -1
+let cachedVaultUserId = ''
+let derivedKeyCache = new Map<string, Promise<CryptoKey>>()
+
+function getDerivedKeyCache(revision: number, userId: string): Map<string, Promise<CryptoKey>> {
+  if (cachedVaultRevision !== revision || cachedVaultUserId !== userId) {
+    cachedVaultRevision = revision
+    cachedVaultUserId = userId
+    derivedKeyCache = new Map()
+  }
+  return derivedKeyCache
+}
+
 async function withDerivedKey<T>(
   userId: string,
+  cacheKey: string,
   keyInfo: Uint8Array<ArrayBuffer>,
   algorithm: AesDerivedKeyParams | HmacImportParams,
   usages: KeyUsage[],
@@ -49,10 +63,19 @@ async function withDerivedKey<T>(
   }
   const base = await material
   assertCurrent()
-  const key = await crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info: keyInfo },
-    base, algorithm, false, usages,
-  )
+  const cache = getDerivedKeyCache(revision, userId)
+  let keyPromise = cache.get(cacheKey)
+  if (!keyPromise) {
+    keyPromise = crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt, info: keyInfo },
+      base, algorithm, false, usages,
+    ).catch(err => {
+      if (cache.get(cacheKey) === keyPromise) cache.delete(cacheKey)
+      throw err
+    })
+    cache.set(cacheKey, keyPromise)
+  }
+  const key = await keyPromise
   assertCurrent()
   const result = await operation(key)
   assertCurrent()
@@ -61,14 +84,16 @@ async function withDerivedKey<T>(
 
 function withEncryptionKey<T>(userId: string, kind: string, operation: (key: CryptoKey) => Promise<T>): Promise<T> {
   // Drafts and their key markers share the original derivation parameters.
-  const keyInfo = kind === 'draft' || kind === 'draft-key-marker' ? draftKeyInfo : encoder.encode(`linger/local-data/aes-gcm/v1/${kind}`)
-  return withDerivedKey(userId, keyInfo, { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt'], operation)
+  const isDraft = kind === 'draft' || kind === 'draft-key-marker'
+  const keyInfo = isDraft ? draftKeyInfo : encoder.encode(`linger/local-data/aes-gcm/v1/${kind}`)
+  const cacheKey = isDraft ? 'aes:draft' : `aes:${kind}`
+  return withDerivedKey(userId, cacheKey, keyInfo, { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt'], operation)
 }
 
 /** Opaque, account-specific identifier for an IndexedDB record. */
 export async function localDataLookupKey(userId: string, kind: string, recordId: string): Promise<string> {
   if (!userId || !kind || !recordId) throw new Error('Local data identity required')
-  return withDerivedKey(userId, lookupKeyInfo, { name: 'HMAC', hash: 'SHA-256', length: 256 }, ['sign'], async key => {
+  return withDerivedKey(userId, 'hmac:lookup', lookupKeyInfo, { name: 'HMAC', hash: 'SHA-256', length: 256 }, ['sign'], async key => {
     const digest = await crypto.subtle.sign('HMAC', key, buffer(aad(userId, kind, recordId)))
     return encode(new Uint8Array(digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
   })

@@ -36,30 +36,40 @@ export const onRequest: PagesFunction<Env, string, Data> = async (context) => {
 
   const accessToken = bearerToken(context.request)
   if (!accessToken) return jsonResponse({ error: 'Google authorization required' }, 401)
-  let expiresIn: number
-  try {
-    expiresIn = await verifyGoogleAccessToken(accessToken, context.env.GOOGLE_CLIENT_ID, session.google_sub)
-  } catch (error) {
+  const idToken = context.request.headers.get('X-Linger-Google-ID-Token') ?? undefined
+
+  const [accessResult, idResult] = await Promise.all([
+    verifyGoogleAccessToken(accessToken, context.env.GOOGLE_CLIENT_ID, session.google_sub)
+      .then(expiresIn => ({ ok: true as const, expiresIn }))
+      .catch(error => ({ ok: false as const, error })),
+    idToken
+      ? verifyGoogleIdToken(idToken, context.env.GOOGLE_CLIENT_ID)
+          .then(claims => ({ ok: true as const, claims }))
+          .catch(error => ({ ok: false as const, error }))
+      : Promise.resolve(null),
+  ])
+
+  if (!accessResult.ok) {
+    const { error } = accessResult
     if (error instanceof GoogleAccessTokenValidationError && error.transient) {
       return jsonResponse({ error: 'Google authorization temporarily unavailable' }, 503, { 'Retry-After': '1' })
     }
     if (error instanceof GoogleAccessTokenValidationError) return jsonResponse({ error: 'Google authorization expired or invalid' }, 401)
     return jsonResponse({ error: 'Google authorization temporarily unavailable' }, 503, { 'Retry-After': '1' })
   }
+  const expiresIn = accessResult.expiresIn
 
-  const idToken = context.request.headers.get('X-Linger-Google-ID-Token') ?? undefined
-  if (idToken) {
-    try {
-      const claims = await verifyGoogleIdToken(idToken, context.env.GOOGLE_CLIENT_ID)
-      if (claims.sub !== session.google_sub) return jsonResponse({ error: 'Google account changed' }, 401)
-      session.id_token = idToken
-      session.id_token_verified = true
-    } catch (error) {
+  if (idToken && idResult) {
+    if (!idResult.ok) {
+      const { error } = idResult
       if (error instanceof GoogleIdTokenValidationError && error.transient) {
         return jsonResponse({ error: 'Google identity validation temporarily unavailable' }, 503, { 'Retry-After': '1' })
       }
       return jsonResponse({ error: 'Google identity token expired or invalid' }, 401)
     }
+    if (idResult.claims.sub !== session.google_sub) return jsonResponse({ error: 'Google account changed' }, 401)
+    session.id_token = idToken
+    session.id_token_verified = true
   }
 
   // Credentials live only on this request's context object. saveSession below

@@ -711,6 +711,26 @@ export default function App() {
     [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
   )
 
+  const handleMenuClick = useCallback(() => {
+    if (isMobileLayout()) {
+      setSidebarOpen(true)
+      history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
+    }
+  }, [])
+
+  const handleGoToToday = useCallback(() => {
+    selectDate(todayYmd())
+  }, [selectDate])
+
+  const handleGetRelatedTokens = useCallback(
+    (previewDate: string) => tfIdf.getSharedTokens(selectedDate, previewDate),
+    [tfIdf.getSharedTokens, selectedDate],
+  )
+
+  const handleConsumeSharedText = useCallback(() => {
+    setPendingSharedText(null)
+  }, [])
+
   const handleReauth = useCallback(() => {
     if (googleConnection === 'unavailable') void retryGoogleConnection()
     else retryAfterExpired()
@@ -990,12 +1010,7 @@ export default function App() {
           getContent={diary.getContent}
           onSave={handleSave}
           onDelete={diary.remove}
-          onMenuClick={() => {
-            if (isMobileLayout()) {
-              setSidebarOpen(true)
-              history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
-            }
-          }}
+          onMenuClick={handleMenuClick}
           onDirtyChange={setEditorDirty}
           autoSave={autoSave}
           onPrevDay={onPrevDay}
@@ -1010,7 +1025,7 @@ export default function App() {
           draftOwner={status === 'signedIn' ? email : null}
           isOnline={isOnline}
           onExpired={handleExpired}
-          onGoToToday={() => selectDate(todayYmd())}
+          onGoToToday={handleGoToToday}
           refreshSignal={entryRefreshSignal}
           knownDates={datesSet}
           diaryListLoaded={diary.freshListLoaded}
@@ -1019,12 +1034,12 @@ export default function App() {
           onMilestoneAdd={addMilestone}
           relatedDates={relatedDates}
           onSelectRelated={handleSelectRelated}
-          getRelatedTokens={(previewDate) => tfIdf.getSharedTokens(selectedDate, previewDate)}
+          getRelatedTokens={handleGetRelatedTokens}
           getRecurringTopic={getRecurringTopic}
           backDate={previousDate ?? undefined}
           onGoBack={handleGoBack}
           pendingSharedText={pendingSharedText}
-          onConsumeSharedText={() => setPendingSharedText(null)}
+          onConsumeSharedText={handleConsumeSharedText}
           onS3StaleEntryDetected={handleS3StaleEntryDetected}
         />
       </main>

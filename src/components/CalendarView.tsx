@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { memo, useEffect, useState, useRef, useMemo } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ChevronDown } from 'lucide-react'
 
@@ -222,7 +222,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', milestones = [] }: Props) {
+export const CalendarView = memo(function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', milestones = [] }: Props) {
   const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -445,4 +445,4 @@ export function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMont
       </select>
     </div>
   )
-}
+})
