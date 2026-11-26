@@ -9,6 +9,7 @@ import type { DraftEntry } from '../lib/diaryCache'
 import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
 import { getS3EntryStatus, retryS3EntrySync } from '../api/s3Settings'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
+import { diffConflictLines, mergeConflictTexts } from '../utils/conflictDiff'
 import { highlightText } from '../utils/highlight'
 import { excerpt } from '../utils/text'
 import { writingPrompts, appendPrompts } from '../data/writingPrompts'
@@ -49,6 +50,9 @@ const S3_RECENT_SAVE_CARRY_MS = 30_000
 // entries per 2s, driven by useS3Backfill), so keep checking back slowly for as
 // long as it stays 'backfilling' instead of giving up on a fixed retry count.
 const S3_BACKFILL_POLL_INTERVAL_MS = 8000
+// Lightweight metadata-only freshness check cadence while an entry stays open.
+const FRESHNESS_POLL_INTERVAL_MS = 90_000
+const FIRST_EDIT_CHECK_COOLDOWN_MS = 30_000
 
 // Keep the textarea focused (and the mobile keyboard open) when tapping a
 // toolbar button, so the keyboard doesn't collapse and shift the toolbar down.
@@ -75,6 +79,7 @@ export interface ReauthSaveFailure {
 interface Props {
   date: string
   getContent: (date: string, options?: { forceNetwork?: boolean }) => Promise<LoadedDiaryEntry | null>
+  onCheckRemoteFreshness?: (date: string, knownVersion: string | null) => Promise<boolean>
   onSave: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null, options?: { keepalive?: boolean }) => Promise<LoadedDiaryEntry>
   onDelete: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   onMenuClick: () => void
@@ -225,7 +230,7 @@ function SyncBadge({ status, title, label, onClick, busy, justSaved, direction, 
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, reauthSaveFailure, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, pendingSharedText, onConsumeSharedText, onS3StaleEntryDetected }: Props) {
+export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, reauthSaveFailure, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, pendingSharedText, onConsumeSharedText, onS3StaleEntryDetected }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -320,8 +325,12 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   const lastSaveAtRef = useRef<{ date: string; at: string } | null>(null)
   const [hasConflict, setHasConflict] = useState(false)
   const [conflictRemote, setConflictRemote] = useState<LoadedDiaryEntry | null>(null)
+  const [remoteCopied, setRemoteCopied] = useState(false)
+  const remoteCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [remoteUpdateAvailable, setRemoteUpdateAvailable] = useState(false)
+  const lastFreshnessCheckRef = useRef<{ date: string; at: number } | null>(null)
+  const onCheckRemoteFreshnessRef = useLatestRef(onCheckRemoteFreshness)
   // Set when a save couldn't reach Drive because the device is offline; the
   // edits stay dirty and are retried automatically once connectivity returns.
   const [pendingOfflineSave, setPendingOfflineSave] = useState(false)
@@ -664,6 +673,11 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       if (loadError === null) {
         if (draft && draft.content !== (entry?.entry.content ?? '')) {
           applyDraft(draft, entry?.meta.id ?? null)
+          if (draft.conflicted) {
+            setHasConflict(true)
+            setConflictRemote(entry)
+            setStatus(t.entry.changedElsewhere)
+          }
         } else {
           // No draft, or the draft already made it to Drive — drop it.
           if (draft && draftOwner) deleteDraft(date, draftOwner, draft.content, draft.savedAt).catch(() => {})
@@ -1014,17 +1028,53 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     setStatus(t.entry.localKept)
   }
 
+  const mergeRemote = () => {
+    if (!conflictRemote) return
+    const merged = mergeConflictTexts(textRef.current, conflictRemote.entry.content, savedTextRef.current)
+    textRef.current = merged.text
+    setText(merged.text)
+    setSavedTextValue(conflictRemote.entry.content)
+    setBaseVersionValue(conflictRemote.meta.version ?? null)
+    fileIdRef.current = conflictRemote.meta.id
+    setHasConflict(false)
+    setConflictRemote(null)
+    setRemoteUpdateAvailable(false)
+    if (autoSave) setAutoSavePausedValue(true)
+    setStatus(merged.kind === 'auto-append' ? t.entry.mergedAutoReady : t.entry.mergedReady)
+  }
+
+  const copyRemoteVersion = async () => {
+    const content = conflictRemote?.entry.content
+    if (!content || typeof navigator === 'undefined' || !navigator.clipboard) return
+    try {
+      await navigator.clipboard.writeText(content)
+      setRemoteCopied(true)
+      if (remoteCopiedTimerRef.current) clearTimeout(remoteCopiedTimerRef.current)
+      remoteCopiedTimerRef.current = setTimeout(() => {
+        remoteCopiedTimerRef.current = null
+        setRemoteCopied(false)
+      }, 2000)
+    } catch { /* ignore clipboard errors */ }
+  }
+
   const overwriteRemote = async () => {
     setSaving(true)
     setStatus('')
     try {
       const currentText = textRef.current
-      const saved = await onSaveRef.current(date, currentText, conflictRemote?.meta.version ?? baseVersionRef.current, true)
+      // Save against the remote version the user just reviewed instead of blind
+      // force=true, so a newer edit arriving while the conflict panel was open
+      // still surfaces as a conflict instead of being silently clobbered.
+      const targetVersion = conflictRemote?.meta.version ?? null
+      const targetBaseContent = conflictRemote?.entry.content ?? null
+      const saved = await onSaveRef.current(date, currentText, targetVersion, false, targetBaseContent)
       const newVersion = saved.meta.version ?? null
       setSavedTextValue(currentText)
       setBaseVersionValue(newVersion)
+      fileIdRef.current = saved.meta.id
       setHasConflict(false)
       setConflictRemote(null)
+      setRemoteUpdateAvailable(false)
       setAutoSavePausedValue(false)
       setPendingOfflineSave(false)
       setStatus(savedStatus)
@@ -1036,12 +1086,38 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
       const attemptStartedAt = saved.meta.modifiedTime ?? new Date().toISOString()
       lastSaveAtRef.current = { date, at: attemptStartedAt }
       resetS3ForVersion(date, newVersion, attemptStartedAt)
-    } catch {
-      setStatus(t.entry.saveFailed)
+    } catch (e) {
+      if (e instanceof EntryConflictError) {
+        setHasConflict(true)
+        setConflictRemote(e.remote)
+        setStatus(t.entry.changedElsewhere)
+        haptics.warning()
+      } else {
+        setStatus(t.entry.saveFailed)
+      }
     } finally {
       setSaving(false)
     }
   }
+
+  const openRemoteComparison = useCallback(async () => {
+    const capturedDate = date
+    setRefreshing(true)
+    setStatus('')
+    try {
+      const entry = await getContentRef.current(capturedDate, { forceNetwork: true })
+      if (currentDateRef.current !== capturedDate) return
+      setConflictRemote(entry)
+      setHasConflict(true)
+      setRemoteUpdateAvailable(false)
+      setStatus(t.entry.changedElsewhere)
+      haptics.warning()
+    } catch {
+      if (currentDateRef.current === capturedDate) setStatus(t.entry.failedToRefresh)
+    } finally {
+      if (currentDateRef.current === capturedDate) setRefreshing(false)
+    }
+  }, [date, t.entry.changedElsewhere, t.entry.failedToRefresh])
 
   const loadFreshEntry = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const capturedDate = date
@@ -1086,6 +1162,52 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
     if (loadingRef.current || savingRef.current || refreshingRef.current || hasConflictRef.current) return
     void loadFreshEntry({ silent: true })
   }, [refreshSignal, loadFreshEntry])
+
+  // Proactive lightweight metadata check on the first edit from a clean state,
+  // so edits started on an open tab notice changes made on another device early.
+  const prevDirtyForFreshnessRef = useRef(false)
+  useEffect(() => {
+    prevDirtyForFreshnessRef.current = false
+    setRemoteCopied(false)
+    if (remoteCopiedTimerRef.current) { clearTimeout(remoteCopiedTimerRef.current); remoteCopiedTimerRef.current = null }
+  }, [date])
+
+  useEffect(() => {
+    const wasDirty = prevDirtyForFreshnessRef.current
+    prevDirtyForFreshnessRef.current = isDirty
+    if (wasDirty || !isDirty) return
+    if (!onCheckRemoteFreshnessRef.current || !isSignedIn || !isOnline) return
+    if (loadingRef.current || savingRef.current || hasConflictRef.current || remoteUpdateAvailable) return
+    const now = Date.now()
+    const last = lastFreshnessCheckRef.current
+    if (last && last.date === date && now - last.at < FIRST_EDIT_CHECK_COOLDOWN_MS) return
+    lastFreshnessCheckRef.current = { date, at: now }
+    const capturedDate = date
+    const capturedVersion = baseVersionRef.current
+    void onCheckRemoteFreshnessRef.current(capturedDate, capturedVersion).then(changed => {
+      if (changed && currentDateRef.current === capturedDate && !hasConflictRef.current) {
+        setRemoteUpdateAvailable(true)
+      }
+    }).catch(() => {})
+  }, [date, isDirty, isSignedIn, isOnline, remoteUpdateAvailable, onCheckRemoteFreshnessRef, baseVersionRef, hasConflictRef])
+
+  // Periodic lightweight metadata-only check while the entry remains open in the foreground.
+  useEffect(() => {
+    if (!onCheckRemoteFreshness || !isSignedIn || !isOnline || loading || loadFailed || hasConflict || remoteUpdateAvailable) return
+    const capturedDate = date
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      if (loadingRef.current || savingRef.current || refreshingRef.current || hasConflictRef.current) return
+      const now = Date.now()
+      lastFreshnessCheckRef.current = { date: capturedDate, at: now }
+      void onCheckRemoteFreshnessRef.current?.(capturedDate, baseVersionRef.current).then(changed => {
+        if (changed && currentDateRef.current === capturedDate && !hasConflictRef.current) {
+          setRemoteUpdateAvailable(true)
+        }
+      }).catch(() => {})
+    }, FRESHNESS_POLL_INTERVAL_MS)
+    return () => window.clearInterval(id)
+  }, [date, onCheckRemoteFreshness, isSignedIn, isOnline, loading, loadFailed, hasConflict, remoteUpdateAvailable, onCheckRemoteFreshnessRef, baseVersionRef, hasConflictRef])
 
   useEffect(() => {
     if (isSignedIn && tokenExpiredForDateRef.current === date) {
@@ -1248,7 +1370,13 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
   useEffect(() => () => {
     if (discardToastTimerRef.current) clearTimeout(discardToastTimerRef.current)
     if (justSavedTimerRef.current) clearTimeout(justSavedTimerRef.current)
+    if (remoteCopiedTimerRef.current) clearTimeout(remoteCopiedTimerRef.current)
   }, [])
+
+  const conflictDiff = useMemo(
+    () => (hasConflict && conflictRemote ? diffConflictLines(text, conflictRemote.entry.content) : null),
+    [hasConflict, conflictRemote, text],
+  )
 
   useKeyboardInset()
   useFooterInset(footerRef)
@@ -1893,12 +2021,18 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
         <div className="conflict-panel" role="status">
           <div>
             <strong>{t.entry.remoteUpdateTitle}</strong>
-            <p>{t.entry.remoteUpdateHint}</p>
+            <p>{text !== savedText ? t.entry.remoteUpdateHintDirty : t.entry.remoteUpdateHint}</p>
           </div>
           <div className="conflict-actions">
-            <button type="button" onClick={() => void loadFreshEntry()} disabled={refreshing || saving || text !== savedText}>
-              {refreshing ? t.entry.refreshingEntry : t.entry.loadLatest}
-            </button>
+            {text !== savedText ? (
+              <button type="button" onClick={() => void openRemoteComparison()} disabled={refreshing || saving}>
+                {refreshing ? t.entry.refreshingEntry : t.entry.remoteUpdateCompare}
+              </button>
+            ) : (
+              <button type="button" onClick={() => void loadFreshEntry()} disabled={refreshing || saving}>
+                {refreshing ? t.entry.refreshingEntry : t.entry.loadLatest}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1910,16 +2044,60 @@ export function EntryEditor({ date, getContent, onSave, onDelete, onMenuClick, o
             <p>{conflictRemote ? t.entry.conflictRemote : t.entry.conflictDeleted}</p>
           </div>
           <div className="conflict-actions">
-            <button onClick={loadRemote}>{conflictRemote ? t.entry.loadLatest : t.entry.clearLocal}</button>
-            <button onClick={keepLocal}>{t.entry.keepLocal}</button>
-            <button className="btn-delete" onClick={overwriteRemote} disabled={saving}>{t.entry.overwrite}</button>
+            <button type="button" onClick={loadRemote}>{conflictRemote ? t.entry.loadLatest : t.entry.clearLocal}</button>
+            {conflictRemote && text.trim().length > 0 && conflictRemote.entry.content.trim().length > 0 && (
+              <button type="button" onClick={mergeRemote} disabled={saving}>{t.entry.mergeBoth}</button>
+            )}
+            <button type="button" onClick={keepLocal}>{t.entry.keepLocal}</button>
+            <button type="button" className="btn-delete" onClick={overwriteRemote} disabled={saving}>{t.entry.overwrite}</button>
           </div>
         </div>
         <details className="conflict-comparison">
           <summary>{t.entry.compareVersions}</summary>
           <div className="conflict-comparison-grid">
-            <div><strong>{t.entry.yourVersion}</strong><pre>{text || t.entry.emptyVersion}</pre></div>
-            <div><strong>{t.entry.otherVersion}</strong><pre>{conflictRemote ? (conflictRemote.entry.content || t.entry.emptyVersion) : t.entry.remoteDeleted}</pre></div>
+            <div>
+              <div className="conflict-comparison-heading">
+                <strong>{t.entry.yourVersion}</strong>
+              </div>
+              <pre>
+                {conflictDiff && conflictDiff.localLines.length > 0
+                  ? conflictDiff.localLines.map((line, idx) => (
+                      <span
+                        key={idx}
+                        className={`conflict-diff-line${line.changed ? ' conflict-diff-line--changed' : ''}`}
+                      >
+                        {line.text}
+                        {idx < conflictDiff.localLines.length - 1 ? '\n' : ''}
+                      </span>
+                    ))
+                  : (text || t.entry.emptyVersion)}
+              </pre>
+            </div>
+            <div>
+              <div className="conflict-comparison-heading">
+                <strong>{t.entry.otherVersion}</strong>
+                {conflictRemote && conflictRemote.entry.content.length > 0 && (
+                  <button type="button" className="conflict-copy-btn" onClick={() => void copyRemoteVersion()}>
+                    {remoteCopied ? t.entry.copiedLatest : t.entry.copyLatest}
+                  </button>
+                )}
+              </div>
+              <pre>
+                {conflictRemote
+                  ? (conflictDiff && conflictDiff.remoteLines.length > 0
+                      ? conflictDiff.remoteLines.map((line, idx) => (
+                          <span
+                            key={idx}
+                            className={`conflict-diff-line${line.changed ? ' conflict-diff-line--changed' : ''}`}
+                          >
+                            {line.text}
+                            {idx < conflictDiff.remoteLines.length - 1 ? '\n' : ''}
+                          </span>
+                        ))
+                      : t.entry.emptyVersion)
+                  : t.entry.remoteDeleted}
+              </pre>
+            </div>
           </div>
         </details>
         </>

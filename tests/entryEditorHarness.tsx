@@ -40,6 +40,9 @@ let selectedDateCalls: string[] = []
 let dirtyChanges: boolean[] = []
 
 let currentSaveReject: 'conflict' | 'error' | undefined
+let currentConflictRemoteContent = 'remote content'
+let currentConflictRemoteVersion = '99'
+let currentFreshnessChanged: boolean | null = null
 let currentGetContentReject: 'tokenExpired' | 'error' | undefined = undefined
 let currentDeleteReject: 'error' | undefined = undefined
 let currentDeleteDelayMs = 0
@@ -176,10 +179,10 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         }
         saveCalls.push({ date: d, content, baseVersion: baseVer, force })
         fullSaveCalls.push({ date: d, content, baseVersion: baseVer, force, baseContent })
-        if (currentSaveReject === 'conflict' && !force) {
+        if (currentSaveReject === 'conflict' && !force && baseVer !== currentConflictRemoteVersion) {
           const remote: LoadedDiaryEntry = {
-            entry: { date: d, content: 'remote content' },
-            meta: { id: 'file-1', name: `diary-${d}.json`, version: '99' },
+            entry: { date: d, content: currentConflictRemoteContent },
+            meta: { id: 'file-1', name: `diary-${d}.json`, version: currentConflictRemoteVersion },
           }
           throw new EntryConflictError(remote)
         }
@@ -230,6 +233,7 @@ function App({ date, autoSave, getContentDelayMs, pendingNavDate: initialPending
         milestoneAddCalls.push({ label, date, emoji, recurring })
       } : undefined}
       relatedDates={relatedDates}
+      onCheckRemoteFreshness={async () => currentFreshnessChanged === true}
       onS3StaleEntryDetected={() => { staleEntryDetectedCalls++ }}
     />
   )
@@ -257,6 +261,9 @@ window.editorHarness = {
   }) => {
     saveCalls = []
     fullSaveCalls = []
+    currentConflictRemoteContent = 'remote content'
+    currentConflictRemoteVersion = '99'
+    currentFreshnessChanged = null
     deleteCalls = []
     deleteCallsWithTarget = []
     pendingNavigateCalls = []
@@ -309,6 +316,14 @@ window.editorHarness = {
     currentSaveModifiedTime = modifiedTime
   },
   setSaveReject: (value: 'conflict' | 'error' | null) => { currentSaveReject = value ?? undefined },
+  setConflictRemote: (content: string, version: string) => {
+    currentConflictRemoteContent = content
+    currentConflictRemoteVersion = version
+  },
+  setFreshnessChanged: (changed: boolean | null) => {
+    currentFreshnessChanged = changed
+    doRender()
+  },
   deleteCalls: () => [...deleteCalls],
   deleteCallsWithTarget: () => [...deleteCallsWithTarget],
   pendingNavigateCalls: () => [...pendingNavigateCalls],

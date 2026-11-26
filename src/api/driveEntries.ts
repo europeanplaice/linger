@@ -260,6 +260,18 @@ export async function readDriveEntry(fileId: string, date: string, auth: DriveRe
   }
 }
 
+export async function checkEntryMetadata(date: string, cachedVersion?: string, fileId?: string, signal?: AbortSignal): Promise<DriveFileMeta | null | 'not-modified'> {
+  const headers: Record<string, string> = cachedVersion ? { 'If-None-Match': cachedVersion } : {}
+  const params = `?metadata=1${fileId ? `&fileId=${encodeURIComponent(fileId)}` : ''}`
+  const { data, status } = await apiFetch<{ meta: DriveFileMeta }>(
+    `${BASE}/entry/${encodeURIComponent(date)}${params}`,
+    { headers, signal },
+  )
+  if (status === 304) return 'not-modified'
+  if (status === 404 || !data) return null
+  return data.meta
+}
+
 export async function getEntryByDate(date: string, cachedVersion?: string, fileId?: string, signal?: AbortSignal): Promise<LoadedDiaryEntry | null | 'not-modified'> {
   const account = accountRequest({ signal })
   const headers: Record<string, string> = cachedVersion ? { 'If-None-Match': cachedVersion } : {}

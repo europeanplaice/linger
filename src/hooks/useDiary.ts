@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../types'
-import { listEntries, searchEntries, getEntryByDate, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError, DriveHttpError } from '../api/driveEntries'
+import { listEntries, searchEntries, getEntryByDate, checkEntryMetadata, saveEntry, deleteEntry, getChanges, TokenExpiredError, SaveConflictError, DriveHttpError } from '../api/driveEntries'
 import { getAllCached, putCached, deleteCached, clearCache, syncCachedBatch } from '../lib/secureCache'
-import { getAllDrafts, getDraft, putDraft, deleteDraft, markDraftConflicted, nextDraftCheckpointTime, reportDraftStorageError } from '../lib/draftStorage'
+import { getAllDrafts, getDraft, putDraft, deleteDraft, markDraftConflicted, nextDraftCheckpointTime, reportDraftStorageError, subscribeDraftChanges } from '../lib/draftStorage'
 import type { CachedEntry, DraftEntry } from '../lib/diaryCache'
 import { LocalStorageAdapter } from '../lib/storageAdapter'
 import { SyncQueueManager } from '../lib/syncQueue'
@@ -37,8 +37,10 @@ export interface DiaryState {
   deletionCancelled: boolean
   queueError: boolean
   dates: string[]                                      // sorted desc
+  conflictedDates: string[]                            // sorted desc; offline drafts that hit a conflict
   hasLegacyMdFiles: boolean                            // any entry still stored as .md (pre-.txt migration)
   getContent: (date: string, options?: { forceNetwork?: boolean; background?: boolean }) => Promise<LoadedDiaryEntry | null>
+  checkEntryFreshness: (date: string, knownVersion: string | null) => Promise<boolean>
   save: (date: string, content: string, baseVersion: string | null, force?: boolean, baseContent?: string | null, options?: { skipDraftCheckpoint?: boolean; draftSavedAt?: number; keepalive?: boolean }) => Promise<LoadedDiaryEntry>
   remove: (date: string, target?: { fileId: string; baseVersion: string }) => Promise<void>
   search: (query: string) => Promise<SearchResult>
@@ -156,6 +158,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
   const [error, setError] = useState<string | null>(null)
   const [deletionCancelled, setDeletionCancelled] = useState(false)
   const [queueError, setQueueError] = useState(false)
+  const [conflictedDates, setConflictedDates] = useState<string[]>([])
   const [cache, setCache] = useState<Map<string, EntryCache>>(new Map())
   const cacheRef = useLatestRef(cache)
   const saveQueueRef = useRef<Map<string, Promise<unknown>>>(new Map())
@@ -187,6 +190,7 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     setCache(new Map())
     setDeletionCancelled(false)
     setQueueError(false)
+    setConflictedDates([])
     inflightRef.current.clear()
     saveQueueRef.current.clear()
     pendingSaveRef.current = null
@@ -998,8 +1002,75 @@ export function useDiary(authStatus: AuthStatus, email: string | null, onExpired
     return () => clearTimeout(id)
   }, [selectedDate])
 
+  const checkEntryFreshness = useCallback(async (date: string, knownVersion: string | null): Promise<boolean> => {
+    const scope = getScope()
+    if (!isSignedIn || !scope) return false
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return false
+    const cached = cacheRef.current.get(date)
+    try {
+      const result = await checkEntryMetadata(date, knownVersion ?? undefined, cached?.meta.id, scope.controller.signal)
+      if (!scope.active) return false
+      if (result === 'not-modified') return false
+      if (result === null) {
+        if (knownVersion !== null) {
+          updateCache(prev => {
+            if (!prev.has(date)) return prev
+            const next = new Map(prev)
+            next.delete(date)
+            return next
+          })
+          return true
+        }
+        return false
+      }
+      if (result.version !== knownVersion) {
+        updateCache(prev => {
+          const next = new Map(prev)
+          next.set(date, { meta: result })
+          return next
+        })
+        return true
+      }
+      return false
+    } catch (e) {
+      if (!scope.active) return false
+      if (e instanceof TokenExpiredError) onExpiredRef.current()
+      return false
+    }
+  }, [isSignedIn, getScope, updateCache])
+
+  // Track offline drafts marked conflicted so the sidebar/calendar can surface them.
+  useEffect(() => {
+    const scope = getScope()
+    if (!isSignedIn || !email || !scope) {
+      setConflictedDates([])
+      return
+    }
+    let cancelled = false
+    const refresh = () => {
+      void getAllDrafts(email)
+        .then(drafts => {
+          if (cancelled || !scope.active) return
+          const next = drafts
+            .filter(d => d.conflicted && (d.owner === undefined || d.owner === email))
+            .map(d => d.date)
+            .sort((a, b) => b.localeCompare(a))
+          setConflictedDates(prev =>
+            prev.length === next.length && prev.every((v, idx) => v === next[idx]) ? prev : next
+          )
+        })
+        .catch(() => {})
+    }
+    refresh()
+    const unsubscribe = subscribeDraftChanges(refresh)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [isSignedIn, email, freshListLoaded, getScope])
+
   const dates = useMemo(() => getScope() ? Array.from(cache.keys()).sort((a, b) => b.localeCompare(a)) : [], [cache, getScope])
   const hasLegacyMdFiles = useMemo(() => Boolean(getScope()) && Array.from(cache.values()).some(e => /\.md$/.test(e.meta.name)), [cache, getScope])
 
-  return { loading, freshListLoaded, error, deletionCancelled, queueError, dates, hasLegacyMdFiles, getContent, save, remove, search, refreshEntries, prefetch, pendingSaveDate, retryPendingSave, exportAll, importAll }
+  return { loading, freshListLoaded, error, deletionCancelled, queueError, dates, conflictedDates, hasLegacyMdFiles, getContent, checkEntryFreshness, save, remove, search, refreshEntries, prefetch, pendingSaveDate, retryPendingSave, exportAll, importAll }
 }

@@ -682,6 +682,7 @@ export default function App() {
   }, [selectDate, toggleTheme, toggleFont])
 
   const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
+  const conflictedDatesSet = useMemo(() => new Set(diary.conflictedDates), [diary.conflictedDates])
   const hint = useMemo(() => recollectionHint(diary.dates), [diary.dates])
 
   const handleSave = useCallback(async (
@@ -878,7 +879,19 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
+        <CalendarView dates={datesSet} conflictedDates={conflictedDatesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
+        {diary.conflictedDates.length > 0 && (
+          <div className="sidebar-status conflict" role="status">
+            <span>{t.app.conflictedDraftsNotice(diary.conflictedDates.length)}</span>
+            <div className="sidebar-conflict-dates">
+              {diary.conflictedDates.map(d => (
+                <button key={d} type="button" className="sidebar-conflict-date-btn" onClick={() => selectDate(d)}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {diary.queueError && <div className="sidebar-status error" role="alert">{t.app.queueStorageError}</div>}
         {milestonesError && <div className="sidebar-status error" role="alert">{t.app.milestonesStorageError}</div>}
@@ -1008,6 +1021,7 @@ export default function App() {
           key={`account:${googleSub ?? email ?? 'unknown'}`}
           date={selectedDate}
           getContent={diary.getContent}
+          onCheckRemoteFreshness={diary.checkEntryFreshness}
           onSave={handleSave}
           onDelete={diary.remove}
           onMenuClick={handleMenuClick}

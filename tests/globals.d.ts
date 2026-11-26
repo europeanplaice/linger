@@ -120,6 +120,8 @@ interface Window {
     setRemoteEntry: (content: string, version: string | null) => void
     setSaveModifiedTime: (modifiedTime: string) => void
     setSaveReject: (value: 'conflict' | 'error' | null) => void
+    setConflictRemote: (content: string, version: string) => void
+    setFreshnessChanged: (changed: boolean | null) => void
     deleteCalls: () => { date: string }[]
     deleteCallsWithTarget: () => { date: string; fileId?: string; baseVersion?: string }[]
     pendingNavigateCalls: () => { date: string | null }[]

@@ -832,7 +832,7 @@ test.describe('EntryEditor — conflict resolution', () => {
     await expect(page.locator('button.btn-save')).toBeEnabled()
   })
 
-  test('overwrites the remote entry with force and the remote version', async ({ page }) => {
+  test('overwrites the remote entry using the reviewed remote version without blind force', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
 
@@ -846,10 +846,79 @@ test.describe('EntryEditor — conflict resolution', () => {
     const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
     expect(saveCalls).toEqual([
       { date: '2026-05-01', content: 'local edits', baseVersion: '1' },
-      { date: '2026-05-01', content: 'local edits', baseVersion: '99', force: true },
+      { date: '2026-05-01', content: 'local edits', baseVersion: '99', force: false },
     ])
     await expect(page.locator('button.btn-save')).toHaveCount(0)
     await expect(page.getByLabel('Saved to Google Drive')).toBeVisible()
+  })
+
+  test('re-surfaces conflict if remote changes again while reviewing the conflict panel', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'local base', version: '1', saveReject: 'conflict', autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'local edits')
+    await page.locator('button.btn-save').click()
+    await page.waitForSelector('.conflict-panel')
+
+    await page.evaluate(() => window.editorHarness.setConflictRemote('newer remote content', '100'))
+    await page.getByRole('button', { name: 'Overwrite' }).click()
+
+    await expect(page.locator('.conflict-panel')).toBeVisible()
+    await page.getByText('Compare versions').click()
+    await expect(page.locator('.conflict-comparison')).toContainText('newer remote content')
+  })
+
+  test('combines both versions and rebases onto the remote version so the next save succeeds', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'Morning walk.', version: '1', saveReject: 'conflict', autoSave: false })
+    await page.evaluate(() => window.editorHarness.setConflictRemote('Morning walk.\nAfternoon rain.', '99'))
+
+    await page.fill('textarea.editor-textarea', 'Morning walk.\nEvening coffee.')
+    await page.locator('button.btn-save').click()
+    await page.waitForSelector('.conflict-panel')
+
+    await page.getByRole('button', { name: 'Combine both' }).click()
+    await expect(page.locator('.conflict-panel')).toHaveCount(0)
+    await expect(page.locator('textarea.editor-textarea')).toHaveValue('Morning walk.\nAfternoon rain.\nEvening coffee.')
+
+    await page.locator('button.btn-save').click()
+    await expect(page.locator('.conflict-panel')).toHaveCount(0)
+    const saveCalls = await page.evaluate(() => window.editorHarness.saveCalls())
+    expect(saveCalls[1]).toEqual({
+      date: '2026-05-01',
+      content: 'Morning walk.\nAfternoon rain.\nEvening coffee.',
+      baseVersion: '99',
+    })
+  })
+
+  test('offers Compare versions when a remote update arrives while local edits are unsaved', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
+
+    await page.fill('textarea.editor-textarea', 'unsaved local edit')
+    await page.evaluate(() => {
+      window.editorHarness.setRemoteEntry('remote updated text', '2')
+      window.editorHarness.setRefreshSignal(1)
+    })
+
+    await expect(page.getByText('A newer version is available.')).toBeVisible()
+    const compareBtn = page.locator('.conflict-panel').getByRole('button', { name: 'Compare versions' })
+    await expect(compareBtn).toBeEnabled()
+    await compareBtn.click()
+
+    await expect(page.getByText('This entry was updated on another device.')).toBeVisible()
+    await page.locator('.conflict-comparison summary').click()
+    await expect(page.locator('.conflict-comparison')).toContainText('remote updated text')
+    await expect(page.locator('.conflict-comparison')).toContainText('unsaved local edit')
+  })
+
+  test('runs a lightweight freshness check on the first edit and surfaces remote update banner', async ({ page }) => {
+    await loadHarness(page)
+    await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false, token: 'tok' })
+    await page.evaluate(() => window.editorHarness.setFreshnessChanged(true))
+
+    await page.fill('textarea.editor-textarea', 'original plus edit')
+    await expect(page.getByText('A newer version is available.')).toBeVisible()
   })
 
 })
@@ -1444,7 +1513,7 @@ test.describe('EntryEditor — silent refresh race condition', () => {
     await expect(page.getByText('A newer version is available.')).toHaveCount(0)
   })
 
-  test('preserves edits and disables loading a remote update while dirty', async ({ page }) => {
+  test('preserves edits and offers Compare versions instead of overwriting while dirty', async ({ page }) => {
     await loadHarness(page)
     await renderEditor(page, { date: '2026-05-01', initialContent: 'original', version: '1', autoSave: false })
     await page.locator('textarea.editor-textarea').fill('local edits')
@@ -1453,7 +1522,8 @@ test.describe('EntryEditor — silent refresh race condition', () => {
       window.editorHarness.setRefreshSignal(1)
     })
     await expect(page.getByText('A newer version is available.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Load latest' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Load latest' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Compare versions' })).toBeEnabled()
     await expect(page.locator('textarea.editor-textarea')).toHaveValue('local edits')
   })
   test('does not overwrite user typing with in-flight silent refreshSignal fetch', async ({ page }) => {

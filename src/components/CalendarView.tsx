@@ -17,6 +17,7 @@ interface Props {
   onMonthChange?: (year: number, month: number) => void
   holidayCountry?: HolidayCountry
   milestones?: Milestone[]
+  conflictedDates?: Set<string>
 }
 
 interface MonthYearPickerProps {
@@ -222,7 +223,7 @@ const gridVariants = {
   exit: (dir: number) => ({ x: dir * -16, opacity: 0 }),
 }
 
-export const CalendarView = memo(function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', milestones = [] }: Props) {
+export const CalendarView = memo(function CalendarView({ dates, selectedDate, onSelect, onPrefetch, onMonthChange, holidayCountry = 'off', milestones = [], conflictedDates }: Props) {
   const { t, language } = useI18n()
   const [todayStr, setTodayStr] = useState(todayYmd)
   const todayRef = useRef(todayStr)
@@ -387,15 +388,17 @@ export const CalendarView = memo(function CalendarView({ dates, selectedDate, on
               const holidayName = holiday ? (language === 'ja' ? holiday.localName : holiday.name) : undefined
               const dayMilestones = day !== null ? (monthMilestones.get(day) ?? []) : []
               const hasMilestone = dayMilestones.length > 0
+              const isConflicted = conflictedDates?.has(dateStr) ?? false
               const milestoneTitle = dayMilestones.map(a => `${a.emoji ?? '🎀'} ${a.label}`).join(', ')
-              const accessibleDetails = [holidayName, milestoneTitle].filter(Boolean).join('; ') || undefined
+              const conflictTitle = isConflicted ? t.calendar.conflictMarker : undefined
+              const accessibleDetails = [holidayName, milestoneTitle, conflictTitle].filter(Boolean).join('; ') || undefined
               return (
                 <motion.button
                   key={dateStr}
                   type="button"
                   aria-label={accessibleDetails ? `${dateStr} ${accessibleDetails}` : dateStr}
                   title={accessibleDetails || undefined}
-                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasMilestone ? 'milestone' : ''].filter(Boolean).join(' ')}
+                  className={['cal-day', hasEntry ? 'has-entry' : '', isSelected ? 'selected' : '', isToday ? 'today' : '', holiday ? 'holiday' : '', hasMilestone ? 'milestone' : '', isConflicted ? 'conflicted' : ''].filter(Boolean).join(' ')}
                   onClick={() => onSelect(dateStr)}
                   onPointerEnter={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
                   onPointerDown={hasEntry && !isSelected ? () => onPrefetch?.(dateStr) : undefined}
@@ -407,6 +410,7 @@ export const CalendarView = memo(function CalendarView({ dates, selectedDate, on
                     {hasMilestone && (
                       <span className="cal-day-milestone">{dayMilestones[0].emoji ?? '🎀'}</span>
                     )}
+                    {isConflicted && <span className="cal-day-conflict-dot" />}
                     <span className="dot" />
                   </span>
                 </motion.button>

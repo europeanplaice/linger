@@ -3717,6 +3717,38 @@ dialog.milestone-form-dialog::backdrop {
 /* ── Entry list ── */
 .sidebar-status { padding: 0.4rem 1rem; font-size: 0.82rem; color: var(--text-muted); }
 .sidebar-status.error { color: var(--danger); }
+.sidebar-status.conflict {
+  margin: 0.35rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--conflict-border);
+  background: var(--conflict-bg);
+  color: var(--conflict-text);
+}
+.sidebar-conflict-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+.sidebar-conflict-date-btn {
+  border: 1px solid var(--conflict-border);
+  background: var(--card-bg);
+  color: var(--conflict-text);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.76rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sidebar-conflict-date-btn:hover { background: var(--sidebar-bg); }
+.cal-day-conflict-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--conflict-border);
+  display: inline-block;
+}
 .sidebar-empty-hint {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -4519,6 +4551,7 @@ dialog.milestone-form-dialog::backdrop {
 .conflict-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
   flex-shrink: 0;
 }
@@ -4547,6 +4580,27 @@ dialog.milestone-form-dialog::backdrop {
   gap: 0.75rem;
 }
 .conflict-comparison-grid > div { min-width: 0; }
+.conflict-comparison-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.conflict-copy-btn {
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.74rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.conflict-copy-btn:hover {
+  background: var(--sidebar-bg);
+  color: var(--text);
+}
 .conflict-comparison pre {
   max-height: 10rem;
   overflow: auto;
@@ -4557,6 +4611,14 @@ dialog.milestone-form-dialog::backdrop {
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--card-bg);
+}
+.conflict-diff-line {
+  display: inline;
+}
+.conflict-diff-line--changed {
+  background: var(--conflict-bg);
+  color: var(--conflict-text);
+  border-radius: 2px;
 }
 
 /* ── Discard undo toast ── */
