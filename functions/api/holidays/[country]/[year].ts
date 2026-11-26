@@ -10,6 +10,7 @@ import { jsonResponse } from '../../../_shared/session'
 const ALLOWED_COUNTRIES = new Set(['JP', 'US', 'GB', 'DE', 'FR'])
 const MIN_YEAR = 1975
 const CACHE_TTL = 60 * 60 * 24 * 90 // 90 days
+const UPSTREAM_FETCH_TIMEOUT_MS = 10_000
 
 interface NagerHoliday {
   date: string
@@ -26,7 +27,10 @@ interface HolidayInfo {
 async function fetchWithRetry(url: string): Promise<Response> {
   const delays = [250, 500, 1000]
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } })
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(UPSTREAM_FETCH_TIMEOUT_MS),
+    })
     if (res.ok || res.status === 404) return res
     if ((res.status === 429 || res.status >= 500) && attempt < delays.length) {
       let delay = delays[attempt]
