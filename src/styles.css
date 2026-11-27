@@ -545,6 +545,7 @@ html.session-restoring .landing {
 .passkey-gate-turnstile { margin-block-end: 1rem; }
 .passkey-action-group { display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
 .passkey-action-hint { font-size: 0.8rem; color: var(--text-muted); text-align: start; }
+.passkey-action-note { margin: 0.15rem 0 0; font-size: 0.78rem; line-height: 1.5; color: var(--text-muted); text-align: start; }
 .passkey-primary { justify-content: center; height: auto; min-height: 44px; padding: 0.75rem 1rem; white-space: normal; font-family: inherit; }
 .passkey-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; white-space: normal; transition: background 0.15s, border-color 0.15s; }
 .passkey-secondary:hover:not(:disabled) { background: var(--sidebar-bg); border-color: var(--text-muted); }

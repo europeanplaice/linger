@@ -152,6 +152,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
                 <button className={`passkey-secondary${!options ? ' passkey-get-started' : ''}`} type="button" disabled={staticPreview || busy} onClick={() => changeView('setup')}>
                   {t.login.passkeyFirstTime}
                 </button>
+                {!options && <p className="passkey-action-note">{t.login.passkeyNewUserNote}</p>}
               </div>
             </>}
           </div>
