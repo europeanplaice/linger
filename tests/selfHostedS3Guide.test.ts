@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 
@@ -17,7 +17,9 @@ let contentSecurityPolicy: string
 
 test.beforeAll(() => {
   test.setTimeout(120_000)
-  execSync('npx vite build', { stdio: 'pipe' })
+  if (!(process.env.USE_EXISTING_DIST === '1' && existsSync(resolve(dist, '_headers')))) {
+    execSync('npx vite build', { stdio: 'pipe' })
+  }
   const headers = readFileSync(resolve(dist, '_headers'), 'utf-8')
   const policy = headers.match(/^\s*Content-Security-Policy:\s*(.+)$/m)?.[1]
   if (!policy) throw new Error('Built _headers is missing Content-Security-Policy')

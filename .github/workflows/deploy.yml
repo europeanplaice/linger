@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -31,81 +31,31 @@ jobs:
 
       - run: npm run build
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm install --global npm@12.2.3
-
-      - run: npm ci
-
       - run: npm run lint
 
-  unit-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm install --global npm@12.2.3
-
-      - run: npm ci
+      - run: npm run audit
 
       - run: npm run test:unit
+
+      - name: Verify production bundle code splitting
+        env:
+          USE_EXISTING_DIST: '1'
+        run: npm run test:build
 
       - run: npm run test:deployment
 
       - run: npm run test:ci
 
-  privacy-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm install --global npm@12.2.3
-
-      - run: npm ci
-
       - name: Check privacy storage and request boundaries
         run: npm run test:privacy
 
-  # Tests/builds the s3-workflows Worker only — it does not deploy it. Deployment
-  # happens via `wrangler deploy` in the deploy/deploy-staging jobs below, using
-  # wrangler.jsonc/wrangler.staging.jsonc. Terraform (infra/) only owns the
-  # surrounding scaffolding (KV namespaces, DNS, Pages projects) — it no longer
-  # manages the Worker script or its Workflow bindings.
-  workers-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm install --global npm@12.2.3
-
-      - run: npm ci
-
-      - run: npm run build:workflows
-
-      - run: npm run test:workers
+      # Tests the remaining s3-workflows Worker suites (privacy/index/runtime already
+      # ran in test:privacy above). Deployment happens via `wrangler deploy` in the
+      # deploy/deploy-staging jobs below.
+      - name: Run remaining Workflows Worker tests
+        env:
+          SKIP_PRIVACY_TESTS: '1'
+        run: npm run test:workers
 
   e2e-image:
     runs-on: ubuntu-latest
@@ -162,24 +112,8 @@ jobs:
             test-results/
           retention-days: 7
 
-  npm-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm install --global npm@12.2.3
-
-      - run: npm ci
-
-      - run: npm run audit
-
   deploy:
-    needs: [build, lint, unit-test, privacy-test, workers-test, e2e-test, npm-audit]
+    needs: [checks, e2e-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -245,7 +179,7 @@ jobs:
         run: node scripts/check-deployment.mjs "$DEPLOYMENT_URL"
 
   deploy-staging:
-    needs: [build, lint, unit-test, privacy-test, workers-test, e2e-test, npm-audit]
+    needs: [checks, e2e-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     steps:

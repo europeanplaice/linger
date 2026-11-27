@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from 'vitest'
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const ROOT = process.cwd()
@@ -17,6 +17,9 @@ const SPLITS = [
 ]
 
 beforeAll(() => {
+  if (process.env.USE_EXISTING_DIST === '1' && existsSync(resolve(DIST, 'index.html'))) {
+    return
+  }
   execSync('npx vite build', { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
 }, 120_000)
 

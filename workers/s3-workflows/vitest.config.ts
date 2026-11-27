@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 
+import { PRIVACY_WORKER_TEST_FILES } from './vitest.privacy.config'
+
 const root = fileURLToPath(new URL('.', import.meta.url))
 
 const poolOptions = {
@@ -14,6 +16,7 @@ export default defineConfig({
   plugins: [cloudflareTest(poolOptions)],
   test: {
     include: ['test/**/*.test.ts'],
+    exclude: process.env.SKIP_PRIVACY_TESTS === '1' ? PRIVACY_WORKER_TEST_FILES : [],
     setupFiles: ['test/setup.ts'],
   },
 })

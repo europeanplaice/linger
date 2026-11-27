@@ -1,5 +1,24 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// Browser-sensitive suites (auth/passkey flows, IndexedDB, BroadcastChannel,
+// CSS layout, navigation, and code splitting). Pure component/hook harness
+// suites are covered on Chromium to keep CI wall-clock time fast.
+const WEBKIT_TEST_MATCH = [
+  '**/authRestore.test.ts',
+  '**/authUx.test.ts',
+  '**/codeSplitting.test.ts',
+  '**/designRegression.test.ts',
+  '**/footerLinks.test.ts',
+  '**/hadSession.test.ts',
+  '**/milestoneNavigation.test.ts',
+  '**/multitab.test.ts',
+  '**/passkeyFlow.test.ts',
+  '**/reauthPendingSave.test.ts',
+  '**/secureLocalBrowser.test.ts',
+  '**/sidebarEmptyState.test.ts',
+  '**/signinPopup.test.ts',
+]
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
@@ -14,10 +33,16 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'chromium',      use: { ...devices['Desktop Chrome'] } },
-    // WebKit is slow to run locally; exercise it in CI only.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // WebKit is slow to run locally; exercise browser-sensitive suites in CI only.
     ...(process.env.CI
-      ? [{ name: 'webkit', use: { ...devices['Desktop Safari'] } }]
+      ? [
+          {
+            name: 'webkit',
+            use: { ...devices['Desktop Safari'] },
+            testMatch: WEBKIT_TEST_MATCH,
+          },
+        ]
       : []),
     {
       name: 'mobile-chrome',
@@ -33,12 +58,13 @@ export default defineConfig({
       stdout: process.env.CI ? 'pipe' : 'ignore',
     },
     {
-      // Vite proxies API and auth requests here during browser tests.
-      // This API-only server returns 404 for /, so wait for its port instead.
-      command: 'npm run workers:dev',
+      // Lightweight stand-in for `npm run workers:dev` during mocked browser tests.
+      // Responds immediately without booting wrangler/miniflare so unmocked
+      // background requests (e.g. /api/holidays, /api/s3/entry-status) receive
+      // clean 401/200 responses instead of Vite proxy ECONNREFUSED 500s.
+      command: 'node tests/helpers/stubApiServer.mjs',
       port: 8788,
       reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
       stdout: process.env.CI ? 'pipe' : 'ignore',
     },
   ],

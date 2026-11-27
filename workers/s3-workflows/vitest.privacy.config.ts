@@ -9,11 +9,17 @@ const poolOptions = {
   miniflare: { bindings: { TEST_AUTH_MIGRATIONS: await readD1Migrations(`${root}../../migrations/auth`) } },
 }
 
+export const PRIVACY_WORKER_TEST_FILES = [
+  'test/privacy.test.ts',
+  'test/index.test.ts',
+  'test/runtime.test.ts',
+]
+
 export default defineConfig({
   root,
   plugins: [cloudflareTest(poolOptions)],
   test: {
-    include: ['test/privacy.test.ts', 'test/index.test.ts', 'test/runtime.test.ts'],
+    include: PRIVACY_WORKER_TEST_FILES,
     setupFiles: ['test/setup.ts'],
   },
 })
