@@ -189,6 +189,20 @@
   --font-editor: 'Source Serif 4', 'Noto Serif JP', serif;
 }
 
+/* In Japanese sans mode, prioritize LINE Seed JP on date displays so digits
+   and kanji/kana share one typeface and matching weights (LINE Seed JP only
+   provides 400 and 700, whereas Inter provides intermediate weights like 500). */
+html[lang="ja"]:not([data-font="serif"]) :is(
+  .editor-header h2,
+  .mypicker-trigger,
+  .cal-day,
+  .search-date,
+  .recollection-card-date,
+  .related-preview-date
+) {
+  font-family: 'LINE Seed JP', 'Inter', sans-serif;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* Reset browser <dialog> defaults so each dialog variant controls its own styles */
