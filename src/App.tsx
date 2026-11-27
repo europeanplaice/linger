@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Sus
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { useAuth } from './hooks/useAuth'
 import { useDiary } from './hooks/useDiary'
+import { useDiaryFolderSharing } from './hooks/useDiaryFolderSharing'
 import { clearCache, hasLegacyCache, recoverLegacyCache } from './lib/secureCache'
 import { getAllDrafts, getDraft } from './lib/draftStorage'
 import { announceAccount, getAccountSnapshot } from './lib/accountSession'
@@ -37,6 +38,7 @@ import { recollectionDatesToPrefetch, recollectionRandomCandidates } from './uti
 import { recollectionHint } from './utils/recollectionHint'
 import { weightedOrder } from './utils/serendipityWeights'
 import { loadSeen } from './utils/serendipitySeen'
+import { receiveSharedText } from './utils/share'
 import { TokenExpiredError, migrateExtensions } from './api/driveEntries'
 import { hasPendingMilestones, useMilestones } from './hooks/useMilestones'
 import { useTfIdfSearch } from './hooks/useTfIdfSearch'
@@ -161,6 +163,7 @@ export default function App() {
   const {
     status,
     tokenExpired,
+    expiryRecovering,
     hadSession,
     email,
     googleSub,
@@ -236,28 +239,32 @@ export default function App() {
   useEffect(() => {
     const url = new URL(window.location.href)
     const shortcut = url.searchParams.get('shortcut')
-    const sharedParts = ['title', 'text', 'url']
-      .map(key => url.searchParams.get(key)?.trim() ?? '')
-      .filter(Boolean)
-
-    if (!shortcut && sharedParts.length === 0) return
+    if (!shortcut && !['title', 'text', 'url'].some(key => url.searchParams.has(key))) return
 
     if (shortcut === 'search') {
       pendingShortcutSearchRef.current = true
-    } else if (shortcut === 'today' || sharedParts.length > 0) {
+    } else if (shortcut === 'today') {
       const today = todayYmd()
       setSelectedDate(today)
       selectedDateRef.current = today
-    }
-
-    if (sharedParts.length > 0) {
-      setPendingSharedText(sharedParts.join('\n'))
     }
 
     for (const key of ['shortcut', 'title', 'text', 'url']) {
       url.searchParams.delete(key)
     }
     history.replaceState(history.state, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  useEffect(() => {
+    const request = pendingShareRequest.current ??= receiveSharedText()
+    if (!request) return
+    let alive = true
+    void request.then(text => {
+      if (!alive || pendingShareRequest.current !== request) return
+      pendingShareRequest.current = undefined
+      setPendingSharedText(text ?? false)
+    })
+    return () => { alive = false }
   }, [])
 
   useEffect(() => {
@@ -278,7 +285,8 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [serendipityPrefetch, setSerendipityPrefetch] = useState<[string, string] | [string] | []>([])
   const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
-  const [pendingSharedText, setPendingSharedText] = useState<string | null>(null)
+  const [pendingSharedText, setPendingSharedText] = useState<string | null | false>(null)
+  const pendingShareRequest = useRef<Promise<string | null> | undefined>(undefined)
   const pendingShortcutSearchRef = useRef(false)
   const searchBarRef = useRef<SearchBarHandle>(null)
   const selectedDateRef = useRef(selectedDate)
@@ -324,6 +332,7 @@ export default function App() {
   // auto-resync while Settings is open to avoid racing one of those.
   const handleS3StaleEntryDetected = useS3StaleEntryAutoResync(isSignedIn, s3Backfill, settingsOpen)
   const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const folderSharing = useDiaryFolderSharing(isSignedIn && !tokenExpired && initialLoadComplete ? vaultUserId : null)
   const loadingSeenRef = useRef(false)
 
   const diary = useDiary(status, email, handleExpired, useCallback((dates: string[]) => {
@@ -612,6 +621,8 @@ export default function App() {
   const handleSignOut = useCallback(() => {
     history.replaceState(null, '', '#')
     setPendingDate(null)
+    pendingShareRequest.current = undefined
+    setPendingSharedText(null)
     signOut()
   }, [signOut])
 
@@ -682,6 +693,7 @@ export default function App() {
   }, [selectDate, toggleTheme, toggleFont])
 
   const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
+  const conflictedDatesSet = useMemo(() => new Set(diary.conflictedDates), [diary.conflictedDates])
   const hint = useMemo(() => recollectionHint(diary.dates), [diary.dates])
 
   const handleSave = useCallback(async (
@@ -710,6 +722,26 @@ export default function App() {
     () => tfIdf.getSimilar(selectedDate, 3),
     [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
   )
+
+  const handleMenuClick = useCallback(() => {
+    if (isMobileLayout()) {
+      setSidebarOpen(true)
+      history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
+    }
+  }, [])
+
+  const handleGoToToday = useCallback(() => {
+    selectDate(todayYmd())
+  }, [selectDate])
+
+  const handleGetRelatedTokens = useCallback(
+    (previewDate: string) => tfIdf.getSharedTokens(selectedDate, previewDate),
+    [tfIdf.getSharedTokens, selectedDate],
+  )
+
+  const handleConsumeSharedText = useCallback(() => {
+    setPendingSharedText(null)
+  }, [])
 
   const handleReauth = useCallback(() => {
     if (googleConnection === 'unavailable') void retryGoogleConnection()
@@ -831,7 +863,7 @@ export default function App() {
     </a>
     <div className="app">
       <AnimatePresence>
-        {tokenExpired && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
+        {tokenExpired && !expiryRecovering && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
           onUseAnotherAccount={handleUseAnotherAccount} accountSwitch={editorDirty || diary.pendingSaveDate ? 'blocked' : accountSwitch}
           pendingSave={!!diary.pendingSaveDate} signingIn={signingIn} authError={authError} />}
       </AnimatePresence>
@@ -858,7 +890,19 @@ export default function App() {
           </div>
         </div>
         <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
-        <CalendarView dates={datesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
+        <CalendarView dates={datesSet} conflictedDates={conflictedDatesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
+        {diary.conflictedDates.length > 0 && (
+          <div className="sidebar-status conflict" role="status">
+            <span>{t.app.conflictedDraftsNotice(diary.conflictedDates.length)}</span>
+            <div className="sidebar-conflict-dates">
+              {diary.conflictedDates.map(d => (
+                <button key={d} type="button" className="sidebar-conflict-date-btn" onClick={() => selectDate(d)}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
         {diary.queueError && <div className="sidebar-status error" role="alert">{t.app.queueStorageError}</div>}
         {milestonesError && <div className="sidebar-status error" role="alert">{t.app.milestonesStorageError}</div>}
@@ -988,14 +1032,10 @@ export default function App() {
           key={`account:${googleSub ?? email ?? 'unknown'}`}
           date={selectedDate}
           getContent={diary.getContent}
+          onCheckRemoteFreshness={diary.checkEntryFreshness}
           onSave={handleSave}
           onDelete={diary.remove}
-          onMenuClick={() => {
-            if (isMobileLayout()) {
-              setSidebarOpen(true)
-              history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
-            }
-          }}
+          onMenuClick={handleMenuClick}
           onDirtyChange={setEditorDirty}
           autoSave={autoSave}
           onPrevDay={onPrevDay}
@@ -1010,7 +1050,7 @@ export default function App() {
           draftOwner={status === 'signedIn' ? email : null}
           isOnline={isOnline}
           onExpired={handleExpired}
-          onGoToToday={() => selectDate(todayYmd())}
+          onGoToToday={handleGoToToday}
           refreshSignal={entryRefreshSignal}
           knownDates={datesSet}
           diaryListLoaded={diary.freshListLoaded}
@@ -1019,12 +1059,13 @@ export default function App() {
           onMilestoneAdd={addMilestone}
           relatedDates={relatedDates}
           onSelectRelated={handleSelectRelated}
-          getRelatedTokens={(previewDate) => tfIdf.getSharedTokens(selectedDate, previewDate)}
+          getRelatedTokens={handleGetRelatedTokens}
           getRecurringTopic={getRecurringTopic}
           backDate={previousDate ?? undefined}
           onGoBack={handleGoBack}
           pendingSharedText={pendingSharedText}
-          onConsumeSharedText={() => setPendingSharedText(null)}
+          folderSharing={folderSharing}
+          onConsumeSharedText={handleConsumeSharedText}
           onS3StaleEntryDetected={handleS3StaleEntryDetected}
         />
       </main>

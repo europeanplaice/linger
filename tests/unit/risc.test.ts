@@ -1,4 +1,4 @@
-import { webcrypto } from 'node:crypto'
+import { createHash, webcrypto } from 'node:crypto'
 import { describe, expect, it, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { onRequestPost } from '../../functions/auth/risc'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
@@ -50,6 +50,7 @@ async function makeSignedJwt(header: object, payload: object, privateKey: Crypto
 }
 
 const VALID_HEADER = { alg: 'RS256', kid: 'key-1', typ: 'secevent+jwt' }
+const TEST_PEPPER = 'test-risc-pepper-value-at-least-32-chars'
 
 function validPayload(overrides?: object) {
   return {
@@ -133,7 +134,7 @@ function makeEnv(sessionsOverrides?: object) {
   }
 }
 
-function postRisc(body: string, env: ReturnType<typeof makeEnv>) {
+function postRisc(body: string, env: Pick<ReturnType<typeof makeEnv>, 'GOOGLE_CLIENT_ID'>) {
   const request = new Request('http://localhost/auth/risc', { method: 'POST', body })
   return onRequestPost({ request, env } as any)
 }
@@ -280,30 +281,16 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(await response.json()).toEqual({ error: 'invalid SET' })
   })
 
-  it('returns 202 and revokes sessions through the subject index', async () => {
+  it('returns a retryable error without D1 and does not enumerate legacy KV', async () => {
     mockCrypto(true)
     mockJwks()
-    const del = vi.fn()
-    const env = makeEnv({
-      list: vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
-        keys: prefix === 'ssidx:12345:'
-          ? [{ name: 'ssidx:12345:sid1' }, { name: 'ssidx:12345:sid2' }]
-          : [],
-        list_complete: true,
-      })),
-      delete: del,
-    })
+    const env = makeEnv()
     const jwt = makeJwt(VALID_HEADER, validPayload())
 
     const response = await postRisc(jwt, env)
-    const body = await response.json() as { ok: boolean; handled: number; revoked: number }
-
-    expect(response.status).toBe(202)
-    expect(body).toMatchObject({ ok: true, handled: 1, revoked: 1 })
-    expect(del).toHaveBeenCalledWith('session:sid1')
-    expect(del).toHaveBeenCalledWith('session:sid2')
-    expect(del).toHaveBeenCalledWith('ssidx:12345:sid1')
-    expect(del).toHaveBeenCalledWith('ssidx:12345:sid2')
+    expect(response.status).toBe(503)
+    expect(env.SESSIONS.list).not.toHaveBeenCalled()
+    expect(env.SESSIONS.delete).not.toHaveBeenCalled()
   })
 
   it('returns a retryable error for an email-only event without enumerating sessions', async () => {
@@ -327,23 +314,22 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(env.SESSIONS.delete).not.toHaveBeenCalled()
   })
 
-  it('returns a retryable error when subject session deletion fails', async () => {
+  it('rolls back revocation and the receipt on failure and accepts redelivery', async () => {
     mockCrypto(true)
     mockJwks()
-    const prefix = 'ssidx:12345:'
-    const env = makeEnv({
-      list: vi.fn().mockImplementation(({ prefix: requested }: { prefix: string }) => Promise.resolve({
-        keys: requested === prefix ? [{ name: `${prefix}sid1` }] : [], list_complete: true,
-      })),
-      delete: vi.fn().mockRejectedValue(new Error('KV unavailable')),
-    })
+    const { env, db, sessionId } = await createPasskeyTestEnv({ google_sub: '12345' }, { riscPepper: TEST_PEPPER })
+    try {
+      db.exec(`CREATE TRIGGER fail_receipt BEFORE INSERT ON risc_processed_events
+        BEGIN SELECT RAISE(ABORT, 'receipt failure'); END`)
+      const jwt = makeJwt(VALID_HEADER, validPayload())
+      expect((await postRisc(jwt, env)).status).toBe(503)
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeTruthy()
+      expect(db.prepare('SELECT * FROM risc_processed_events').all()).toEqual([])
 
-    const response = await postRisc(makeJwt(VALID_HEADER, validPayload()), env)
-
-    expect(response.status).toBe(503)
-    expect(response.headers.get('Retry-After')).toBe('1')
-    expect(await response.json()).toEqual({ error: 'Session revocation temporarily unavailable' })
-    expect(env.SESSIONS.delete).not.toHaveBeenCalledWith(`${prefix}sid1`)
+      db.exec('DROP TRIGGER fail_receipt')
+      expect((await postRisc(jwt, env)).status).toBe(202)
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeNull()
+    } finally { db.close() }
   })
 
   it('uses cached JWKS and skips fetch on cache hit', async () => {
@@ -374,7 +360,7 @@ describe('onRequestPost (RISC webhook)', () => {
     const staleJwks = { keys: [{ kty: 'RSA', kid: 'old-key', n: 'n', e: 'e' }] }
     const cachedResp = new Response(JSON.stringify(staleJwks), { headers: { 'Content-Type': 'application/json' } })
     const cache = mockJwks(makeMockCache(cachedResp))
-    const jwt = makeJwt(VALID_HEADER, validPayload()) // kid: 'key-1', not in stale cache
+    const jwt = makeJwt(VALID_HEADER, validPayload({ events: { 'unknown-event': {} } })) // kid: 'key-1', not in stale cache
 
     const response = await postRisc(jwt, makeEnv())
 
@@ -387,26 +373,9 @@ describe('onRequestPost (RISC webhook)', () => {
   it('accepts aud as an array containing the client ID', async () => {
     mockCrypto(true)
     mockJwks()
-    const jwt = makeJwt(VALID_HEADER, validPayload({ aud: ['client-id', 'other'] }))
+    const jwt = makeJwt(VALID_HEADER, validPayload({ aud: ['client-id', 'other'], events: { 'unknown-event': {} } }))
     const response = await postRisc(jwt, makeEnv())
     expect(response.status).toBe(202)
-  })
-
-  it('revokes by subject sub even when no email hint is present', async () => {
-    mockCrypto(true)
-    mockJwks()
-    const payload = validPayload({
-      events: {
-        'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked': {
-          subject: { subject_type: 'iss-sub', iss: 'https://accounts.google.com', sub: '12345' },
-        },
-      },
-    })
-    const jwt = makeJwt(VALID_HEADER, payload)
-    const response = await postRisc(jwt, makeEnv())
-    const body = await response.json() as { handled: number; revoked: number }
-    expect(response.status).toBe(202)
-    expect(body).toMatchObject({ handled: 1, revoked: 1 })
   })
 
   it('returns 202 with handled:0 for unknown event types', async () => {
@@ -430,30 +399,20 @@ describe('onRequestPost (RISC webhook)', () => {
   ])('revokes sessions by subject for event %s/%s', async (ns, eventSlug) => {
     mockCrypto(true)
     mockJwks()
-    const del = vi.fn()
-    const env = makeEnv({
-      list: vi.fn().mockImplementation(({ prefix }: { prefix: string }) => Promise.resolve({
-        keys: prefix === 'ssidx:12345:' ? [{ name: 'ssidx:12345:sid1' }] : [], list_complete: true,
-      })),
-      delete: del,
-    })
     const payload = validPayload({
       events: {
         [`https://schemas.openid.net/secevent/${ns}/event-type/${eventSlug}`]: {
           subject: { subject_type: 'iss-sub', iss: 'https://accounts.google.com', sub: '12345' },
-          hint_identifier: 'user@example.com',
         },
       },
     })
-    const jwt = makeJwt(VALID_HEADER, payload)
-
-    const response = await postRisc(jwt, env)
-    const body = await response.json() as { revoked: number }
-
-    expect(response.status).toBe(202)
-    expect(body.revoked).toBe(1)
-    expect(del).toHaveBeenCalledWith('session:sid1')
-    expect(del).toHaveBeenCalledWith('ssidx:12345:sid1')
+    const { env, db, sessionId } = await createPasskeyTestEnv({ google_sub: '12345' }, { riscPepper: TEST_PEPPER })
+    try {
+      const response = await postRisc(makeJwt(VALID_HEADER, payload), env)
+      expect(response.status).toBe(202)
+      expect(await response.json()).toMatchObject({ revoked: 1 })
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeNull()
+    } finally { db.close() }
   })
 
   it('rejects missing or empty jti with 400', async () => {
@@ -481,71 +440,54 @@ describe('onRequestPost (RISC webhook)', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 
-  it('ignores replayed SETs with the same jti in both KV and D1', async () => {
+  it('retries old incomplete receipts once and preserves sessions created after commit', async () => {
     mockCrypto(true)
     mockJwks()
-    const kvStore = new Map<string, string>()
-    const kvEnv = makeEnv({
-      get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
-      put: vi.fn(async (key: string, value: string) => { kvStore.set(key, value) }),
-    })
-    const jwt = makeJwt(VALID_HEADER, validPayload({ jti: 'replay-jti-kv' }))
-    expect(await (await postRisc(jwt, kvEnv)).json()).toEqual({ ok: true, handled: 1, revoked: 1 })
-    const kvReplay = await postRisc(jwt, kvEnv)
-    expect(kvReplay.status).toBe(202)
-    expect(await kvReplay.json()).toEqual({ ok: true, handled: 0, revoked: 0, duplicate: true })
-
-    const { env: d1Env, db, sessionId } = await createPasskeyTestEnv({ google_sub: '12345' })
+    const { env, db, sessionId, userId } = await createPasskeyTestEnv({ google_sub: '12345' }, { riscPepper: TEST_PEPPER })
     try {
-      const d1Jwt = makeJwt(VALID_HEADER, validPayload({ jti: 'replay-jti-d1' }))
-      const first = await postRisc(d1Jwt, d1Env as never)
+      const jti = 'replay-jti-d1'
+      const hash = createHash('sha256').update(`linger-risc-jti/v1:${jti}`).digest('hex')
+      db.prepare('INSERT INTO risc_processed_events (jti_hash, expires_at) VALUES (?, ?)').run(`sha256:${hash}`, Date.now() + 1000)
+      const d1Jwt = makeJwt(VALID_HEADER, validPayload({ jti }))
+      const first = await postRisc(d1Jwt, env)
       expect(await first.json()).toEqual({ ok: true, handled: 1, revoked: 1 })
-      expect(await getPasskeySessionUserId(sessionId, d1Env)).toBeNull()
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeNull()
 
       // A new session created after the first event must not be revoked by replaying the same jti.
       const newSessionId = 'fresh-session-after-risc'
-      const newUserId = crypto.randomUUID()
-      db.prepare('INSERT INTO passkey_users (id, created_at) VALUES (?, ?)').run(newUserId, Date.now())
-      await createPasskeySession(newSessionId, newUserId, d1Env)
-      const second = await postRisc(d1Jwt, d1Env as never)
+      await createPasskeySession(newSessionId, userId, env)
+      const second = await postRisc(d1Jwt, env)
       expect(second.status).toBe(202)
       expect(await second.json()).toEqual({ ok: true, handled: 0, revoked: 0, duplicate: true })
-      expect(await getPasskeySessionUserId(newSessionId, d1Env)).toBe(newUserId)
+      expect(await getPasskeySessionUserId(newSessionId, env)).toBe(userId)
     } finally { db.close() }
   })
 
-  it('releases jti claim on transient 503 failure so a retry can succeed', async () => {
+  it('leaves sessions in place when the configuration is missing and succeeds after it is restored', async () => {
     mockCrypto(true)
     mockJwks()
-    const { env, db, sessionId } = await createPasskeyTestEnv({ google_sub: '12345' })
+    const { env, db, sessionId } = await createPasskeyTestEnv({ google_sub: '12345' }, { riscPepper: TEST_PEPPER })
     try {
-      const emailOnlyJwt = makeJwt(VALID_HEADER, validPayload({
-        jti: 'retryable-jti',
-        events: {
-          'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked': {
-            hint_identifier: 'user@example.com',
-          },
-        },
-      }))
-      const failed = await postRisc(emailOnlyJwt, env as never)
+      const jwt = makeJwt(VALID_HEADER, validPayload({ jti: 'retryable-jti' }))
+      const failed = await postRisc(jwt, { ...env, RISC_INDEX_PEPPER: undefined } as typeof env)
       expect(failed.status).toBe(503)
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeTruthy()
+      expect(db.prepare('SELECT * FROM risc_processed_events').all()).toEqual([])
 
-      const recoveredJwt = makeJwt(VALID_HEADER, validPayload({ jti: 'retryable-jti' }))
-      const retried = await postRisc(recoveredJwt, env as never)
+      const retried = await postRisc(jwt, env)
       expect(retried.status).toBe(202)
       expect(await retried.json()).toEqual({ ok: true, handled: 1, revoked: 1 })
       expect(await getPasskeySessionUserId(sessionId, env)).toBeNull()
     } finally { db.close() }
   })
 
-  it('targets only the matching blind-indexed user and unindexed legacy users when RISC_INDEX_PEPPER is set', async () => {
+  it('targets only the matching blind-indexed user', async () => {
     mockCrypto(true)
     mockJwks()
-    const pepper = 'test-risc-pepper-value-at-least-32-chars'
     const fixture = await createPasskeyTestEnv({ google_sub: '12345' }, { userId: 'user-a', sessionId: 'session-a' })
     try {
       const { db, key } = fixture
-      const env = { ...fixture.env, RISC_INDEX_PEPPER: pepper }
+      const env = { ...fixture.env, RISC_INDEX_PEPPER: TEST_PEPPER }
       const { getSession, saveSession } = await import('../../functions/_shared/session')
       const sessionA = (await getSession('session-a', env, key))!
       sessionA.folder_id = 'folder-a'
@@ -566,14 +508,14 @@ describe('onRequestPost (RISC webhook)', () => {
       await createPasskeySession(legacySession, legacyUser, env)
       db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(legacyUser, 'v1.refresh-legacy', Date.now())
 
-      const response = await postRisc(makeJwt(VALID_HEADER, validPayload({ jti: 'targeted-jti' })), env as never)
+      const response = await postRisc(makeJwt(VALID_HEADER, validPayload({ jti: 'targeted-jti' })), env)
       expect(response.status).toBe(202)
       expect(await response.json()).toEqual({ ok: true, handled: 1, revoked: 1 })
 
       expect(await getPasskeySessionUserId('session-a', env)).toBeNull()
-      expect(await getPasskeySessionUserId(legacySession, env)).toBeNull()
+      expect(await getPasskeySessionUserId(legacySession, env)).toBe(legacyUser)
       expect(await getPasskeySessionUserId(sessionB, env)).toBe(userB)
-      expect(db.prepare('SELECT user_id FROM google_refresh_vault').all()).toEqual([{ user_id: userB }])
+      expect(db.prepare('SELECT user_id FROM google_refresh_vault ORDER BY user_id').all()).toEqual([{ user_id: userB }, { user_id: legacyUser }])
     } finally { fixture.db.close() }
   })
 })
@@ -598,7 +540,7 @@ describe('onRequestPost (RISC webhook) — real RSA signature verification', () 
 
   it('accepts a JWT with a genuine RS256 signature over the published JWK', async () => {
     stubJwksFetch([{ kty: 'RSA', kid: 'key-1', n: publicJwk.n!, e: publicJwk.e! }])
-    const jwt = await makeSignedJwt(VALID_HEADER, validPayload(), privateKey)
+    const jwt = await makeSignedJwt(VALID_HEADER, validPayload({ events: { 'unknown-event': {} } }), privateKey)
 
     const response = await postRisc(jwt, makeEnv())
 

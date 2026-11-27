@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { SearchResult } from '../hooks/useDiary'
 import { diaryDateLabel } from '../utils/date'
@@ -32,7 +32,7 @@ export interface SearchBarHandle {
   focus(): void
 }
 
-export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({ onSearch, onSelect, entriesLoading }, ref) {
+export const SearchBar = memo(forwardRef<SearchBarHandle, Props>(function SearchBar({ onSearch, onSelect, entriesLoading }, ref) {
   const { t, locale } = useI18n()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Result[]>([])
@@ -183,4 +183,4 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar({
       )}
     </div>
   )
-})
+}))

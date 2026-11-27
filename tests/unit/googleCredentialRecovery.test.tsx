@@ -5,6 +5,7 @@ import { clearPendingGoogleCredential, hasPendingGoogleCredential, refreshGoogle
 import { getAccessToken, clearOAuthCredentials } from '../../src/lib/oauthCredentials'
 import { AUTH_EVENT_KEY, setActiveAccount, getAccountSnapshot } from '../../src/lib/accountSession'
 import { restoreTabSession } from '../../src/lib/tabSession'
+import { deferred } from '../helpers/deferred'
 
 const mocks = vi.hoisted(() => ({ userId: null as string | null, register: vi.fn(), login: vi.fn() }))
 vi.mock('../../src/api/passkeys', () => ({ registerPasskey: mocks.register, loginWithPasskey: mocks.login, addPasskey: vi.fn() }))
@@ -277,6 +278,30 @@ describe('Google credential recovery', () => {
     rejectSession(new Error('stale session failure'))
     await expect(first).resolves.toMatchObject({ message: expect.stringContaining('superseded') })
     expect(hasPendingGoogleCredential()).toBe(true)
+  })
+
+  it('keeps the resume refresh when a Drive request reports expiry', async () => {
+    const { result } = await mount()
+    await act(async () => result.current.unlockPasskey())
+    refresh.mockClear()
+    const pending = deferred<Response>()
+    refresh.mockReturnValueOnce(pending.promise)
+    vi.setSystemTime(Date.now() + 150_000)
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await act(async () => result.current.handleExpired())
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(result.current.tokenExpired).toBe(true)
+    expect(result.current.expiryRecovering).toBe(true)
+
+    await act(async () => pending.resolve(renewed()))
+    expect(getAccessToken()).toBe('renewed-access')
+    expect(result.current.tokenExpired).toBe(false)
+    expect(result.current.expiryRecovering).toBe(false)
+    expect(result.current.googleConnection).toBe('idle')
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
   it('recovers on reconnect after an outage spans access token expiry', async () => {

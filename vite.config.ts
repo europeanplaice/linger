@@ -193,13 +193,15 @@ export default defineConfig({
       writeBundle() {
         const distPath = resolve(import.meta.dirname, 'dist')
         const swPath = resolve(import.meta.dirname, 'dist/sw.js')
-        const assetsDir = resolve(distPath, 'assets')
-        const precacheAssets = existsSync(assetsDir)
-          ? readdirSync(assetsDir)
-              .filter((name) => name.endsWith('.js') || name.endsWith('.css'))
-              .sort((a, b) => a.localeCompare(b))
-              .map((name) => `./assets/${name}`)
-          : []
+        const indexHtml = readFileSync(resolve(distPath, 'index.html'), 'utf-8')
+        // Precache only the entry-point assets referenced by index.html so
+        // lazy-loaded chunks (emoji picker data, jszip, modals) are fetched
+        // and runtime-cached on demand instead of on first visit.
+        const entryAssets = new Set<string>()
+        for (const match of indexHtml.matchAll(/(?:src|href)="\/assets\/([^"]+\.(?:js|css))"/g)) {
+          entryAssets.add(`./assets/${match[1]}`)
+        }
+        const precacheAssets = Array.from(entryAssets).sort((a, b) => a.localeCompare(b))
         let content = readFileSync(swPath, 'utf-8').replace(
           '[] // __PRECACHE_ASSETS__',
           JSON.stringify(precacheAssets),

@@ -19,6 +19,7 @@
   },
   "include": [
     "functions/**/*.ts",
+    "src/types.ts",
     "src/utils/folderName.ts",
     "src/utils/parseDriveEntry.ts"
   ]

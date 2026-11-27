@@ -1,9 +1,11 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { onRequestGet } from '../../functions/auth/callback'
 import { onRequestGet as startLogin } from '../../functions/auth/login'
+import { onRequestPost as retireAccounts } from '../../functions/auth/passkey/recovery'
 import { verifyGoogleIdToken } from '../../functions/_shared/google'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
-import { sessionStorageId } from '../../functions/_shared/authStore'
+import { createPasskeySession, getPasskeySessionUserId, riscSubjectHash, sessionStorageId } from '../../functions/_shared/authStore'
+import { sealVaultValue } from '../../functions/_shared/vaultCrypto'
 
 vi.mock('../../functions/_shared/google', () => ({
   verifyGoogleIdToken: vi.fn().mockResolvedValue({ sub: 'google-sub-123', email: 'user@example.com', email_verified: true }),
@@ -32,6 +34,98 @@ function mockTokenResponse(overrides: Record<string, unknown> = {}) {
     access_token: 'short-lived-access', expires_in: 3600, id_token: 'verified-id-token', ...overrides,
   }), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
 }
+
+const recoveryPepper = 'test-risc-pepper-value-at-least-32-chars'
+const recoverySubject = 'google-sub-123'
+
+async function recoveryFixture() {
+  const fixture = await createPasskeyTestEnv({ google_sub: recoverySubject }, { riscPepper: recoveryPepper })
+  const { db, env, userId, sessionId, key } = fixture
+  const credentials = db.prepare(`INSERT INTO passkey_credentials
+    (credential_id, user_id, public_key, prf_salt, wrapped_master_key, created_at)
+    VALUES (?, ?, ?, 'salt', 'wrapped', ?)`)
+  const now = Date.now()
+  credentials.run('current-passkey', userId, new Uint8Array(1), now)
+  db.prepare('UPDATE auth_sessions SET credential_id = ? WHERE id = ?').run('current-passkey', await sessionStorageId(sessionId))
+  const addAccount = async (name: string, sub: string | null, createdAt: number) => {
+    const hash = sub ? await riscSubjectHash(sub, recoveryPepper) : null
+    db.prepare('INSERT INTO passkey_users (id, created_at, risc_subject_hash) VALUES (?, ?, ?)').run(name, createdAt, hash)
+    credentials.run(`passkey-${name}`, name, new Uint8Array(1), createdAt)
+    await createPasskeySession(`session-${name}`, name, env, `passkey-${name}`)
+    const envelope = await sealVaultValue(key, name, 'google-refresh-token', { token: 'saved-refresh' })
+    db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(name, envelope, now)
+  }
+  const saveCurrentGoogleConnection = async () => {
+    const envelope = await sealVaultValue(key, userId, 'google-refresh-token', { token: 'new-refresh' })
+    db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(userId, envelope, now)
+  }
+  const authorize = async () => {
+    const first = await startLogin({ env, request: new Request('https://example.com/auth/login?retire_previous=1&reuse=1', {
+      headers: { ...fixture.headers, 'Sec-Fetch-Site': 'same-origin' },
+    }) } as never)
+    expect(first.status).toBe(302)
+    const state = new URL(first.headers.get('Location')!).searchParams.get('state')!
+    const cookies = first.headers.getSetCookie().map(cookie => cookie.split(';')[0]).join('; ')
+    const response = await onRequestGet({ env, request: new Request(`https://example.com/auth/callback?code=abc&state=${state}`, {
+      headers: { Cookie: cookies },
+    }) } as never)
+    expect(response.status).toBe(200)
+    const encoded = (await response.text()).match(/const encoded = '([^']+)'/)![1]
+    return JSON.parse(Buffer.from(encoded, 'base64url').toString()) as unknown
+  }
+  const retire = (requestHeaders = fixture.headers) => retireAccounts({
+    env, request: new Request('https://example.com/auth/passkey/recovery', {
+      method: 'POST', headers: { ...requestHeaders, Origin: 'https://example.com' },
+    }),
+  } as never)
+  return { ...fixture, now, addAccount, saveCurrentGoogleConnection, authorize, retire }
+}
+
+describe('lost-passkey recovery', () => {
+  it('retains the current and newer accounts and revokes only matching older credentials after Google confirmation', async () => {
+    mockTokenResponse({ refresh_token: 'provider-refresh' })
+    const { db, env, userId, sessionId, now, addAccount, saveCurrentGoogleConnection, authorize, retire } = await recoveryFixture()
+    try {
+      await addAccount('old', recoverySubject, now - 1000)
+      await addAccount('newer', recoverySubject, now + 1000)
+      await addAccount('unrelated', 'another-subject', now - 1000)
+      await addAccount('unindexed', null, now - 1000)
+      expect((await retire()).status).toBe(409)
+      expect(await authorize()).toEqual({ recovery: 'ready' })
+      expect((await retire()).status).toBe(409)
+      expect(await getPasskeySessionUserId('session-old', env)).toBe('old')
+
+      await saveCurrentGoogleConnection()
+      const results = await Promise.all([retire(), retire()])
+      const applied = results.find(response => response.status === 200)
+      expect(await applied?.json()).toEqual({ revokedPasskeys: 1 })
+      expect(results.map(response => response.status).sort()).toEqual([200, 409])
+      expect(await getPasskeySessionUserId('session-old', env)).toBeNull()
+      expect(db.prepare('SELECT credential_id FROM passkey_credentials WHERE user_id = ?').get('old')).toBeUndefined()
+      expect(db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get('old')).toBeUndefined()
+      expect(await getPasskeySessionUserId(sessionId, env)).toBe(userId)
+      for (const name of ['newer', 'unrelated', 'unindexed']) {
+        expect(await getPasskeySessionUserId(`session-${name}`, env)).toBe(name)
+        expect(db.prepare('SELECT envelope FROM google_refresh_vault WHERE user_id = ?').get(name)).toBeTruthy()
+      }
+    } finally { db.close() }
+  })
+
+  it('requires the linked Google account and the current vault key', async () => {
+    mockTokenResponse()
+    const { db, headers, authorize, retire, saveCurrentGoogleConnection } = await recoveryFixture()
+    try {
+      await saveCurrentGoogleConnection()
+      vi.mocked(verifyGoogleIdToken).mockResolvedValueOnce({ sub: 'wrong-account', iss: 'https://accounts.google.com', aud: 'client-id', exp: 1 })
+      expect(await authorize()).toEqual({ recovery: 'account_mismatch' })
+      expect((await retire()).status).toBe(409)
+      expect(await authorize()).toEqual({ recovery: 'ready' })
+      expect((await retire({ ...headers, 'X-Linger-Vault-Key': 'A'.repeat(43) })).status).toBe(401)
+      db.prepare('UPDATE passkey_recovery_grants SET expires_at = 0').run()
+      expect((await retire()).status).toBe(409)
+    } finally { db.close() }
+  })
+})
 
 describe('OAuth callback popup flow', () => {
   it('completes concurrent browser attempts in reverse order with their own PKCE verifier', async () => {

@@ -187,3 +187,5 @@ export interface MilestoneProximity {
   recurring?: boolean
   nthYear?: number  // computed: how many years since the milestone date (only for recurring)
 }
+
+export type DiaryFolderSharing = 'private' | 'shared' | 'unknown'

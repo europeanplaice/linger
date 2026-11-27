@@ -39,41 +39,31 @@ export interface TfIdfDoc {
   content: string
 }
 
+interface DocTermCounts {
+  counts: Map<string, number>
+  totalTokens: number
+}
+
 export interface TfIdfIndex {
   vectors: Map<string, Map<string, number>>  // date → (token → normalized tf-idf)
   contents: Map<string, string>              // date → raw content for snippet extraction
+  termCounts?: Map<string, DocTermCounts>    // date → cached token counts for incremental updates
+  df?: Map<string, number>                   // token → document frequency
 }
 
-export function buildIndex(docs: TfIdfDoc[]): TfIdfIndex {
-  const N = docs.length
-  if (N === 0) return { vectors: new Map(), contents: new Map() }
+function countDocTerms(content: string): DocTermCounts {
+  const tokens = tokenize(content).filter(t => !NOISE_BIGRAMS.has(t))
+  const counts = new Map<string, number>()
+  for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1)
+  return { counts, totalTokens: tokens.length || 1 }
+}
 
-  // Step 1: tokenize each doc and count term frequencies
-  // tokenize() returns all occurrences (not deduplicated) so counts reflect real TF.
-  const docTermCounts = docs.map(doc => {
-    const tokens = tokenize(doc.content).filter(t => !NOISE_BIGRAMS.has(t))
-    const counts = new Map<string, number>()
-    for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1)
-    return { counts, totalTokens: tokens.length || 1 }
-  })
-
-  // Step 2: document frequency — how many docs contain each token
-  const df = new Map<string, number>()
-  for (const { counts } of docTermCounts) {
-    for (const token of counts.keys()) {
-      df.set(token, (df.get(token) ?? 0) + 1)
-    }
-  }
-
-  // Step 3: compute TF-IDF scores and L2-normalize each vector for cosine similarity
+function computeVectors(termCounts: Map<string, DocTermCounts>, df: Map<string, number>): Map<string, Map<string, number>> {
+  const N = termCounts.size
   const vectors = new Map<string, Map<string, number>>()
-  const contents = new Map<string, string>()
-
-  docs.forEach((doc, i) => {
-    const { counts, totalTokens } = docTermCounts[i]
+  termCounts.forEach(({ counts, totalTokens }, date) => {
     const vec = new Map<string, number>()
     let normSq = 0
-
     counts.forEach((count, token) => {
       const tf = count / totalTokens
       // Smoothed IDF avoids division by zero and dampens extremely common tokens
@@ -82,15 +72,61 @@ export function buildIndex(docs: TfIdfDoc[]): TfIdfIndex {
       vec.set(token, score)
       normSq += score * score
     })
-
     const norm = Math.sqrt(normSq)
     if (norm > 0) vec.forEach((v, k) => vec.set(k, v / norm))
-
-    vectors.set(doc.date, vec)
-    contents.set(doc.date, doc.content)
+    vectors.set(date, vec)
   })
+  return vectors
+}
 
-  return { vectors, contents }
+export function buildIndex(docs: TfIdfDoc[]): TfIdfIndex {
+  const N = docs.length
+  if (N === 0) return { vectors: new Map(), contents: new Map(), termCounts: new Map(), df: new Map() }
+
+  const termCounts = new Map<string, DocTermCounts>()
+  const contents = new Map<string, string>()
+  const df = new Map<string, number>()
+
+  for (const doc of docs) {
+    const entry = countDocTerms(doc.content)
+    termCounts.set(doc.date, entry)
+    contents.set(doc.date, doc.content)
+    for (const token of entry.counts.keys()) {
+      df.set(token, (df.get(token) ?? 0) + 1)
+    }
+  }
+
+  return { vectors: computeVectors(termCounts, df), contents, termCounts, df }
+}
+
+/** Incrementally update a single document without re-tokenizing other entries. */
+export function updateIndex(index: TfIdfIndex, date: string, content: string): TfIdfIndex {
+  const termCounts = index.termCounts ?? new Map<string, DocTermCounts>()
+  const df = index.df ?? new Map<string, number>()
+  const contents = new Map(index.contents)
+
+  if (!index.termCounts || !index.df) {
+    contents.set(date, content)
+    return buildIndex(Array.from(contents, ([d, c]) => ({ date: d, content: c })))
+  }
+
+  const prev = termCounts.get(date)
+  if (prev) {
+    for (const token of prev.counts.keys()) {
+      const nextDf = (df.get(token) ?? 1) - 1
+      if (nextDf <= 0) df.delete(token)
+      else df.set(token, nextDf)
+    }
+  }
+
+  const nextCounts = countDocTerms(content)
+  termCounts.set(date, nextCounts)
+  contents.set(date, content)
+  for (const token of nextCounts.counts.keys()) {
+    df.set(token, (df.get(token) ?? 0) + 1)
+  }
+
+  return { vectors: computeVectors(termCounts, df), contents, termCounts, df }
 }
 
 export interface SearchHit {

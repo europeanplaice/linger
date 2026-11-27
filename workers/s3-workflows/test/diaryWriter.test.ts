@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.mocked(drive.inspectDriveFolder).mockImplementation(async (token, id) => {
     const meta = await drive.getEntryMeta(token, id)
     if (meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) throw new drive.DriveError(400, 'Selected item is not an available Drive folder')
-    return { id, name: meta.name, canAddChildren: true, entryCount: 1, firstEntryDate: date, lastEntryDate: date }
+    return { id, name: meta.name, canAddChildren: true, sharing: 'private', entryCount: 1, firstEntryDate: date, lastEntryDate: date }
   })
   vi.mocked(drive.listDriveFolders).mockResolvedValue([])
   vi.mocked(drive.getDiaryFileMeta).mockImplementation(async (_token, _id, session, _env, id) => {
@@ -168,7 +168,7 @@ describe('account-scoped diary mutations', () => {
     const index = env.S3_SYNC_INDEX.getByName(auth.accountKey)
     await index.updateProtectedEntry(auth, date, 'pending', '7', new Date().toISOString())
     vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'empty', name: 'Empty' }])
-    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'empty', name: 'Empty', canAddChildren: true, entryCount: 0, firstEntryDate: null, lastEntryDate: null })
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'empty', name: 'Empty', canAddChildren: true, sharing: 'private', entryCount: 0, firstEntryDate: null, lastEntryDate: null })
     await expect(service.selectDiaryFolder({ ...auth, folderId: 'empty' })).rejects.toThrow('FOLDER_EMPTY')
     expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe(previous)
     expect(await index.getProtectedEntry(auth, date)).not.toBeNull()
@@ -180,9 +180,23 @@ describe('account-scoped diary mutations', () => {
     const { auth, service } = await account()
     const previous = await service.ensureDiaryFolder(auth)
     vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'readonly', name: 'Read only' }])
-    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'readonly', name: 'Read only', canAddChildren: false, entryCount: 1, firstEntryDate: date, lastEntryDate: date })
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({ id: 'readonly', name: 'Read only', canAddChildren: false, sharing: 'private', entryCount: 1, firstEntryDate: date, lastEntryDate: date })
     await expect(service.selectDiaryFolder({ ...auth, folderId: 'readonly', allowEmpty: true })).rejects.toThrow('FOLDER_READ_ONLY')
     expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe(previous)
+  })
+
+  it('requires confirmation matching the current sharing status before changing folders', async () => {
+    const { auth, service } = await account()
+    const previous = await service.ensureDiaryFolder(auth)
+    vi.mocked(drive.listDriveFolders).mockResolvedValue([{ id: 'shared-folder', name: 'Shared' }])
+    vi.mocked(drive.inspectDriveFolder).mockResolvedValue({
+      id: 'shared-folder', name: 'Shared', sharing: 'shared', canAddChildren: true, entryCount: 1,
+      firstEntryDate: date, lastEntryDate: date,
+    })
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'shared-folder' })).rejects.toThrow('FOLDER_SHARING_CONFIRMATION')
+    await expect(service.selectDiaryFolder({ ...auth, folderId: 'shared-folder', acknowledgeSharing: 'unknown' })).rejects.toThrow('FOLDER_SHARING_CONFIRMATION')
+    expect((await getSession(auth.sessionId, env, auth.vaultKey))!.folder_id).toBe(previous)
+    expect(await service.selectDiaryFolder({ ...auth, folderId: 'shared-folder', acknowledgeSharing: 'shared' })).toBe('shared-folder')
   })
 
   it('rejects a folder selection with credentials for a different account', async () => {

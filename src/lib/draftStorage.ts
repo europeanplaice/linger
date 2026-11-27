@@ -3,6 +3,19 @@ import { deleteSecureDraft, getAllSecureDrafts, getSecureDraft, markSecureDraftC
 
 let lastCheckpointTime = 0
 export const DRAFT_STORAGE_ERROR_EVENT = 'linger-draft-storage-error'
+const draftChangeListeners = new Set<() => void>()
+
+export function subscribeDraftChanges(listener: () => void): () => void {
+  draftChangeListeners.add(listener)
+  return () => { draftChangeListeners.delete(listener) }
+}
+
+function notifyDraftChanges(): void {
+  for (const listener of draftChangeListeners) {
+    try { listener() } catch { /* isolate listener errors */ }
+  }
+}
+
 export function reportDraftStorageError(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(DRAFT_STORAGE_ERROR_EVENT))
 }
@@ -24,8 +37,16 @@ export function getAllDrafts(owner?: string): Promise<DraftEntry[]> {
   return getAllSecureDrafts(requireOwner(owner))
 }
 
-export function putDraft(draft: DraftEntry): Promise<void> { return putSecureDraft(draft) }
-export function deleteDraft(date: string, owner?: string, expectedContent?: string, expectedSavedAt?: number): Promise<void> {
-  return deleteSecureDraft(requireOwner(owner), date, expectedContent, expectedSavedAt)
+export async function putDraft(draft: DraftEntry): Promise<void> {
+  await putSecureDraft(draft)
+  notifyDraftChanges()
 }
-export function markDraftConflicted(draft: DraftEntry): Promise<boolean> { return markSecureDraftConflicted(draft) }
+export async function deleteDraft(date: string, owner?: string, expectedContent?: string, expectedSavedAt?: number): Promise<void> {
+  await deleteSecureDraft(requireOwner(owner), date, expectedContent, expectedSavedAt)
+  notifyDraftChanges()
+}
+export async function markDraftConflicted(draft: DraftEntry): Promise<boolean> {
+  const updated = await markSecureDraftConflicted(draft)
+  if (updated) notifyDraftChanges()
+  return updated
+}

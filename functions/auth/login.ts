@@ -1,6 +1,6 @@
 import type { Env } from '../_shared/session'
 import { jsonResponse, makeOAuthStateCookie, makeOAuthPkceCookie, parseSessionId } from '../_shared/session'
-import { checkAuthRateLimit, saveOAuthState, getPasskeySessionUserId, sessionStorageId } from '../_shared/authStore'
+import { checkAuthRateLimit, configuredRiscPepper, saveOAuthState, getPasskeySessionUserId, sessionStorageId } from '../_shared/authStore'
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file openid email'
 
@@ -29,6 +29,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const userId = sessionId ? await getPasskeySessionUserId(sessionId, env) : null
   const url = new URL(request.url)
   const setup = url.searchParams.get('setup') === '1'
+  const retirePrevious = url.searchParams.get('retire_previous') === '1'
+  if (retirePrevious) {
+    if (setup || (fetchSite && fetchSite !== 'same-origin')) return jsonResponse({ error: 'Forbidden' }, 403)
+    if (!userId) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
+    if (!configuredRiscPepper(env)) return jsonResponse({ error: 'Passkey recovery temporarily unavailable' }, 503)
+  }
   if ((!sessionId || !userId) && !setup) return jsonResponse({ error: 'Unlock Linger with a passkey first' }, 401)
   if (!userId) {
     const rate = await checkAuthRateLimit(request, env, 'oauth-setup', 10, 5 * 60_000)
@@ -49,7 +55,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
 
   // Keep the PKCE secret in a short lived, HttpOnly browser cookie. The server
   // store only needs nonce and response mode after atomically consuming state.
-  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId, setup, userId, sessionHandle: sessionId && userId ? await sessionStorageId(sessionId) : undefined }), env)
+  await saveOAuthState(state, JSON.stringify({ nonce, popup: true, channelId, setup, ...(retirePrevious ? { retirePrevious } : {}), userId, sessionHandle: sessionId && userId ? await sessionStorageId(sessionId) : undefined }), env)
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -75,7 +81,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   // Intentionally omit login_hint: callback/session verification enforces the
   // linked Google subject, and permanent identifiers should not appear in URLs.
 
-  const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` })
+  const headers = new Headers({ Location: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, 'Cache-Control': 'no-store' })
   headers.append('Set-Cookie', makeOAuthStateCookie(state, !env.SESSION_DOMAIN.startsWith('http://')))
   headers.append('Set-Cookie', makeOAuthPkceCookie(codeVerifier, !env.SESSION_DOMAIN.startsWith('http://'), state))
   return new Response(null, {

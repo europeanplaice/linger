@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAllCached } from '../lib/secureCache'
-import { buildIndex, search, findSimilar, sharedTokens, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
+import { buildIndex, updateIndex, search, findSimilar, sharedTokens, type TfIdfDoc, type TfIdfIndex } from '../utils/tfidf'
 import { findRecurringAbsentTopic, type RecurringTopic } from '../utils/topicExtraction'
 import type { Language } from '../i18n'
 
@@ -13,6 +13,7 @@ export function useTfIdfSearch(owner: string | null = null) {
   const [ready, setReady] = useState(false)
   const [indexVersion, setIndexVersion] = useState(0)
   const indexRef = useRef<TfIdfIndex | null>(null)
+  const overridesRef = useRef<Map<string, string>>(new Map())
   const rebuildGenerationRef = useRef(0)
 
   useEffect(() => {
@@ -20,15 +21,22 @@ export function useTfIdfSearch(owner: string | null = null) {
     const generation = ++rebuildGenerationRef.current
 
     indexRef.current = null
+    overridesRef.current = new Map()
     setReady(false)
     if (!owner) return () => { cancelled = true; rebuildGenerationRef.current++ }
 
     getAllCached()
       .then(entries => {
         if (cancelled || generation !== rebuildGenerationRef.current) return
-        const docs: TfIdfDoc[] = entries
-          .filter(e => e.content?.content)
-          .map(e => ({ date: e.date, content: e.content!.content }))
+        const docMap = new Map<string, string>()
+        for (const e of entries) {
+          if (e.content?.content) docMap.set(e.date, e.content.content)
+        }
+        // Preserve any updates that arrived while the initial cache load was in flight.
+        for (const [date, content] of overridesRef.current) {
+          docMap.set(date, content)
+        }
+        const docs: TfIdfDoc[] = Array.from(docMap, ([date, content]) => ({ date, content }))
         indexRef.current = buildIndex(docs)
         setReady(true)
         setIndexVersion(v => v + 1)
@@ -40,30 +48,12 @@ export function useTfIdfSearch(owner: string | null = null) {
     return () => { cancelled = true; rebuildGenerationRef.current++ }
   }, [owner])
 
-  const rebuildFromCache = useCallback((overrides: Record<string, string> = {}) => {
-    const generation = ++rebuildGenerationRef.current
-    getAllCached()
-      .then(entries => {
-        if (generation !== rebuildGenerationRef.current) return
-        const docs: TfIdfDoc[] = entries
-          .filter(e => e.content?.content)
-          .map(e => ({
-            date: e.date,
-            content: overrides[e.date] ?? e.content!.content,
-          }))
-        for (const [date, content] of Object.entries(overrides)) {
-          if (!docs.find(d => d.date === date)) docs.push({ date, content })
-        }
-        indexRef.current = buildIndex(docs)
-        setReady(true)
-        setIndexVersion(v => v + 1)
-      })
-      .catch(() => {})
-  }, [])
-
   const updateEntry = useCallback((date: string, content: string) => {
-    rebuildFromCache({ [date]: content })
-  }, [rebuildFromCache])
+    overridesRef.current.set(date, content)
+    indexRef.current = updateIndex(indexRef.current ?? buildIndex([]), date, content)
+    setReady(true)
+    setIndexVersion(v => v + 1)
+  }, [])
 
   const searchLocal = useCallback((query: string, limit = 20): LocalSearchResult[] => {
     const idx = indexRef.current

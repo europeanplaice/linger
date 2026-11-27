@@ -14,7 +14,7 @@ import { S3BackfillWorkflow } from './workflow'
 import { S3MirrorWorkflow } from './mirrorWorkflow'
 import { S3SyncIndex } from './syncIndex'
 import type { WorkflowEnv } from './types'
-import type { DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import type { DiaryFolderSelection, DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { DiaryWriter } from './diaryWriter'
 import type { S3Config } from './runtime'
 import type { S3WorkflowAuth } from '../../../functions/_shared/s3Workflow'
@@ -58,7 +58,7 @@ export default class S3WorkflowsService extends WorkerEntrypoint<WorkflowEnv> {
     return this.env.DIARY_WRITER.getByName(input.accountKey).ensureFolder(input)
   }
 
-  async selectDiaryFolder(input: DiaryWriterAuth & { folderId: string; allowEmpty?: boolean }): Promise<string> {
+  async selectDiaryFolder(input: DiaryFolderSelection): Promise<string> {
     await authorizedSession(this.env, input)
     await migrateSyncMetadata(this.env, input)
     return this.env.DIARY_WRITER.getByName(input.accountKey).selectFolder(input)

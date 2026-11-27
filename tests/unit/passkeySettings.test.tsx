@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { PasskeySettings } from '../../src/components/PasskeySettings'
 import { I18nProvider } from '../../src/i18n'
 import * as passkeys from '../../src/api/passkeys'
+import { retirePreviousAccounts } from '../../src/api/auth'
 import { clearTabSession } from '../../src/lib/tabSession'
 import { clearVaultKey } from '../../src/lib/passkeyVault'
 
@@ -11,6 +12,7 @@ vi.mock('../../src/api/passkeys', () => ({
   listPasskeys: vi.fn(),
   renamePasskey: vi.fn(),
 }))
+vi.mock('../../src/api/auth', () => ({ retirePreviousAccounts: vi.fn() }))
 
 const records = [
   { credentialId: 'current-id', createdAt: 1_800_000_000_000 },
@@ -77,5 +79,17 @@ describe('PasskeySettings', () => {
     renderSettings()
     await screen.findByText('Current sign-in passkey')
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+  })
+
+  it('requires confirming that the diary opens before starting Google recovery', async () => {
+    vi.mocked(retirePreviousAccounts).mockResolvedValue(1)
+    renderSettings()
+    fireEvent.click(await screen.findByText('Retire previous accounts’ passkeys'))
+    const proceed = screen.getByRole<HTMLButtonElement>('button', { name: 'Confirm with Google' })
+    expect(proceed.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I can open my diary with this passkey.' }))
+    fireEvent.click(proceed)
+    expect(await screen.findByText('Matching older passkeys and sessions were disabled.')).toBeTruthy()
+    expect(retirePreviousAccounts).toHaveBeenCalledOnce()
   })
 })

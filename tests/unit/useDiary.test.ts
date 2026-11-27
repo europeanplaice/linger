@@ -10,6 +10,7 @@ import type { DiaryEntry, DriveFileMeta, LoadedDiaryEntry } from '../../src/type
 vi.mock('../../src/api/driveEntries', () => ({
   listEntries: vi.fn().mockResolvedValue([]),
   getEntryByDate: vi.fn().mockResolvedValue(null),
+  checkEntryMetadata: vi.fn().mockResolvedValue('not-modified'),
   saveEntry: vi.fn(),
   deleteEntry: vi.fn(),
   searchEntries: vi.fn().mockResolvedValue([]),
@@ -22,6 +23,7 @@ vi.mock('../../src/api/driveEntries', () => ({
 vi.mock('../../src/lib/secureCache', () => ({
   getAllCached: vi.fn().mockResolvedValue([]),
   putCached: vi.fn().mockResolvedValue(undefined),
+  syncCachedBatch: vi.fn().mockResolvedValue(undefined),
   deleteCached: vi.fn().mockResolvedValue(undefined),
   clearCache: vi.fn().mockResolvedValue(undefined),
   getAllDrafts: vi.fn().mockResolvedValue([]),
@@ -38,6 +40,7 @@ vi.mock('../../src/lib/draftStorage', () => ({
   putDraft: vi.fn().mockResolvedValue(undefined),
   deleteDraft: vi.fn().mockResolvedValue(undefined),
   markDraftConflicted: vi.fn().mockResolvedValue(false),
+  subscribeDraftChanges: vi.fn(() => () => {}),
 }))
 
 vi.mock('../../src/utils/tabSync', () => ({

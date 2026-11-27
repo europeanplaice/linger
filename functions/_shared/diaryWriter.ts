@@ -1,6 +1,7 @@
 import type { Data, Env } from './session'
 import { jsonResponse } from './session'
 import type { DriveFileMeta } from './drive'
+import type { DiaryFolderSharing } from '../../src/types'
 
 export interface DiaryWriterAuth {
   vaultKey?: string // request-scoped; never persisted
@@ -22,6 +23,7 @@ export interface DiaryMutationInput extends DiaryWriterAuth {
 export interface DiaryFolderSelection extends DiaryWriterAuth {
   folderId: string
   allowEmpty?: boolean
+  acknowledgeSharing?: Exclude<DiaryFolderSharing, 'private'>
 }
 
 export type DiaryUploadInput = DiaryWriterAuth & { date: string; operationId: string } & (

@@ -91,4 +91,14 @@ describe('holidays handler — fetch + cache', () => {
     const res = await onHolidays(makeContext({ country: 'JP', year: '2026' }) as any)
     expect(res.status).toBe(500)
   })
+
+  it('passes a timeout AbortSignal to the upstream fetch and returns 500 on timeout', async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new DOMException('Timed out', 'TimeoutError'))
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await onHolidays(makeContext({ country: 'JP', year: '2026' }) as any)
+    expect(res.status).toBe(500)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    const init = fetchSpy.mock.calls[0][1] as RequestInit | undefined
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+  })
 })

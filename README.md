@@ -9,6 +9,7 @@ A private daily diary that saves plain-text entries to your Google Drive.
 - Daily writing with autosave, offline drafts, and cross-device edit conflict handling
 - Calendar navigation, past-entry recollections, milestones, and public holidays
 - Search, revision history, and restore
+- Receive shared text and links in the installed app, then choose whether to add them to a diary entry
 - ZIP import/export, including a standalone offline viewer
 - Themes, fonts, writing prompts, keyboard shortcuts, and mobile support
 - Optional S3 backup to a bucket in your own AWS account
@@ -82,6 +83,8 @@ job before browser tests start. Run `npm run test:ci` to check the resolver loca
 To deploy your own fork, configure a Google Cloud OAuth web client with the Drive API enabled and your `/auth/callback` URL registered. Provision Cloudflare Pages, D1, KV, and the `s3-workflows` Worker; configure the bindings in the Wrangler files and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `SESSION_DOMAIN` for both Pages and the Worker. Apply the auth migrations as described in [D1-MIGRATION.md](D1-MIGRATION.md), add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets, and update the project names and domains in the deployment workflow for your fork.
 
 Passkey sign-in and registration also require the Turnstile widget secret as the Pages secret `TURNSTILE_SECRET` in each deployed environment. The site key is configured in `src/components/Turnstile.tsx`; use a widget registered for the frontend hostname in `SESSION_DOMAIN`. For local Pages development, add the secret to the ignored `.dev.vars` file and register the local hostname on the widget. Requests fail closed if the secret or verification is unavailable.
+
+Set the Pages secret `RISC_INDEX_PEPPER` to a stable random value of at least 32 characters in each environment. Passkey recovery and Google security notifications use it to match the linked accounts without storing a readable Google identifier. See [D1 setup](D1-MIGRATION.md) for migration and legacy account behavior.
 
 For staging, set `TURNSTILE_SECRET` on the separate `linger-staging` Pages project and ensure `SESSION_DOMAIN` is `https://staging.linger.europeanplaice.com`. The widget must authorize that hostname (or its parent `linger.europeanplaice.com`). The backend checks the exact hostname for the active environment.
 

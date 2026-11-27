@@ -3,7 +3,7 @@ import { onRequestPost } from '../../functions/auth/refresh'
 import { openVaultValue, sealVaultValue } from '../../functions/_shared/vaultCrypto'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { deferred } from '../helpers/deferred'
-import { revokeD1Account, sessionStorageId } from '../../functions/_shared/authStore'
+import { applyRiscEvent, sessionStorageId } from '../../functions/_shared/authStore'
 
 const mocks = vi.hoisted(() => ({ id: vi.fn(), access: vi.fn() }))
 vi.mock('../../functions/_shared/google', () => ({ verifyGoogleIdToken: mocks.id, verifyGoogleAccessToken: mocks.access }))
@@ -100,9 +100,9 @@ describe('encrypted Google refresh credential', () => {
   })
 
   it('clears saved credentials when a Google security event revokes sessions', async () => {
-    const { env, db, userId } = await createPasskeyTestEnv({ google_sub: 'google-user' })
+    const { env, db, userId } = await createPasskeyTestEnv({ google_sub: 'google-user' }, { riscPepper: 'test-risc-pepper-value-at-least-32-chars' })
     db.prepare('INSERT INTO google_refresh_vault (user_id, envelope, updated_at) VALUES (?, ?, ?)').run(userId, 'v1.ciphertext', Date.now())
-    await revokeD1Account('google_sub', 'google-user', { ...env, AUTH_DB: env.AUTH_DB! })
+    await applyRiscEvent('event-a', Date.now() + 1000, ['google-user'], env)
     expect(db.prepare('SELECT COUNT(*) AS n FROM google_refresh_vault').get()).toEqual({ n: 0 })
     db.close()
   })

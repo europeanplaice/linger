@@ -1,6 +1,6 @@
 import type { Env } from '../_shared/session'
 import { clearOAuthStateCookie, clearOAuthPkceCookie, parseOAuthStateCookie, parseOAuthPkceCookie, jsonResponse } from '../_shared/session'
-import { consumeOAuthState } from '../_shared/authStore'
+import { authorizePasskeyRecovery, consumeOAuthState } from '../_shared/authStore'
 import { verifyGoogleIdToken } from '../_shared/google'
 
 function base64url(bytes: Uint8Array): string {
@@ -9,7 +9,10 @@ function base64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function popupCredentialResponse(payload: { accessToken: string; idToken: string; expiresAt: number; refreshToken?: string; email?: string }, origin: string, channelId: string | undefined, secure: boolean, cookieState?: string): Response {
+type PopupPayload = { accessToken: string; idToken: string; expiresAt: number; refreshToken?: string; email?: string }
+  | { recovery: 'ready' | 'account_mismatch' | 'unavailable' }
+
+function popupResponse(payload: PopupPayload, origin: string, channelId: string | undefined, secure: boolean, cookieState?: string): Response {
   const nonce = base64url(crypto.getRandomValues(new Uint8Array(18)))
   const encoded = base64url(new TextEncoder().encode(JSON.stringify(payload)))
   const encodedChannelId = JSON.stringify(channelId ?? '')
@@ -18,7 +21,9 @@ function popupCredentialResponse(payload: { accessToken: string; idToken: string
     const bytes = Uint8Array.from(atob(encoded + '='.repeat((4 - encoded.length % 4) % 4)), c => c.charCodeAt(0));
     const credential = JSON.parse(new TextDecoder().decode(bytes));
     const channelId = ${encodedChannelId};
-    const message = { type: 'linger-oauth-complete', credential, ...(channelId ? { channelId } : {}) };
+    const message = credential.recovery
+      ? { type: 'linger-recovery-verified', result: credential.recovery, channelId }
+      : { type: 'linger-oauth-complete', credential, ...(channelId ? { channelId } : {}) };
     const status = document.querySelector('p');
     let acknowledged = false;
     let channel = null;
@@ -93,7 +98,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const stateRecordRaw = await consumeOAuthState(state, env)
   if (!stateRecordRaw) return jsonResponse({ error: 'Invalid or expired state' }, 400)
 
-  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; setup?: boolean; channelId?: string; userId?: string; sessionHandle?: string }
+  let stateRecord: { codeVerifier?: string; nonce: string; popup: boolean; setup?: boolean; retirePrevious?: boolean; channelId?: string; userId?: string; sessionHandle?: string }
   try {
     const parsed = JSON.parse(stateRecordRaw) as Partial<typeof stateRecord>
     stateRecord = {
@@ -103,6 +108,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       nonce: parsed.nonce ?? '',
       popup: parsed.popup === true,
       setup: parsed.setup === true,
+      retirePrevious: parsed.retirePrevious === true,
       channelId: typeof parsed.channelId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.channelId)
         ? parsed.channelId
         : undefined,
@@ -182,15 +188,26 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // request-scoped key; the OAuth callback has no key and writes no profile.
   void claims
 
-  const credential = {
+  let payload: PopupPayload = {
     accessToken: tokens.access_token,
     expiresAt: Date.now() + tokens.expires_in * 1000,
     idToken: tokens.id_token,
     ...(typeof responseFields.refresh_token === 'string' && responseFields.refresh_token ? { refreshToken: responseFields.refresh_token } : {}),
     ...(claims.email ? { email: claims.email } : {}),
   }
+  if (stateRecord.retirePrevious) {
+    if (!env.AUTH_DB || !stateRecord.userId || !stateRecord.sessionHandle || stateRecord.setup || !stateRecord.nonce) {
+      return consumedStateError({ error: 'Passkey session required' }, 401, secure, cookieState)
+    }
+    try {
+      const authorized = await authorizePasskeyRecovery(stateRecord.sessionHandle, stateRecord.userId, claims.sub, { ...env, AUTH_DB: env.AUTH_DB })
+      payload = { recovery: authorized ? 'ready' : 'account_mismatch' }
+    } catch {
+      payload = { recovery: 'unavailable' }
+    }
+  }
   if (stateRecord.popup) {
-    const response = popupCredentialResponse(credential, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure, cookieState)
+    const response = popupResponse(payload, new URL(env.SESSION_DOMAIN).origin, stateRecord.channelId, secure, cookieState)
     const headers = new Headers(response.headers)
     headers.append('Set-Cookie', clearOAuthPkceCookie(secure, cookieState))
     return new Response(response.body, { status: response.status, headers })

@@ -44,6 +44,10 @@ const COPY = {
     expired: 'Your session has expired. Sign in again before choosing a folder.',
     rateLimited: 'Google Drive is receiving too many requests. Wait a moment and try again.',
     emptyChanged: 'No diary files were found. Refresh and confirm using this folder for new entries.',
+    shared: 'This folder is shared. People with access to it may be able to read diary entries saved here.',
+    sharingUnknown: 'Linger could not verify that this folder is private. Check its sharing settings in Google Drive.',
+    allowSharing: 'Use this folder with its current sharing settings',
+    sharingChanged: 'The sharing status needs confirmation. Review it and try again.',
   },
   ja: {
     title: '既存の日記フォルダに接続',
@@ -78,6 +82,10 @@ const COPY = {
     expired: '認証の有効期限が切れました。もう一度ログインしてからフォルダを選択してください。',
     rateLimited: 'Google Drive へのアクセスが集中しています。少し待ってからお試しください。',
     emptyChanged: '日記ファイルが見つかりません。再読み込みして、新しい日記の保存先として使うことを確認してください。',
+    shared: 'このフォルダは共有されています。アクセス権のある人が、ここに保存した日記を読める場合があります。',
+    sharingUnknown: 'このフォルダが非公開か確認できません。Google Drive で共有設定をご確認ください。',
+    allowSharing: '現在の共有設定でこのフォルダを使用する',
+    sharingChanged: '共有状態を確認してください。内容を確認してから、もう一度お試しください。',
   },
 } as const
 
@@ -91,6 +99,8 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
   const [inspection, setInspection] = useState<DiaryFolderInspection | null>(null)
   const [checking, setChecking] = useState(false)
   const [allowEmpty, setAllowEmpty] = useState(false)
+  const [allowSharing, setAllowSharing] = useState(false)
+  const [inspectionRevision, setInspectionRevision] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -109,6 +119,7 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
       case 'unavailable': return copy.unavailable
       case 'rate_limited': return copy.rateLimited
       case 'empty_folder': return copy.emptyChanged
+      case 'sharing_confirmation': return copy.sharingChanged
       default: return fallback
     }
   }
@@ -151,6 +162,7 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
     const controller = new AbortController()
     setInspection(null)
     setAllowEmpty(false)
+    setAllowSharing(false)
     setChecking(Boolean(selectedFolderId))
     if (selectedFolderId) {
       void inspectDiaryFolder(selectedFolderId, controller.signal).then(result => {
@@ -162,12 +174,17 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
       })
     }
     return () => controller.abort()
-  }, [selectedFolderId]) // Check only when the candidate changes.
+  }, [selectedFolderId, inspectionRevision])
 
   const candidate = inspection?.id === selectedFolderId ? inspection : null
+  const sharing = candidate?.sharing ?? 'unknown'
+  const sharingNeedsConfirmation = sharing !== 'private'
+  const canSelect = !disabled && !saving && !loading && !checking && candidate?.canAddChildren
+    && (candidate.entryCount > 0 || allowEmpty) && (!sharingNeedsConfirmation || allowSharing)
+    && selectedFolderId !== currentFolderId
 
   const chooseFolder = async () => {
-    if (!selectedFolderId || disabled || saving || loading || checking || !candidate?.canAddChildren || (candidate.entryCount === 0 && !allowEmpty)) return
+    if (!selectedFolderId || !canSelect) return
     const account = accountRequest()
     selectAbort.current?.abort()
     const controller = new AbortController()
@@ -183,13 +200,16 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
       if (!mounted.current || controller.signal.aborted) return
       // Keep the same account across the safety check and selection request.
       account.assertCurrent()
-      const result = await selectDiaryFolder(selectedFolderId, controller.signal, allowEmpty)
+      const result = await selectDiaryFolder(selectedFolderId, controller.signal, allowEmpty, sharing !== 'private' ? sharing : undefined)
       if (!mounted.current || controller.signal.aborted) return
       setCurrentFolderId(result.selectedFolderId)
       setStatus(copy.success)
       await onSelected?.()
     } catch (error) {
-      if (mounted.current && !controller.signal.aborted) setError(errorMessage(error, copy.selectError))
+      if (mounted.current && !controller.signal.aborted) {
+        setError(errorMessage(error, copy.selectError))
+        if (error instanceof DiaryFolderError && error.code === 'sharing_confirmation') setInspectionRevision(revision => revision + 1)
+      }
     } finally {
       if (mounted.current && !controller.signal.aborted) setSaving(false)
     }
@@ -229,6 +249,13 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
           {candidate.modifiedTime && !Number.isNaN(Date.parse(candidate.modifiedTime)) && <><br />{copy.modified}: {new Date(candidate.modifiedTime).toLocaleString(language === 'ja' ? 'ja-JP' : 'en-US')}</>}
         </p>
         <p className="settings-section-description">{candidate.canAddChildren ? copy.writable : copy.readOnly}</p>
+        {sharingNeedsConfirmation && <>
+          <p className="settings-section-description" role="status">{sharing === 'shared' ? copy.shared : copy.sharingUnknown}</p>
+          {candidate.canAddChildren && selectedFolderId !== currentFolderId && <label className="settings-folder-confirm">
+            <input type="checkbox" checked={allowSharing} disabled={disabled || saving} onChange={event => setAllowSharing(event.target.checked)} />
+            <span>{copy.allowSharing}</span>
+          </label>}
+        </>}
         {candidate.entryCount === 0 && <>
           <p className="settings-section-description">{copy.noEntries}</p>
           {candidate.canAddChildren && selectedFolderId !== currentFolderId && <label className="settings-folder-confirm">
@@ -241,7 +268,7 @@ export function DiaryFolderSettings({ disabled = false, beforeSelect, onSelected
     {loading && <p className="settings-section-description" role="status">{copy.loading}</p>}
     {!loading && folders.length === 0 && <p className="settings-section-description">{copy.empty}</p>}
     <div className="passkey-gate-actions">
-      {folders.length > 0 && <button className="settings-copy-btn" type="button" disabled={disabled || loading || saving || checking || !candidate?.canAddChildren || (candidate.entryCount === 0 && !allowEmpty) || selectedFolderId === currentFolderId} onClick={() => void chooseFolder()}>
+      {folders.length > 0 && <button className="settings-copy-btn" type="button" disabled={!canSelect} onClick={() => void chooseFolder()}>
         {saving ? copy.selecting : copy.select}
       </button>}
       <button className="settings-copy-btn" type="button" disabled={disabled || loading || saving} onClick={() => void refresh()}>{copy.refresh}</button>

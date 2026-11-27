@@ -49,12 +49,16 @@ function updatePasskeyAccountName(userId: string | null, email: string | null): 
   } catch { /* A provider may reject the optional update synchronously. */ }
 }
 
-export function startSignIn(options: { selectAccount?: boolean; setup?: boolean; renew?: boolean } = {}): Promise<SessionInfo> {
-  const generation = ++signInGeneration
+interface GoogleSignInOptions { selectAccount?: boolean; setup?: boolean; renew?: boolean }
+
+function googlePopup(options: GoogleSignInOptions, retirePrevious = false): Promise<SessionInfo | null> {
+  const generation = retirePrevious ? signInGeneration : ++signInGeneration
   cancelPendingSignIn?.(new Error('Google sign-in was superseded'))
   cancelPendingSignIn = null
-  clearOAuthCredentials()
-  clearPendingGoogleCredential()
+  if (!retirePrevious) {
+    clearOAuthCredentials()
+    clearPendingGoogleCredential()
+  }
   return new Promise((resolve, reject) => {
     const channelId = crypto.randomUUID()
     let channel: BroadcastChannel | null = null
@@ -65,6 +69,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
     if (options.selectAccount) params.set('select_account', '1')
     if (options.setup) params.set('setup', '1')
     if (options.renew === false) params.set('reuse', '1')
+    if (retirePrevious) params.set('retire_previous', '1')
     const loginUrl = `/auth/login?${params.toString()}`
     const popup = window.open(loginUrl, `linger-google-signin-${channelId}`, 'popup,width=520,height=680')
     if (!popup) {
@@ -75,7 +80,7 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
 
     let finished = false
     let receivedCredential = false
-    const finish = (error?: Error, info?: SessionInfo) => {
+    const finish = (error?: Error, info?: SessionInfo | null) => {
       if (finished) return
       finished = true
       window.removeEventListener('message', onMessage)
@@ -85,19 +90,29 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
       if (!popup.closed) popup.close()
       if (cancelPendingSignIn === cancel) cancelPendingSignIn = null
       if (error) {
-        if (generation === signInGeneration) {
+        if (!retirePrevious && generation === signInGeneration) {
           clearOAuthCredentials()
           clearPendingGoogleCredential()
         }
         reject(error)
       }
-      else if (info) resolve(info)
+      else if (info !== undefined) resolve(info)
       else reject(new Error('Google sign-in did not complete'))
     }
     const cancel = (error: Error) => finish(error)
 
     const handleMessage = (data: unknown, requireChannelId = false) => {
-      const message = data as { type?: unknown; credential?: unknown; channelId?: unknown }
+      const message = data as { type?: unknown; credential?: unknown; channelId?: unknown; result?: unknown }
+      if (retirePrevious) {
+        if (message?.type !== 'linger-recovery-verified' || message.channelId !== channelId) return
+        if (message.result === 'ready') {
+          finish(undefined, null)
+        } else {
+          const code = message.result === 'account_mismatch' ? 'account_mismatch' : 'network'
+          finish(new AuthFlowError(code, 'Could not confirm Google account for passkey recovery'))
+        }
+        return
+      }
       if (message?.type !== 'linger-oauth-complete' || !message.credential || typeof message.credential !== 'object') return
       if (requireChannelId && message.channelId !== channelId) return
       if (message.channelId !== undefined && message.channelId !== channelId) return
@@ -140,6 +155,30 @@ export function startSignIn(options: { selectAccount?: boolean; setup?: boolean;
     const timeout = window.setTimeout(() => finish(new Error('Google sign-in timed out')), 5 * 60_000)
     cancelPendingSignIn = cancel
   })
+}
+
+export async function startSignIn(options: GoogleSignInOptions = {}): Promise<SessionInfo> {
+  const info = await googlePopup(options)
+  if (!info) throw new Error('Google sign-in did not complete')
+  return info
+}
+
+export async function retirePreviousAccounts(): Promise<number> {
+  const userId = getVaultUserId()
+  if (!userId) throw new AuthFlowError('account_mismatch', 'Unlock the current passkey account first')
+  await googlePopup({ selectAccount: true, renew: false }, true)
+  if (userId !== getVaultUserId()) throw new AuthFlowError('account_mismatch', 'Passkey account changed')
+
+  const headers = new Headers()
+  setVaultKeyHeader(headers)
+  const response = await fetch('/auth/passkey/recovery', {
+    method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', headers,
+  })
+  if (response.status === 401) throw new AuthFlowError('account_mismatch', 'Passkey account changed')
+  if (response.status === 409) throw new AuthFlowError('recovery_connection', 'A saved Google connection is required')
+  if (!response.ok) throw new AuthFlowError('network', 'Passkey recovery temporarily unavailable')
+  const result = await response.json() as { revokedPasskeys: number }
+  return result.revokedPasskeys
 }
 
 export async function refreshGoogleCredentials(storePending = false): Promise<boolean> {

@@ -26,6 +26,8 @@ interface SignInOptions {
 export interface AuthState {
   status: AuthStatus
   tokenExpired: boolean
+  /** True while a silent credential refresh is still deciding whether the expiry is real. */
+  expiryRecovering: boolean
   hadSession: boolean
   email: string | null
   googleSub: string | null
@@ -67,6 +69,12 @@ function rememberSession(signedIn: boolean): void {
 export function useAuth(): AuthState {
   const [status, setStatus] = useState<AuthStatus>('initializing')
   const [tokenExpired, setTokenExpired] = useState(false)
+  // A 401 often only means the access token lapsed while the PWA was suspended
+  // (timers do not run in the background). Hide the reconnect modal until the
+  // silent refresh has actually failed, so it does not flash on resume.
+  const [expiryRecovering, setExpiryRecovering] = useState(false)
+  const tokenExpiredRef = useRef(false)
+  const requestCredentialRefresh = useRef<(() => Promise<void>) | null>(null)
   const [email, setEmail] = useState<string | null>(null)
   const [googleSub, setGoogleSub] = useState<string | null>(null)
   const [googleClientId, setGoogleClientId] = useState<string | null>(null)
@@ -546,11 +554,27 @@ export function useAuth(): AuthState {
     setSigningIn(false)
   }, [])
 
-  const handleExpired = useCallback(() => {
+  const markExpired = useCallback((recover: boolean) => {
     clearOAuthCredentials()
     saveTabSession()
+    if (recover && !tokenExpiredRef.current) setExpiryRecovering(true)
+    if (!recover) setExpiryRecovering(false)
+    tokenExpiredRef.current = true
     setTokenExpired(true)
   }, [])
+  const handleExpired = useCallback(() => markExpired(true), [markExpired])
+
+  useEffect(() => {
+    tokenExpiredRef.current = tokenExpired
+    if (!tokenExpired) setExpiryRecovering(false)
+  }, [tokenExpired])
+
+  useEffect(() => {
+    if (!expiryRecovering) return
+    // Never hide the modal indefinitely if no refresh attempt can run.
+    const timer = setTimeout(() => setExpiryRecovering(false), 15_000)
+    return () => clearTimeout(timer)
+  }, [expiryRecovering])
 
   useEffect(() => {
     if (status !== 'signedOut' || vaultStatus !== 'unlocked' || googleConnection !== 'unavailable') return
@@ -576,19 +600,23 @@ export function useAuth(): AuthState {
         if (stopped || revision !== authRevision.current) return
         if (refreshed) {
           needsGoogleCredential.current = false
+          tokenExpiredRef.current = false
           setTokenExpired(false)
+          setExpiryRecovering(false)
           setGoogleConnection('idle')
           schedule()
         } else {
           needsGoogleCredential.current = true
           rejected = true
           setGoogleConnection('required')
-          handleExpired()
+          markExpired(false)
         }
       } catch {
-        if (!stopped && revision === authRevision.current) setGoogleConnection('unavailable')
+        if (stopped || revision !== authRevision.current) return
+        setGoogleConnection('unavailable')
+        setExpiryRecovering(false)
         // A temporary outage does not invalidate the saved Google authorization.
-        if (!stopped && revision === authRevision.current) timer = setTimeout(refresh, 30_000)
+        timer = setTimeout(refresh, 30_000)
       } finally { inFlight = false }
     }
     const schedule = () => {
@@ -597,19 +625,37 @@ export function useAuth(): AuthState {
       timer = setTimeout(refresh, Math.max(1000, hasPendingGoogleCredential() ? Math.min(30_000, delay) : delay))
     }
     const onOnline = () => { void refresh() }
+    // Timers are frozen while an installed PWA is in the background; renew a
+    // lapsed or nearly expired token as soon as the app becomes visible again.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const credentials = getOAuthCredentials()
+      if (!credentials || credentials.expiresAt - Date.now() < 60_000) void refresh()
+    }
+    requestCredentialRefresh.current = refresh
     window.addEventListener('online', onOnline)
-    if (tokenExpired) void refresh()
-    else schedule()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onVisible)
+    schedule()
     return () => {
       stopped = true
+      requestCredentialRefresh.current = null
       clearTimeout(timer)
       window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onVisible)
     }
-  }, [status, vaultStatus, signingIn, tokenExpired, handleExpired])
+  }, [status, vaultStatus, signingIn, markExpired])
+
+  // A Drive 401 can arrive while a resume refresh is already in flight.
+  // Request recovery without restarting the effect that owns the refresh.
+  useEffect(() => {
+    if (tokenExpired) void requestCredentialRefresh.current?.()
+  }, [status, vaultStatus, signingIn, tokenExpired])
 
   const retryAfterExpired = useCallback((selectAccount = false) => {
     signIn({ selectAccount, expectedGoogleSub: googleSub })
   }, [googleSub, signIn])
 
-  return { status, tokenExpired, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, vaultPhase, googleConnection, retryGoogleConnection, savedSessionConnection, retrySavedSession, offerRememberDevice, dismissRememberDevice, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
+  return { status, tokenExpired, expiryRecovering, hadSession, email, googleSub, googleClientId, authError, signingIn, clearAuthError, signIn, signOut, handleExpired, retryAfterExpired, vaultStatus, vaultBusy, vaultError, vaultUserId, vaultPhase, googleConnection, retryGoogleConnection, savedSessionConnection, retrySavedSession, offerRememberDevice, dismissRememberDevice, setupPasskey, setupEmail, beginSetup, cancelSetup, unlockPasskey, addPasskey, lockVault, clearVaultError }
 }
