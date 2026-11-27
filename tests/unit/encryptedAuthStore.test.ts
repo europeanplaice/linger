@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { getSession, saveSession } from '../../functions/_shared/session'
-import { getPasskeySessionUserId, revokeD1Account, revokeD1Session, sessionStorageId } from '../../functions/_shared/authStore'
+import { applyRiscEvent, getPasskeySessionUserId, revokeD1Session, sessionStorageId } from '../../functions/_shared/authStore'
 import { encodeVaultBytes } from '../../functions/_shared/vaultCrypto'
 
 describe('encrypted account metadata and opaque passkey sessions', () => {
@@ -78,11 +78,11 @@ describe('encrypted account metadata and opaque passkey sessions', () => {
     } finally { db.close() }
   })
 
-  it('handles security events without retaining a Google-sub lookup index', async () => {
+  it('does not revoke unrelated accounts when the blind index secret is missing', async () => {
     const { env, db, sessionId } = await createPasskeyTestEnv({ google_sub: 'sub-a' })
     try {
-      await revokeD1Account('google_sub', 'sub-a', { ...env, AUTH_DB: env.AUTH_DB! })
-      expect(await getPasskeySessionUserId(sessionId, env)).toBeNull()
+      await expect(applyRiscEvent('event-a', Date.now() + 1000, ['sub-a'], env)).rejects.toThrow('Targeted revocation unavailable')
+      expect(await getPasskeySessionUserId(sessionId, env)).toBeTruthy()
       const indexes = JSON.stringify(db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index'").all())
       expect(indexes).not.toContain('auth_sessions_sub')
     } finally { db.close() }
@@ -119,10 +119,10 @@ describe('encrypted account metadata and opaque passkey sessions', () => {
       expect(userARow.risc_subject_hash).not.toContain('sub-a')
       expect(() => db.prepare('UPDATE passkey_users SET risc_subject_hash = ? WHERE id = ?').run('sub-a', 'user-a')).toThrow()
 
-      await revokeD1Account('google_sub', 'sub-a', envWithPepper)
+      await applyRiscEvent('event-a', Date.now() + 1000, ['sub-a'], envWithPepper)
 
       expect(await getPasskeySessionUserId('session-a', envWithPepper)).toBeNull()
-      expect(await getPasskeySessionUserId(legacySessionId, envWithPepper)).toBeNull()
+      expect(await getPasskeySessionUserId(legacySessionId, envWithPepper)).toBe(legacyUser)
       expect(await getPasskeySessionUserId(sessionBId, envWithPepper)).toBe(userB)
     } finally { envA.db.close() }
   })

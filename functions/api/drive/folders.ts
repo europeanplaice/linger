@@ -1,11 +1,12 @@
 import type { Data, Env } from '../../_shared/session'
-import { DriveError, inspectDriveFolder, listDriveFolders } from '../../_shared/drive'
+import { DriveError, getDriveFolderSharing, inspectDriveFolder, listDriveFolders } from '../../_shared/drive'
 import { jsonResponse } from '../../_shared/session'
 
 function folderError(error: unknown): Response {
   const message = error instanceof Error ? error.message : ''
   if (message.includes('FOLDER_READ_ONLY')) return jsonResponse({ error: 'Folder is read-only', code: 'read_only' }, 403)
   if (message.includes('FOLDER_EMPTY')) return jsonResponse({ error: 'Confirm using a folder with no visible diary entries', code: 'empty_folder' }, 422)
+  if (message.includes('FOLDER_SHARING_CONFIRMATION')) return jsonResponse({ error: 'Confirm the current sharing status before using this folder', code: 'sharing_confirmation' }, 422)
   if (message.includes('FOLDER_AUTH_EXPIRED')) return jsonResponse({ error: 'Sign in again' }, 401)
   if (message.includes('FOLDER_PERMISSION_DENIED')) return jsonResponse({ error: 'Access denied', code: 'permission_denied' }, 403)
   if (message.includes('FOLDER_RATE_LIMITED')) return jsonResponse({ error: 'Too many Drive requests', code: 'rate_limited' }, 429)
@@ -21,7 +22,11 @@ export const onRequestGet: PagesFunction<Env, string, Data> = async context => {
   const { accessToken, session } = context.data
   if (!session) return jsonResponse({ error: 'Unauthorized' }, 401)
   try {
-    const folderId = new URL(context.request.url).searchParams.get('folderId')
+    const { searchParams } = new URL(context.request.url)
+    if (searchParams.get('sharing') === '1') {
+      return jsonResponse({ sharing: session.folder_id ? await getDriveFolderSharing(accessToken, session.folder_id) : null })
+    }
+    const folderId = searchParams.get('folderId')
     if (folderId !== null) {
       if (!folderId || folderId.length > 256) return jsonResponse({ error: 'Invalid folder', code: 'unavailable' }, 400)
       return jsonResponse(await inspectDriveFolder(accessToken, folderId))
@@ -65,6 +70,10 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async context => 
   if ('allowEmpty' in body && typeof body.allowEmpty !== 'boolean') {
     return jsonResponse({ error: 'Invalid empty folder confirmation' }, 400)
   }
+  const acknowledgeSharing = 'acknowledgeSharing' in body ? body.acknowledgeSharing : undefined
+  if (acknowledgeSharing !== undefined && acknowledgeSharing !== 'shared' && acknowledgeSharing !== 'unknown') {
+    return jsonResponse({ error: 'Invalid sharing confirmation' }, 400)
+  }
 
   try {
     const accountKey = session.user_id
@@ -75,6 +84,7 @@ export const onRequestPost: PagesFunction<Env, string, Data> = async context => 
       accessToken, expiresAt: session.expires_at ?? 0, idToken,
       folderId,
       allowEmpty: 'allowEmpty' in body && body.allowEmpty === true,
+      ...(acknowledgeSharing ? { acknowledgeSharing } : {}),
     })
     return jsonResponse({ selectedFolderId })
   } catch (error) {

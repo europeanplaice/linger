@@ -23,10 +23,10 @@ Session storage does not retain Google email addresses. The session endpoint rea
 the email for display from the verified request-scoped identity token. When
 `RISC_INDEX_PEPPER` is configured, `passkey_users` stores a keyed HMAC-SHA-256
 blind index of the Google subject so RISC events with a `sub` revoke only the
-matching account (and any unindexed legacy accounts) while clearing its encrypted
-refresh credentials; without the pepper, RISC events conservatively revoke all
-sessions and refresh credentials. Processed SET `jti` digests are tracked until
-expiry to prevent replay, and email-only events receive a retryable error. Migration 0004
+matching indexed accounts while clearing their encrypted refresh credentials.
+The handler returns a retryable error for actionable events without the pepper
+and for email-only events. D1 commits revocation with the SET `jti` digest, which
+is retained until expiry to prevent replay. Migration 0004
 clears existing D1 emails; scheduled cleanup removes legacy KV email index keys.
 Historical backups and logs require separate retention and deletion review.
 

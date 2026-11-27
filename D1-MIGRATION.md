@@ -1,5 +1,18 @@
 # Authentication metadata in D1
 
+## Passkey recovery and atomic RISC delivery (migration 0011)
+
+Apply `0011_recovery_and_risc_commit.sql` before deploying the matching Pages and Worker code.
+Keep a stable `RISC_INDEX_PEPPER` secret of at least 32 characters in each Pages
+environment. Existing profiles populate their blind index on the next authenticated
+session save. An unindexed profile cannot be targeted using its Google identity.
+
+D1 records verified Google security notifications as completed in the same
+transaction that revokes matching sessions and deletes their saved Google
+credentials. A legacy receipt can be processed once on redelivery because the old
+schema could record it before revoking anything. Missing D1 or an invalid secret
+produces a retryable error for actionable events.
+
 ## Targeted RISC revocation, replay protection, and auth rate limits (migration 0010)
 
 Apply `0010_risc_hardening.sql` before deploying the matching Pages and Worker
@@ -8,8 +21,8 @@ on `passkey_users`, single-use SET `jti` replay tracking
 (`risc_processed_events`), hashed-IP rate-limit buckets (`auth_rate_limits`), and
 an expiry index on `passkey_management_grants`. Configure `RISC_INDEX_PEPPER` (a
 random secret of at least 32 characters) in Pages secrets to enable targeted
-per-account RISC revocation; unindexed legacy accounts continue to fall back
-conservatively until their next authenticated session save.
+per-account RISC revocation. The next authenticated session save indexes an
+unindexed legacy account.
 
 ## Passkey management verification (migration 0008)
 

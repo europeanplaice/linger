@@ -8,6 +8,7 @@ import { createFakeKV } from './fakeKV'
 // The unit-test adapter executes real SQL and the actual migration chain. Worker
 // runtime tests independently exercise Cloudflare's real D1 binding.
 export function sqliteD1(db: DatabaseSync): D1Database {
+  const totalChanges = db.prepare('SELECT total_changes() AS n')
   const prepare = (sql: string) => {
     let values: (string | number | null | Uint8Array)[] = []
     const statement = {
@@ -16,7 +17,12 @@ export function sqliteD1(db: DatabaseSync): D1Database {
         const row = db.prepare(sql).get(...values)
         return column ? row?.[column] ?? null : row ?? null
       },
-      async all() { return { success: true, results: db.prepare(sql).all(...values), meta: {} } },
+      execute() {
+        const before = Number(totalChanges.get()?.n)
+        const results = db.prepare(sql).all(...values)
+        return { success: true, results, meta: { changes: Number(totalChanges.get()?.n) - before } }
+      },
+      async all() { return statement.execute() },
       async run() {
         const result = db.prepare(sql).run(...values)
         return { success: true, results: [], meta: { changes: Number(result.changes) } }
@@ -27,11 +33,10 @@ export function sqliteD1(db: DatabaseSync): D1Database {
   }
   return {
     prepare,
-    async batch(statements: { all(): Promise<unknown> }[]) {
+    async batch(statements: { execute(): unknown }[]) {
       db.exec('BEGIN')
       try {
-        const results = []
-        for (const statement of statements) results.push(await statement.all())
+        const results = statements.map(statement => statement.execute())
         db.exec('COMMIT')
         return results
       } catch (error) { db.exec('ROLLBACK'); throw error }
@@ -42,7 +47,7 @@ export function sqliteD1(db: DatabaseSync): D1Database {
 
 export async function createPasskeyTestEnv(
   session: SessionData = {},
-  options: { sessionId?: string; userId?: string; domain?: string; clientId?: string } = {},
+  options: { sessionId?: string; userId?: string; domain?: string; clientId?: string; riscPepper?: string } = {},
 ) {
   const db = new DatabaseSync(':memory:')
   for (const name of readdirSync('migrations/auth').filter(name => name.endsWith('.sql')).sort()) {
@@ -56,6 +61,7 @@ export async function createPasskeyTestEnv(
     AUTH_DB: sqliteD1(db), SESSIONS: kv as never,
     GOOGLE_CLIENT_ID: options.clientId ?? 'client-id', GOOGLE_CLIENT_SECRET: 'test-client-secret',
     SESSION_DOMAIN: options.domain ?? 'https://example.com',
+    ...(options.riscPepper ? { RISC_INDEX_PEPPER: options.riscPepper } : {}),
   }
   db.prepare('INSERT INTO passkey_users (id, created_at) VALUES (?, ?)').run(userId, Date.now())
   await createPasskeySession(sessionId, userId, env)

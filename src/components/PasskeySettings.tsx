@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { KeyRound, Plus } from 'lucide-react'
 import { deletePasskey, listPasskeys, renamePasskey } from '../api/passkeys'
+import { retirePreviousAccounts } from '../api/auth'
 import type { PasskeyCredentialSummary } from '../api/passkeys'
 import { useI18n } from '../i18n'
 import { authFeedback } from '../lib/authFeedback'
@@ -20,6 +21,10 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
   const [name, setName] = useState('')
   const [savingName, setSavingName] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
+  const [recoveryConfirmed, setRecoveryConfirmed] = useState(false)
+  const [recovering, setRecovering] = useState(false)
+  const [recoveryResult, setRecoveryResult] = useState<number | null>(null)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const renameDialog = useRef<HTMLDialogElement>(null)
 
@@ -76,6 +81,19 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
     setStatus(null)
     await onAdd()
     await refresh()
+  }
+
+  const retirePrevious = async () => {
+    if (!userId || !recoveryConfirmed || recovering) return
+    setRecovering(true)
+    setRecoveryResult(null)
+    setRecoveryError(null)
+    try {
+      setRecoveryResult(await retirePreviousAccounts())
+      setRecoveryConfirmed(false)
+    } catch (cause) {
+      setRecoveryError(authFeedback(cause, t.login))
+    } finally { setRecovering(false) }
   }
 
   const confirmDelete = async () => {
@@ -137,6 +155,19 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
     </ul>}
     {error && <p role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
     {status && <p role="status">{status}</p>}
+    {userId && <details className="passkey-recovery-settings" onToggle={event => { if (!event.currentTarget.open) setRecoveryConfirmed(false) }}>
+      <summary>{t.login.passkeyRecoveryRetire}</summary>
+      <p>{t.login.passkeyRecoveryRetireHelp}</p>
+      <label className="settings-folder-confirm">
+        <input type="checkbox" checked={recoveryConfirmed} disabled={recovering} onChange={event => setRecoveryConfirmed(event.target.checked)} />
+        {t.login.passkeyRecoveryRetireConfirm}
+      </label>
+      <button className="settings-copy-btn" type="button" disabled={busy || recovering || !recoveryConfirmed} onClick={() => { void retirePrevious() }}>
+        {recovering ? t.login.passkeyRecoveryRetiring : t.login.passkeyRecoveryRetireAction}
+      </button>
+      {recoveryError && <p role="alert">{recoveryError}</p>}
+      {recoveryResult !== null && <p role="status">{recoveryResult > 0 ? t.login.passkeyRecoveryRetired : t.login.passkeyRecoveryNoMatches}</p>}
+    </details>}
     </div>
     <dialog className="passkey-delete-dialog" ref={dialog} aria-labelledby="passkey-delete-title" onClose={() => setSelected(null)}>
       <h4 id="passkey-delete-title">{t.login.passkeyDeleteTitle}</h4>

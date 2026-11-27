@@ -138,9 +138,18 @@ existing OAuth client/project and Drive file grants. If the diary folder was
 renamed or automatic discovery cannot identify it, select the existing accessible
 Drive folder in settings. This requires continued access to that Google account
 and its files, and must be rehearsed with a real Google account before rollout.
-Creating a new account does not invalidate the old account's passkeys. Without
-another passkey for that old internal account, it cannot be managed from the new
-one; a lost Google session/device must also be secured through Google.
+After opening the diary with the new passkey, use Settings → Passkeys → Retire
+previous accounts’ passkeys. Confirm the linked Google account in the Google
+popup. Linger checks the active passkey session and its saved Google connection,
+then removes the passkeys, sessions, and saved Google credentials of matching
+older Linger accounts. It uses a one-use confirmation bound to the current
+session for five minutes. The current account keeps its passkeys and connection.
+
+Older accounts without a blind Google subject index cannot be matched. Secure
+a lost device or compromised Google account through Google Account settings.
+Revoking Linger's Google access there applies to the whole OAuth project, so
+reconnect your current Linger account afterward. An already-issued Google access
+token can remain usable until it expires or Google revokes it.
 
 ## Google security notifications
 
@@ -148,11 +157,10 @@ When `RISC_INDEX_PEPPER` (32+ characters) is configured, authenticated session
 saves record a server-keyed HMAC-SHA-256 digest (`risc_subject_hash`) of the
 Google `sub` on `passkey_users` instead of a readable Google identifier. A
 verified, supported RISC event with a `sub` then revokes sessions and clears saved
-refresh credentials for that matching blind-indexed account (plus any unindexed
-legacy accounts whose `risc_subject_hash` is still `NULL`). If `RISC_INDEX_PEPPER`
-is not configured, or for email-only events, the handler conservatively falls back
-to revoking all sessions or returning a retryable error. Processed SET `jti`
-digests are retained until expiry to block token replay within the validity window.
+refresh credentials for matching blind-indexed accounts. The handler returns a
+retryable error when the secret is missing or an event identifies the account
+only by email. D1 commits the SET `jti` digest and the revocation together.
+The digest expires after the event's acceptance window.
 Users whose sessions are revoked must unlock and authorize again; their passkeys,
 keys, and diary files are not deleted.
 

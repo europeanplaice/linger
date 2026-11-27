@@ -1,4 +1,5 @@
 import { apiFetch } from './driveEntries'
+import type { DiaryFolderSharing } from '../types'
 
 export interface DiaryFolderCandidate {
   id: string
@@ -13,6 +14,7 @@ export interface DiaryFoldersResponse {
 
 export interface DiaryFolderInspection extends DiaryFolderCandidate {
   canAddChildren: boolean
+  sharing: DiaryFolderSharing
   entryCount: number
   firstEntryDate: string | null
   lastEntryDate: string | null
@@ -36,11 +38,18 @@ export async function inspectDiaryFolder(folderId: string, signal?: AbortSignal)
   return folderRequest<DiaryFolderInspection>(`/api/drive/folders?folderId=${encodeURIComponent(folderId)}`, { signal })
 }
 
-export async function selectDiaryFolder(folderId: string, signal?: AbortSignal, allowEmpty = false): Promise<{ selectedFolderId: string }> {
+export async function getCurrentDiaryFolderSharing(signal: AbortSignal): Promise<DiaryFolderSharing | null> {
+  const result = await folderRequest<{ sharing: DiaryFolderSharing | null }>('/api/drive/folders?sharing=1', { signal })
+  return result.sharing ?? null
+}
+
+export async function selectDiaryFolder(
+  folderId: string, signal?: AbortSignal, allowEmpty = false, acknowledgeSharing?: Exclude<DiaryFolderSharing, 'private'>,
+): Promise<{ selectedFolderId: string }> {
   return folderRequest<{ selectedFolderId: string }>('/api/drive/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderId, allowEmpty }),
+    body: JSON.stringify({ folderId, allowEmpty, acknowledgeSharing }),
     signal,
   })
 }

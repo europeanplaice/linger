@@ -1,6 +1,6 @@
 import type { Env } from '../_shared/session'
-import { deleteAllSessionsForSub, jsonResponse } from '../_shared/session'
-import { claimRiscEvent, commitRiscEvent, releaseRiscEvent } from '../_shared/authStore'
+import { jsonResponse } from '../_shared/session'
+import { applyRiscEvent } from '../_shared/authStore'
 
 const GOOGLE_ISSUER = 'https://accounts.google.com'
 const GOOGLE_RISC_JWKS_URL = 'https://accounts.google.com/o/oauth2/risc/jwks'
@@ -189,13 +189,13 @@ async function readBoundedText(request: Request, maxBytes: number): Promise<stri
 }
 
 function extractEmail(payload: SetEventPayload): string | null {
-  const raw = payload.subject?.email || payload.hint_identifier
-  return raw ? raw.trim().toLowerCase() : null
+  const raw = payload?.subject?.email || payload?.hint_identifier
+  return typeof raw === 'string' ? raw.trim().toLowerCase() : null
 }
 
 function extractSub(payload: SetEventPayload): string | null {
-  const sub = payload.subject?.sub?.trim()
-  return sub || null
+  const sub = payload?.subject?.sub
+  return typeof sub === 'string' ? sub.trim() || null : null
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
@@ -211,52 +211,29 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'invalid SET' }, 400)
   }
 
-  const expiresAt = (claims.iat + MAX_SET_AGE_SEC + 60) * 1000
-  const claimed = await claimRiscEvent(claims.jti, expiresAt, env)
-  if (!claimed) {
-    return jsonResponse({ ok: true, handled: 0, revoked: 0, duplicate: true }, 202)
-  }
-
+  const retry = () => jsonResponse({ error: 'Session revocation temporarily unavailable' }, 503, { 'Retry-After': '1' })
+  const subjects: string[] = []
   let handled = 0
-  let revoked = 0
-  let failed = false
-
   for (const [eventType, payload] of Object.entries(claims.events)) {
     if (!HANDLED_EVENT_TYPES.has(eventType)) continue
     handled++
-
     const sub = extractSub(payload)
-    const email = extractEmail(payload)
-    if (!sub && email) {
-      // An email-only event cannot identify sessions without an email index.
+    if (sub) subjects.push(sub)
+    else if (extractEmail(payload)) {
       console.error('RISC: subject identifier required for session revocation')
-      failed = true
-      continue
-    }
-    if (!sub && !email) {
-      console.log('RISC: no subject identifier available; skipping')
-      continue
-    }
-
-    try {
-      // Attempt both indexes even if one fails; acknowledge only after all
-      // revocations finish, leaving failed sessions indexed for redelivery.
-      const results = await Promise.allSettled([
-        ...(sub ? [deleteAllSessionsForSub(sub, env)] : []),
-      ])
-      if (results.some(result => result.status === 'rejected')) throw new Error('Session revocation incomplete')
-      revoked++
-      console.log('RISC: revoked sessions')
-    } catch (err) {
-      failed = true
-      console.error('RISC: failed to revoke sessions')
+      return retry()
     }
   }
 
-  if (failed) {
-    await releaseRiscEvent(claims.jti, env).catch(() => {})
-    return jsonResponse({ error: 'Session revocation temporarily unavailable' }, 503, { 'Retry-After': '1' })
+  if (!subjects.length) return jsonResponse({ ok: true, handled, revoked: 0 }, 202)
+  try {
+    const expiresAt = (claims.iat + MAX_SET_AGE_SEC + 60) * 1000
+    if (!await applyRiscEvent(claims.jti, expiresAt, subjects, env)) {
+      return jsonResponse({ ok: true, handled: 0, revoked: 0, duplicate: true }, 202)
+    }
+    return jsonResponse({ ok: true, handled, revoked: subjects.length }, 202)
+  } catch {
+    console.error('RISC: failed to revoke sessions')
+    return retry()
   }
-  await commitRiscEvent(claims.jti, expiresAt, env)
-  return jsonResponse({ ok: true, handled, revoked }, 202)
 }

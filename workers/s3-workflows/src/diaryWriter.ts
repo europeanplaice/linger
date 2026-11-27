@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import type { DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
+import type { DiaryFolderSelection, DiaryMutationInput, DiaryUploadInput, DiaryUploadResult, DiaryWriterAuth } from '../../../functions/_shared/diaryWriter'
 import { DIARY_UPLOAD_URL, diaryUploadResponse } from '../../../functions/_shared/diaryWriter'
 import { removeDiaryEntry, saveDiaryEntry } from '../../../functions/_shared/entryMutation'
 import { mirrorCurrentEntry, mirrorEntryDelete, mirrorEntrySave } from '../../../functions/_shared/s3Settings'
@@ -139,7 +139,7 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
     })
   }
 
-  async selectFolder(input: DiaryWriterAuth & { folderId: string; allowEmpty?: boolean }): Promise<string> {
+  async selectFolder(input: DiaryFolderSelection): Promise<string> {
     // A rebind must not race a write already executing or waiting in this
     // account queue. Later writes queue behind the completed rebind and use its
     // new pointer.
@@ -161,6 +161,9 @@ export class DiaryWriter extends DurableObject<WorkflowEnv> {
       const currentFolder = await this.readMetadata<string>('folder', input)
       if (currentFolder === input.folderId) return currentFolder
       if (inspection.entryCount === 0 && input.allowEmpty !== true) throw new Error('FOLDER_EMPTY')
+      if (inspection.sharing !== 'private' && input.acknowledgeSharing !== inspection.sharing) {
+        throw new Error('FOLDER_SHARING_CONFIRMATION')
+      }
 
       // Clear old-folder S3 status only after the request has passed all
       // checks and the writer queue is clear. resetAllData refuses to proceed

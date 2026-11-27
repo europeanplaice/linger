@@ -19,6 +19,7 @@
     "functions/_shared/s3Settings.ts",
     "functions/_shared/s3Backup.ts",
     "functions/_shared/s3BackupRequest.ts",
+    "src/types.ts",
     "src/utils/folderName.ts",
     "src/utils/parseDriveEntry.ts"
   ],

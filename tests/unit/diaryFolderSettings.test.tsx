@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { DiaryFolderSettings } from '../../src/components/DiaryFolderSettings'
 import { I18nProvider } from '../../src/i18n'
 import { TokenExpiredError } from '../../src/api/driveEntries'
 import * as foldersApi from '../../src/api/diaryFolders'
+import { useDiaryFolderSharing } from '../../src/hooks/useDiaryFolderSharing'
 
 vi.mock('../../src/api/diaryFolders', async original => ({
   ...await original<typeof import('../../src/api/diaryFolders')>(),
   listDiaryFolders: vi.fn(),
   inspectDiaryFolder: vi.fn(),
   selectDiaryFolder: vi.fn(),
+  getCurrentDiaryFolderSharing: vi.fn(),
 }))
 
 beforeEach(() => {
@@ -18,7 +20,7 @@ beforeEach(() => {
     folders: [{ id: 'renamed-folder', name: 'Old journal' }], selectedFolderId: null,
   })
   vi.mocked(foldersApi.inspectDiaryFolder).mockResolvedValue({
-    id: 'renamed-folder', name: 'Old journal', canAddChildren: true, entryCount: 2,
+    id: 'renamed-folder', name: 'Old journal', canAddChildren: true, sharing: 'private', entryCount: 2,
     firstEntryDate: '2026-01-01', lastEntryDate: '2026-11-01',
   })
   vi.mocked(foldersApi.selectDiaryFolder).mockResolvedValue({ selectedFolderId: 'renamed-folder' })
@@ -54,7 +56,7 @@ describe('DiaryFolderSettings', () => {
     await chooseCandidate()
     fireEvent.click(screen.getByRole('button', { name: 'Use this folder' }))
     expect((await screen.findByRole('button', { name: 'Connecting…' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(foldersApi.selectDiaryFolder).toHaveBeenCalledWith('renamed-folder', expect.any(AbortSignal), false)
+    expect(foldersApi.selectDiaryFolder).toHaveBeenCalledWith('renamed-folder', expect.any(AbortSignal), false, undefined)
     expect(onSelected).toHaveBeenCalledOnce()
     finish()
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Sign in again to reload your diary'))
@@ -92,7 +94,7 @@ describe('DiaryFolderSettings', () => {
 
   it('requires confirmation for a folder with no visible diary entries', async () => {
     vi.mocked(foldersApi.inspectDiaryFolder).mockResolvedValue({
-      id: 'renamed-folder', name: 'Empty', canAddChildren: true, entryCount: 0, firstEntryDate: null, lastEntryDate: null,
+      id: 'renamed-folder', name: 'Empty', canAddChildren: true, sharing: 'private', entryCount: 0, firstEntryDate: null, lastEntryDate: null,
     })
     renderSettings()
     fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'renamed-folder' } })
@@ -100,12 +102,12 @@ describe('DiaryFolderSettings', () => {
     expect((screen.getByRole('button', { name: 'Use this folder' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(confirmation)
     fireEvent.click(screen.getByRole('button', { name: 'Use this folder' }))
-    await waitFor(() => expect(foldersApi.selectDiaryFolder).toHaveBeenCalledWith('renamed-folder', expect.any(AbortSignal), true))
+    await waitFor(() => expect(foldersApi.selectDiaryFolder).toHaveBeenCalledWith('renamed-folder', expect.any(AbortSignal), true, undefined))
   })
 
   it('blocks a read-only folder', async () => {
     vi.mocked(foldersApi.inspectDiaryFolder).mockResolvedValue({
-      id: 'renamed-folder', name: 'Read only', canAddChildren: false, entryCount: 0, firstEntryDate: null, lastEntryDate: null,
+      id: 'renamed-folder', name: 'Read only', canAddChildren: false, sharing: 'private', entryCount: 0, firstEntryDate: null, lastEntryDate: null,
     })
     renderSettings()
     fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'renamed-folder' } })
@@ -113,6 +115,27 @@ describe('DiaryFolderSettings', () => {
     expect((screen.getByRole('button', { name: 'Use this folder' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(foldersApi.selectDiaryFolder).not.toHaveBeenCalled()
+  })
+
+  it('requires a fresh confirmation when sharing changes before connection', async () => {
+    vi.mocked(foldersApi.inspectDiaryFolder).mockResolvedValueOnce({
+      id: 'renamed-folder', name: 'Diary', canAddChildren: true, sharing: 'private',
+      entryCount: 1, firstEntryDate: '2026-11-01', lastEntryDate: '2026-11-01',
+    }).mockResolvedValueOnce({
+      id: 'renamed-folder', name: 'Diary', canAddChildren: true, sharing: 'shared',
+      entryCount: 1, firstEntryDate: '2026-11-01', lastEntryDate: '2026-11-01',
+    })
+    vi.mocked(foldersApi.selectDiaryFolder).mockRejectedValueOnce(new foldersApi.DiaryFolderError('sharing_confirmation'))
+    renderSettings()
+    await chooseCandidate()
+    const connect = screen.getByRole<HTMLButtonElement>('button', { name: 'Use this folder' })
+    fireEvent.click(connect)
+    const confirm = await screen.findByRole('checkbox', { name: 'Use this folder with its current sharing settings' })
+    expect(screen.getByText(/This folder is shared/)).toBeTruthy()
+    expect(connect.disabled).toBe(true)
+    fireEvent.click(confirm)
+    fireEvent.click(connect)
+    await waitFor(() => expect(foldersApi.selectDiaryFolder).toHaveBeenLastCalledWith('renamed-folder', expect.any(AbortSignal), false, 'shared'))
   })
 
 
@@ -123,14 +146,14 @@ describe('DiaryFolderSettings', () => {
     })
     vi.mocked(foldersApi.inspectDiaryFolder)
       .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
-      .mockResolvedValueOnce({ id: 'new-folder', name: 'New', canAddChildren: false, entryCount: 0, firstEntryDate: null, lastEntryDate: null })
+      .mockResolvedValueOnce({ id: 'new-folder', name: 'New', canAddChildren: false, sharing: 'private', entryCount: 0, firstEntryDate: null, lastEntryDate: null })
     renderSettings()
     const select = await screen.findByRole('combobox')
     fireEvent.change(select, { target: { value: 'renamed-folder' } })
     await waitFor(() => expect(foldersApi.inspectDiaryFolder).toHaveBeenCalledOnce())
     fireEvent.change(select, { target: { value: 'new-folder' } })
     await screen.findByText(/You cannot save new diary entries/)
-    finish({ id: 'renamed-folder', name: 'Old', canAddChildren: true, entryCount: 99, firstEntryDate: '2020-01-01', lastEntryDate: '2026-01-01' })
+    finish({ id: 'renamed-folder', name: 'Old', canAddChildren: true, sharing: 'private', entryCount: 99, firstEntryDate: '2020-01-01', lastEntryDate: '2026-01-01' })
     await Promise.resolve()
     expect(screen.queryByText(/Visible diary files: 99/)).toBeNull()
     expect((screen.getByRole('button', { name: 'Use this folder' }) as HTMLButtonElement).disabled).toBe(true)
@@ -149,4 +172,27 @@ describe('DiaryFolderSettings', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(message)
   })
 
+})
+
+it('rechecks the active folder while the diary stays open', async () => {
+  vi.useFakeTimers()
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  vi.mocked(foldersApi.getCurrentDiaryFolderSharing).mockResolvedValueOnce('private').mockResolvedValueOnce('shared')
+  try {
+    const { result, rerender, unmount } = renderHook(({ userId }) => useDiaryFolderSharing(userId), {
+      initialProps: { userId: 'account-a' as string | null },
+    })
+    await act(async () => {})
+    expect(result.current).toBe('private')
+    await act(() => vi.advanceTimersByTimeAsync(60_000))
+    expect(result.current).toBe('shared')
+    const signal = vi.mocked(foldersApi.getCurrentDiaryFolderSharing).mock.calls[0][0]
+    rerender({ userId: null })
+    expect(result.current).toBeNull()
+    expect(signal.aborted).toBe(true)
+    unmount()
+  } finally {
+    visibility.mockRestore()
+    vi.useRealTimers()
+  }
 })

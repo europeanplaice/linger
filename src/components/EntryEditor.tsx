@@ -6,7 +6,7 @@ import { TokenExpiredError } from '../api/driveEntries'
 import { DRAFT_STORAGE_ERROR_EVENT, getDraft, putDraft, deleteDraft, nextDraftCheckpointTime } from '../lib/draftStorage'
 import { DraftKeyMismatchError } from '../lib/encryptedLocalStore'
 import type { DraftEntry } from '../lib/diaryCache'
-import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
+import { MAX_MILESTONE_BADGES, MAX_MILESTONES, type DiaryFolderSharing, type Milestone, type LoadedDiaryEntry, type S3EntrySyncStatus, type S3EntryStatusResult } from '../types'
 import { getS3EntryStatus, retryS3EntrySync } from '../api/s3Settings'
 import { todayYmd, weekdayLabel, diaryDateLabel, diaryDateParts, milestonesNearEntry, sameMonthDayInPastYears } from '../utils/date'
 import { diffConflictLines, mergeConflictTexts } from '../utils/conflictDiff'
@@ -110,7 +110,8 @@ interface Props {
   getRecurringTopic?: (forDate: string) => RecurringTopic | null
   backDate?: string
   onGoBack?: () => void
-  pendingSharedText?: string | null
+  pendingSharedText?: string | null | false
+  folderSharing?: DiaryFolderSharing | null
   onConsumeSharedText?: () => void
   // Called (at most meaningfully once per session — throttling is the caller's
   // job) when the S3 mirror status comes back 'unconfirmed' for an entry that
@@ -254,7 +255,7 @@ function SyncBadge({ status, title, label, onClick, busy, justSaved, direction, 
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
-export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, reauthSaveFailure, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, pendingSharedText, onConsumeSharedText, onS3StaleEntryDetected }: Props) {
+export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, onDelete, onMenuClick, onDirtyChange, autoSave, onPrevDay, onNextDay, onSelectDate, pendingNavDate, onPendingNavigate, onCancelNavigation, reauthSaveResult, reauthSaveFailure, isSignedIn, draftOwner, isOnline, onExpired, onGoToToday, refreshSignal = 0, knownDates, diaryListLoaded, holidayCountry = 'off', milestones = [], onMilestoneAdd, relatedDates, onSelectRelated, getRelatedTokens, getRecurringTopic, backDate, onGoBack, pendingSharedText, folderSharing, onConsumeSharedText, onS3StaleEntryDetected }: Props) {
   const { t, locale, language } = useI18n()
   const { progress: saveProgress, startSave, completeSave } = useSaveProgress()
   const savedStatus = t.entry.savedStatus
@@ -735,11 +736,11 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
     return () => { cancelled = true }
   }, [date, draftOwner, applyLoadedEntry, applyDraft, pollS3Status, setAutoSavePausedValue, isComposingRef])
 
-  useEffect(() => {
+  const addSharedText = () => {
     if (loading || loadFailed || !pendingSharedText) return
     setText(prev => (prev.trim().length > 0 ? `${prev.trimEnd()}\n\n${pendingSharedText}` : pendingSharedText))
     onConsumeSharedText?.()
-  }, [loading, loadFailed, pendingSharedText, onConsumeSharedText])
+  }
 
   const directionRef = useRef(0)
   const prevDateRef = useRef(date)
@@ -2005,6 +2006,22 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
       </div>
       {shareMsgVisible && (
         <div className="editor-share-toast" role="status">{t.entry.copiedToClipboard}</div>
+      )}
+      {(folderSharing === 'shared' || folderSharing === 'unknown') && (
+        <div className="restored-banner" role="status">
+          {folderSharing === 'shared' ? t.app.diaryFolderShared : t.app.diaryFolderSharingUnknown}
+        </div>
+      )}
+      {pendingSharedText != null && (
+        <div className="restored-banner shared-text-banner">
+          <span role="status">{pendingSharedText === false ? t.entry.sharedTextUnavailable : t.entry.sharedTextReady}</span>
+          <div className="restored-banner-actions">
+            {pendingSharedText
+              ? <button type="button" onClick={addSharedText} disabled={loading || loadFailed}>{t.entry.addSharedText}</button>
+              : null}
+            <button type="button" onClick={onConsumeSharedText}>{pendingSharedText === false ? t.common.close : t.common.discard}</button>
+          </div>
+        </div>
       )}
       <AnimatePresence>
         {status &&

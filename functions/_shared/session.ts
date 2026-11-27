@@ -1,7 +1,7 @@
 import type { S3BackupRequest, S3WorkflowService } from './s3Workflow'
-import type { DiaryWriterAuth } from './diaryWriter'
+import type { DiaryFolderSelection, DiaryWriterAuth } from './diaryWriter'
 import type { DriveFileMeta } from './drive'
-import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Account, revokeD1Session, saveD1Session } from './authStore'
+import { createD1Session, isD1SessionRevoked, legacyAuthEnabled, readD1Session, readD1SessionByStorageId, revokeD1Session, saveD1Session } from './authStore'
 
 export const SESSION_TTL = 60 * 60 * 24 * 30 // 30 days
 
@@ -30,7 +30,7 @@ export interface Env {
       getEntryMeta(input: DiaryWriterAuth & { date: string }): Promise<DriveFileMeta | null>
       fetch(request: Request): Promise<Response>
       ensureFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string }): Promise<string>
-      selectFolder(input: { sessionId: string; accountKey: string; accessToken: string; expiresAt: number; idToken?: string; vaultKey?: string; folderId: string }): Promise<string>
+      selectFolder(input: DiaryFolderSelection): Promise<string>
     }
   }
 }
@@ -239,36 +239,6 @@ export async function removeSubSessionIndex(sub: string, sessionId: string, env:
   await env.SESSIONS.delete(subSessionIndexKey(sub, sessionId))
 }
 
-// Caps list() pagination — no real account will ever approach this many
-// concurrent sessions; it only bounds worst-case latency against a very long-
-// lived account's index.
-const MAX_INDEX_LIST_PAGES = 10
-
-async function listSessionIdsForEmail(email: string, env: Env): Promise<string[]> {
-  const prefix = emailSessionIndexPrefix(email)
-  const ids: string[] = []
-  let cursor: string | undefined
-  for (let page = 0; page < MAX_INDEX_LIST_PAGES; page++) {
-    const result = await env.SESSIONS.list({ prefix, cursor })
-    ids.push(...result.keys.map(k => k.name.slice(prefix.length)))
-    if (result.list_complete) break
-    cursor = result.cursor
-  }
-  return ids
-}
-
-async function listSessionIdsForPrefix(prefix: string, env: Env): Promise<string[]> {
-  const ids: string[] = []
-  let cursor: string | undefined
-  for (let page = 0; page < MAX_INDEX_LIST_PAGES; page++) {
-    const result = await env.SESSIONS.list({ prefix, cursor })
-    ids.push(...result.keys.map(k => k.name.slice(prefix.length)))
-    if (result.list_complete) break
-    cursor = result.cursor
-  }
-  return ids
-}
-
 // Write revocation separately before deleting tokens or indexes. An in-flight
 // refresh/renewal must never restore authorization by recreating session:{id}.
 // IDs are never reused; the marker contains no credentials and has no TTL because
@@ -287,37 +257,6 @@ export async function invalidateSession(sessionId: string, email: string | undef
   if (googleSub) {
     await removeSubSessionIndex(googleSub, sessionId, env)
   }
-}
-
-// Attempt every session, but report partial failure so the security event can be
-// retried. Delete a record before its index: a failed record deletion must leave
-// the live session discoverable on the next attempt.
-async function revokeSessions(operations: Promise<void>[]): Promise<void> {
-  const results = await Promise.allSettled(operations)
-  if (results.some(result => result.status === 'rejected')) {
-    throw new Error('Session revocation incomplete')
-  }
-}
-
-export async function deleteAllSessionsForEmail(email: string, env: Env): Promise<void> {
-  if (env.AUTH_DB) {
-    await revokeD1Account('email', email, { ...env, AUTH_DB: env.AUTH_DB })
-    if (!legacyAuthEnabled(env)) return
-  }
-  const ids = await listSessionIdsForEmail(email, env)
-  await revokeSessions(ids.map(id => invalidateSession(id, email, env)))
-}
-
-export async function deleteAllSessionsForSub(sub: string, env: Env): Promise<void> {
-  if (env.AUTH_DB) {
-    await revokeD1Account('google_sub', sub, { ...env, AUTH_DB: env.AUTH_DB })
-    if (!legacyAuthEnabled(env)) return
-  }
-  const ids = await listSessionIdsForPrefix(subSessionIndexPrefix(sub), env)
-  await revokeSessions(ids.map(async id => {
-    const session = await getSession(id, env)
-    await invalidateSession(id, session?.email, env, sub)
-  }))
 }
 
 export function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {

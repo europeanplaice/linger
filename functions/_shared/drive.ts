@@ -2,6 +2,7 @@ import type { Env, SessionData } from './session'
 import { invalidateFolderScopedS3Cache, saveSession, SESSION_TTL } from './session'
 import { folderNameForOrigin } from '../../src/utils/folderName'
 import { parseDriveEntry } from '../../src/utils/parseDriveEntry'
+import type { DiaryFolderSharing } from '../../src/types'
 const BASE = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 const ENTRY_WRITE_FIELDS = encodeURIComponent('id,name,modifiedTime,version')
@@ -36,17 +37,45 @@ export interface DriveFolderCandidate {
 
 export interface DriveFolderInspection extends DriveFolderCandidate {
   canAddChildren: boolean
+  sharing: DiaryFolderSharing
   entryCount: number
   firstEntryDate: string | null
   lastEntryDate: string | null
 }
 
-/** Read metadata only; inspecting a candidate never creates or changes files. */
-export async function inspectDriveFolder(token: string, folderId: string): Promise<DriveFolderInspection> {
-  const meta = await getEntryMeta(token, folderId)
+async function getDriveFolderMeta(token: string, folderId: string) {
+  const fields = encodeURIComponent('id,name,modifiedTime,mimeType,trashed,capabilities(canAddChildren),shared,ownedByMe,driveId,permissions(role,deleted)')
+  const meta = await driveWithRetry(
+    () => fetch(`${BASE}/files/${encodeURIComponent(folderId)}?fields=${fields}&supportsAllDrives=true`,
+      { headers: driveHeaders(token), signal: AbortSignal.timeout(DRIVE_FETCH_TIMEOUT_MS) }),
+    r => r.json() as Promise<DriveFileMeta & {
+      shared?: boolean; ownedByMe?: boolean; driveId?: string; permissions?: { role: string; deleted?: boolean }[]
+    }>,
+  )
   if (meta.id !== folderId || meta.mimeType !== 'application/vnd.google-apps.folder' || meta.trashed) {
     throw new DriveError(400, 'FOLDER_UNAVAILABLE')
   }
+  return meta
+}
+
+function folderSharing(meta: Awaited<ReturnType<typeof getDriveFolderMeta>>): DiaryFolderSharing {
+  if (meta.driveId || meta.shared === true || meta.ownedByMe === false ||
+      meta.permissions?.some(permission => !permission.deleted && permission.role !== 'owner')) return 'shared'
+  return meta.ownedByMe === true && meta.shared === false ? 'private' : 'unknown'
+}
+
+export async function getDriveFolderSharing(token: string, folderId: string): Promise<DiaryFolderSharing> {
+  try {
+    return folderSharing(await getDriveFolderMeta(token, folderId))
+  } catch (error) {
+    if (error instanceof DriveError && [400, 403, 404].includes(error.status)) return 'unknown'
+    throw error
+  }
+}
+
+/** Read metadata only; inspecting a candidate never creates or changes files. */
+export async function inspectDriveFolder(token: string, folderId: string): Promise<DriveFolderInspection> {
+  const meta = await getDriveFolderMeta(token, folderId)
   const escapedId = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   const q = encodeURIComponent(`'${escapedId}' in parents and trashed=false and mimeType='text/plain'`)
   const files = await listAllFiles(token, `${BASE}/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=${FILES_PAGE_SIZE}`)
@@ -57,6 +86,7 @@ export async function inspectDriveFolder(token: string, folderId: string): Promi
   return {
     id: meta.id, name: meta.name, modifiedTime: meta.modifiedTime,
     canAddChildren: meta.capabilities?.canAddChildren === true,
+    sharing: folderSharing(meta),
     entryCount: dates.length, firstEntryDate: dates[0] ?? null, lastEntryDate: dates.at(-1) ?? null,
   }
 }

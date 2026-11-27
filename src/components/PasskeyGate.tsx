@@ -110,6 +110,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
               <p id="passkey-verify-help">{t.login.passkeyVerifyHelp}</p>
               {recovery && <>
                 <p id="passkey-recovery-help">{t.login.passkeyRecoveryHelp}</p>
+                <p>{t.login.passkeyRecoveryNext}</p>
                 <label className="passkey-remember"><input type="checkbox" checked={recoveryConfirmed} disabled={busy} aria-describedby="passkey-recovery-help" onChange={event => setRecoveryConfirmed(event.target.checked)} /><span>{t.login.passkeyRecoveryConfirm}</span></label>
               </>}
             </> : !recovery && <p className="passkey-setup-note" id="passkey-setup-note">{t.login.passkeySetupNote}</p>}

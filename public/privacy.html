@@ -33,7 +33,7 @@
     <a href="/" class="back">Open app</a>
   </nav>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: November 12, 2026</p>
+  <p class="meta">Last updated: November 27, 2026</p>
 
   <h2>1. Overview</h2>
   <p>
@@ -88,6 +88,12 @@
     transfers the entry text directly to or from Google Drive. The backend processes account
     information, file metadata, and upload coordination requests. It also handles entry text
     during S3 backup and restore, and for compatibility requests from older clients.
+  </p>
+  <p>
+    Linger checks whether your diary folder is shared before connecting to an existing folder
+    and while you use the app. Files saved in a shared folder can inherit its access permissions.
+    When the installed app receives text or links through the system share menu, its service
+    worker keeps the shared content in memory and passes it to the editor for your confirmation.
   </p>
   <p>
     Linger processes diary text, Google OAuth credentials, and AWS temporary credentials in memory
@@ -288,8 +294,12 @@
     Google Drive: authorize the same Google account and create a new Linger passkey to reconnect.
     If this browser still holds data encrypted under the old key, use another browser to reconnect
     without deleting it. Clearing this site's data removes those local records, including unsynced changes.
-    A verified Google security event can invalidate all Linger sessions and remove all saved refresh
-    credentials because the service does not retain a readable Google-account lookup index.
+    Once you can open the diary with the new passkey, you can use Settings → Passkeys to
+    confirm the linked account with Google and disable passkeys and sessions for matching older
+    Linger accounts. That also removes their saved Google credentials. Linger matches accounts using
+    a keyed hash of the Google account ID. Some legacy accounts lack this hash. A verified Google
+    security event can invalidate sessions and remove the saved Google credential for an account
+    matched by this hash.
   </p>
 
   <h2>10. Security</h2>

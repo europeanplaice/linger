@@ -11,6 +11,8 @@ type RequestLike = {
   mode?: string;
   destination?: string;
   cache?: string;
+  headers?: Headers;
+  body?: ReadableStream<Uint8Array> | null;
 };
 
 function createHarness() {
@@ -75,6 +77,11 @@ function createHarness() {
     fetch: (input: string | RequestLike) => fetchImpl(urlOf(input)),
     Response,
     URL,
+    URLSearchParams,
+    TextDecoder,
+    crypto,
+    setTimeout,
+    clearTimeout,
     console,
   };
 
@@ -110,6 +117,14 @@ function createHarness() {
       return cachesByKey.get(cacheName)?.get(url);
     },
     dispatchFetch,
+    takeShare(location: string) {
+      const reply = vi.fn();
+      const id = new URL(location).hash.replace('#linger-share=', '');
+      for (const fn of listeners.get('message') ?? []) {
+        fn({ data: { type: 'linger-take-share', id }, ports: [{ postMessage: reply }] });
+      }
+      return reply.mock.calls[0]?.[0];
+    },
     flush,
     CACHE_NAME: '__CACHE_VERSION__',
   };
@@ -300,6 +315,50 @@ describe('service worker (public/sw.js) fetch handling', () => {
   it('does not intercept non-GET requests', async () => {
     const result = h.dispatchFetch({ url: ASSET_URL, method: 'POST' });
     expect(result).toBeUndefined();
+  });
+
+  it('accepts a native share without posting it to the server or storing it in cache', async () => {
+    const fetchSpy = vi.fn();
+    h.setFetch(fetchSpy);
+    const url = APP_URL + 'share-target';
+    const share = new Request(url, {
+      method: 'POST', body: new URLSearchParams({ title: 'Private title', text: '秘密 & <text>', url: 'https://example.org/secret' }),
+    });
+    const response = await h.dispatchFetch({ url, method: 'POST', mode: 'navigate', headers: share.headers, body: share.body });
+    expect(response?.status).toBe(303);
+    const location = response!.headers.get('Location')!;
+    expect(location).toMatch(/^https:\/\/app\.example\.com\/#linger-share=[0-9a-f-]{36}$/);
+    h.seedEntry(h.CACHE_NAME, APP_URL, htmlResponse('<title>Offline Linger</title>'));
+    const offline = await h.dispatchFetch({ url: location, method: 'GET', mode: 'navigate', cache: 'no-cache' });
+    expect(await offline?.text()).toContain('Offline Linger');
+    expect(h.takeShare(location)).toBe('Private title\n秘密 & <text>\nhttps://example.org/secret');
+    expect(h.takeShare(location)).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.entriesFor(h.CACHE_NAME, url)).toBeUndefined();
+  });
+
+  it('keeps legacy installed share-target query strings off the network as well', async () => {
+    const fetchSpy = vi.fn();
+    h.setFetch(fetchSpy);
+    const response = await h.dispatchFetch({ url: APP_URL + '?text=legacy+private+share', mode: 'navigate', method: 'GET' });
+    expect(response?.status).toBe(303);
+    const location = response!.headers.get('Location')!;
+    expect(new URL(location).search).toBe('');
+    expect(h.takeShare(location)).toBe('legacy private share');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects cross-site form submissions and oversized shares locally', async () => {
+    const url = APP_URL + 'share-target';
+    const handle = (body: string, headers?: HeadersInit) => {
+      const share = new Request(url, { method: 'POST', body: new URLSearchParams({ text: body }), headers });
+      return h.dispatchFetch({ url, method: 'POST', mode: 'navigate', headers: share.headers, body: share.body });
+    };
+    const spy = vi.fn();
+    h.setFetch(spy);
+    expect((await handle('third-party value', { 'Sec-Fetch-Site': 'cross-site' }))?.status).toBe(403);
+    expect((await handle('x'.repeat(64 * 1024)))?.status).toBe(413);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('does not intercept cross-origin requests', async () => {

@@ -25,7 +25,7 @@ function toHex(bytes: ArrayBuffer | Uint8Array): string {
   return Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function configuredRiscPepper(env: Env): string | null {
+export function configuredRiscPepper(env: Env): string | null {
   return typeof env.RISC_INDEX_PEPPER === 'string' && env.RISC_INDEX_PEPPER.length >= MIN_RISC_PEPPER_LENGTH
     ? env.RISC_INDEX_PEPPER
     : null
@@ -85,8 +85,11 @@ export async function getPasskeySessionInfo(id: string, env: Env): Promise<{ use
 
 export async function createPasskeySession(id: string, userId: string, env: Env, credentialId: string | null = null): Promise<void> {
   if (!env.AUTH_DB || !userId || id.startsWith(SESSION_ID_HASH_PREFIX)) throw new SessionRevokedError('Passkey authentication required')
-  await env.AUTH_DB.prepare('INSERT INTO auth_sessions (id, user_id, credential_id, data, expires_at) VALUES (?, ?, ?, NULL, ?)')
-    .bind(await sessionStorageId(id), userId, credentialId, Date.now() + SESSION_TTL * 1000).run()
+  const inserted = await env.AUTH_DB.prepare(`INSERT INTO auth_sessions (id, user_id, credential_id, data, expires_at)
+    SELECT ?, ?, ?, NULL, ? WHERE ? IS NULL OR EXISTS (
+      SELECT 1 FROM passkey_credentials WHERE credential_id = ? AND user_id = ?
+    )`).bind(await sessionStorageId(id), userId, credentialId, Date.now() + SESSION_TTL * 1000, credentialId, credentialId, userId).run()
+  if (inserted.meta.changes !== 1) throw new SessionRevokedError('Passkey was revoked')
 }
 
 export function sanitizeSession(session: SessionData): SessionData {
@@ -196,57 +199,87 @@ export async function revokeD1Session(id: string, env: AuthEnv): Promise<void> {
     .bind(await sessionStorageId(id)).run()
 }
 
-// When RISC_INDEX_PEPPER is configured, revoke the matching keyed blind index
-// plus any unindexed legacy accounts; otherwise conservatively revoke all sessions.
-export async function revokeD1Account(field: 'email' | 'google_sub', value: string, env: AuthEnv): Promise<void> {
-  const pepper = field === 'google_sub' ? configuredRiscPepper(env) : null
-  if (pepper) {
-    const targetHash = await riscSubjectHash(value, pepper)
-    await env.AUTH_DB.batch([
-      env.AUTH_DB.prepare(`UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1
-        WHERE revoked = 0 AND (
-          user_id IS NULL
-          OR user_id NOT IN (SELECT id FROM passkey_users WHERE risc_subject_hash IS NOT NULL)
-          OR user_id IN (SELECT id FROM passkey_users WHERE risc_subject_hash = ?)
-        )`).bind(targetHash),
-      env.AUTH_DB.prepare(`DELETE FROM google_refresh_vault
-        WHERE user_id NOT IN (SELECT id FROM passkey_users WHERE risc_subject_hash IS NOT NULL)
-           OR user_id IN (SELECT id FROM passkey_users WHERE risc_subject_hash = ?)`).bind(targetHash),
-    ])
-    return
-  }
-  await env.AUTH_DB.batch([
-    env.AUTH_DB.prepare('UPDATE auth_sessions SET data = NULL, user_id = NULL, revoked = 1 WHERE revoked = 0'),
-    env.AUTH_DB.prepare('DELETE FROM google_refresh_vault'),
-  ])
+function accountRevocations(db: D1Database, target: string, args: (string | number)[]) {
+  return [
+    db.prepare(`DELETE FROM passkey_management_grants WHERE session_id IN (
+      SELECT id FROM auth_sessions WHERE user_id IN (${target})
+    )`).bind(...args),
+    db.prepare(`UPDATE auth_sessions SET data = NULL, user_id = NULL, credential_id = NULL, revoked = 1
+      WHERE revoked = 0 AND user_id IN (${target})`).bind(...args),
+    db.prepare(`DELETE FROM google_refresh_vault WHERE user_id IN (${target})`).bind(...args),
+  ]
 }
 
 async function riscJtiHash(jti: string): Promise<string> {
   return `sha256:${toHex(await crypto.subtle.digest('SHA-256', encoder.encode(`linger-risc-jti/v1:${jti}`)))}`
 }
 
-export async function claimRiscEvent(jti: string, expiresAt: number, env: Env): Promise<boolean> {
+export async function applyRiscEvent(jti: string, expiresAt: number, subjects: string[], env: Env): Promise<boolean> {
+  const db = env.AUTH_DB
+  const pepper = configuredRiscPepper(env)
+  if (!db || (subjects.length && !pepper)) throw new Error('Targeted revocation unavailable')
+  const now = Date.now()
   const hash = await riscJtiHash(jti)
-  if (env.AUTH_DB) {
-    await env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash = ? AND expires_at <= ?')
-      .bind(hash, Date.now()).run()
-    const inserted = await env.AUTH_DB.prepare('INSERT OR IGNORE INTO risc_processed_events (jti_hash, expires_at) VALUES (?, ?)')
-      .bind(hash, expiresAt).run()
-    return inserted.meta.changes === 1
-  }
-  return (await env.SESSIONS.get(`risc_jti:${hash}`)) !== '1'
+  const hashes = pepper ? await Promise.all([...new Set(subjects)].map(sub => riscSubjectHash(sub, pepper))) : []
+  const target = `SELECT id FROM passkey_users WHERE risc_subject_hash = ?
+    AND NOT EXISTS (SELECT 1 FROM risc_processed_events WHERE jti_hash = ? AND expires_at > ? AND completed = 1)`
+  // D1 rolls back the entire batch on failure. An interrupted notification
+  // leaves either all revocations and the receipt, or neither.
+  const results = await db.batch([
+    ...hashes.flatMap(subjectHash => accountRevocations(db, target, [subjectHash, hash, now])),
+    db.prepare(`INSERT INTO risc_processed_events (jti_hash, expires_at, completed) VALUES (?, ?, 1)
+      ON CONFLICT(jti_hash) DO UPDATE SET expires_at = excluded.expires_at, completed = 1
+      WHERE risc_processed_events.expires_at <= ? OR risc_processed_events.completed = 0`)
+      .bind(hash, expiresAt, now),
+  ])
+  return results.at(-1)?.meta.changes === 1
 }
 
-export async function commitRiscEvent(jti: string, expiresAt: number, env: Env): Promise<void> {
-  if (env.AUTH_DB) return
-  const ttl = Math.max(60, Math.ceil((expiresAt - Date.now()) / 1000))
-  await env.SESSIONS.put(`risc_jti:${await riscJtiHash(jti)}`, '1', { expirationTtl: ttl })
+// The OAuth callback proves current control of the same Google account. The
+// grant stays in D1 and can only be used with this passkey session and its key.
+export async function authorizePasskeyRecovery(sessionHandle: string, userId: string, googleSub: string, env: AuthEnv): Promise<boolean> {
+  const pepper = configuredRiscPepper(env)
+  if (!pepper) throw new Error('Targeted recovery unavailable')
+  const subjectHash = await riscSubjectHash(googleSub, pepper)
+  const now = Date.now()
+  const row = await env.AUTH_DB.prepare(`INSERT INTO passkey_recovery_grants (session_id, subject_hash, expires_at)
+    SELECT s.id, u.risc_subject_hash, ? FROM auth_sessions s
+    JOIN passkey_users u ON u.id = s.user_id
+    JOIN passkey_credentials c ON c.credential_id = s.credential_id AND c.user_id = s.user_id
+    WHERE s.id = ? AND s.user_id = ? AND s.revoked = 0 AND s.expires_at > ? AND u.risc_subject_hash = ?
+    ON CONFLICT(session_id) DO UPDATE SET subject_hash = excluded.subject_hash, expires_at = excluded.expires_at
+    RETURNING session_id`)
+    .bind(now + OAUTH_STATE_TTL * 1000, sessionHandle, userId, now, subjectHash).first()
+  return !!row
 }
 
-export async function releaseRiscEvent(jti: string, env: Env): Promise<void> {
-  if (!env.AUTH_DB) return
-  await env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash = ?')
-    .bind(await riscJtiHash(jti)).run()
+export async function retirePreviousPasskeyAccounts(id: string, userId: string, googleSub: string, env: AuthEnv): Promise<number | null> {
+  const pepper = configuredRiscPepper(env)
+  if (!pepper) throw new Error('Targeted recovery unavailable')
+  const db = env.AUTH_DB
+  const sessionHandle = await sessionStorageId(id)
+  const subjectHash = await riscSubjectHash(googleSub, pepper)
+  const now = Date.now()
+  // Keep the current account and any account created after it. Every write
+  // rechecks the one-use grant, current credential and saved Google connection.
+  const activeGrant = `SELECT u.created_at FROM passkey_recovery_grants g
+    JOIN auth_sessions s ON s.id = g.session_id
+    JOIN passkey_users u ON u.id = s.user_id AND u.risc_subject_hash = g.subject_hash
+    JOIN passkey_credentials c ON c.credential_id = s.credential_id AND c.user_id = s.user_id
+    JOIN google_refresh_vault r ON r.user_id = s.user_id
+    WHERE g.session_id = ? AND g.subject_hash = ? AND g.expires_at > ?
+      AND s.user_id = ? AND s.revoked = 0 AND s.expires_at > ?`
+  const grantArgs = [sessionHandle, subjectHash, now, userId, now]
+  const target = `SELECT id FROM passkey_users WHERE risc_subject_hash = ? AND id <> ?
+    AND created_at < (${activeGrant})`
+  const args = [subjectHash, userId, ...grantArgs]
+  const results = await db.batch([
+    ...accountRevocations(db, target, args),
+    db.prepare(`DELETE FROM passkey_credentials WHERE user_id IN (${target})`).bind(...args),
+    db.prepare(`DELETE FROM passkey_recovery_grants WHERE session_id = ? AND EXISTS (${activeGrant})`)
+      .bind(sessionHandle, ...grantArgs),
+  ])
+  return results.at(-1)?.meta.changes === 1 ? (results.at(-2)?.meta.changes ?? 0) : null
 }
 
 export async function saveOAuthState(state: string, data: string, env: Env): Promise<void> {
@@ -317,6 +350,7 @@ export async function cleanupAuth(env: AuthEnv): Promise<void> {
     env.AUTH_DB.prepare('DELETE FROM auth_sessions WHERE id IN (SELECT id FROM auth_sessions WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM passkey_challenges WHERE id IN (SELECT id FROM passkey_challenges WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM passkey_management_grants WHERE session_id IN (SELECT session_id FROM passkey_management_grants WHERE expires_at <= ? LIMIT 500)').bind(now),
+    env.AUTH_DB.prepare('DELETE FROM passkey_recovery_grants WHERE session_id IN (SELECT session_id FROM passkey_recovery_grants WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM risc_processed_events WHERE jti_hash IN (SELECT jti_hash FROM risc_processed_events WHERE expires_at <= ? LIMIT 500)').bind(now),
     env.AUTH_DB.prepare('DELETE FROM auth_rate_limits WHERE bucket_key IN (SELECT bucket_key FROM auth_rate_limits WHERE expires_at <= ? LIMIT 500)').bind(now),
   ])

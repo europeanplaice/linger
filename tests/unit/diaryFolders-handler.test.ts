@@ -6,6 +6,7 @@ vi.mock('../../functions/_shared/drive', async original => ({
   ...await original<typeof import('../../functions/_shared/drive')>(),
   listDriveFolders: vi.fn(),
   inspectDriveFolder: vi.fn(),
+  getDriveFolderSharing: vi.fn(),
 }))
 
 function context(request: Request, selectDiaryFolder = vi.fn().mockResolvedValue('chosen-folder')) {
@@ -66,7 +67,7 @@ describe('Drive diary folder recovery route', () => {
     expect((await onRequestPost(busy as never)).status).toBe(409)
   })
   it('inspects a candidate without selecting or creating a folder', async () => {
-    const inspection = { id: 'candidate', name: 'Diary', canAddChildren: true, entryCount: 3, firstEntryDate: '2026-01-01', lastEntryDate: '2026-11-01' }
+    const inspection = { id: 'candidate', name: 'Diary', canAddChildren: true, sharing: 'private' as const, entryCount: 3, firstEntryDate: '2026-01-01', lastEntryDate: '2026-11-01' }
     vi.mocked(drive.inspectDriveFolder).mockResolvedValue(inspection)
     const ctx = context(new Request('https://example.test/api/drive/folders?folderId=candidate'))
     const response = await onRequestGet(ctx as never)
@@ -75,9 +76,18 @@ describe('Drive diary folder recovery route', () => {
     expect(ctx.selectDiaryFolder).not.toHaveBeenCalled()
   })
 
+  it('checks the current folder sharing without exposing permission details', async () => {
+    vi.mocked(drive.getDriveFolderSharing).mockResolvedValue('shared')
+    const ctx = context(new Request('https://example.test/api/drive/folders?sharing=1'))
+    const response = await onRequestGet(ctx as never)
+    expect(await response.json()).toEqual({ sharing: 'shared' })
+    expect(drive.getDriveFolderSharing).toHaveBeenCalledWith('validated-access-token', 'old-folder')
+  })
+
   it.each([
     ['FOLDER_READ_ONLY', 403, 'read_only'],
     ['FOLDER_EMPTY', 422, 'empty_folder'],
+    ['FOLDER_SHARING_CONFIRMATION', 422, 'sharing_confirmation'],
     ['FOLDER_UNAVAILABLE', 400, 'unavailable'],
     ['FOLDER_PERMISSION_DENIED', 403, 'permission_denied'],
     ['FOLDER_RATE_LIMITED', 429, 'rate_limited'],

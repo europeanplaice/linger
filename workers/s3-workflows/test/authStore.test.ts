@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import {
+  applyRiscEvent,
   createPasskeySession,
   durableSessionHandle,
   getPasskeySessionUserId,
@@ -33,6 +34,26 @@ async function grantCredentialDeletion(sessionId: string): Promise<void> {
 }
 
 describe('encrypted passkey session storage', () => {
+  it('commits one receipt for concurrent Google security event deliveries', async () => {
+    const handlerEnv = { ...env, RISC_INDEX_PEPPER: 'test-risc-pepper-value-at-least-32-chars' }
+    const userId = crypto.randomUUID()
+    const subject = crypto.randomUUID()
+    const sessionId = crypto.randomUUID()
+    const jti = crypto.randomUUID()
+    const session = testSession(userId, { google_sub: subject })
+    await createTestSession(sessionId, session, handlerEnv)
+
+    const deliver = () => applyRiscEvent(jti, Date.now() + 60_000, [subject], handlerEnv)
+    const results = await Promise.all([deliver(), deliver()])
+    expect(results.filter(result => result)).toHaveLength(1)
+    expect(await getPasskeySessionUserId(sessionId, handlerEnv)).toBeNull()
+
+    const newSessionId = crypto.randomUUID()
+    await createPasskeySession(newSessionId, userId, handlerEnv)
+    expect(await deliver()).toBe(false)
+    expect(await getPasskeySessionUserId(newSessionId, handlerEnv)).toBe(userId)
+  })
+
   it('renames passkeys through migrated D1 without persisting plaintext labels', async () => {
     const userId = `user-${crypto.randomUUID()}`
     const sessionId = `session-${crypto.randomUUID()}`
@@ -143,10 +164,10 @@ describe('encrypted passkey session storage', () => {
     expect(await readD1Session(sessionId, env, session.vault_key)).toBeNull()
     expect(await readD1SessionByStorageId(storageId, env, session.vault_key)).toBeNull()
 
-    // Models login verification finishing after a concurrent delete: the late
-    // session can be inserted, but credential-existence checks keep it unusable.
+    // A login that finished verifying the signature before the deletion
+    // cannot create a session after the deletion commits.
     const lateSessionId = `session-${crypto.randomUUID()}`
-    await createPasskeySession(lateSessionId, userId, env, credentialId)
+    await expect(createPasskeySession(lateSessionId, userId, env, credentialId)).rejects.toThrow('Passkey was revoked')
     expect(await getPasskeySessionUserId(lateSessionId, env)).toBeNull()
     expect(await readD1Session(lateSessionId, env, session.vault_key)).toBeNull()
   })
