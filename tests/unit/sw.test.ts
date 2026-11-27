@@ -30,7 +30,7 @@ function createHarness() {
         cachesByKey.set(name, entries);
       }
       return {
-        match: async (req: string | RequestLike) => entries?.get(urlOf(req)) ?? undefined,
+        match: async (req: string | RequestLike) => entries?.get(urlOf(req))?.clone(),
         put: async (req: string | RequestLike, res: Response) => {
           entries?.set(urlOf(req), res);
         },
@@ -54,7 +54,7 @@ function createHarness() {
     async match(req: string | RequestLike) {
       for (const entries of cachesByKey.values()) {
         const hit = entries.get(urlOf(req));
-        if (hit) return hit;
+        if (hit) return hit.clone();
       }
       return undefined;
     },
@@ -85,6 +85,7 @@ function createHarness() {
     let respondWith: Promise<Response | undefined> | undefined;
     const event = {
       request,
+      waitUntil() {},
       respondWith(p: Promise<Response | undefined>) {
         respondWith = p;
       },
@@ -240,6 +241,40 @@ describe('service worker (public/sw.js) fetch handling', () => {
     });
     const second = await h.dispatchFetch({ url: APP_URL, method: 'GET', mode: 'navigate', destination: 'document' });
     expect(await second?.text()).toContain('shell v1');
+  });
+
+  it('keeps the offline start page after a visit to the privacy policy', async () => {
+    const privacyUrl = new URL('privacy', APP_URL).href;
+    h.seedEntry(h.CACHE_NAME, APP_URL, htmlResponse('<title>Linger</title>'));
+    h.seedEntry(h.CACHE_NAME, privacyUrl + '.html', htmlResponse('<title>Privacy Policy</title>'));
+    h.setFetch(async () => htmlResponse('<title>Privacy Policy</title>'));
+
+    await h.dispatchFetch({ url: privacyUrl, method: 'GET', mode: 'navigate', destination: 'document' });
+    await h.flush();
+    h.setFetch(async () => { throw new TypeError('offline'); });
+
+    const launch = await h.dispatchFetch({ url: APP_URL, method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(await launch?.text()).toContain('<title>Linger</title>');
+    const shortcut = await h.dispatchFetch({ url: APP_URL + '?shortcut=search', method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(await shortcut?.text()).toContain('<title>Linger</title>');
+    const privacy = await h.dispatchFetch({ url: privacyUrl, method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(await privacy?.text()).toContain('<title>Privacy Policy</title>');
+  });
+
+  it('keeps the offline start page after an HTTP error on the start URL', async () => {
+    h.seedEntry(h.CACHE_NAME, APP_URL, htmlResponse('<title>Linger</title>'));
+    h.setFetch(async () => new Response('<title>Error</title>', {
+      status: 503,
+      headers: { 'Content-Type': 'text/html' },
+    }));
+
+    const error = await h.dispatchFetch({ url: APP_URL, method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(error?.status).toBe(503);
+    await h.flush();
+    h.setFetch(async () => { throw new TypeError('offline'); });
+
+    const launch = await h.dispatchFetch({ url: APP_URL, method: 'GET', mode: 'navigate', destination: 'document' });
+    expect(await launch?.text()).toContain('<title>Linger</title>');
   });
 
   it('bypasses the SW cache for reload/no-store/no-cache requests', async () => {

@@ -74,6 +74,7 @@ export function useAuth(): AuthState {
   // silent refresh has actually failed, so it does not flash on resume.
   const [expiryRecovering, setExpiryRecovering] = useState(false)
   const tokenExpiredRef = useRef(false)
+  const requestCredentialRefresh = useRef<(() => Promise<void>) | null>(null)
   const [email, setEmail] = useState<string | null>(null)
   const [googleSub, setGoogleSub] = useState<string | null>(null)
   const [googleClientId, setGoogleClientId] = useState<string | null>(null)
@@ -599,7 +600,9 @@ export function useAuth(): AuthState {
         if (stopped || revision !== authRevision.current) return
         if (refreshed) {
           needsGoogleCredential.current = false
+          tokenExpiredRef.current = false
           setTokenExpired(false)
+          setExpiryRecovering(false)
           setGoogleConnection('idle')
           schedule()
         } else {
@@ -609,9 +612,11 @@ export function useAuth(): AuthState {
           markExpired(false)
         }
       } catch {
-        if (!stopped && revision === authRevision.current) { setGoogleConnection('unavailable'); setExpiryRecovering(false) }
+        if (stopped || revision !== authRevision.current) return
+        setGoogleConnection('unavailable')
+        setExpiryRecovering(false)
         // A temporary outage does not invalidate the saved Google authorization.
-        if (!stopped && revision === authRevision.current) timer = setTimeout(refresh, 30_000)
+        timer = setTimeout(refresh, 30_000)
       } finally { inFlight = false }
     }
     const schedule = () => {
@@ -627,19 +632,26 @@ export function useAuth(): AuthState {
       const credentials = getOAuthCredentials()
       if (!credentials || credentials.expiresAt - Date.now() < 60_000) void refresh()
     }
+    requestCredentialRefresh.current = refresh
     window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('pageshow', onVisible)
-    if (tokenExpired) void refresh()
-    else schedule()
+    schedule()
     return () => {
       stopped = true
+      requestCredentialRefresh.current = null
       clearTimeout(timer)
       window.removeEventListener('online', onOnline)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('pageshow', onVisible)
     }
-  }, [status, vaultStatus, signingIn, tokenExpired, markExpired])
+  }, [status, vaultStatus, signingIn, markExpired])
+
+  // A Drive 401 can arrive while a resume refresh is already in flight.
+  // Request recovery without restarting the effect that owns the refresh.
+  useEffect(() => {
+    if (tokenExpired) void requestCredentialRefresh.current?.()
+  }, [status, vaultStatus, signingIn, tokenExpired])
 
   const retryAfterExpired = useCallback((selectAccount = false) => {
     signIn({ selectAccount, expectedGoogleSub: googleSub })

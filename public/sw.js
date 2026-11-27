@@ -5,15 +5,24 @@ function scopedUrl(path) {
   return new URL(path, self.registration.scope).toString()
 }
 
+const APP_SHELL_URL = scopedUrl('./')
+const PRIVACY_PAGE_URL = scopedUrl('./privacy.html')
+const NAVIGATION_CACHE_KEYS = new Map([
+  [APP_SHELL_URL, APP_SHELL_URL],
+  [scopedUrl('./index.html'), APP_SHELL_URL],
+  [scopedUrl('./privacy'), PRIVACY_PAGE_URL],
+  [PRIVACY_PAGE_URL, PRIVACY_PAGE_URL],
+])
+
 const APP_SHELL = [
-  scopedUrl('./'),
+  APP_SHELL_URL,
   scopedUrl('./index.html'),
   scopedUrl('./manifest.webmanifest'),
   scopedUrl('./favicon.svg'),
   scopedUrl('./icon.svg'),
   scopedUrl('./apple-touch-icon.png'),
   scopedUrl('./icon-192.png'),
-  scopedUrl('./privacy.html'),
+  PRIVACY_PAGE_URL,
   ...PRECACHE_ASSETS.map(scopedUrl),
 ]
 
@@ -95,14 +104,24 @@ self.addEventListener('fetch', event => {
   }
 
   if (request.mode === 'navigate') {
+    // Shortcuts and share targets add query parameters to the same app shell.
+    const cacheKey = NAVIGATION_CACHE_KEYS.get(url.origin + url.pathname)
+    if (!cacheKey) return
+
     event.respondWith(
       fetch(request)
         .then(response => {
-          const copy = response.clone()
-          caches.open(CACHE_NAME).then(cache => cache.put(scopedUrl('./'), copy))
+          const contentType = response.headers.get('Content-Type')?.toLowerCase()
+          if (response.ok && !response.redirected && contentType?.startsWith('text/html')) {
+            const copy = response.clone()
+            event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(cacheKey, copy)).catch(() => {}))
+          }
           return response
         })
-        .catch(() => caches.match(scopedUrl('./'))),
+        .catch(async () => {
+          const cache = await caches.open(CACHE_NAME)
+          return (await cache.match(cacheKey)) ?? Response.error()
+        }),
     )
     return
   }
