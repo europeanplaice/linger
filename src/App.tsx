@@ -27,7 +27,7 @@ function RestoringScreen({ selectedDate }: { selectedDate: string }) {
           <h1 className="app-title"><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
         </div>
         <div className="restoring-search" />
-        <div className="entry-skeleton" aria-hidden="true">
+        <div className="restoring-calendar" aria-hidden="true">
           <div className="entry-skeleton-row medium" />
           <div className="entry-skeleton-row" />
           <div className="entry-skeleton-row" />

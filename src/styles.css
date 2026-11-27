@@ -5011,7 +5011,8 @@ dialog.session-expired-dialog::backdrop {
 }
 .btn-reauth:disabled { opacity: 0.55; cursor: default; }
 .btn-reauth:not(:disabled):hover { filter: brightness(1.08); }
-.entry-skeleton {
+.entry-skeleton,
+.restoring-calendar {
   flex: 1;
   padding-block-start: var(--entry-content-padding-start, 0.35rem);
   display: flex;
