@@ -13,4 +13,7 @@ test('renderLanding output is non-empty and contains the landing wrapper', () =>
   const html = renderLanding()
   expect(html.length).toBeGreaterThan(1000)
   expect(html).toContain('<div class="landing">')
+  expect(html).toContain('href="#screenshots"')
+  expect(html).toContain('href="#about"')
+  expect(html).toContain('href="#top"')
 })

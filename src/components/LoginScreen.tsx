@@ -94,7 +94,7 @@ export function LoginScreen({ onLockVault, onSignIn, onUseAnotherAccount, onRetr
   )
 
   return (
-    <main className="login-screen" {...(authResolved ? { 'data-auth-resolved': '' } : {})}>
+    <main id="top" className="login-screen" {...(authResolved ? { 'data-auth-resolved': '' } : {})}>
       {/* Plain (non-animated) card so the build-time prerendered HTML stays put
           when React mounts over it — no flash before hydration. */}
       <div className="login-card">{cardBody}</div>

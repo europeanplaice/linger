@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useI18n } from '../i18n'
 import { LoginScreen } from './LoginScreen'
 import { DeploymentVerification } from './DeploymentVerification'
 import type { AuthErrorCode, GoogleConnection } from '../hooks/useAuth'
@@ -25,6 +26,9 @@ interface Props {
 // page (it is rendered into the initial HTML by the build-time prerender). The
 // copy here is intentionally English — it is the canonical content for `/`.
 export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccount, onRetry, tokenExpired, authResolved, authError, onDismissAuthError, googleConnection, onRetryConnection, signingIn, email, rememberDevicePrompt }: Props) {
+  const { t } = useI18n()
+  const l = t.landing
+
   return (
     <div className="landing">
       {passkeyGate ?? <LoginScreen
@@ -44,7 +48,7 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
       {rememberDevicePrompt}
 
       <div className="landing-content">
-        <section className="landing-shots" aria-label="Screenshots">
+        <section className="landing-shots" id="screenshots" aria-label={l.shotsAriaLabel}>
           <figure>
             <img
               src="/screenshots/editor.png"
@@ -53,7 +57,7 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
               loading="lazy"
               alt="Linger diary editor showing a dated entry alongside a monthly calendar in the sidebar"
             />
-            <figcaption>Write your day. Browse past entries on the calendar.</figcaption>
+            <figcaption>{l.shotEditorCaption}</figcaption>
           </figure>
           <figure>
             <img
@@ -63,7 +67,7 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
               loading="lazy"
               alt="Linger full-text search listing matching diary entries with highlighted keywords"
             />
-            <figcaption>Full-text search across everything you've written.</figcaption>
+            <figcaption>{l.shotSearchCaption}</figcaption>
           </figure>
           <div className="landing-shots-mobile">
             <figure>
@@ -85,101 +89,105 @@ export function Landing({ passkeyGate, onLockVault, onSignIn, onUseAnotherAccoun
               />
             </figure>
           </div>
-          <p className="landing-shots-caption">Works just as well on your phone.</p>
+          <p className="landing-shots-caption">{l.shotMobileCaption}</p>
+        </section>
+
+        <section id="about">
+          <h2>{l.whatIsTitle}</h2>
+          <p>{l.whatIsBody1}</p>
+          <p>
+            {l.whatIsBody2ScopePrefix}
+            <code>drive.file</code>
+            {l.whatIsBody2ScopeMid1}
+            <code>openid</code>
+            {l.whatIsBody2ScopeMid2}
+            <code>email</code>
+            {l.whatIsBody2ScopeMid3}
+            <code>drive.file</code>
+            {l.whatIsBody2ScopeMid4}
+            <strong>{l.whatIsBody2ScopeStrong}</strong>
+            {l.whatIsBody2ScopeSuffix}
+          </p>
         </section>
 
         <section>
-          <h2>What is Linger?</h2>
-          <p>
-            Linger is a personal diary web app. Write daily entries and access them from any
-            device. Your entries are saved as individual plain-text files inside your own Google
-            Drive account — you retain full ownership and control of your data at all times.
-          </p>
-          <p>
-            To store and retrieve your diary files, Linger requests the Google Drive{' '}
-            <code>drive.file</code> OAuth scope, along with the standard <code>openid</code> and{' '}
-            <code>email</code> scopes used only to identify your account at sign-in. The{' '}
-            <code>drive.file</code> scope grants access <strong>exclusively to files that Linger
-            itself creates</strong> — it cannot read, modify, or delete any other files in your
-            Google Drive.
-          </p>
-        </section>
-
-        <section>
-          <h2>Features</h2>
+          <h2>{l.featuresTitle}</h2>
           <ul>
-            <li>Write and edit diary entries with a clean, distraction-free editor</li>
-            <li>Browse entries on a monthly calendar view</li>
-            <li>Full-text search across all your entries</li>
-            <li>View and restore previous versions of any entry</li>
-            <li>Export all entries as a ZIP file</li>
-            <li>Available in English and Japanese</li>
+            {l.features.map(feature => (
+              <li key={feature}>{feature}</li>
+            ))}
           </ul>
         </section>
 
         <section>
-          <h2>Data &amp; Privacy</h2>
+          <h2>{l.privacyTitle}</h2>
+          <p>{l.privacySummary}</p>
+          <details className="landing-tech-details">
+            <summary>{l.privacyTechSummary}</summary>
+            <p>
+              {l.privacyTechBody1Prefix}
+              <code>linger_diary/</code>
+              {l.privacyTechBody1Suffix}
+            </p>
+          </details>
           <p>
-            Diary entries reside entirely in your own Google Drive folder (
-            <code>linger_diary/</code>). No diary content is stored on Linger's servers. OAuth
-            short-lived tokens are sent to Linger's API only while requests run; the refresh token is encrypted in D1.
-            You can choose to save your unlock key in this browser for up to seven days, including across restarts. S3
-            backfill runs from the open browser tab and pauses if you close or reload it.
-          </p>
-          <p>
-            For full details, see the <a href="/privacy">Privacy Policy</a>.
+            {l.privacyPolicyPrefix}
+            <a href="/privacy">{l.privacyPolicyLink}</a>
+            {l.privacyPolicySuffix}
           </p>
         </section>
 
         <section>
-          <h2>How to verify this app is safe</h2>
-          <p>
-            You don't have to take our word for it. Here are concrete steps you can take to verify
-            that Linger cannot read, copy, or transmit your diary entries anywhere other than your
-            own Google Drive.
-          </p>
+          <h2>{l.verifyTitle}</h2>
+          <p>{l.verifyIntro}</p>
           <ol>
             <li>
-              <strong>Check what Google permissions you granted</strong> — Go to{' '}
+              <strong>{l.verifyStep1Title}</strong> — {l.verifyStep1Before}
               <a
                 href="https://myaccount.google.com/permissions"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Google Account → Apps &amp; services
-              </a>{' '}
-              and find Linger. The only scope listed should be the <code>drive.file</code> scope,
-              which cannot access any other files in your Drive. You can revoke access there at any
-              time.
+                {l.verifyStep1Link}
+              </a>
+              {l.verifyStep1Mid}
+              <code>drive.file</code>
+              {l.verifyStep1After}
             </li>
             <li>
-              <strong>Inspect network requests in your browser</strong> — Open DevTools → Network
-              while using the app. Diary requests go to <code>/api/drive/…</code> (the Cloudflare
-              proxy on this domain) or <code>accounts.google.com</code> (OAuth). If you choose the
-              deployment check below, your browser also requests public workflow status from{' '}
-              <code>api.github.com</code>. GitHub receives normal connection metadata such as your
-              IP address, but not diary contents, Google account details, or credentials from that
-              request.
+              <strong>{l.verifyStep2Title}</strong> — {l.verifyStep2Part1}
+              <code>/api/drive/…</code>
+              {l.verifyStep2Part2}
+              <code>accounts.google.com</code>
+              {l.verifyStep2Part3}
+              <code>api.github.com</code>
+              {l.verifyStep2Part4}
             </li>
             <li>
-              <strong>Read the source code</strong> — The entire codebase is open source on{' '}
+              <strong>{l.verifyStep3Title}</strong> — {l.verifyStep3Before}
               <a
                 href="https://github.com/europeanplaice/linger"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                GitHub
+                {l.verifyStep3Link}
               </a>
-              . You can also self-host using your own Google Cloud and Cloudflare accounts.
+              {l.verifyStep3After}
             </li>
           </ol>
         </section>
 
+        <section className="landing-cta">
+          <h2>{l.ctaTitle}</h2>
+          <p>{l.ctaDescription}</p>
+          <a className="landing-cta-btn" href="#top">{l.ctaButton}</a>
+        </section>
+
         <footer className="landing-footer">
           <DeploymentVerification />
-          <a href="/privacy">Privacy Policy</a>
+          <a href="/privacy">{t.login.privacyPolicy}</a>
           {' · '}
-          <a href="/terms-of-service">Terms of Service</a>
+          <a href="/terms-of-service">{t.login.termsOfService}</a>
           {' · '}
           <a href="https://github.com/europeanplaice/linger" target="_blank" rel="noopener noreferrer">
             GitHub

@@ -1,5 +1,7 @@
 import { useI18n } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { AppIcon } from './AppIcon'
 import { authFeedback } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
 import type { RememberDays } from '../lib/tabSession'
@@ -93,8 +95,9 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
   const progress = phase === 'google' ? t.login.googleConnecting : phase === 'create' ? t.login.passkeyCreating : phase === 'verify' ? t.login.passkeyVerifying : phase === 'restore' ? t.login.googleRestoring : t.login.passkeyWorking
   const currentStep = !setupEmail ? 0 : phase === 'verify' ? 2 : 1
   return (
-    <section className="login-screen passkey-gate" aria-labelledby="passkey-gate-title">
+    <section id="top" className="login-screen passkey-gate" aria-labelledby="passkey-gate-title">
       <div className="login-card passkey-gate-card">
+        {!restoringSession && <AppIcon className="login-logo passkey-gate-logo" fetchPriority="high" />}
         <h1 ref={title} tabIndex={-1} id="passkey-gate-title">{restoringSession ? t.login.savedSessionTitle : recovery ? t.login.passkeyRecoverySetupTitle : setup ? t.login.passkeySetupTitle : options ? t.login.passkeyOptionsTitle : t.login.passkeySignInTitle}</h1>
         {restoringSession ? <>
           <p role="status">{savedSessionConnection === 'restoring' ? t.login.savedSessionRestoring : t.login.savedSessionUnavailable}</p>
@@ -145,7 +148,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
               </div>
               <div className="passkey-action-group">
                 <span className="passkey-action-hint">{t.login.passkeyNewUserHint}</span>
-                <button className="passkey-secondary" type="button" disabled={staticPreview || busy} onClick={() => changeView('setup')}>
+                <button className={`passkey-secondary${!options ? ' passkey-get-started' : ''}`} type="button" disabled={staticPreview || busy} onClick={() => changeView('setup')}>
                   {t.login.passkeyFirstTime}
                 </button>
               </div>
@@ -172,7 +175,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
           {error && !(options && error === 'cancelled') && onClearError && <button className="passkey-error-dismiss" type="button" onClick={() => { if (options) setView('options'); onClearError() }}>{t.common.close}</button>}
         </>}
         <p className="login-footer">
-          <a href="/home" target="_blank" rel="noopener noreferrer">{t.login.aboutLinger}</a>
+          <a href="#about">{t.login.aboutLinger}</a>
           {' · '}
           <a href="/privacy" target="_blank" rel="noopener noreferrer">{t.login.privacyPolicy}</a>
           {' · '}
@@ -184,6 +187,12 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
           <button type="button" disabled={staticPreview} aria-pressed={language === 'ja'} onClick={() => setLanguage('ja')}>日本語</button>
         </div>
       </div>
+      {!restoringSession && !setup && !options && (
+        <a className="landing-scroll-cue" href="#screenshots">
+          <span>{t.login.scrollToDetails}</span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </a>
+      )}
     </section>
   )
 }
