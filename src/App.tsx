@@ -161,6 +161,7 @@ export default function App() {
   const {
     status,
     tokenExpired,
+    expiryRecovering,
     hadSession,
     email,
     googleSub,
@@ -852,7 +853,7 @@ export default function App() {
     </a>
     <div className="app">
       <AnimatePresence>
-        {tokenExpired && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
+        {tokenExpired && !expiryRecovering && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
           onUseAnotherAccount={handleUseAnotherAccount} accountSwitch={editorDirty || diary.pendingSaveDate ? 'blocked' : accountSwitch}
           pendingSave={!!diary.pendingSaveDate} signingIn={signingIn} authError={authError} />}
       </AnimatePresence>
