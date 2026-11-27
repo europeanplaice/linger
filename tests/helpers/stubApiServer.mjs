@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import process from 'node:process'
 
 const port = Number(process.env.PORT ?? 8788)
 
