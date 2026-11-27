@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider } from '../../src/i18n'
 import { PasskeyGate } from '../../src/components/PasskeyGate'
 import { LoginScreen } from '../../src/components/LoginScreen'
@@ -127,9 +127,11 @@ describe('authentication guidance', () => {
     expect(screen.getByRole('status').textContent).toBe('Connecting Google Drive…')
   })
 
-  it('localizes provider failures instead of displaying raw errors', () => {
+  it('localizes provider failures instead of displaying raw errors', async () => {
     render(<I18nProvider initialLanguage="ja"><PasskeyGate busy={false} error="unsupported" setupEmail={null} onSetup={vi.fn()} onBeginSetup={vi.fn()} onCancelSetup={vi.fn()} onUnlock={vi.fn()} /></I18nProvider>)
-    expect(screen.getByRole('alert').textContent).toContain('対応')
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('対応')
+    })
     expect(screen.getByRole('alert').textContent).not.toContain('This passkey')
   })
 

@@ -9,6 +9,57 @@ export interface LocalSearchResult {
   snippet: string
 }
 
+interface WorkerBuildResponse {
+  generation: number
+  index: TfIdfIndex
+}
+
+function buildIndexInWorker(
+  docs: TfIdfDoc[],
+  generation: number,
+  isCancelled: () => boolean,
+): Promise<TfIdfIndex | null> {
+  if (typeof Worker === 'undefined' || import.meta.env.MODE === 'test') {
+    return Promise.resolve(buildIndex(docs))
+  }
+
+  return new Promise((resolve) => {
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('../utils/tfidf.worker.ts', import.meta.url), { type: 'module' })
+    } catch {
+      resolve(buildIndex(docs))
+      return
+    }
+
+    const cleanup = () => {
+      worker.onmessage = null
+      worker.onerror = null
+      worker.terminate()
+    }
+
+    worker.onmessage = (event: MessageEvent<WorkerBuildResponse>) => {
+      cleanup()
+      if (isCancelled() || event.data.generation !== generation) {
+        resolve(null)
+        return
+      }
+      resolve(event.data.index)
+    }
+
+    worker.onerror = () => {
+      cleanup()
+      if (isCancelled()) {
+        resolve(null)
+        return
+      }
+      resolve(buildIndex(docs))
+    }
+
+    worker.postMessage({ generation, docs })
+  })
+}
+
 export function useTfIdfSearch(owner: string | null = null) {
   const [ready, setReady] = useState(false)
   const [indexVersion, setIndexVersion] = useState(0)
@@ -25,9 +76,11 @@ export function useTfIdfSearch(owner: string | null = null) {
     setReady(false)
     if (!owner) return () => { cancelled = true; rebuildGenerationRef.current++ }
 
+    const isStale = () => cancelled || generation !== rebuildGenerationRef.current
+
     getAllCached()
-      .then(entries => {
-        if (cancelled || generation !== rebuildGenerationRef.current) return
+      .then(async (entries) => {
+        if (isStale()) return
         const docMap = new Map<string, string>()
         for (const e of entries) {
           if (e.content?.content) docMap.set(e.date, e.content.content)
@@ -37,7 +90,17 @@ export function useTfIdfSearch(owner: string | null = null) {
           docMap.set(date, content)
         }
         const docs: TfIdfDoc[] = Array.from(docMap, ([date, content]) => ({ date, content }))
-        indexRef.current = buildIndex(docs)
+        const built = await buildIndexInWorker(docs, generation, isStale)
+        if (!built || isStale()) return
+
+        // Merge any updates that arrived while the worker was building the index.
+        let merged = built
+        for (const [date, content] of overridesRef.current) {
+          if (merged.contents.get(date) !== content) {
+            merged = updateIndex(merged, date, content)
+          }
+        }
+        indexRef.current = merged
         setReady(true)
         setIndexVersion(v => v + 1)
       })

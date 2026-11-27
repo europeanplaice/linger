@@ -1,0 +1,977 @@
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, Suspense } from 'react'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import type { useAuth } from '../hooks/useAuth'
+import { useDiary } from '../hooks/useDiary'
+import { useDiaryFolderSharing } from '../hooks/useDiaryFolderSharing'
+import { clearCache, hasLegacyCache, recoverLegacyCache } from '../lib/secureCache'
+import { getAllDrafts, getDraft } from '../lib/draftStorage'
+import { announceAccount, getAccountSnapshot } from '../lib/accountSession'
+import { LocalStorageAdapter } from '../lib/storageAdapter'
+import { SyncQueueManager } from '../lib/syncQueue'
+import type { useTheme } from '../hooks/useTheme'
+import type { useAccentColor } from '../hooks/useAccentColor'
+import type { useFont } from '../hooks/useFont'
+import type { useFontSize } from '../hooks/useFontSize'
+import { useHolidayCountry } from '../hooks/useHolidayCountry'
+import { useOnline } from '../hooks/useOnline'
+import { useTabSync } from '../hooks/useTabSync'
+import { useS3Backfill } from '../hooks/useS3Backfill'
+import { useS3StaleEntryAutoResync } from '../hooks/useS3StaleEntryAutoResync'
+import { Keyboard } from 'lucide-react'
+import { RememberDevicePrompt } from './RememberDevicePrompt'
+import { PasskeySettings } from './PasskeySettings'
+import { SessionExpiredModal } from './SessionExpiredModal'
+import type { AccountSwitchAvailability } from './SessionExpiredModal'
+import { CalendarView } from './CalendarView'
+import { EntryEditor } from './EntryEditor'
+import type { ReauthSaveFailure } from './EntryEditor'
+import { SearchBar } from './SearchBar'
+import type { SearchBarHandle } from './SearchBar'
+import { SettingsModal, RecollectionJourney, KeyboardShortcutsModal } from './lazy'
+import { AppIcon } from './AppIcon'
+import { todayYmd, shiftDate } from '../utils/date'
+import { recollectionDatesToPrefetch, recollectionRandomCandidates } from '../utils/recollectionDates'
+import { recollectionHint } from '../utils/recollectionHint'
+import { weightedOrder } from '../utils/serendipityWeights'
+import { loadSeen } from '../utils/serendipitySeen'
+import { receiveSharedText } from '../utils/share'
+import { TokenExpiredError, migrateExtensions } from '../api/driveEntries'
+import { hasPendingMilestones, useMilestones } from '../hooks/useMilestones'
+import { useTfIdfSearch } from '../hooks/useTfIdfSearch'
+import type { LoadedDiaryEntry } from '../types'
+import { useI18n } from '../i18n'
+
+const DATE_HASH_RE = /^\d{4}-\d{2}-\d{2}$/
+const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
+const FOCUS_REFRESH_MIN_MS = 1000
+
+interface SidebarHistoryState {
+  grassPufferSidebar?: boolean
+}
+
+function dateFromHash(): string | null {
+  const hash = window.location.hash.slice(1)
+  return DATE_HASH_RE.test(hash) ? hash : null
+}
+
+function readStoredAutoSave(): boolean {
+  try {
+    return localStorage.getItem('linger_autosave') === 'true'
+  } catch {
+    return false
+  }
+}
+
+function isMobileLayout(): boolean {
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches
+}
+
+function dismissActiveTextCursor() {
+  const activeElement = document.activeElement
+  if (!(activeElement instanceof HTMLElement)) return
+
+  if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
+    const wasReadOnly = activeElement.readOnly
+    activeElement.readOnly = true
+    try {
+      activeElement.setSelectionRange(0, 0)
+    } catch {
+      // Some input types do not support text selection.
+    }
+    activeElement.blur()
+    requestAnimationFrame(() => {
+      activeElement.readOnly = wasReadOnly
+    })
+  } else {
+    activeElement.blur()
+  }
+
+  window.getSelection()?.removeAllRanges()
+}
+
+export interface AuthenticatedAppProps {
+  auth: ReturnType<typeof useAuth>
+  theme: ReturnType<typeof useTheme>
+  accent: ReturnType<typeof useAccentColor>
+  font: ReturnType<typeof useFont>
+  fontSizeControl: ReturnType<typeof useFontSize>
+  editorDirty: boolean
+  onEditorDirtyChange: (dirty: boolean) => void
+  updatePending: boolean
+  dismissUpdate: () => void
+  applyUpdate: () => void
+}
+
+export function AuthenticatedApp({
+  auth,
+  theme,
+  accent,
+  font,
+  fontSizeControl,
+  editorDirty,
+  onEditorDirtyChange,
+  updatePending,
+  dismissUpdate,
+  applyUpdate,
+}: AuthenticatedAppProps) {
+  const { t, language } = useI18n()
+  const {
+    status,
+    tokenExpired,
+    expiryRecovering,
+    email,
+    googleSub,
+    googleClientId,
+    authError,
+    signingIn,
+    signOut,
+    handleExpired,
+    retryAfterExpired,
+    vaultBusy, vaultError, vaultUserId, addPasskey,
+    vaultPhase, googleConnection, retryGoogleConnection, offerRememberDevice, dismissRememberDevice,
+  } = auth
+  const { mode: themeMode, setMode: setThemeMode, toggleTheme } = theme
+  const { accent: accentColor, setAccent } = accent
+  const { mode: fontMode, toggleFont } = font
+  const { fontSize, setFontSize } = fontSizeControl
+  const { country: holidayCountry, setCountry: setHolidayCountry } = useHolidayCountry(language)
+  const { milestones, recoveryReady: milestonesRecoveryReady, storageError: milestonesError, syncError: milestonesSyncError, legacyAvailable: legacyMilestones, recoverLegacy: recoverLegacyMilestones, waitForLocalChanges: waitForMilestoneChanges, add: addMilestone, update: updateMilestone, remove: removeMilestone, toggleBadge: toggleMilestoneBadge } = useMilestones(status, handleExpired, email)
+  const [legacyMirror, setLegacyMirror] = useState(false)
+  const [legacyCache, setLegacyCache] = useState(false)
+  const [legacyQueue, setLegacyQueue] = useState(false)
+  const [legacyRecoveryError, setLegacyRecoveryError] = useState(false)
+  useEffect(() => {
+    let active = true
+    if (status !== 'signedIn') { setLegacyCache(false); setLegacyMirror(false); setLegacyQueue(false); setLegacyRecoveryError(false); return }
+    try {
+      setLegacyMirror(Object.keys(localStorage).some(key => key.startsWith('linger_local_entry_')))
+      setLegacyQueue(localStorage.getItem('linger_pending_sync_queue') !== null)
+    } catch { setLegacyRecoveryError(true) }
+    if (email) void hasLegacyCache().then(available => { if (active) setLegacyCache(available) }).catch(() => { if (active) setLegacyRecoveryError(true) })
+    return () => { active = false }
+  }, [status, email])
+  const recoverOldCache = useCallback(async () => {
+    try { await recoverLegacyCache(); setLegacyCache(false); setLegacyRecoveryError(false) }
+    catch { setLegacyRecoveryError(true) }
+  }, [])
+  const recoverLegacyMirror = useCallback(async () => {
+    try { await new LocalStorageAdapter().recoverLegacy(); setLegacyMirror(false); setLegacyRecoveryError(false) }
+    catch { setLegacyRecoveryError(true) }
+  }, [])
+  const recoverLegacyQueue = useCallback(async () => {
+    try { await new SyncQueueManager(email ?? undefined).recoverLegacy(); setLegacyQueue(false); setLegacyRecoveryError(false); window.dispatchEvent(new Event('online')) }
+    catch { setLegacyRecoveryError(true) }
+  }, [email])
+  const tfIdf = useTfIdfSearch(status === 'signedIn' ? email : null)
+  const getRecurringTopic = useCallback(
+    (forDate: string) => tfIdf.getRecurringTopic(forDate, language),
+    // indexVersion is included so a new identity is produced whenever the TF-IDF
+    // index rebuilds (getRecurringTopic itself is a stable ref/closure otherwise).
+    [tfIdf.getRecurringTopic, language, tfIdf.indexVersion],
+  )
+  const isOnline = useOnline()
+  const previewParams = new URLSearchParams(window.location.search).getAll('preview')
+  const forceEmptyState = previewParams.includes('empty-state')
+  const [selectedDate, setSelectedDate] = useState(() => dateFromHash() ?? todayYmd())
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const shortcut = url.searchParams.get('shortcut')
+    if (!shortcut && !['title', 'text', 'url'].some(key => url.searchParams.has(key))) return
+
+    if (shortcut === 'search') {
+      pendingShortcutSearchRef.current = true
+    } else if (shortcut === 'today') {
+      const today = todayYmd()
+      setSelectedDate(today)
+      selectedDateRef.current = today
+    }
+
+    for (const key of ['shortcut', 'title', 'text', 'url']) {
+      url.searchParams.delete(key)
+    }
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  useEffect(() => {
+    const request = pendingShareRequest.current ??= receiveSharedText()
+    if (!request) return
+    let alive = true
+    void request.then(text => {
+      if (!alive || pendingShareRequest.current !== request) return
+      pendingShareRequest.current = undefined
+      setPendingSharedText(text ?? false)
+    })
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
+    if (status !== 'signedIn' || tokenExpired || !pendingShortcutSearchRef.current) return
+    pendingShortcutSearchRef.current = false
+    if (isMobileLayout()) setSidebarOpen(true)
+    requestAnimationFrame(() => searchBarRef.current?.focus())
+  }, [status, tokenExpired])
+  const [autoSave, setAutoSave] = useState(readStoredAutoSave)
+  const [pendingDate, setPendingDate] = useState<string | null>(null)
+  const pendingRelatedFromRef = useRef<string | null>(null)
+  const [accountSwitch, setAccountSwitch] = useState<AccountSwitchAvailability>('checking')
+  const reauthAccountSubRef = useRef<string | null>(null)
+  const [reauthSaveResult, setReauthSaveResult] = useState<LoadedDiaryEntry | null>(null)
+  const [reauthSaveFailure, setReauthSaveFailure] = useState<ReauthSaveFailure | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [recollectionOpen, setRecollectionOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [serendipityPrefetch, setSerendipityPrefetch] = useState<[string, string] | [string] | []>([])
+  const [entryRefreshSignal, setEntryRefreshSignal] = useState(0)
+  const [pendingSharedText, setPendingSharedText] = useState<string | null | false>(null)
+  const pendingShareRequest = useRef<Promise<string | null> | undefined>(undefined)
+  const pendingShortcutSearchRef = useRef(false)
+  const searchBarRef = useRef<SearchBarHandle>(null)
+  const selectedDateRef = useRef(selectedDate)
+  const editorDirtyRef = useRef(editorDirty)
+  const sidebarOpenRef = useRef(sidebarOpen)
+  const lastFocusRefreshRef = useRef(0)
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate
+  }, [selectedDate])
+
+  useEffect(() => {
+    editorDirtyRef.current = editorDirty
+  }, [editorDirty])
+
+  useEffect(() => {
+    if (!tokenExpired) {
+      setAccountSwitch('checking')
+      return
+    }
+    if (editorDirty) {
+      setAccountSwitch('blocked')
+      return
+    }
+    let cancelled = false
+    setAccountSwitch('checking')
+    getAllDrafts(email ?? undefined).then(drafts => {
+      if (!cancelled) setAccountSwitch(drafts.length === 0 ? 'available' : 'blocked')
+    }).catch(() => {
+      if (!cancelled) setAccountSwitch('unavailable')
+    })
+    return () => { cancelled = true }
+  }, [tokenExpired, email, editorDirty])
+
+  useEffect(() => {
+    sidebarOpenRef.current = sidebarOpen
+  }, [sidebarOpen])
+
+  const isSignedIn = status === 'signedIn'
+  const s3Backfill = useS3Backfill(isSignedIn, handleExpired, tokenExpired)
+  // Settings' own Save/Test/Resync actions rewrite s3_settings.json with no
+  // concurrency check against each other (see SettingsModal.tsx) — block the
+  // auto-resync while Settings is open to avoid racing one of those.
+  const handleS3StaleEntryDetected = useS3StaleEntryAutoResync(isSignedIn, s3Backfill, settingsOpen)
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const folderSharing = useDiaryFolderSharing(isSignedIn && !tokenExpired && initialLoadComplete ? vaultUserId : null)
+  const loadingSeenRef = useRef(false)
+
+  const diary = useDiary(status, email, handleExpired, useCallback((dates: string[]) => {
+    if (selectedDateRef.current && dates.includes(selectedDateRef.current)) {
+      setEntryRefreshSignal(v => v + 1)
+    }
+  }, []), selectedDate, googleSub)
+
+  useTabSync(useCallback((event) => {
+    if (event.type === 'DIARY_UPDATED' || event.type === 'DIARY_REMOVED') {
+      diary.refreshEntries()
+        .then(() => setEntryRefreshSignal(v => v + 1))
+        .catch(() => {})
+    }
+  }, [diary.refreshEntries]))
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setInitialLoadComplete(false)
+      loadingSeenRef.current = false
+      lastFocusRefreshRef.current = 0
+    }
+  }, [isSignedIn])
+
+  useEffect(() => {
+    if (isSignedIn && diary.loading) {
+      loadingSeenRef.current = true
+    }
+  }, [isSignedIn, diary.loading])
+
+  useEffect(() => {
+    if (isSignedIn && !diary.loading && loadingSeenRef.current && !initialLoadComplete) {
+      setInitialLoadComplete(true)
+    }
+  }, [isSignedIn, diary.loading, initialLoadComplete])
+
+  const migrationAttemptedRef = useRef(false)
+
+  const diaryDatesRef = useRef(diary.dates)
+  useEffect(() => { diaryDatesRef.current = diary.dates }, [diary.dates])
+
+  const handleGetContent = useCallback(async (
+    date: string,
+    options?: { forceNetwork?: boolean; background?: boolean },
+  ) => {
+    const result = await diary.getContent(date, options)
+    // Only rebuild the index if this entry isn't indexed yet (first load from Drive).
+    // Saves rebuild cost on every getContent call for already-indexed entries.
+    if (result?.entry.content && !tfIdf.hasEntry(date)) {
+      tfIdf.updateEntry(date, result.entry.content)
+    }
+    return result
+  }, [diary.getContent, tfIdf.updateEntry, tfIdf.hasEntry])
+
+  const diaryGetContentRef = useRef(handleGetContent)
+  useEffect(() => { diaryGetContentRef.current = handleGetContent }, [handleGetContent])
+
+  // One-time migration of legacy `.md` diary files to `.txt`. Runs once per
+  // device when any `.md` entry is detected; renamed files are picked up by the
+  // next incremental Drive sync.
+  useEffect(() => {
+    if (!isSignedIn || !initialLoadComplete) return
+    if (migrationAttemptedRef.current) return
+    if (localStorage.getItem('linger_ext_migrated') === 'true') return
+    if (!diary.hasLegacyMdFiles) return
+
+    migrationAttemptedRef.current = true
+    migrateExtensions()
+      .then(({ migrated, s3Resyncing }) => {
+        localStorage.setItem('linger_ext_migrated', 'true')
+        if (migrated > 0) {
+          diary.refreshEntries()
+            .then(() => setEntryRefreshSignal(v => v + 1))
+            .catch(() => {})
+        }
+        // The rename bumped Drive's version on each migrated file, so the server
+        // kicked off a re-mirror of them to S3 (see migrate.ts) — start the backfill
+        // polling loop so a re-mirror spanning more than one chunk actually runs to
+        // completion instead of stopping after the first chunk with nothing left to
+        // drive it forward.
+        if (s3Resyncing) s3Backfill.startBackfill()
+      })
+      .catch(() => { migrationAttemptedRef.current = false })
+  }, [isSignedIn, initialLoadComplete, diary.hasLegacyMdFiles, diary.refreshEntries, s3Backfill.startBackfill])
+
+  useEffect(() => {
+    if (recollectionOpen) return
+    if (!initialLoadComplete) return
+    const toFetch = recollectionDatesToPrefetch(diaryDatesRef.current)
+    const candidates = recollectionRandomCandidates(diaryDatesRef.current)
+    const shuffled = weightedOrder(candidates, { today: todayYmd(), recentlyShown: loadSeen() })
+    const prefetch = shuffled.slice(0, 2) as [string, string] | [string] | []
+    setSerendipityPrefetch(prefetch)
+    const allToFetch = [...toFetch, ...prefetch]
+    if (allToFetch.length === 0) return
+    let cancelled = false
+    const run = () => {
+      if (!cancelled) allToFetch.forEach(d => diaryGetContentRef.current(d, { background: true }).catch(() => {}))
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      const id = requestIdleCallback(run, { timeout: 10_000 })
+      return () => { cancelled = true; cancelIdleCallback(id) }
+    }
+    const id = setTimeout(run, 1_500)
+    return () => { cancelled = true; clearTimeout(id) }
+  }, [initialLoadComplete, recollectionOpen])
+
+  useEffect(() => {
+    if (!isSignedIn) return
+    const nextDate = dateFromHash() ?? selectedDateRef.current
+    setSelectedDate(nextDate)
+    selectedDateRef.current = nextDate
+  }, [isSignedIn])
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as SidebarHistoryState | null
+      if (state?.grassPufferSidebar) {
+        setSidebarOpen(false)
+        return
+      }
+
+      const hashDate = dateFromHash() ?? todayYmd()
+      if (hashDate) {
+        if (hashDate !== selectedDateRef.current && editorDirtyRef.current) {
+          // Restore the visible entry's URL while the user decides whether to leave.
+          history.pushState(null, '', '#' + selectedDateRef.current)
+          pendingRelatedFromRef.current = null
+          setPendingDate(hashDate)
+          setSidebarOpen(false)
+          return
+        }
+        setSelectedDate(hashDate)
+        selectedDateRef.current = hashDate
+      }
+      setSidebarOpen(false)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editorDirtyRef.current) return
+      event.preventDefault()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!sidebarOpen || !isMobileLayout()) return
+    dismissActiveTextCursor()
+  }, [sidebarOpen])
+
+  const closeSidebar = useCallback(() => {
+    if (sidebarOpen) {
+      history.back()
+    } else {
+      setSidebarOpen(false)
+    }
+  }, [sidebarOpen])
+
+  const [previousDate, setPreviousDate] = useState<string | null>(null)
+
+  const doNavigateToDate = useCallback((d: string, keepBack = false) => {
+    history.pushState(null, '', '#' + d)
+    setSelectedDate(d)
+    selectedDateRef.current = d
+    setSidebarOpen(false)
+    setPendingDate(null)
+    if (!keepBack) setPreviousDate(null)
+  }, [])
+
+  const selectDate = useCallback((d: string) => {
+    pendingRelatedFromRef.current = null
+    if (d !== selectedDateRef.current && editorDirtyRef.current) {
+      setPendingDate(d)
+      return
+    }
+    doNavigateToDate(d)
+  }, [doNavigateToDate])
+
+  const handleSelectRelated = useCallback((targetDate: string) => {
+    if (targetDate !== selectedDateRef.current && editorDirtyRef.current) {
+      pendingRelatedFromRef.current = selectedDateRef.current
+      setPendingDate(targetDate)
+      return
+    }
+    setPreviousDate(selectedDateRef.current)
+    doNavigateToDate(targetDate, true)
+  }, [doNavigateToDate])
+
+  const handleGoBack = useCallback(() => {
+    if (previousDate) selectDate(previousDate)
+  }, [previousDate, selectDate])
+
+  const handlePendingNavigate = useCallback(() => {
+    if (!pendingDate) return
+    const relatedFrom = pendingRelatedFromRef.current
+    pendingRelatedFromRef.current = null
+    if (relatedFrom) setPreviousDate(relatedFrom)
+    doNavigateToDate(pendingDate, !!relatedFrom)
+  }, [pendingDate, doNavigateToDate])
+
+  const handleCancelNavigation = useCallback(() => {
+    pendingRelatedFromRef.current = null
+    setPendingDate(null)
+  }, [])
+
+  const handleAutoSaveToggle = useCallback(() => {
+    setAutoSave(prev => {
+      const next = !prev
+      try {
+        localStorage.setItem('linger_autosave', String(next))
+      } catch {
+        // Ignore storage write failures; keep the in-memory toggle working.
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'linger_autosave') setAutoSave(e.newValue === 'true')
+      else if (e.key === null) setAutoSave(readStoredAutoSave())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  const diaryPrefetchRef = useRef(diary.prefetch)
+  useEffect(() => { diaryPrefetchRef.current = diary.prefetch }, [diary.prefetch])
+
+  const prefetchEntry = useCallback((d: string) => {
+    diaryGetContentRef.current(d, { background: true }).catch(() => {})
+  }, [])
+
+  // Warm every entry in the month the calendar is showing. Debounced so paging
+  // quickly through months only fetches the one the user settles on; concurrency
+  // is bounded inside diary.prefetch.
+  const monthPrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const displayedMonthRef = useRef<{ year: number; month: number } | null>(null)
+  const prefetchMonth = useCallback((year: number, month: number) => {
+    displayedMonthRef.current = { year, month }
+    if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`
+    monthPrefetchTimerRef.current = setTimeout(() => {
+      const monthDates = diaryDatesRef.current.filter(d => d.startsWith(prefix))
+      if (monthDates.length > 0) diaryPrefetchRef.current(monthDates, 3).catch(() => {})
+    }, 250)
+  }, [])
+
+  const prefetchDisplayedMonth = useCallback(() => {
+    const m = displayedMonthRef.current
+    if (m) prefetchMonth(m.year, m.month)
+  }, [prefetchMonth])
+
+  // Opening the sidebar on mobile reveals the calendar — a strong signal the
+  // user is about to tap a date in the month on screen, so warm it.
+  useEffect(() => {
+    if (sidebarOpen) prefetchDisplayedMonth()
+  }, [sidebarOpen, prefetchDisplayedMonth])
+
+  // On a cold first load the entry list can resolve after the calendar's
+  // mount-time prefetch already ran against an empty list; re-warm the month in
+  // view once entries are available.
+  useEffect(() => {
+    if (initialLoadComplete) prefetchDisplayedMonth()
+  }, [initialLoadComplete, prefetchDisplayedMonth])
+
+  useEffect(() => () => {
+    if (monthPrefetchTimerRef.current) clearTimeout(monthPrefetchTimerRef.current)
+  }, [])
+
+  const onPrevDay = useCallback(() => {
+    selectDate(shiftDate(selectedDateRef.current, -1))
+  }, [selectDate])
+
+  const onNextDay = useCallback(() => {
+    selectDate(shiftDate(selectedDateRef.current, 1))
+  }, [selectDate])
+
+  const handleSignOut = useCallback(() => {
+    history.replaceState(null, '', '#')
+    setPendingDate(null)
+    pendingShareRequest.current = undefined
+    setPendingSharedText(null)
+    signOut()
+  }, [signOut])
+
+  const beforeDiaryFolderSelect = useCallback(async () => {
+    if (editorDirtyRef.current || tokenExpired) return false
+    if (localStorage.getItem('linger_pending_sync_queue') !== null) return false
+    try { await waitForMilestoneChanges() } catch { return false }
+    const [drafts, pending, pendingMilestones] = await Promise.all([
+      getAllDrafts(email ?? undefined),
+      new SyncQueueManager(email ?? undefined).getPending(),
+      hasPendingMilestones(),
+    ])
+    return !editorDirtyRef.current && !pendingMilestones && drafts.length === 0 && pending.length === 0
+  }, [email, tokenExpired, waitForMilestoneChanges])
+
+  const handleDiaryFolderSelected = useCallback(async () => {
+    await Promise.all([clearCache(), new LocalStorageAdapter().clearAll()])
+    // Stop this tab and notify other tabs before rebuilding folder-scoped caches.
+    announceAccount(null)
+    setSettingsOpen(false)
+    handleSignOut()
+  }, [handleSignOut])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.repeat) {
+        if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+          e.preventDefault()
+          toggleTheme()
+          return
+        }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+          e.preventDefault()
+          toggleFont()
+          return
+        }
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+          e.preventDefault()
+          if (isMobileLayout() && !sidebarOpenRef.current) {
+            setSidebarOpen(true)
+            history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
+          }
+          requestAnimationFrame(() => searchBarRef.current?.focus())
+          return
+        }
+        if (e.key === '?') {
+          e.preventDefault()
+          setShortcutsOpen(v => !v)
+          return
+        }
+      }
+      if (!e.altKey || e.repeat) return
+      if (document.activeElement instanceof HTMLInputElement) return
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        selectDate(shiftDate(selectedDateRef.current, -1))
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        selectDate(shiftDate(selectedDateRef.current, 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        selectDate(todayYmd())
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectDate, toggleTheme, toggleFont])
+
+  const datesSet = useMemo(() => new Set(diary.dates), [diary.dates])
+  const conflictedDatesSet = useMemo(() => new Set(diary.conflictedDates), [diary.conflictedDates])
+  const hint = useMemo(() => recollectionHint(diary.dates), [diary.dates])
+
+  const handleSave = useCallback(async (
+    date: string,
+    content: string,
+    baseVersion: string | null,
+    force?: boolean,
+    baseContent?: string | null,
+    options?: { keepalive?: boolean },
+  ) => {
+    const result = await diary.save(date, content, baseVersion, force, baseContent, options)
+    tfIdf.updateEntry(date, content)
+    return result
+  }, [diary.save, tfIdf.updateEntry])
+
+  const handleSearch = useCallback(async (query: string) => {
+    try {
+      return await diary.search(query)
+    } catch {
+      const localResults = tfIdf.searchLocal(query, 30)
+      return { results: localResults, unindexedCount: 0, totalCount: localResults.length }
+    }
+  }, [diary.search, tfIdf.searchLocal])
+
+  const relatedDates = useMemo(
+    () => tfIdf.getSimilar(selectedDate, 3),
+    [tfIdf.getSimilar, selectedDate, tfIdf.indexVersion],
+  )
+
+  const handleMenuClick = useCallback(() => {
+    if (isMobileLayout()) {
+      setSidebarOpen(true)
+      history.pushState({ grassPufferSidebar: true } as SidebarHistoryState, '')
+    }
+  }, [])
+
+  const handleGoToToday = useCallback(() => {
+    selectDate(todayYmd())
+  }, [selectDate])
+
+  const handleGetRelatedTokens = useCallback(
+    (previewDate: string) => tfIdf.getSharedTokens(selectedDate, previewDate),
+    [tfIdf.getSharedTokens, selectedDate],
+  )
+
+  const handleConsumeSharedText = useCallback(() => {
+    setPendingSharedText(null)
+  }, [])
+
+  const handleReauth = useCallback(() => {
+    if (googleConnection === 'unavailable') void retryGoogleConnection()
+    else retryAfterExpired()
+  }, [googleConnection, retryGoogleConnection, retryAfterExpired])
+
+  const handleUseAnotherAccount = useCallback(() => {
+    if (accountSwitch !== 'available' || editorDirtyRef.current || diary.pendingSaveDate) return
+    // A different Google sub needs a clean sign-in flow so its cache and
+    // session cannot overlap the expired editor's account.
+    signOut()
+  }, [accountSwitch, diary.pendingSaveDate, signOut])
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      reauthAccountSubRef.current = null
+      setReauthSaveResult(null)
+      setReauthSaveFailure(null)
+      return
+    }
+    if (tokenExpired) {
+      reauthAccountSubRef.current = googleSub
+      setReauthSaveResult(null)
+      setReauthSaveFailure(null)
+      return
+    }
+    // The pending edit belongs to the account that expired. Never replay it
+    // with credentials for a different Google identity.
+    const previousSub = reauthAccountSubRef.current
+    reauthAccountSubRef.current = null
+    const date = diary.pendingSaveDate
+    if (!date || !previousSub || googleSub !== previousSub) return
+    const account = getAccountSnapshot()
+    diary.retryPendingSave()
+      .then(result => {
+        if (result && getAccountSnapshot() === account) setReauthSaveResult(result)
+      })
+      .catch(async error => {
+        if (error instanceof TokenExpiredError || getAccountSnapshot() !== account) return
+        const draft = email ? await getDraft(date, email).catch(() => undefined) : undefined
+        if (getAccountSnapshot() === account) setReauthSaveFailure({ date, error, draftRetained: Boolean(draft) })
+      })
+  }, [isSignedIn, tokenExpired, googleSub, email, diary.pendingSaveDate, diary.retryPendingSave])
+
+  useEffect(() => {
+    if (!isSignedIn || tokenExpired || !initialLoadComplete) return
+
+    let cancelled = false
+    const refreshFromDrive = () => {
+      if (document.visibilityState === 'hidden') return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+
+      const now = Date.now()
+      if (now - lastFocusRefreshRef.current < FOCUS_REFRESH_MIN_MS) return
+      lastFocusRefreshRef.current = now
+
+      diary.refreshEntries()
+        .then(() => {
+          if (!cancelled) {
+            setEntryRefreshSignal(v => v + 1)
+          }
+        })
+        .catch(e => {
+          if (!cancelled) console.error('Drive refresh failed:', e)
+        })
+    }
+
+    window.addEventListener('focus', refreshFromDrive)
+    window.addEventListener('online', refreshFromDrive)
+    document.addEventListener('visibilitychange', refreshFromDrive)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', refreshFromDrive)
+      window.removeEventListener('online', refreshFromDrive)
+      document.removeEventListener('visibilitychange', refreshFromDrive)
+    }
+  }, [isSignedIn, tokenExpired, initialLoadComplete, diary.refreshEntries])
+
+  return (
+    <MotionConfig reducedMotion="user">
+    <a href="#main-content" className="skip-link">
+      {language === 'ja' ? 'コンテンツへスキップ' : 'Skip to main content'}
+    </a>
+    <div className="app">
+      <AnimatePresence>
+        {tokenExpired && !expiryRecovering && <SessionExpiredModal email={email} googleConnection={googleConnection} onReconnect={handleReauth}
+          onUseAnotherAccount={handleUseAnotherAccount} accountSwitch={editorDirty || diary.pendingSaveDate ? 'blocked' : accountSwitch}
+          pendingSave={!!diary.pendingSaveDate} signingIn={signingIn} authError={authError} />}
+      </AnimatePresence>
+      {updatePending && (
+        <div className="update-banner" role="status">
+          <span>{t.app.updateAvailable}</span>
+          <button className="update-banner-action" onClick={applyUpdate} disabled={editorDirty}>{t.app.updateNow}</button>
+          <button className="update-banner-dismiss" onClick={dismissUpdate} aria-label="Dismiss">✕</button>
+        </div>
+      )}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
+        onClick={closeSidebar}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeSidebar() } }}
+        role="button"
+        tabIndex={sidebarOpen ? 0 : -1}
+        aria-label={t.app.closeMenu}
+      />
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <div className="sidebar-top">
+          <h1 className="app-title"><AppIcon className="app-title-icon" /> {t.appTitle}</h1>
+          <div className="sidebar-actions">
+            <button className="btn-close-sidebar" onClick={closeSidebar} title={t.app.closeMenu} aria-label={t.app.closeMenu}>×</button>
+          </div>
+        </div>
+        <SearchBar ref={searchBarRef} onSearch={handleSearch} onSelect={selectDate} entriesLoading={diary.loading} />
+        <CalendarView dates={datesSet} conflictedDates={conflictedDatesSet} selectedDate={selectedDate} onSelect={selectDate} onPrefetch={prefetchEntry} onMonthChange={prefetchMonth} holidayCountry={holidayCountry} milestones={milestones} />
+        {diary.conflictedDates.length > 0 && (
+          <div className="sidebar-status conflict" role="status">
+            <span>{t.app.conflictedDraftsNotice(diary.conflictedDates.length)}</span>
+            <div className="sidebar-conflict-dates">
+              {diary.conflictedDates.map(d => (
+                <button key={d} type="button" className="sidebar-conflict-date-btn" onClick={() => selectDate(d)}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {diary.error && <div className="sidebar-status error">{t.app.loadError}</div>}
+        {diary.queueError && <div className="sidebar-status error" role="alert">{t.app.queueStorageError}</div>}
+        {milestonesError && <div className="sidebar-status error" role="alert">{t.app.milestonesStorageError}</div>}
+        {milestonesSyncError && <div className="sidebar-status error" role="status">{t.app.milestonesSyncError}</div>}
+        {legacyRecoveryError && <div className="sidebar-status error" role="alert">{t.app.legacyRecoveryError}</div>}
+        {legacyCache && <div className="sidebar-status" role="status">{t.app.legacyCache} <button type="button" onClick={() => { void recoverOldCache() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyMirror && <div className="sidebar-status" role="status">{t.app.legacyMirror} <button type="button" onClick={() => { void recoverLegacyMirror() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyQueue && <div className="sidebar-status" role="status">{t.app.legacyQueue} <button type="button" onClick={() => { void recoverLegacyQueue() }}>{t.app.recoverLegacyData}</button></div>}
+        {legacyMilestones && <div className="sidebar-status" role="status">{t.app.legacyMilestones} {!milestonesRecoveryReady && t.app.milestonesRecoveryNeedsDrive} <button type="button" disabled={!milestonesRecoveryReady} onClick={recoverLegacyMilestones}>{t.app.recoverMilestones}</button></div>}
+        {diary.deletionCancelled && <div className="sidebar-status error" role="status">{t.app.deletionCancelled}</div>}
+        {!diary.loading && !diary.error && (initialLoadComplete && diary.dates.length === 0 || forceEmptyState) && (
+          <p className="sidebar-empty-hint">{t.app.noEntriesHint}</p>
+        )}
+        <div className="sidebar-bottom">
+          <AnimatePresence>
+            {diary.dates.length > 0 && (
+            <motion.button
+              className="btn-recollection"
+              layout
+              onClick={() => setRecollectionOpen(true)}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}>
+              <svg className="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+              <span className="recollection-label">
+                <span className="btn-text">{t.recollection.open}</span>
+                {hint && (
+                  <span className="recollection-hint">
+                    {hint.kind === 'onThisDay'
+                      ? `${t.recollection.hintOnThisDay(hint.yearsAgo)}${t.recollection.hintMore(hint.moreCount)}`
+                      : t.recollection.hintCount(hint.count)}
+                  </span>
+                )}
+              </span>
+            </motion.button>
+            )}
+          </AnimatePresence>
+          <button className="btn-help" onClick={() => setShortcutsOpen(true)} title={t.settings.keyboardShortcuts}>
+            <Keyboard className="btn-icon" size={18} strokeWidth={1.8} aria-hidden="true" />
+            <span className="sidebar-help-label">{t.settings.keyboardShortcuts}</span>
+          </button>
+          <button className="btn-account btn-settings" onClick={() => setSettingsOpen(true)} title={t.common.settings}>
+            {email && (
+              <span className="account-avatar" aria-hidden="true">
+                {email[0].toUpperCase()}
+              </span>
+            )}
+            <span className="account-meta">
+              {email && <span className="account-email">{email}</span>}
+              <span className="account-sub">{t.common.settings}</span>
+            </span>
+            <svg className="btn-icon account-gear" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+        </div>
+      </aside>
+      <AnimatePresence>
+        {settingsOpen && (
+          <Suspense fallback={null}>
+            <SettingsModal
+              autoSave={autoSave}
+              onAutoSaveToggle={handleAutoSaveToggle}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
+              accentColor={accentColor}
+              onAccentChange={setAccent}
+              fontMode={fontMode}
+              onFontToggle={toggleFont}
+              fontSize={fontSize}
+              onFontSizeChange={setFontSize}
+              holidayCountry={holidayCountry}
+              onHolidayCountryChange={setHolidayCountry}
+              dates={diary.dates}
+              onExport={diary.exportAll}
+              onImport={diary.importAll}
+              onClose={() => setSettingsOpen(false)}
+              onSignOut={handleSignOut}
+              folderRecoveryDisabled={editorDirty || tokenExpired || vaultBusy || diary.loading}
+              beforeDiaryFolderSelect={beforeDiaryFolderSelect}
+              onDiaryFolderSelected={handleDiaryFolderSelected}
+              passkeyControls={<PasskeySettings key={vaultUserId} phase={vaultPhase} userId={vaultUserId} busy={vaultBusy} error={vaultError} onAdd={addPasskey} />}
+              email={email ?? undefined}
+              googleSub={googleSub ?? undefined}
+              googleClientId={googleClientId ?? undefined}
+              milestones={milestones}
+              onMilestoneAdd={addMilestone}
+              onMilestoneUpdate={updateMilestone}
+              onMilestoneRemove={removeMilestone}
+              onMilestoneToggleBadge={toggleMilestoneBadge}
+              s3BackfillProgress={s3Backfill.backfillProgress}
+              s3LastSyncError={s3Backfill.lastSyncError}
+              s3LastSyncErrorAt={s3Backfill.lastSyncErrorAt}
+              s3BackfillActive={s3Backfill.backfillActive}
+              onS3StartBackfill={s3Backfill.startBackfill}
+              onEntryRestored={() => { void diary.refreshEntries() }}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {recollectionOpen && (
+          <Suspense fallback={null}>
+            <RecollectionJourney
+              dates={diary.dates}
+              getContent={handleGetContent}
+              serendipityPrefetch={serendipityPrefetch}
+              onSelect={(d) => {
+                setRecollectionOpen(false)
+                selectDate(d)
+              }}
+              onClose={() => setRecollectionOpen(false)}
+              getSimilar={tfIdf.getSimilar}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {shortcutsOpen && (
+          <Suspense fallback={null}>
+            <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />
+          </Suspense>
+        )}
+      </AnimatePresence>
+      <main className="main" id="main-content" tabIndex={-1}>
+        {offerRememberDevice && <RememberDevicePrompt onClose={dismissRememberDevice} />}
+        <EntryEditor
+          key={`account:${googleSub ?? email ?? 'unknown'}`}
+          date={selectedDate}
+          getContent={diary.getContent}
+          onCheckRemoteFreshness={diary.checkEntryFreshness}
+          onSave={handleSave}
+          onDelete={diary.remove}
+          onMenuClick={handleMenuClick}
+          onDirtyChange={onEditorDirtyChange}
+          autoSave={autoSave}
+          onPrevDay={onPrevDay}
+          onNextDay={onNextDay}
+          onSelectDate={selectDate}
+          pendingNavDate={pendingDate}
+          onPendingNavigate={handlePendingNavigate}
+          onCancelNavigation={handleCancelNavigation}
+          reauthSaveResult={reauthSaveResult}
+          reauthSaveFailure={reauthSaveFailure}
+          isSignedIn={!tokenExpired}
+          draftOwner={status === 'signedIn' ? email : null}
+          isOnline={isOnline}
+          onExpired={handleExpired}
+          onGoToToday={handleGoToToday}
+          refreshSignal={entryRefreshSignal}
+          knownDates={datesSet}
+          diaryListLoaded={diary.freshListLoaded}
+          holidayCountry={holidayCountry}
+          milestones={milestones}
+          onMilestoneAdd={addMilestone}
+          relatedDates={relatedDates}
+          onSelectRelated={handleSelectRelated}
+          getRelatedTokens={handleGetRelatedTokens}
+          getRecurringTopic={getRecurringTopic}
+          backDate={previousDate ?? undefined}
+          onGoBack={handleGoBack}
+          pendingSharedText={pendingSharedText}
+          folderSharing={folderSharing}
+          onConsumeSharedText={handleConsumeSharedText}
+          onS3StaleEntryDetected={handleS3StaleEntryDetected}
+        />
+      </main>
+    </div>
+    </MotionConfig>
+  )
+}

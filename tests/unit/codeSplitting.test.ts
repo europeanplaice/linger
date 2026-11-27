@@ -8,6 +8,8 @@ const DIST = resolve(ROOT, 'dist')
 const ASSETS = resolve(DIST, 'assets')
 
 const SPLITS = [
+  { name: 'AuthenticatedApp', marker: 'Skip to main content' },
+  { name: 'Japanese i18n dictionary', marker: 'Google でログイン' },
   { name: 'SettingsModal', marker: 'settings-dialog' },
   { name: 'RecollectionJourney', marker: 'recollection-dialog' },
   { name: 'HistoryModal', marker: 'history-dialog' },
