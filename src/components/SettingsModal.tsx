@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { BookOpen, CalendarDays, Check, CloudUpload, FolderOpen, HardDrive, Info, Palette, PartyPopper, UserRound, X, type LucideIcon } from 'lucide-react'
+import { AlertCircle, BookOpen, CalendarDays, Check, ChevronRight, CloudUpload, FolderOpen, HardDrive, Info, LogOut, Monitor, Moon, Palette, PartyPopper, Pencil, Sun, UserRound, X, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { ExportButton } from './ExportButton'
 import { ImportButton } from './ImportButton'
@@ -113,15 +113,11 @@ function SpinnerIcon() {
 }
 
 function CheckIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-  )
+  return <Check size={14} strokeWidth={2} aria-hidden="true" />
 }
 
 function ErrorIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-  )
+  return <AlertCircle size={14} strokeWidth={2} aria-hidden="true" />
 }
 
 interface SettingsModalProps {
@@ -646,7 +642,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               {email && <span className="settings-account-email" title={email}>{email}</span>}
             </div>
             <button className="settings-signout-btn" onClick={() => setSignOutConfirmOpen(true)}>
-              <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <LogOut size={14} strokeWidth={2} aria-hidden="true" />
               {t.app.signOut}
             </button>
           </div>
@@ -671,13 +667,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.themeLight}
                 aria-pressed={themeMode === 'light'}
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="4"/>
-                  <line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/>
-                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                  <line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/>
-                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                </svg>
+                <Sun size={15} strokeWidth={2} aria-hidden="true" />
                 <span className="settings-theme-label">{t.settings.themeLight}</span>
               </button>
               <button
@@ -687,9 +677,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.themeDark}
                 aria-pressed={themeMode === 'dark'}
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                </svg>
+                <Moon size={15} strokeWidth={2} aria-hidden="true" />
                 <span className="settings-theme-label">{t.settings.themeDark}</span>
               </button>
               <button
@@ -699,9 +687,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.themeAuto}
                 aria-pressed={themeMode === 'system'}
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-                </svg>
+                <Monitor size={15} strokeWidth={2} aria-hidden="true" />
                 <span className="settings-theme-label">{t.settings.themeAuto}</span>
               </button>
             </div>
@@ -719,7 +705,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.accentIndigo}
                 aria-pressed={accentColor === 'indigo'}
               >
-                <span className="settings-color-swatch" style={{ background: '#5c5fa8' }} />
+                <span className="settings-color-swatch" data-accent="indigo" />
                 <span className="settings-color-label">{t.settings.accentIndigo}</span>
               </button>
               <button
@@ -729,7 +715,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.accentSage}
                 aria-pressed={accentColor === 'sage'}
               >
-                <span className="settings-color-swatch" style={{ background: '#4a6a4a' }} />
+                <span className="settings-color-swatch" data-accent="sage" />
                 <span className="settings-color-label">{t.settings.accentSage}</span>
               </button>
               <button
@@ -739,7 +725,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.accentTerracotta}
                 aria-pressed={accentColor === 'terracotta'}
               >
-                <span className="settings-color-swatch" style={{ background: '#a8635c' }} />
+                <span className="settings-color-swatch" data-accent="terracotta" />
                 <span className="settings-color-label">{t.settings.accentTerracotta}</span>
               </button>
             </div>
@@ -778,7 +764,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.fontSans}
                 aria-pressed={fontMode === 'sans'}
               >
-                <span className="settings-font-sample" style={{ fontFamily: "'Inter', 'Noto Sans JP', sans-serif" }}>Aあ</span>
+                <span className="settings-font-sample" style={{ fontFamily: 'var(--font-body)' }}>Aあ</span>
                 <span className="settings-font-label">{t.settings.fontSans}</span>
               </button>
               <button
@@ -788,7 +774,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                 aria-label={t.settings.fontSerif}
                 aria-pressed={fontMode === 'serif'}
               >
-                <span className="settings-font-sample" style={{ fontFamily: "'Source Serif 4', 'Noto Serif JP', serif" }}>Aあ</span>
+                <span className="settings-font-sample" style={{ fontFamily: 'var(--font-display)' }}>Aあ</span>
                 <span className="settings-font-label">{t.settings.fontSerif}</span>
               </button>
             </div>
@@ -813,7 +799,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
           <figure className="settings-writing-preview" aria-label={t.settings.previewLabel}>
             <figcaption>{t.settings.previewLabel}</figcaption>
             <p style={{
-              fontFamily: fontMode === 'serif' ? "'Source Serif 4', 'Noto Serif JP', serif" : "'Inter', 'LINE Seed JP', sans-serif",
+              fontFamily: fontMode === 'serif' ? 'var(--font-display)' : 'var(--font-body)',
               fontSize: FONT_SIZE_VALUES[fontSize],
             }}>{t.settings.previewText}</p>
           </figure>
@@ -900,7 +886,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                     onClick={() => setListExpanded(v => !v)}
                     aria-expanded={listExpanded}
                   >
-                    <span className={`settings-milestone-toggle-chevron${listExpanded ? ' open' : ''}`} aria-hidden="true">▸</span>
+                    <ChevronRight size={14} strokeWidth={2} className={`settings-milestone-toggle-chevron${listExpanded ? ' open' : ''}`} aria-hidden="true" />
                     {listExpanded ? t.settings.milestonHideList : t.settings.milestoneShowList}
                   </button>
                 <AnimatePresence initial={false}>
@@ -908,11 +894,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                   <motion.div
                     key="list"
                     className="settings-milestone-list"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                    style={{ overflowY: 'clip', overflowX: 'visible' }}
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16, ease: 'easeOut' }}
                   >
                   <AnimatePresence initial={false}>
                     {milestones.map(a => {
@@ -922,10 +907,10 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                         <motion.div
                           key={a.id}
                           layout
-                          initial={{ opacity: 0, y: -6 }}
+                          initial={{ opacity: 0, y: -4 }}
                           animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
-                          transition={{ duration: 0.18 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.16 }}
                         >
                           <div className="settings-milestone-row">
                             <div className="settings-milestone-details">
@@ -965,7 +950,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                                   className="settings-milestone-edit"
                                   onClick={() => { setPendingDelete(null); setMilestoneModal({ mode: 'edit', milestone: a }) }}
                                   aria-label={t.settings.milestoneEdit(a.label)}
-                                >✎</button>
+                                >
+                                  <Pencil size={13} strokeWidth={1.8} aria-hidden="true" />
+                                </button>
                               )}
                               {onMilestoneRemove && (
                                 <AnimatePresence mode="wait" initial={false}>
@@ -995,7 +982,9 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
                                       animate={{ opacity: 1 }}
                                       exit={{ opacity: 0 }}
                                       transition={{ duration: 0.12 }}
-                                    >×</motion.button>
+                                    >
+                                      <X size={14} strokeWidth={1.8} aria-hidden="true" />
+                                    </motion.button>
                                   )}
                                 </AnimatePresence>
                               )}
@@ -1112,7 +1101,7 @@ export function SettingsModal({ autoSave, onAutoSaveToggle, themeMode, onThemeMo
               onClick={() => { s3SetupTouched.current = true; setS3SetupOpen(v => !v) }}
               aria-expanded={s3SetupOpen}
             >
-              <span className={`settings-milestone-toggle-chevron${s3SetupOpen ? ' open' : ''}`} aria-hidden="true">▸</span>
+              <ChevronRight size={14} strokeWidth={2} className={`settings-milestone-toggle-chevron${s3SetupOpen ? ' open' : ''}`} aria-hidden="true" />
               {s3SetupOpen ? t.settings.s3Collapse : t.settings.s3Expand}
             </button>
           </div>

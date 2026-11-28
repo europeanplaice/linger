@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CalendarDays, Clock3, Compass, Sparkles, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { haptics } from '../utils/haptics'
 import { useI18n } from '../i18n'
@@ -204,7 +205,9 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
     >
         <div className="recollection-header">
           <h2 className="recollection-title" id="recollection-title">{t.recollection.title}</h2>
-          <button className="recollection-close" onClick={onClose} aria-label={t.recollection.close}>×</button>
+          <button type="button" className="recollection-close" onClick={onClose} aria-label={t.recollection.close}>
+            <X size={18} strokeWidth={1.8} aria-hidden="true" />
+          </button>
         </div>
 
         {!hasAnything ? (
@@ -214,7 +217,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             {onThisDay.length > 0 && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">⚬</span>
+                  <CalendarDays size={14} strokeWidth={1.8} className="recollection-section-glyph" aria-hidden="true" />
                   {t.recollection.onThisDay}
                 </h3>
                 <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
@@ -231,7 +234,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             {periodic.length > 0 && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">◷</span>
+                  <Clock3 size={14} strokeWidth={1.8} className="recollection-section-glyph" aria-hidden="true" />
                   {t.recollection.aWhileAgo}
                 </h3>
                 <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
@@ -243,7 +246,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             {randomDate && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">✦</span>
+                  <Compass size={14} strokeWidth={1.8} className="recollection-section-glyph" aria-hidden="true" />
                   {t.recollection.serendipity}
                 </h3>
                 <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">
@@ -256,7 +259,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
                   })())}
                 </motion.div>
                 {randomIdx < randomQueue.length - 1 && (
-                  <button className="recollection-another" onClick={() => setRandomIdx(i => i + 1)}>
+                  <button type="button" className="recollection-another" onClick={() => setRandomIdx(i => i + 1)}>
                     {t.recollection.another}
                   </button>
                 )}
@@ -266,7 +269,7 @@ export function RecollectionJourney({ dates, getContent, serendipityPrefetch, on
             {similarDates.length > 0 && randomDate && (
               <section className="recollection-section">
                 <h3 className="recollection-section-heading">
-                  <span className="recollection-section-glyph" aria-hidden="true">≈</span>
+                  <Sparkles size={14} strokeWidth={1.8} className="recollection-section-glyph" aria-hidden="true" />
                   {t.recollection.similarDaysOf(diaryDateLabel(randomDate, true, 'long', locale, true))}
                 </h3>
                 <motion.div className="recollection-cards" variants={cardContainerVariants} initial="hidden" animate="visible">

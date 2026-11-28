@@ -267,8 +267,8 @@ test.describe('RecollectionJourney', () => {
       return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     }
 
-    // The heading is now dynamic ("Days like <date>"), so locate by the glyph ≈
-    const similarSection = page.locator('.recollection-section', { hasText: '≈' })
+    // Locate the dynamic "Similar to <date>" section by its heading prefix.
+    const similarSection = page.locator('.recollection-section', { hasText: 'Similar to ' })
     await expect(similarSection).toBeVisible()
 
     // Heading should reference the current serendipity date (rand1)
