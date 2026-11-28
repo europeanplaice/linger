@@ -66,6 +66,7 @@
   --theme-icon: var(--text-muted);
   --on-accent: #fcfbf8;
   --on-danger: #fcfbf8;
+  --switch-thumb: #fcfbf8;
   --focus-ring: var(--accent);
   --selection-bg: color-mix(in srgb, var(--accent) 28%, white);
   --selection-color: #1f1e1b;
@@ -132,6 +133,7 @@
   --warning: #e0a048;
   --on-accent: #141311;
   --on-danger: #141311;
+  --switch-thumb: #f3f0e8;
   --focus-ring: #d4a359;
   --selection-bg: color-mix(in srgb, var(--accent) 45%, #191816);
   --selection-color: #f3f0e8;
@@ -529,7 +531,7 @@ html.session-restoring .landing {
 .landing {
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-overflow-scrolling: touch;
   background: var(--bg);
 }
@@ -1003,9 +1005,9 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   z-index: 10000;
   inset: 0 0 auto;
   padding: 0.8rem 1rem;
-  color: #3d2100;
-  background: #fff1c9;
-  border-bottom: 1px solid #a87927;
+  color: var(--unsaved-text);
+  background: var(--unsaved-bg);
+  border-bottom: 1px solid var(--unsaved-border);
   line-height: 1.5;
 }
 
@@ -2096,7 +2098,7 @@ dialog.settings-dialog::backdrop {
   left: 2px;
   width: 18px;
   height: 18px;
-  background: #fff;
+  background: var(--switch-thumb);
   border-radius: 50%;
   transition: transform 0.2s;
   box-shadow: 0 1px 3px var(--shadow);
@@ -2496,10 +2498,8 @@ dialog.settings-dialog::backdrop {
   padding-top: 0.3rem;
 }
 .settings-about-title {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
   color: var(--text-muted);
   margin: 0 0 0.6rem;
 }
@@ -2519,10 +2519,8 @@ dialog.settings-dialog::backdrop {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--text-muted);
   padding: 1rem 1.35rem 0.4rem;
   margin-top: 0.5rem;
@@ -2797,7 +2795,7 @@ dialog.settings-dialog::backdrop {
   opacity: 0.45;
 }
 .settings-milestone-badge-toggle-thumb {
-  background: #fff;
+  background: var(--switch-thumb);
   border-radius: 50%;
   display: block;
   height: 0.75rem;
@@ -3061,11 +3059,9 @@ dialog.settings-dialog::backdrop {
   gap: 0.35rem;
 }
 .settings-milestone-emoji-label {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 /* EmojiPicker component */
@@ -3084,7 +3080,7 @@ dialog.settings-dialog::backdrop {
   border: 1.5px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
   font-family: inherit;
   color: var(--text-muted);
 }
@@ -3242,7 +3238,7 @@ dialog.settings-dialog::backdrop {
   font-weight: 500;
   padding: 0.45rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   text-align: center;
   font-family: inherit;
 }
@@ -4371,7 +4367,7 @@ dialog.milestone-form-dialog::backdrop {
   width: 8px;
   height: 8px;
   display: block;
-  color: #ffffff;
+  color: var(--on-accent);
   animation: badge-icon-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes badge-icon-in {
@@ -4575,7 +4571,7 @@ dialog.milestone-form-dialog::backdrop {
   width: 0.72rem;
   height: 0.72rem;
   border: 2px solid var(--spinner-border);
-  border-top-color: #fff;
+  border-top-color: var(--on-accent);
   border-radius: 50%;
   animation: save-spinner 0.75s linear infinite;
 }
@@ -5017,8 +5013,8 @@ dialog.delete-dialog p { font-size: 0.9rem; color: var(--text); line-height: 1.6
   50% { opacity: 1; }
 }
 .delete-modal-actions .btn-delete[aria-busy="true"] .btn-saving-spinner {
-  border-color: rgba(255, 255, 255, 0.45);
-  border-top-color: #fff;
+  border-color: var(--spinner-border);
+  border-top-color: var(--on-danger);
 }
 dialog.session-expired-dialog {
   border: 1px solid var(--border);
@@ -5583,8 +5579,6 @@ dialog.history-dialog::backdrop {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 .unsaved-badge {
   color: var(--unsaved-text);
@@ -6208,11 +6202,9 @@ dialog.recollection-dialog::backdrop {
   box-shadow: 0 4px 16px var(--shadow-heavy);
 }
 .recollection-card-eyebrow {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--accent);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 .recollection-card-eyebrow:empty {
   display: none;

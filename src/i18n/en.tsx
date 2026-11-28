@@ -637,7 +637,7 @@ export const en = {
     verifyStep3After: '. You can also self-host using your own Google Cloud and Cloudflare accounts.',
     ctaTitle: 'Ready to start your private diary?',
     ctaDescription: 'Connect your Google Drive and create a passkey in about a minute.',
-    ctaButton: 'Get started',
+    ctaButton: 'Start writing',
   },
 }
 
