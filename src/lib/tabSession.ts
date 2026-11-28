@@ -371,6 +371,7 @@ export function saveTabSession(): void {
 
 export async function restoreTabSession(isCurrent: () => boolean = () => true): Promise<TabSessionRestore> {
   removeLegacyStorage()
+  if (getVaultUserId()) return 'missing'
   const gen = sessionGeneration
 
   // 1. Try Split-Key device unlock (IndexedDB encrypted blob + HttpOnly cookie secret).

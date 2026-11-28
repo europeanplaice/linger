@@ -4,6 +4,11 @@ import { installMockTurnstile } from './helpers/mockTurnstile'
 import type { Env } from '../functions/_shared/session'
 import { onRequestGet as restoreSession } from '../functions/auth/passkey/session'
 import {
+  onRequestDelete as deleteDeviceUnlock,
+  onRequestGet as getDeviceUnlock,
+  onRequestPost as postDeviceUnlock,
+} from '../functions/auth/passkey/device-unlock'
+import {
   addOptions, addVerify, loginOptions, loginVerify,
   deleteCredential, listCredentials, registrationOptions, registrationVerify, renameCredential,
 } from '../functions/_shared/passkeys'
@@ -31,6 +36,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     '/add/options': addOptions, '/add/verify': addVerify,
     '/credentials/list': listCredentials, '/credentials/delete': deleteCredential, '/credentials/rename': renameCredential,
     '/session': async (request, env) => await restoreSession({ request, env } as Parameters<typeof restoreSession>[0]) as Response,
+    '/device-unlock': async (request, env) => (request.method === 'POST' ? postDeviceUnlock : request.method === 'DELETE' ? deleteDeviceUnlock : getDeviceUnlock)({ request, env } as Parameters<typeof getDeviceUnlock>[0]) as Response,
   }
   const forbiddenNetworkValues: string[] = []
   const loginVerifyStatuses: number[] = []
@@ -107,7 +113,10 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
     expect(await page.evaluate(() => (window as unknown as { passkeyName?: string }).passkeyName)).toBe('person@example.com')
-    await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
+    const rememberPrompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
+    await expect(rememberPrompt).toBeVisible()
+    await rememberPrompt.getByRole('button', { name: 'Require a passkey each time' }).click()
+    await expect(rememberPrompt).toHaveCount(0)
 
     const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)

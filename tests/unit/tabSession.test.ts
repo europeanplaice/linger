@@ -99,6 +99,22 @@ describe('split-key device unlock and cross-tab handoff', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('skips device and sibling-tab restoration when the vault is already unlocked in memory', async () => {
+    vi.stubGlobal('BroadcastChannel', MockBroadcastChannel)
+    const siblingListener = vi.fn()
+    const sibling = new MockBroadcastChannel('linger_vault_handoff')
+    sibling.addEventListener('message', siblingListener)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    unlockVaultWithKey('already-unlocked', new Uint8Array(32).fill(3))
+    expect(await restoreTabSession()).toBe('missing')
+    expect(getVaultUserId()).toBe('already-unlocked')
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(siblingListener).not.toHaveBeenCalled()
+
+    sibling.close()
+  })
+
   it('encrypts the vault key in IndexedDB with the server-issued secret and restores on reload', async () => {
     const userId = 'vault-user-1'
     const rawKey = new Uint8Array(32).map((_, i) => i + 1)
