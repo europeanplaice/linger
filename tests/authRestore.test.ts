@@ -157,8 +157,8 @@ test('keeps editor header typography stable between skeleton and loaded states',
 
   await page.goto(baseUrl)
 
-  // Entry is loading — skeleton shown in the real editor (no separate restoring screen)
-  await expect(page.locator('.entry-skeleton')).toBeVisible()
+  // Entry is loading — skeleton shown in the real editor (not the restoring fallback)
+  await expect(page.locator('.editor:not(.restoring-editor) .entry-skeleton')).toBeVisible()
 
   // Sidebar is off-screen on mobile (not forced open during loading)
   await expect.poll(async () => page.locator('.sidebar').evaluate(el => {
