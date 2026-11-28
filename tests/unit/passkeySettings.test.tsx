@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { PasskeySettings } from '../../src/components/PasskeySettings'
@@ -5,7 +6,7 @@ import { I18nProvider } from '../../src/i18n'
 import * as passkeys from '../../src/api/passkeys'
 import { retirePreviousAccounts } from '../../src/api/auth'
 import { clearTabSession } from '../../src/lib/tabSession'
-import { clearVaultKey } from '../../src/lib/passkeyVault'
+import { clearVaultKey, unlockVaultWithKey } from '../../src/lib/passkeyVault'
 
 vi.mock('../../src/api/passkeys', () => ({
   deletePasskey: vi.fn(),
@@ -29,17 +30,38 @@ beforeEach(() => {
   vi.mocked(passkeys.renamePasskey).mockResolvedValue()
 })
 
-afterEach(() => { clearTabSession(); clearVaultKey() })
+afterEach(async () => { await clearTabSession(); clearVaultKey(); vi.unstubAllGlobals() })
 
 function renderSettings() {
   return render(<I18nProvider initialLanguage="en"><PasskeySettings userId="user-id" busy={false} error={null} onAdd={async () => {}} /></I18nProvider>)
 }
 
 describe('PasskeySettings', () => {
-  it('does not offer a remembered device setting', async () => {
+  it('lets the user enable and forget skipping passkey on this device', async () => {
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000
+    const secret = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/auth/passkey/device-unlock' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ userId: 'user-id', expiresAt, secret }), { status: 200 })
+      }
+      if (url === '/auth/passkey/device-unlock' && init?.method === 'DELETE') {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
+      throw new Error(`Unexpected URL: ${url}`)
+    }))
+    unlockVaultWithKey('user-id', new Uint8Array(32).fill(4))
+
     renderSettings()
     await screen.findByText('Current sign-in passkey')
-    expect(screen.queryByRole('button', { name: 'Choose how to sign in next time' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Skip passkey on this browser' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'How long to skip passkey' }), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/Passkey skipped until:/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop skipping passkey on this device' }))
+    expect(await screen.findByText('Saved unlock key removed. Your passkey will be required next time.')).toBeTruthy()
+    expect(screen.queryByText(/Passkey skipped until:/)).toBeNull()
   })
 
   it('shows custom names and usage dates and submits a trimmed new name', async () => {

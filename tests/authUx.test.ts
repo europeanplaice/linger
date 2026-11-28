@@ -95,11 +95,65 @@ test('requires a passkey again after registration and reload', async ({ page }) 
   await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
   await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
+  const prompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: 'Require a passkey each time' }).click()
+  await expect(prompt).toHaveCount(0)
   expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
+})
+
+test('opts in to skip passkey on this browser and restores after reload', async ({ page }) => {
+  const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
+  const secret = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000
+  let loginCalls = 0
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
+  await page.route('**/src/api/passkeys.ts*', route => route.fulfill({ contentType: 'application/javascript', body: `
+    import { unlockVaultWithKey } from '/src/lib/passkeyVault.ts';
+    function unlock() { unlockVaultWithKey('${userId}', new Uint8Array(32).fill(7)); return { userId: '${userId}' }; }
+    export async function registerPasskey() { return unlock(); }
+    export async function loginWithPasskey() { throw new Error('Passkey should not be requested after opting in'); }
+    export async function addPasskey() {}
+    export async function listPasskeys() { return { credentials: [], currentCredentialId: null }; }
+    export async function renamePasskey() {}
+    export async function deletePasskey() {}
+  ` }))
+  await mockGoogleSetup(page)
+  await page.route('/auth/passkey/device-unlock', route => {
+    const method = route.request().method()
+    if (method === 'POST' || method === 'GET') {
+      return route.fulfill({ json: { userId, expiresAt, secret } })
+    }
+    return route.fulfill({ json: { ok: true } })
+  })
+  await page.route('/auth/passkey/session', route => {
+    loginCalls++
+    return route.fulfill({ json: { valid: true } })
+  })
+  await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, userId, email: 'person@example.com', googleSub: 'google-a', googleClientId: 'client' } }))
+  await page.route('/auth/refresh', route => route.fulfill({ json: { accessToken: 'renewed', idToken: 'renewed-id', expiresAt: Date.now() + 3600000 } }))
+  await page.route('/api/**', route => route.fulfill({ status: 404, body: '{}' }))
+  await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
+
+  await page.goto(baseUrl)
+  await page.getByRole('button', { name: 'Get started with a Google account' }).click()
+  await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
+  await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
+  await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+
+  const prompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
+  await prompt.getByRole('checkbox', { name: 'Skip passkey on this browser' }).check()
+  await prompt.getByRole('combobox', { name: 'How long to skip passkey' }).selectOption('7')
+  await prompt.getByRole('button', { name: 'Save' }).click()
+  await expect(prompt).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.locator('textarea.editor-textarea')).toBeVisible()
+  expect(loginCalls).toBe(1)
 })

@@ -112,11 +112,17 @@
     to your browser and passkey provider so you can identify the credential. OAuth access, refresh, and identity tokens and
     AWS temporary credentials are not persisted in session records. Short-lived Google tokens are
     held in browser memory and sent with authorized requests; the backend uses them transiently.
-    Reloading requires passkey unlock, after which the saved refresh token can restore
-    Google access. Earlier versions offered a device session that saved the unlocked key in browser
-    storage; Linger removes that saved key when this version starts. New session records expire 30 days after
-    creation or renewal. Sign-out invalidates the session. Metadata keys are used only in request
-    memory, including on the backend when needed.
+    Reloading requires passkey unlock by default, after which the saved refresh token can restore
+    Google access. While another Linger tab is open and unlocked in the same browser, a new tab can
+    obtain the in-memory unlock key from that tab after verifying the active server session, without
+    writing keys to storage. If you explicitly opt in to skipping passkeys on a personal device
+    (for 1 or 7 days), the unlock key is encrypted in IndexedDB and the separate wrapping secret is
+    kept only in an <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code>
+    <code>linger_device_unlock</code> cookie scoped to <code>/auth/passkey/device-unlock</code> and
+    never stored in server databases. Signing out, locking, or revoking the session stops automatic
+    unlock, and legacy browser-storage records from earlier versions are removed on launch. New
+    session records expire 30 days after creation or renewal. Sign-out invalidates the session.
+    Metadata keys are used only in request memory, including on the backend when needed.
     The browser's opaque <code>linger_session</code> cookie identifies the metadata record and
     cannot authorize Drive access by itself. On HTTPS it is <code>HttpOnly</code>,
     <code>Secure</code>, and <code>SameSite=Strict</code>.

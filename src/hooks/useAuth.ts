@@ -4,9 +4,10 @@ import { accountIdentity, announceAccount, getAccountSnapshot, invalidateAccount
 import { clearOAuthCredentials, getOAuthCredentials } from '../lib/oauthCredentials'
 import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
-import { clearTabSession, enableTabSession, restoreTabSession, saveTabSession } from '../lib/tabSession'
+import { clearTabSession, enableTabSession, restoreTabSession } from '../lib/tabSession'
 import type { RememberDays } from '../lib/tabSession'
-import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
+import { rememberDevicePromptDismissal, shouldOfferRememberDevicePrompt } from '../lib/rememberDevicePrompt'
+import { broadcastVaultLock, subscribeVaultHandoff } from '../lib/vaultHandoff'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
 import { hasRegisteredPasskey } from '../lib/passkeyRegistrationHistory'
@@ -104,8 +105,7 @@ export function useAuth(): AuthState {
     setOfferRememberDevice(false)
   }, [])
   const offerRememberDeviceChoice = useCallback((remember: RememberDays) => {
-    void remember
-    setOfferRememberDevice(false)
+    setOfferRememberDevice(!remember && !rememberDevicePromptDismissed.current && shouldOfferRememberDevicePrompt())
   }, [])
   const googleRetryInFlight = useRef(false)
   const vaultRevision = useRef(0)
@@ -114,6 +114,24 @@ export function useAuth(): AuthState {
   const restoring = useRef(true)
   // Only skip forced consent after a refresh has proved the stored credential works.
   const needsGoogleCredential = useRef(true)
+
+  const lockVaultLocal = useCallback(() => {
+    setOfferRememberDevice(false)
+    setGoogleConnection('idle')
+    setSavedSessionConnection('idle')
+    setVaultPhase(null)
+    needsGoogleCredential.current = true
+    vaultRevision.current++
+    vaultOperation.current?.abort()
+    vaultOperation.current = null
+    clearVaultKey()
+    clearOAuthCredentials()
+    clearPendingGoogleCredential()
+    setSetupEmail(null)
+    setVaultUserId(null)
+    setVaultStatus('locked')
+    setVaultBusy(false)
+  }, [])
 
   const retryGoogleConnection = useCallback(async () => {
     const userId = getVaultUserId()
@@ -125,7 +143,7 @@ export function useAuth(): AuthState {
       if (authVersion !== authRevision.current || vaultVersion !== vaultRevision.current) return false
       if (userId === getVaultUserId()) return true
       if (!getVaultUserId()) {
-        clearTabSession()
+        void clearTabSession({ keepCookie: true })
         setVaultUserId(null)
         setVaultStatus('locked')
         setStatus('signedOut')
@@ -175,7 +193,7 @@ export function useAuth(): AuthState {
       vaultOperation.current?.abort()
       vaultOperation.current = null
       clearVaultKey()
-      clearTabSession()
+      void clearTabSession({ keepCookie: true })
       clearPendingGoogleCredential()
       setVaultUserId(null)
       setVaultStatus('locked')
@@ -191,6 +209,13 @@ export function useAuth(): AuthState {
     })
     return unsubscribe
   }, [])
+
+  useEffect(() => subscribeVaultHandoff({
+    onLocked: () => {
+      lockVaultLocal()
+      void clearTabSession({ keepCookie: true, broadcast: false })
+    },
+  }), [lockVaultLocal])
 
   useEffect(() => {
     const clearOnPageExit = () => {
@@ -294,7 +319,6 @@ export function useAuth(): AuthState {
       if (!connectionUnavailable || info.signedIn) rememberSession(info.signedIn)
       if (!info.signedIn) {
         if (!connectionUnavailable) clearOAuthCredentials()
-        if (getVaultUserId()) saveTabSession()
       }
       setStatus(info.signedIn ? 'signedIn' : 'signedOut')
       setEmail(info.email)
@@ -318,13 +342,12 @@ export function useAuth(): AuthState {
     setSigningIn(true)
     const pendingSignIn = startSignIn({ selectAccount: Boolean(options.selectAccount), renew: needsGoogleCredential.current })
     // Do not retain the previous Google credentials during account switching.
-    saveTabSession()
     pendingSignIn.then(async info => {
       if (revision !== authRevision.current) return
       const unlockedUserId = getVaultUserId()
       if (info.userId && unlockedUserId && info.userId !== unlockedUserId) {
         clearVaultKey()
-        clearTabSession()
+        void clearTabSession({ keepCookie: true })
         setVaultUserId(null)
         setVaultStatus('locked')
         throw new Error('vault_account_mismatch')
@@ -332,7 +355,7 @@ export function useAuth(): AuthState {
       if (options.expectedGoogleSub !== undefined && info.googleSub !== options.expectedGoogleSub) {
         clearOAuthCredentials()
         clearVaultKey()
-        clearTabSession()
+        void clearTabSession({ keepCookie: true })
         setVaultUserId(null)
         setVaultStatus('locked')
         throw new Error('account_mismatch')
@@ -348,7 +371,6 @@ export function useAuth(): AuthState {
       setActiveAccount(account, getAccountSnapshot().account !== account, info.email)
       announceAccount(account)
       rememberSession(true)
-      saveTabSession()
       setEmail(info.email)
       setGoogleSub(info.googleSub)
       setGoogleClientId(info.googleClientId)
@@ -437,8 +459,8 @@ export function useAuth(): AuthState {
         if (revision !== vaultRevision.current) return
       }
       if (action !== 'add') {
-        clearTabSession()
-        if (remember) { enableTabSession(remember); saveTabSession() }
+        if (remember) await enableTabSession(remember).catch(() => {})
+        else void clearTabSession()
       }
       if (action !== 'add') {
         if (action === 'unlock') {
@@ -505,23 +527,10 @@ export function useAuth(): AuthState {
   const unlockPasskey = useCallback((remember: RememberDays = 0, preferImmediate = false, token?: string | Promise<string>) => runVaultAction('unlock', remember, preferImmediate, false, token), [runVaultAction])
   const addPasskey = useCallback(() => runVaultAction('add'), [runVaultAction])
   const lockVault = useCallback(() => {
-    setOfferRememberDevice(false)
-    setGoogleConnection('idle')
-    setSavedSessionConnection('idle')
-    setVaultPhase(null)
-    needsGoogleCredential.current = true
-    vaultRevision.current++
-    vaultOperation.current?.abort()
-    vaultOperation.current = null
-    clearVaultKey()
-    clearTabSession()
-    clearOAuthCredentials()
-    clearPendingGoogleCredential()
-    setSetupEmail(null)
-    setVaultUserId(null)
-    setVaultStatus('locked')
-    setVaultBusy(false)
-  }, [])
+    lockVaultLocal()
+    broadcastVaultLock()
+    void clearTabSession({ clearRemote: true })
+  }, [lockVaultLocal])
   const clearVaultError = useCallback(() => setVaultError(null), [])
 
   const signOut = useCallback(() => {
@@ -540,7 +549,7 @@ export function useAuth(): AuthState {
     vaultOperation.current?.abort()
     vaultOperation.current = null
     clearVaultKey()
-    clearTabSession()
+    void clearTabSession({ keepCookie: true })
     setVaultUserId(null)
     setVaultStatus('locked')
     setVaultBusy(false)
@@ -556,7 +565,6 @@ export function useAuth(): AuthState {
 
   const markExpired = useCallback((recover: boolean) => {
     clearOAuthCredentials()
-    saveTabSession()
     if (recover && !tokenExpiredRef.current) setExpiryRecovering(true)
     if (!recover) setExpiryRecovering(false)
     tokenExpiredRef.current = true

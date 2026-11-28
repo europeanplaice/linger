@@ -12,7 +12,7 @@ vi.mock('../../src/api/auth', () => ({
 }))
 vi.mock('../../src/api/passkeys', () => ({ registerPasskey: mocks.register, loginWithPasskey: mocks.login, addPasskey: vi.fn() }))
 vi.mock('../../src/lib/passkeyVault', () => ({ getVaultUserId: mocks.vaultId, clearVaultKey: vi.fn() }))
-vi.mock('../../src/lib/tabSession', () => ({ clearTabSession: vi.fn(), enableTabSession: vi.fn(), restoreTabSession: vi.fn().mockResolvedValue('missing'), saveTabSession: vi.fn() }))
+vi.mock('../../src/lib/tabSession', () => ({ clearTabSession: vi.fn().mockResolvedValue(undefined), enableTabSession: vi.fn().mockResolvedValue(0), restoreTabSession: vi.fn().mockResolvedValue('missing'), saveTabSession: vi.fn() }))
 
 beforeEach(() => {
   localStorage.clear()
@@ -59,6 +59,8 @@ describe('Google-first registration', () => {
     expect(mocks.refresh).toHaveBeenCalledWith()
     expect(mocks.start).not.toHaveBeenCalled()
     expect(result.current.status).toBe('signedIn')
+    expect(result.current.offerRememberDevice).toBe(true)
+    act(() => result.current.dismissRememberDevice())
     expect(result.current.offerRememberDevice).toBe(false)
     mocks.start.mockResolvedValue({ signedIn: true, userId: 'existing-vault', email: 'person@example.com', googleSub: 'sub' })
     await act(async () => { result.current.signIn(); await Promise.resolve() })

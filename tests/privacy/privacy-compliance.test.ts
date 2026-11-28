@@ -15,6 +15,8 @@ import { unlockVaultWithKey, clearVaultKey } from '../../src/lib/passkeyVault'
 import { createPasskeyTestEnv } from '../helpers/passkeyAuth'
 import { revokeSession, startSignIn } from '../../src/api/auth'
 import { openVaultValue, sealVaultValue } from '../../functions/_shared/vaultCrypto'
+import { onRequestPost as issueDeviceUnlock } from '../../functions/auth/passkey/device-unlock'
+import { DEVICE_UNLOCK_COOKIE, DEVICE_UNLOCK_PATH } from '../../functions/_shared/deviceUnlock'
 
 const accessToken = 'sentinel-google-access-token'
 const refreshToken = 'sentinel-google-refresh-token'
@@ -127,6 +129,36 @@ describe('OAuth persistence boundary', () => {
     expect(legacyAuthEnabled(env)).toBe(false)
     expect(await getSession('legacy-session', env)).toBeNull()
     expect(get).not.toHaveBeenCalled()
+  })
+
+  it('issues split-key device-unlock secrets in an HttpOnly scoped cookie without storing them in D1', async () => {
+    const { env, db, headers, key } = await createPasskeyTestEnv({ google_sub: 'sentinel-sub' })
+    try {
+      const beforeSessions = db.prepare('SELECT * FROM auth_sessions').all()
+      const beforeUsers = db.prepare('SELECT * FROM passkey_users').all()
+      const response = await issueDeviceUnlock({
+        request: new Request(`https://example.com${DEVICE_UNLOCK_PATH}`, {
+          method: 'POST',
+          headers: { ...headers, Origin: 'https://example.com', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days: 7 }),
+        }),
+        env,
+      } as never)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Cache-Control')).toBe('no-store')
+      const cookie = response.headers.get('Set-Cookie') ?? ''
+      expect(cookie).toContain(`${DEVICE_UNLOCK_COOKIE}=`)
+      expect(cookie).toContain('HttpOnly')
+      expect(cookie).toContain('Secure')
+      expect(cookie).toContain('SameSite=Strict')
+      expect(cookie).toContain(`Path=${DEVICE_UNLOCK_PATH}`)
+      const payload = await response.json() as { secret: string }
+      const dump = JSON.stringify({ sessions: db.prepare('SELECT * FROM auth_sessions').all(), users: db.prepare('SELECT * FROM passkey_users').all() })
+      expect(db.prepare('SELECT * FROM auth_sessions').all()).toEqual(beforeSessions)
+      expect(db.prepare('SELECT * FROM passkey_users').all()).toEqual(beforeUsers)
+      expect(dump).not.toContain(payload.secret)
+      expect(dump).not.toContain(key)
+    } finally { db.close() }
   })
 })
 

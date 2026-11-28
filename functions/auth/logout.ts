@@ -1,3 +1,4 @@
+import { clearDeviceUnlockCookie } from '../_shared/deviceUnlock'
 import type { Env } from '../_shared/session'
 import { getPasskeySessionUserId } from '../_shared/authStore'
 import { parseSessionId, getSession, validateRequestAccount, invalidateSession, clearSessionCookie, validateMutationOrigin, jsonResponse } from '../_shared/session'
@@ -19,7 +20,13 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
     await invalidateSession(sessionId, undefined, env)
   }
-  return jsonResponse({ ok: true }, 200, {
-    'Set-Cookie': clearSessionCookie(!env.SESSION_DOMAIN.startsWith('http://')),
+  const secure = !env.SESSION_DOMAIN.startsWith('http://')
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
   })
+  headers.append('Set-Cookie', clearSessionCookie(secure))
+  headers.append('Set-Cookie', clearDeviceUnlockCookie(secure))
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers })
 }

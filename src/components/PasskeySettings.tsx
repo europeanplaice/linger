@@ -6,6 +6,10 @@ import type { PasskeyCredentialSummary } from '../api/passkeys'
 import { useI18n } from '../i18n'
 import { authFeedback } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
+import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
+import { clearTabSession, getDeviceSessionExpiry, readDeviceSessionExpiry } from '../lib/tabSession'
+import { subscribeVaultHandoff } from '../lib/vaultHandoff'
+import { RememberDevicePrompt } from './RememberDevicePrompt'
 
 export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId: string | null; busy: boolean; error: string | null; onAdd: () => Promise<void>; phase?: PasskeyPhase | null }) {
   const { t, language } = useI18n()
@@ -17,6 +21,9 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
   const [status, setStatus] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deviceExpiry, setDeviceExpiry] = useState<number | null>(() => getDeviceSessionExpiry(userId ?? undefined))
+  const [choosingSignIn, setChoosingSignIn] = useState(false)
+  const [forgetting, setForgetting] = useState(false)
   const [renaming, setRenaming] = useState<PasskeyCredentialSummary | null>(null)
   const [name, setName] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -27,6 +34,26 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const renameDialog = useRef<HTMLDialogElement>(null)
+  const signInChoiceButton = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const sync = () => {
+      void readDeviceSessionExpiry(userId ?? undefined).then(expiry => {
+        if (!cancelled) setDeviceExpiry(expiry)
+      })
+    }
+    sync()
+    const timer = deviceExpiry ? setTimeout(sync, Math.max(0, deviceExpiry - Date.now())) : undefined
+    window.addEventListener('focus', sync)
+    const unsubscribe = subscribeVaultHandoff({ onDeviceSessionChanged: sync })
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      window.removeEventListener('focus', sync)
+      unsubscribe()
+    }
+  }, [userId, deviceExpiry])
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!userId) {
@@ -153,6 +180,22 @@ export function PasskeySettings({ userId, busy, error, onAdd, phase }: { userId:
         </li>
       })}
     </ul>}
+    {deviceExpiry && <>
+      <p>{t.login.passkeyRememberUntil}: {new Intl.DateTimeFormat(language === 'ja' ? 'ja-JP' : 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(deviceExpiry)}</p>
+      <button className="passkey-device-btn" type="button" disabled={busy || forgetting} onClick={() => {
+        setForgetting(true)
+        void clearTabSession({ clearRemote: true })
+          .then(() => { setDeviceExpiry(null); setStatus(t.login.passkeyForgotDevice) })
+          .finally(() => setForgetting(false))
+      }}>{t.login.passkeyForgetDevice}</button>
+    </>}
+    <button ref={signInChoiceButton} className="passkey-device-btn" type="button" disabled={busy || !userId || forgetting} aria-expanded={choosingSignIn} onClick={() => setChoosingSignIn(value => !value)}>{t.login.passkeyRememberPrompt}</button>
+    {choosingSignIn && <RememberDevicePrompt onClose={() => {
+      rememberDevicePromptDismissal()
+      setChoosingSignIn(false)
+      void readDeviceSessionExpiry(userId ?? undefined).then(setDeviceExpiry)
+      signInChoiceButton.current?.focus()
+    }} />}
     {error && <p role={error === 'cancelled' ? 'status' : 'alert'}>{authFeedback(error, t.login)}</p>}
     {status && <p role="status">{status}</p>}
     {userId && <details className="passkey-recovery-settings" onToggle={event => { if (!event.currentTarget.open) setRecoveryConfirmed(false) }}>

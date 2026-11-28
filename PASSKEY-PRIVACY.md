@@ -34,12 +34,24 @@ The user's master key and Google credentials may be used in request memory.
 Authenticated requests send the master key to this origin over HTTPS, together
 with the expected internal account ID. These values must never be logged,
 persisted on the server, placed in workflow input/output, or retained in server global state.
-Browser keys and plaintext OAuth credentials are memory-only. A passkey-protected
-refresh token in D1 can restore Google access after unlock. Earlier releases could
-save an unlocked key in browser storage; current code removes those records on launch
-and does not restore them. Copies outside live browser storage are not erased by this
-cleanup. Scripts running on the origin can access keys while unlocked; users of shared
-devices should explicitly sign out.
+Browser keys and plaintext OAuth credentials are memory-only by default. A
+passkey-protected refresh token in D1 can restore Google access after unlock.
+While another same-origin Linger tab is already unlocked, a newly opened tab
+can request the in-memory vault key over `BroadcastChannel` and must verify it
+against the active D1 session before unlocking; nothing is written to storage for
+tab handoff. If the user explicitly opts in to "Skip passkey on this browser"
+(1 or 7 days, fixed expiration, disabled by default), the vault key is encrypted
+with AES-256-GCM in a dedicated `linger-device-unlock` IndexedDB database while
+the 256-bit wrapping secret is stored only in an `HttpOnly`, `Secure`,
+`SameSite=Strict` cookie scoped to `/auth/passkey/device-unlock` and never
+stored in D1, KV, Durable Objects, or logs. Signing out, locking the vault,
+removing the passkey, or a RISC revocation invalidates the session and blocks
+further automatic unlock. Scripts running on the origin can access keys while
+unlocked (or request automatic unlock while opted in); users of shared devices
+should leave this disabled and explicitly sign out. Legacy key records from
+earlier releases in `localStorage`/`sessionStorage` are removed on launch and
+never restored. Copies outside live browser storage are not erased by this
+cleanup.
 
 ## Stored data
 

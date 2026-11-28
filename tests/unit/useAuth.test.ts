@@ -169,6 +169,7 @@ describe('useAuth', () => {
     let resolve!: (info: { signedIn: boolean; email: string }) => void
     mockCheckSession.mockReturnValue(new Promise(r => { resolve = r }))
     const { result } = renderHook(() => useAuth())
+    await waitFor(() => expect(mockCheckSession).toHaveBeenCalledTimes(1))
     act(() => {
       localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify({ id: 'new-account', account: 'sub:b' }))
       window.dispatchEvent(new StorageEvent('storage', { key: AUTH_EVENT_KEY }))
