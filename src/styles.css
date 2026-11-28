@@ -1649,7 +1649,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   transition: background 0.15s ease;
 }
 .btn-account:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 .btn-account:hover .account-gear {
   transform: rotate(20deg);
@@ -1659,14 +1659,14 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   outline-offset: -2px;
 }
 .account-avatar {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--accent) 18%, var(--sidebar-bg));
+  background: color-mix(in srgb, var(--accent) 16%, var(--sidebar-bg));
   color: var(--accent);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
   flex: 0 0 auto;
 }
@@ -6043,22 +6043,20 @@ dialog.history-dialog::backdrop {
   align-items: center;
   gap: 0.55rem;
   width: calc(100% - 2rem);
-  margin: 0.65rem 1rem 0.25rem;
+  margin: 0.35rem 1rem 0;
   background: transparent;
   border: none;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 0 4px 4px 0;
+  border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
   font-size: var(--font-size-diary-control);
   font-family: inherit;
   padding: 0.45rem 0.7rem;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s;
   min-height: 44px;
 }
 .btn-recollection:hover {
   color: var(--accent);
-  border-left-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 .btn-recollection:focus-visible {
@@ -6353,16 +6351,16 @@ dialog.shortcuts-dialog::backdrop {
   min-height: 44px;
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: 4px;
   color: var(--text-muted);
   cursor: pointer;
   font-family: inherit;
-  padding: 0.55rem 1rem;
+  padding: 0.45rem 0.7rem;
   transition: color 0.15s, background 0.15s;
 }
 .btn-help:hover {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 .btn-help:focus-visible {
   outline: 2px solid var(--accent);
@@ -6380,14 +6378,14 @@ dialog.shortcuts-dialog::backdrop {
 .sidebar-bottom > .btn-account {
   width: calc(100% - 2rem);
   margin-inline: 1rem;
-}
-.sidebar-bottom > .btn-help,
-.sidebar-bottom > .btn-account {
-  padding-inline: 0.7rem;
+  border-radius: 4px;
+  padding: 0.45rem 0.7rem;
 }
 .sidebar-bottom > .btn-recollection {
-  margin-block-start: 0.35rem;
-  margin-block-end: 0.1rem;
+  margin-block: 0;
+}
+.sidebar-bottom > .btn-account {
+  margin-bottom: 0.5rem;
 }
 
 /* dialog:not([open]) must come after all specific dialog rules (equal specificity,
