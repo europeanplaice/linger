@@ -29,7 +29,7 @@ import { useSwipeNav } from '../hooks/useSwipeNav'
 import { useHolidays } from '../hooks/useHolidays'
 import type { HolidayCountry } from '../utils/holidays'
 import { haptics } from '../utils/haptics'
-import { Clock3, CloudUpload, ExternalLink, Flag, Lightbulb, MoreHorizontal, RefreshCw, Share2, Sparkles, Trash2 } from 'lucide-react'
+import { Clock3, CloudUpload, ExternalLink, Flag, MoreHorizontal, RefreshCw, Share2, Sparkles, Trash2, X } from 'lucide-react'
 
 const dayNavWhileTap = { scale: 0.82 }
 const dayNavTransition = { type: 'spring' as const, stiffness: 600, damping: 25 }
@@ -2277,100 +2277,89 @@ export function EntryEditor({ date, getContent, onCheckRemoteFreshness, onSave, 
       </div>
       <div className="editor-footer" ref={footerRef}>
       {draftWriteFailed && <p role="alert">{t.entry.draftWriteFailed}</p>}
-      {!loading && !loadFailed && !isNewEmptyEntry && (
-        <div className="editor-charcount" aria-hidden="true">
-          {t.entry.charCount(charCount)}
-        </div>
-      )}
-      {!loading && !loadFailed && (
-        <div className="editor-idea">
-          {!ideaOpen ? (
+      {!loading && !loadFailed && (!isNewEmptyEntry || !ideaOpen) && (
+        <div className="editor-footer-meta">
+          {!ideaOpen && (
             <button
               type="button"
               className="editor-idea-trigger"
               onClick={() => setIdeaOpen(true)}
               onPointerDown={preventFocusSteal}
             >
-              <Lightbulb size={13} strokeWidth={1.8} aria-hidden="true" />
               {t.entry.wantIdea}
             </button>
-          ) : currentIdea && (
-            <div className="editor-idea-card">
-              {currentIdea.kind === 'memory' ? (
-                <>
-                  <p className="editor-idea-text">
-                    {t.recollection.hintOnThisDay(Number(date.slice(0, 4)) - Number(currentIdea.date.slice(0, 4)))}
-                  </p>
-                  {ideaMemoryLoading ? (
-                    <div className="editor-idea-skeleton" aria-hidden="true" />
-                  ) : (
-                    <p className="editor-idea-excerpt">{excerpt(ideaMemoryContent ?? '', 160)}</p>
-                  )}
-                  <div className="editor-idea-actions">
-                    <button
-                      type="button"
-                      className="editor-idea-action"
-                      onClick={() => setPreviewDate(currentIdea.date)}
-                      onPointerDown={preventFocusSteal}
-                    >
-                      {t.entry.ideaViewFull}
-                    </button>
-                    {ideaCandidates.length > 1 && (
-                      <button
-                        type="button"
-                        className="editor-idea-icon-btn"
-                        aria-label={t.entry.ideaAnother}
-                        onClick={handleShuffleIdea}
-                        onPointerDown={preventFocusSteal}
-                      >
-                        <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="editor-idea-icon-btn"
-                      aria-label={t.common.close}
-                      onClick={() => setIdeaOpen(false)}
-                      onPointerDown={preventFocusSteal}
-                    >×</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="editor-idea-text">{currentIdea.text}</p>
-                  <div className="editor-idea-actions">
-                    <button
-                      type="button"
-                      className="editor-idea-action"
-                      onClick={handleUseIdea}
-                      onPointerDown={preventFocusSteal}
-                    >
-                      {isEntryEmpty ? t.entry.ideaUsePrompt : t.entry.ideaUsePromptAppend}
-                    </button>
-                    {ideaCandidates.length > 1 && (
-                      <button
-                        type="button"
-                        className="editor-idea-icon-btn"
-                        aria-label={t.entry.ideaAnother}
-                        onClick={handleShuffleIdea}
-                        onPointerDown={preventFocusSteal}
-                      >
-                        <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="editor-idea-icon-btn"
-                      aria-label={t.common.close}
-                      onClick={() => setIdeaOpen(false)}
-                      onPointerDown={preventFocusSteal}
-                    >×</button>
-                  </div>
-                </>
-              )}
+          )}
+          {!isNewEmptyEntry && (
+            <div className="editor-charcount" aria-hidden="true">
+              {t.entry.charCount(charCount)}
             </div>
           )}
         </div>
+      )}
+      {!loading && !loadFailed && (
+        <AnimatePresence initial={false}>
+          {ideaOpen && currentIdea && (
+            <motion.div
+              className="editor-idea"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 2 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
+            >
+              <div className="editor-idea-card">
+                {currentIdea.kind === 'memory' ? (
+                  <>
+                    <p className="editor-idea-text">
+                      {t.recollection.hintOnThisDay(Number(date.slice(0, 4)) - Number(currentIdea.date.slice(0, 4)))}
+                    </p>
+                    {ideaMemoryLoading ? (
+                      <div className="editor-idea-skeleton" aria-hidden="true" />
+                    ) : (
+                      <p className="editor-idea-excerpt">{excerpt(ideaMemoryContent ?? '', 160)}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="editor-idea-text">{currentIdea.text}</p>
+                )}
+                <div className="editor-idea-actions">
+                  <button
+                    type="button"
+                    className="editor-idea-action"
+                    onClick={currentIdea.kind === 'memory'
+                      ? () => setPreviewDate(currentIdea.date)
+                      : handleUseIdea}
+                    onPointerDown={preventFocusSteal}
+                  >
+                    {currentIdea.kind === 'memory'
+                      ? t.entry.ideaViewFull
+                      : (isEntryEmpty ? t.entry.ideaUsePrompt : t.entry.ideaUsePromptAppend)}
+                  </button>
+                  {ideaCandidates.length > 1 && (
+                    <button
+                      type="button"
+                      className="editor-idea-icon-btn editor-idea-another"
+                      aria-label={t.entry.ideaAnother}
+                      onClick={handleShuffleIdea}
+                      onPointerDown={preventFocusSteal}
+                    >
+                      <RefreshCw size={12} strokeWidth={1.8} aria-hidden="true" />
+                      <span>{t.entry.ideaAnother}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="editor-idea-icon-btn editor-idea-close"
+                    aria-label={t.common.close}
+                    onClick={() => setIdeaOpen(false)}
+                    onPointerDown={preventFocusSteal}
+                  >
+                    <X size={14} strokeWidth={1.8} aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       )}
       {relatedDates && relatedDates.length > 0 && !loading && !loadFailed && (
         <div className="editor-related">

@@ -5089,19 +5089,28 @@ dialog.session-expired-dialog::backdrop {
   0% { background-position: 120% 0; }
   100% { background-position: -120% 0; }
 }
-.editor-charcount {
-  text-align: right;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  padding: 0.35rem 0 0;
-  user-select: none;
-  pointer-events: none;
-  min-height: 1.2em;
+.editor-footer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0 0.15rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  margin-top: 0.25rem;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   position: relative;
   z-index: 2;
+}
+.editor-charcount {
+  margin-left: auto;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  user-select: none;
+  pointer-events: none;
+  min-height: 1.2em;
 }
 .editor-back-bar {
   display: flex;
@@ -5163,50 +5172,51 @@ dialog.session-expired-dialog::backdrop {
   display: none;
 }
 .editor-idea {
-  padding: 0.5rem 0 0.15rem;
-  border-top: 1px solid var(--border);
+  padding: 0.35rem 0 0.2rem;
+}
+.editor-idea:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   margin-top: 0.25rem;
+  padding-top: 0.55rem;
 }
 .editor-idea-trigger {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 4px;
-  padding: 0.28rem 0.65rem;
+  padding: 0.25rem 0.45rem;
+  margin-left: -0.45rem;
   cursor: pointer;
   font-family: inherit;
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  transition: background-color 0.15s, color 0.15s;
 }
 .editor-idea-trigger:hover {
-  color: var(--accent);
+  color: var(--text);
   background: var(--selected-bg);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 .editor-idea-card {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.7rem 0.85rem;
-  background: var(--sidebar-bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  gap: 0.5rem;
+  padding: 0.15rem 0 0.15rem 0.85rem;
+  border-left: 2px solid var(--border);
 }
 .editor-idea-text {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   color: var(--text);
-  line-height: 1.4;
+  line-height: 1.55;
 }
 .editor-idea-excerpt {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
-  line-height: 1.4;
-  font-style: italic;
+  line-height: 1.55;
 }
 .editor-idea-skeleton {
   height: 0.85rem;
@@ -5220,41 +5230,66 @@ dialog.session-expired-dialog::backdrop {
 .editor-idea-actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .editor-idea-action {
+  position: relative;
   font-size: 0.76rem;
   color: var(--accent);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 4px;
-  padding: 0.28rem 0.65rem;
+  padding: 0.26rem 0.6rem;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 .editor-idea-action:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .editor-idea-icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
+  gap: 0.3rem;
+  padding: 0.26rem 0.45rem;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 999px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
+  font-family: inherit;
+  font-size: 0.76rem;
+  line-height: 1.2;
   transition: background-color 0.15s, color 0.15s;
 }
 .editor-idea-icon-btn:hover {
   background: var(--selected-bg);
   color: var(--text);
+}
+.editor-idea-close {
+  margin-left: auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-radius: 999px;
+}
+.editor-idea-trigger:focus-visible,
+.editor-idea-action:focus-visible,
+.editor-idea-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .editor-idea-trigger::after,
+  .editor-idea-action::after,
+  .editor-idea-icon-btn::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
 }
 
 @property --entry-date-mask-start {
