@@ -42,7 +42,9 @@ describe('authentication guidance', () => {
   })
   it('offers registration and passkey help without asking for a passkey first', () => {
     const actions = gate()
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    const remember = screen.getByRole('checkbox', { name: 'Skip passkey on this browser' }) as HTMLInputElement
+    expect(remember.checked).toBe(false)
+    expect(screen.queryByRole('radiogroup')).toBeNull()
     expect(screen.getByText('Already have a passkey?')).toBeTruthy()
     expect(screen.getByText('New to Linger? Connect Google & create a passkey')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Get started with a Google account' })).toBeTruthy()
@@ -54,6 +56,22 @@ describe('authentication guidance', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Get started with a Google account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' }))
     expect(actions.onBeginSetup).toHaveBeenCalledWith(false)
+  })
+
+  it('lets returning users opt in to skip passkey for 1 or 7 days from the sign-in screen', () => {
+    const oneDay = gate()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Skip passkey on this browser' }))
+    expect(screen.getByRole('radiogroup', { name: 'How long to skip passkey' })).toBeTruthy()
+    expect((screen.getByRole('radio', { name: '1 day' }) as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
+    expect(oneDay.onUnlock).toHaveBeenCalledWith(1, true, 'test-token')
+    oneDay.unmount()
+
+    const sevenDays = gate()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Skip passkey on this browser' }))
+    fireEvent.click(screen.getByRole('radio', { name: '7 days' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
+    expect(sevenDays.onUnlock).toHaveBeenCalledWith(7, true, 'test-token')
   })
 
   it('offers explicit alternatives after dismissal and retries with the full browser chooser', () => {

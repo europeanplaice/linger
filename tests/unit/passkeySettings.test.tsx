@@ -55,7 +55,7 @@ describe('PasskeySettings', () => {
     await screen.findByText('Current sign-in passkey')
     fireEvent.click(screen.getByRole('button', { name: 'Choose how to sign in next time' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Skip passkey on this browser' }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'How long to skip passkey' }), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('radio', { name: '7 days' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText(/Passkey skipped until:/)).toBeTruthy()

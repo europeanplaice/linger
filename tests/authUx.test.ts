@@ -25,7 +25,8 @@ test('shows registration and recovery before asking for a passkey', async ({ pag
   await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Get started with a Google account' })).toBeVisible()
   await expect(page.getByText('Having trouble with your passkey?', { exact: true })).toBeVisible()
-  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByRole('checkbox', { name: 'Skip passkey on this browser' })).not.toBeChecked()
+  await expect(page.getByRole('radiogroup')).toHaveCount(0)
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Choose how to continue' })).toBeFocused()
   await expect(page.getByRole('button', { name: 'Get started with a Google account' })).toBeVisible()
@@ -59,7 +60,7 @@ test('mobile recovery keeps its title visible and confirms before account recrea
 test('new setup explains each step and defers persistence until after authentication', async ({ page }) => {
   await mockGoogleSetup(page)
   await page.goto(baseUrl)
-  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByRole('checkbox', { name: 'Skip passkey on this browser' })).not.toBeChecked()
   await page.getByRole('button', { name: 'Get started with a Google account' }).click()
   await expect(page.getByRole('list', { name: 'Start using Linger' })).toBeVisible()
   await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
@@ -95,10 +96,7 @@ test('requires a passkey again after registration and reload', async ({ page }) 
   await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
   await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-  const prompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
-  await expect(prompt).toBeVisible()
-  await prompt.getByRole('button', { name: 'Require a passkey each time' }).click()
-  await expect(prompt).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
   expect(await page.evaluate(() => localStorage.getItem('linger_device_session_v1'))).toBeNull()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Sign in with a passkey', exact: true })).toBeVisible()
@@ -111,20 +109,19 @@ test('opts in to skip passkey on this browser and restores after reload', async 
   const userId = '624a7c5a-7c13-4c62-a14d-3f8c3bd516f8'
   const secret = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
   const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000
-  let loginCalls = 0
+  let sessionChecks = 0
   await page.setViewportSize({ width: 390, height: 844 })
   await installMockOAuthCredentials(page, { seedOnModuleLoad: 0, seedVaultOnModuleLoad: 0 })
   await page.route('**/src/api/passkeys.ts*', route => route.fulfill({ contentType: 'application/javascript', body: `
     import { unlockVaultWithKey } from '/src/lib/passkeyVault.ts';
     function unlock() { unlockVaultWithKey('${userId}', new Uint8Array(32).fill(7)); return { userId: '${userId}' }; }
     export async function registerPasskey() { return unlock(); }
-    export async function loginWithPasskey() { throw new Error('Passkey should not be requested after opting in'); }
+    export async function loginWithPasskey() { window.__loginCalls = (window.__loginCalls || 0) + 1; return unlock(); }
     export async function addPasskey() {}
     export async function listPasskeys() { return { credentials: [], currentCredentialId: null }; }
     export async function renamePasskey() {}
     export async function deletePasskey() {}
   ` }))
-  await mockGoogleSetup(page)
   await page.route('/auth/passkey/device-unlock', route => {
     const method = route.request().method()
     if (method === 'POST' || method === 'GET') {
@@ -133,7 +130,7 @@ test('opts in to skip passkey on this browser and restores after reload', async 
     return route.fulfill({ json: { ok: true } })
   })
   await page.route('/auth/passkey/session', route => {
-    loginCalls++
+    sessionChecks++
     return route.fulfill({ json: { valid: true } })
   })
   await page.route('/auth/session', route => route.fulfill({ json: { signedIn: true, userId, email: 'person@example.com', googleSub: 'google-a', googleClientId: 'client' } }))
@@ -142,18 +139,14 @@ test('opts in to skip passkey on this browser and restores after reload', async 
   await page.route('/api/drive/entries', route => route.fulfill({ json: { files: [] } }))
 
   await page.goto(baseUrl)
-  await page.getByRole('button', { name: 'Get started with a Google account' }).click()
-  await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click()
-  await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'Skip passkey on this browser' }).check()
+  await page.getByRole('radio', { name: '7 days' }).check()
+  await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-
-  const prompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
-  await prompt.getByRole('checkbox', { name: 'Skip passkey on this browser' }).check()
-  await prompt.getByRole('combobox', { name: 'How long to skip passkey' }).selectOption('7')
-  await prompt.getByRole('button', { name: 'Save' }).click()
-  await expect(prompt).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { __loginCalls?: number }).__loginCalls ?? 0)).toBe(1)
 
   await page.reload()
   await expect(page.locator('textarea.editor-textarea')).toBeVisible()
-  expect(loginCalls).toBe(1)
+  expect(sessionChecks).toBe(1)
+  expect(await page.evaluate(() => (window as unknown as { __loginCalls?: number }).__loginCalls ?? 0)).toBe(0)
 })

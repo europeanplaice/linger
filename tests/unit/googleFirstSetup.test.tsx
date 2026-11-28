@@ -59,8 +59,6 @@ describe('Google-first registration', () => {
     expect(mocks.refresh).toHaveBeenCalledWith()
     expect(mocks.start).not.toHaveBeenCalled()
     expect(result.current.status).toBe('signedIn')
-    expect(result.current.offerRememberDevice).toBe(true)
-    act(() => result.current.dismissRememberDevice())
     expect(result.current.offerRememberDevice).toBe(false)
     mocks.start.mockResolvedValue({ signedIn: true, userId: 'existing-vault', email: 'person@example.com', googleSub: 'sub' })
     await act(async () => { result.current.signIn(); await Promise.resolve() })

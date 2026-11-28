@@ -6,7 +6,7 @@ import { clearVaultKey, getVaultUserId } from '../lib/passkeyVault'
 import { addPasskey as addPasskeyCredential, loginWithPasskey, registerPasskey } from '../api/passkeys'
 import { clearTabSession, enableTabSession, restoreTabSession } from '../lib/tabSession'
 import type { RememberDays } from '../lib/tabSession'
-import { rememberDevicePromptDismissal, shouldOfferRememberDevicePrompt } from '../lib/rememberDevicePrompt'
+import { rememberDevicePromptDismissal } from '../lib/rememberDevicePrompt'
 import { broadcastVaultLock, subscribeVaultHandoff } from '../lib/vaultHandoff'
 import { authFeedbackCode } from '../lib/authFeedback'
 import type { PasskeyPhase } from '../lib/authFeedback'
@@ -105,7 +105,8 @@ export function useAuth(): AuthState {
     setOfferRememberDevice(false)
   }, [])
   const offerRememberDeviceChoice = useCallback((remember: RememberDays) => {
-    setOfferRememberDevice(!remember && !rememberDevicePromptDismissed.current && shouldOfferRememberDevicePrompt())
+    void remember
+    setOfferRememberDevice(false)
   }, [])
   const googleRetryInFlight = useRef(false)
   const vaultRevision = useRef(0)

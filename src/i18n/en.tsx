@@ -224,6 +224,7 @@ export const en = {
     passkeyRememberDuration: "How long to skip passkey",
     passkeyRememberOneDay: "1 day",
     passkeyRememberSevenDays: "7 days",
+    passkeyRememberShortNote: "Do not use on a shared device. Anyone using this browser can open your diary.",
     passkeyRememberOff: "Require a passkey each time",
     passkeyRememberPrompt: "Choose how to sign in next time",
     passkeyRememberUntil: "Passkey skipped until",

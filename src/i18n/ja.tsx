@@ -212,6 +212,7 @@ export const ja: Dictionary = {
     passkeyRememberDuration: "パスキーを省略する期間",
     passkeyRememberOneDay: "1日間",
     passkeyRememberSevenDays: "7日間",
+    passkeyRememberShortNote: "共有端末では使わないでください。このブラウザーを使える人は日記を開けます。",
     passkeyRememberOff: "毎回パスキーで確認する",
     passkeyRememberPrompt: "次回のログイン方法を選ぶ",
     passkeyRememberUntil: "パスキー省略の期限",

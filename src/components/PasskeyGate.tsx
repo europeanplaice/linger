@@ -7,6 +7,7 @@ import type { PasskeyPhase } from '../lib/authFeedback'
 import type { RememberDays } from '../lib/tabSession'
 import type { SavedSessionConnection } from '../hooks/useAuth'
 import { Turnstile } from './Turnstile'
+import { RememberDeviceChoice } from './RememberDeviceChoice'
 
 interface Props {
   busy: boolean
@@ -29,6 +30,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
   const [view, setView] = useState<'welcome' | 'options' | 'setup' | 'recovery'>('welcome')
   const currentView = savedSessionConnection !== 'idle' ? 'saved-session' : error === 'already_registered' || (view === 'welcome' && error) ? 'options' : view
   const [recoveryConfirmed, setRecoveryConfirmed] = useState(false)
+  const [rememberDays, setRememberDays] = useState<RememberDays>(0)
   const [token, setToken] = useState('')
   const [verificationFailed, setVerificationFailed] = useState(false)
   const pendingToken = useRef<{ resolve: (token: string) => void; reject: (error: Error) => void } | null>(null)
@@ -84,7 +86,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
       verification = new Promise<string>((resolve, reject) => { pendingToken.current = { resolve, reject } })
       void verification.catch(() => {})
     }
-    onUnlock(0, preferImmediate, verification)
+    onUnlock(rememberDays, preferImmediate, verification)
     setToken('')
     pendingReset.current = true
   }
@@ -146,6 +148,7 @@ export function PasskeyGate({ busy, error, onSetup, setupEmail, onBeginSetup, on
                   onClick={() => unlock(!options)}>
                   {t.login.passkeyUnlock}
                 </button>
+                <RememberDeviceChoice value={rememberDays} onChange={setRememberDays} disabled={staticPreview || busy} />
               </div>
               <div className="passkey-action-group">
                 <span className="passkey-action-hint">{t.login.passkeyNewUserHint}</span>

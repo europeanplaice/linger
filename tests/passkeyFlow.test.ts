@@ -113,10 +113,7 @@ test('registers, unlocks, adds, and revokes PRF passkeys with real WebAuthn sign
     await page.getByRole('button', { name: 'Create my first Linger passkey', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible({ timeout: 20_000 })
     expect(await page.evaluate(() => (window as unknown as { passkeyName?: string }).passkeyName)).toBe('person@example.com')
-    const rememberPrompt = page.getByRole('complementary', { name: 'Choose how to sign in next time' })
-    await expect(rememberPrompt).toBeVisible()
-    await rememberPrompt.getByRole('button', { name: 'Require a passkey each time' }).click()
-    await expect(rememberPrompt).toHaveCount(0)
+    await expect(page.getByRole('complementary', { name: 'Choose how to sign in next time' })).toHaveCount(0)
 
     const userId = (db.prepare('SELECT user_id AS id FROM passkey_credentials ORDER BY created_at DESC LIMIT 1').get() as { id: string }).id
     expect(userId).toMatch(/^[0-9a-f-]{36}$/)
