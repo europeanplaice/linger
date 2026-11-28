@@ -1252,7 +1252,7 @@ test.describe('EntryEditor — Share Entry', () => {
 
     expect(metrics.width).toBeGreaterThanOrEqual(120)
     expect(metrics.width).toBeLessThan(180)
-    expect(metrics.background).toBe('rgb(247, 246, 252)')
+    expect(metrics.background).toBe('rgb(248, 246, 241)')
     expect(parseFloat(metrics.borderWidth)).toBeGreaterThanOrEqual(1)
     expect(metrics.borderRadius).toBe('8px')
     expect(metrics.padding).toBe('4px')
@@ -1688,14 +1688,14 @@ test.describe('EntryEditor — editor meta info', () => {
       }
     })
     expect(containedStyles).toEqual({
-      backgroundColor: 'rgb(92, 95, 168)',
-      borderColor: 'rgb(92, 95, 168)',
+      backgroundColor: 'rgb(38, 65, 94)',
+      borderColor: 'rgb(38, 65, 94)',
       borderWidth: '1px',
-      color: 'rgb(255, 255, 255)',
+      color: 'rgb(252, 251, 248)',
     })
     expect(outlinedStyles).toEqual({
       backgroundColor: 'rgba(0, 0, 0, 0)',
-      borderColor: 'rgb(92, 95, 168)',
+      borderColor: 'rgb(38, 65, 94)',
       borderWidth: '1px',
       boxShadow: 'none',
       cursor: 'pointer',

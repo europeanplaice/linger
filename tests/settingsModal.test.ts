@@ -851,7 +851,7 @@ test.describe('SettingsModal — font size select', () => {
 
     expect(metrics.width).toBeGreaterThanOrEqual(96)
     expect(metrics.width).toBeLessThan(160)
-    expect(metrics.background).toBe('rgb(247, 246, 252)')
+    expect(metrics.background).toBe('rgb(248, 246, 241)')
     expect(parseFloat(metrics.borderWidth)).toBeGreaterThanOrEqual(1)
     expect(metrics.borderRadius).toBe('8px')
     expect(metrics.padding).toBe('4px')
