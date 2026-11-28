@@ -905,17 +905,16 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   border-radius: 3px;
   color: var(--text);
   font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.05rem 0.25rem;
 }
 .deployment-verification-status,
 .deployment-verification-scope {
   color: var(--text-muted);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   line-height: 1.4;
   margin: 0.2rem 0 0;
 }
-.deployment-verification-scope { font-size: 0.68rem; }
 .deployment-verification-run { margin-top: 0.2rem; }
 .deployment-verification-button {
   background: var(--card-bg);
@@ -924,7 +923,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   line-height: 1.25;
   min-height: 2rem;
   padding: 0.35rem 0.55rem;
@@ -1273,7 +1272,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   flex-shrink: 0;
 }
 .search-result-capped {
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   opacity: 0.75;
 }
@@ -1575,7 +1574,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
 .cal-day-label {
   color: var(--text-muted);
   padding: 0.2rem 0 0.35rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -1703,7 +1702,7 @@ dialog.passkey-delete-dialog::backdrop { background: var(--overlay-heavy); }
   white-space: nowrap;
 }
 .account-sub {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 .account-gear {
@@ -1833,7 +1832,7 @@ dialog.settings-dialog::backdrop {
   gap: 0.4rem;
   margin-top: auto;
   padding: 1.5rem 0.65rem 0.25rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.7;
   color: var(--text-muted);
 }
@@ -1884,7 +1883,7 @@ dialog.settings-dialog::backdrop {
 }
 .settings-writing-preview figcaption {
   margin-bottom: 0.75rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 .settings-writing-preview p {
@@ -1959,12 +1958,12 @@ dialog.settings-dialog::backdrop {
   padding: 0;
 }
 .settings-s3-actions-help {
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   opacity: 0.8;
   margin-bottom: 0.5rem;
 }
 .settings-s3-field-help {
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   margin: -0.25rem 0 0.55rem;
   padding-inline: 1.35rem;
@@ -1974,7 +1973,7 @@ dialog.settings-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -2241,7 +2240,7 @@ dialog.settings-dialog::backdrop {
 }
 .settings-milestone-type-help {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.4;
   margin: 0.2rem 0 0;
 }
@@ -2541,7 +2540,7 @@ dialog.settings-dialog::backdrop {
   border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
   font-family: inherit;
   text-transform: none;
@@ -2626,13 +2625,13 @@ dialog.settings-dialog::backdrop {
   flex-shrink: 0;
 }
 .settings-shortcut-keys span {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted, var(--text));
   opacity: 0.55;
 }
 .settings-shortcut-keys kbd {
   font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
   min-width: 1.5em;
   text-align: center;
@@ -2713,7 +2712,7 @@ dialog.settings-dialog::backdrop {
 }
 .settings-milestone-toggle-chevron {
   display: inline-block;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   transition: transform 0.18s ease;
 }
 .settings-milestone-toggle-chevron.open {
@@ -2722,7 +2721,7 @@ dialog.settings-dialog::backdrop {
 .settings-milestone-usage,
 .settings-milestone-limit {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .settings-milestone-list {
   display: flex;
@@ -2884,7 +2883,7 @@ dialog.settings-dialog::backdrop {
   border-radius: 4px;
   color: var(--on-danger);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
   padding: 0.2rem 0.5rem;
   font-family: inherit;
@@ -2895,7 +2894,7 @@ dialog.settings-dialog::backdrop {
   border-radius: 4px;
   color: var(--text);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   font-family: inherit;
 }
@@ -4805,7 +4804,7 @@ dialog.milestone-form-dialog::backdrop {
   color: var(--text-muted);
   border-radius: 4px;
   padding: 0.12rem 0.45rem;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-family: inherit;
   cursor: pointer;
 }
@@ -5092,7 +5091,7 @@ dialog.session-expired-dialog::backdrop {
 }
 .editor-charcount {
   text-align: right;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   padding: 0.35rem 0 0;
   user-select: none;
@@ -5134,7 +5133,7 @@ dialog.session-expired-dialog::backdrop {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
   user-select: none;
@@ -5146,7 +5145,7 @@ dialog.session-expired-dialog::backdrop {
   gap: 0.35rem;
 }
 .editor-related-item {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--accent);
   background: transparent;
   border: 1px solid var(--border);
@@ -6081,7 +6080,7 @@ dialog.history-dialog::backdrop {
   min-width: 0;
 }
 .recollection-hint {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--accent);
   opacity: 0.8;
   white-space: nowrap;
@@ -6330,13 +6329,13 @@ dialog.shortcuts-dialog::backdrop {
   flex-shrink: 0;
 }
 .shortcuts-keys span {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted, var(--text));
   opacity: 0.55;
 }
 .shortcuts-keys kbd {
   font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 500;
   min-width: 1.5em;
   text-align: center;
